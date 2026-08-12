@@ -88,14 +88,10 @@ extension ScrollableContainer {
     }
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        if let parent,
-           let mapped = parent.mapFirstChild(ofType: type, body: body) {
-            return mapped
+        if let scrollable = self as? A {
+            return body(scrollable)
         }
         for child in children ?? [] {
-            if let typedChild = child as? A {
-                return body(typedChild)
-            }
             if let mapped = child.mapFirstChild(ofType: type, body: body) {
                 return mapped
             }

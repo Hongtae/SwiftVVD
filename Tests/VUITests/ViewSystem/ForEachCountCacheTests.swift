@@ -81,6 +81,33 @@ final class ForEachCountCacheTests: XCTestCase {
         }
     }
 
+    func testExplicitIDUnaryCountSkipsDirectlyToRequestedItem() throws {
+        let root = ForEach(Array(0..<200), id: \.self) { value in
+            Text("\(value)").id(value)
+        }
+
+        try withForEachState(root) { state, list in
+            var from = 150
+            var visited = 0
+            _ = list.applyNodes(
+                from: &from,
+                style: _ViewList_IteratorStyle(value: 2),
+                list: nil,
+                transform: _ViewList_TemporarySublistTransform()
+            ) { _, _, _, _ in
+                visited += 1
+                return false
+            }
+
+            XCTAssertEqual(visited, 1)
+            XCTAssertEqual(Set(state.items.keys), Set([0, 150]))
+            guard case .resolved(1) = state.viewsPerElementCount else {
+                return XCTFail("expected explicit-ID content to resolve as unary")
+            }
+            XCTAssertFalse(state.createdAllItems)
+        }
+    }
+
     func testUniformMultiViewCountUsesResolvedProduct() throws {
         let root = ForEach([0, 1, 2], id: \.self) { value in
             Text("\(value)-a")

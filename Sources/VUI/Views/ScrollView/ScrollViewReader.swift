@@ -48,13 +48,15 @@ public struct ScrollViewProxy {
             )
         }
         Update.ensure {
-            guard let graph = _AGGraph.current,
-                  _values.isValid(in: graph) else {
+            guard let graph = _values.graph else {
                 return
             }
-            for scrollable in _values.toStrong().value {
-                if body(scrollable) {
-                    break
+            _AGGraphContext(graph: graph).withCurrent {
+                guard _values.isValid(in: graph) else { return }
+                for scrollable in _values.toStrong().value {
+                    if body(scrollable) {
+                        break
+                    }
                 }
             }
         }

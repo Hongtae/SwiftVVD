@@ -53,10 +53,22 @@ extension _AGGraph {
         mode: AGComparisonMode = .storedRepresentation
     ) -> (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool {
         let options = AGComparisonOptions(mode: mode)
+        let descriptorEquality: (any _AGTypeDescriptorEquatable.Type)? = if mode.rawValue
+            <= AGComparisonMode.layout.rawValue {
+            Value.self as? any _AGTypeDescriptorEquatable.Type
+        } else {
+            nil
+        }
         return { lhs, rhs in
             guard let lhs = lhs as? _AGValueStorage<Value>,
                   let rhs = rhs as? _AGValueStorage<Value> else {
                 return false
+            }
+            if let descriptorEquality {
+                return descriptorEquality._agTypeDescriptorValuesEqual(
+                    lhs.pointer,
+                    rhs.pointer
+                )
             }
             return compareStoredValues(lhs.pointer, rhs.pointer, options: options)
         }
@@ -237,7 +249,7 @@ extension _AGGraph {
 
     private func allocateSlot() -> UInt32 {
         if let index = freeList.popLast() {
-            // Reuse freed slot (seed was already incremented on removal)
+            // Reuse a freed slot after its generation token was replaced.
 #if DEBUG
             if _attributeGraphRecordRemovalTombstones {
                 removedNodeTombstones.removeValue(forKey: index)
@@ -248,7 +260,7 @@ extension _AGGraph {
         }
         let index = UInt32(slots.count)
         // Reserve the all-zero weak handle as the invalid sentinel.
-        slots.append(NodeSlot(seed: 1, node: nil))
+        slots.append(NodeSlot(seed: initialWeakSeed, node: nil))
         return index
     }
 
@@ -915,6 +927,7 @@ extension _AGGraph {
     struct PreparedNodeRemoval {
         var id: AGAttribute
         var outputs: Set<UInt32>
+        var replacementSeed: UInt32
     }
 
     /// Disconnects a node while retaining its body and value for the later
@@ -929,8 +942,13 @@ extension _AGGraph {
             fatalError("removeNode called on @\(id.rawValue) while removal is already in progress.")
         }
         removingNode.isBeingRemoved = true
+        let replacementSeed = makeWeakSeed()
 #if DEBUG
-        recordRemovedNodeTombstone(id: id, node: removingNode)
+        recordRemovedNodeTombstone(
+            id: id,
+            node: removingNode,
+            replacementSeed: replacementSeed
+        )
 #endif
 
         // 1. Break input connections (removes one reverse output record for
@@ -982,7 +1000,11 @@ extension _AGGraph {
             markNeedsEvaluation(AGAttribute(rawValue: outputIndex), evaluateSideEffects: false)
         }
 
-        return PreparedNodeRemoval(id: id, outputs: outputs)
+        return PreparedNodeRemoval(
+            id: id,
+            outputs: outputs,
+            replacementSeed: replacementSeed
+        )
     }
 
     /// Destroys the body and value retained by `prepareNodeRemoval(_:)`, then
@@ -1002,7 +1024,7 @@ extension _AGGraph {
         }
 
         // Invalidate all weak handles before making the slot available again.
-        slots[index].seed &+= 1
+        slots[index].seed = removal.replacementSeed
         slots[index].node = nil
         freeList.append(id.rawValue)
     }
@@ -1562,7 +1584,7 @@ extension _AGGraph {
         }
     }
 
-    private func withGraphUpdateCounterIfNeeded<R>(_ body: () -> R) -> R {
+    func withGraphUpdateCounterIfNeeded<R>(_ body: () -> R) -> R {
         let graphID = ObjectIdentifier(self)
         var activeGraphs = _AGGraph.currentlyUpdatingGraphs ?? []
         guard !activeGraphs.contains(graphID) else {
@@ -1946,6 +1968,7 @@ extension _AGGraph {
             guard slots.indices.contains(index), slots[index].node != nil else {
                 continue
             }
+            let wasAlreadyDirty = slots[index].node!.needsEvaluation
             if propagateTransaction {
                 slots[index].node!.transaction = transaction
             }
@@ -1961,13 +1984,13 @@ extension _AGGraph {
             if rawID == forcedStart || forcedStarts?.contains(rawID) == true {
                 slots[index].node!.forceEvaluation = true
             }
+            // Dirty propagation is transition-gated. A repeated invalidation
+            // still records its direct changed edge and mutation metadata, but
+            // descendants of an already-dirty node are already pending.
+            guard !wasAlreadyDirty else { continue }
             if slots[index].node!.kind.isSideEffect {
                 sideEffects.append(UInt32(index))
             }
-            // Even when a node is already dirty, keep walking its outputs.
-            // Structural updates can leave intermediate preference/layout nodes
-            // dirty. Later source changes still need to reach side-effect refresh
-            // rules that may have been evaluated and cleared in the meantime.
             for output in slots[index].node!.outputs {
                 let outputIndex = Int(output)
                 guard slots.indices.contains(outputIndex),
@@ -2712,12 +2735,16 @@ extension _AGGraph {
         removedNodeTombstones
     }
 
-    private func recordRemovedNodeTombstone(id: AGAttribute, node: Node) {
+    private func recordRemovedNodeTombstone(
+        id: AGAttribute,
+        node: Node,
+        replacementSeed: UInt32
+    ) {
         guard _attributeGraphRecordRemovalTombstones else { return }
         let seedBeforeRemoval = slots[Int(id.rawValue)].seed
         let tombstone = RemovedNodeTombstone(
             seedBeforeRemoval: seedBeforeRemoval,
-            seedAfterRemoval: seedBeforeRemoval &+ 1,
+            seedAfterRemoval: replacementSeed,
             kindDescription: debugDescription(for: node.kind),
             valueTypeDescription: debugValueTypeDescription(for: node.value?.anyValue),
             inputs: Set(node.inputs.map(\.attribute)),

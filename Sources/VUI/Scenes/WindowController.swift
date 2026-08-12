@@ -937,7 +937,7 @@ class WindowController: WindowDelegate,
         let sizeChanged = (layoutContentSize != cachedContentSize)
         if sizeChanged {
             cachedContentSize = layoutContentSize
-            viewGraph.valuesNeedingUpdate.insert(.size)
+            viewGraph.setSize(layoutContentSize)
         }
 
         let events = self.inputEvents.withLock { events in

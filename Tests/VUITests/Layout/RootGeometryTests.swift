@@ -276,11 +276,10 @@ final class RootGeometryTests: XCTestCase {
         )
         rendererHost.storage = viewGraph
 
-        try viewGraph.data.withCurrent {
-            try XCTUnwrap(viewGraph.sizeAttr).setValue(
-                ViewSize(CGSize(width: 100, height: 80))
-            )
+        viewGraph.setSize(CGSize(width: 100, height: 80))
+        viewGraph.instantiateIfNeeded()
 
+        try viewGraph.data.withCurrent {
             XCTAssertEqual(
                 try XCTUnwrap(capture.position).value,
                 CGPoint(x: 45, y: 37)
@@ -308,11 +307,10 @@ final class RootGeometryTests: XCTestCase {
         )
         rendererHost.storage = viewGraph
 
-        try viewGraph.data.withCurrent {
-            try XCTUnwrap(viewGraph.sizeAttr).setValue(
-                ViewSize(CGSize(width: 100, height: 80))
-            )
+        viewGraph.setSize(CGSize(width: 100, height: 80))
+        viewGraph.instantiateIfNeeded()
 
+        try viewGraph.data.withCurrent {
             let position = try XCTUnwrap(capture.position)
             let size = try XCTUnwrap(capture.size)
             let graph = viewGraph.data.graph
@@ -359,9 +357,8 @@ final class RootGeometryTests: XCTestCase {
             requestedOutputs: []
         )
         rendererHost.storage = viewGraph
-        _ = viewGraph.data.withCurrent {
-            viewGraph.sizeAttr?.setValue(ViewSize(proposedSize))
-        }
+        viewGraph.setSize(proposedSize)
+        viewGraph.instantiateIfNeeded()
         return (viewGraph, rendererHost)
     }
 }

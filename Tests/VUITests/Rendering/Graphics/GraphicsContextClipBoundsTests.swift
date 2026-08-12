@@ -686,6 +686,95 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertEqual(renderer.animatorCount, 0)
     }
 
+    func testPlatformGroupUsesLiveViewportWithoutRebuildingDisplayListOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        let attachment = graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            host.host.updateViewport(
+                contentOffset: .zero,
+                containingSize: CGSize(width: 4, height: 3)
+            )
+            return (host, HostingScrollView.PlatformContainer(scrollView: host))
+        }
+
+        let viewportFrame = CGRect(x: 5, y: 4, width: 4, height: 3)
+        var contents = DisplayList()
+        contents.appendItem(bounds: CGRect(x: 0, y: 0, width: 4, height: 3)) { context in
+            context.fill(
+                Path(CGRect(x: 0, y: 0, width: 4, height: 3)),
+                with: .color(.red)
+            )
+        }
+        contents.appendItem(bounds: CGRect(x: 0, y: 3, width: 4, height: 3)) { context in
+            context.fill(
+                Path(CGRect(x: 0, y: 3, width: 4, height: 3)),
+                with: .color(.blue)
+            )
+        }
+        var list = DisplayList()
+        list.appendEffect(
+            .platformGroup(attachment.1),
+            contents: contents,
+            frame: viewportFrame,
+            identity: _DisplayList_Identity(decodedValue: 92),
+            version: DisplayList.Version(value: 1)
+        )
+        let renderer = DisplayList.GraphicsRenderer()
+
+        func renderedPixel() throws -> [UInt8] {
+            let width = 16
+            let height = 16
+            let queue = try XCTUnwrap(deviceContext.renderQueue())
+            let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+            let context = try XCTUnwrap(GraphicsContext(
+                sceneResources: SceneResources(),
+                environment: EnvironmentValues(),
+                viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: width, height: height),
+                commandBuffer: commandBuffer
+            ))
+            context.clear(with: .clear)
+            renderer.render(list: list, at: .zero, in: context)
+            try waitForCompletion(commandBuffer)
+
+            let staging = try XCTUnwrap(
+                deviceContext.makeCPUAccessible(texture: context.backdrop)
+            )
+            let pointer = try XCTUnwrap(staging.contents())
+            let bytes = UnsafeRawBufferPointer(
+                start: pointer,
+                count: width * height * 4
+            )
+            let offset = ((5 * width) + 6) * 4
+            return Array(bytes[offset..<(offset + 4)])
+        }
+
+        let initialPixel = try renderedPixel()
+        XCTAssertGreaterThan(initialPixel[0], initialPixel[2])
+        XCTAssertEqual(initialPixel[3], 255)
+
+        attachment.0.host.updateViewport(
+            contentOffset: CGPoint(x: 0, y: 3),
+            containingSize: CGSize(width: 4, height: 3)
+        )
+
+        let scrolledPixel = try renderedPixel()
+        XCTAssertGreaterThan(scrolledPixel[2], scrolledPixel[0])
+        XCTAssertEqual(scrolledPixel[3], 255)
+        XCTAssertNotEqual(scrolledPixel, initialPixel)
+        XCTAssertEqual(renderer.animatorCount, 0)
+    }
+
     func testDifferentModeDisplayListMasksMergeComplementaryBranchesOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

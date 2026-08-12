@@ -316,6 +316,146 @@ extension SystemScrollLayoutState.ContentOffsetMode: Equatable {
     }
 }
 
+struct ScrollViewCommitMutation: GraphMutation {
+    var layoutState: (
+        value: SystemScrollLayoutState,
+        attr: WeakAttribute<SystemScrollLayoutState>
+    )?
+    var phaseState: (
+        value: ScrollPhaseState,
+        attr: WeakAttribute<ScrollPhaseState>
+    )?
+    var containerSize: (
+        value: CGSize,
+        attr: WeakAttribute<CGSize>
+    )?
+    var isPreferred: Bool
+
+    func apply() {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewCommitMutation.apply() requires an active _AGGraph context.")
+        }
+        let transaction = Transaction.current
+        if let layoutState, layoutState.attr.isValid(in: graph) {
+            layoutState.attr.toStrong().setValue(
+                layoutState.value,
+                transaction: transaction
+            )
+        }
+        if let phaseState, phaseState.attr.isValid(in: graph) {
+            phaseState.attr.toStrong().setValue(
+                phaseState.value,
+                transaction: transaction
+            )
+        }
+        if let containerSize, containerSize.attr.isValid(in: graph) {
+            containerSize.attr.toStrong().setValue(
+                containerSize.value,
+                transaction: transaction
+            )
+        }
+    }
+
+    mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
+        guard let mutation = mutation as? ScrollViewCommitMutation else {
+            return false
+        }
+        return merge(mutation)
+    }
+
+    mutating func merge(_ mutation: ScrollViewCommitMutation) -> Bool {
+        if let layoutState,
+           let nextLayoutState = mutation.layoutState,
+           layoutState.attr != nextLayoutState.attr {
+            return false
+        }
+        if let phaseState,
+           let nextPhaseState = mutation.phaseState,
+           phaseState.attr != nextPhaseState.attr {
+            return false
+        }
+        if let containerSize,
+           let nextContainerSize = mutation.containerSize,
+           containerSize.attr != nextContainerSize.attr {
+            return false
+        }
+
+        if isPreferred {
+            return !mutation.isPreferred
+        }
+
+        if let layoutState = mutation.layoutState {
+            self.layoutState = layoutState
+        }
+        if let phaseState = mutation.phaseState {
+            self.phaseState = phaseState
+        }
+        if let containerSize = mutation.containerSize {
+            self.containerSize = containerSize
+        }
+        isPreferred = mutation.isPreferred
+        return true
+    }
+
+    static func commit(
+        layoutState: (
+            value: SystemScrollLayoutState,
+            attr: WeakAttribute<SystemScrollLayoutState>
+        )? = nil,
+        phaseState: (
+            value: ScrollPhaseState,
+            attr: WeakAttribute<ScrollPhaseState>
+        )? = nil,
+        containerSize: (
+            value: CGSize,
+            attr: WeakAttribute<CGSize>
+        )? = nil,
+        isPreferred: Bool,
+        transaction: Transaction? = nil
+    ) {
+        let viewGraph = layoutState?.attr.graph.flatMap {
+            AGGraphGetContext($0) as? ViewGraph
+        } ?? phaseState?.attr.graph.flatMap {
+            AGGraphGetContext($0) as? ViewGraph
+        } ?? containerSize?.attr.graph.flatMap {
+            AGGraphGetContext($0) as? ViewGraph
+        }
+        guard let viewGraph else {
+            return
+        }
+
+        var transaction = transaction ?? Transaction()
+        transaction.fromScrollView = true
+        viewGraph.asyncTransaction(
+            transaction,
+            id: Transaction.id,
+            mutation: ScrollViewCommitMutation(
+                layoutState: layoutState,
+                phaseState: phaseState,
+                containerSize: containerSize,
+                isPreferred: isPreferred
+            ),
+            style: .deferred,
+            mayDeferUpdate: false
+        )
+
+        guard let layoutState else { return }
+        let requestsImmediateUpdate = switch layoutState.value.contentOffsetMode {
+        case .system:
+            isLinkedOnOrAfter(.v6)
+        case .adjustment, .target:
+            false
+        }
+        Update.enqueueAction {
+            if requestsImmediateUpdate {
+                viewGraph.requestImmediateUpdate()
+            } else {
+                viewGraph.flushTransactions()
+            }
+        }
+    }
+}
+
 /// Narrow graph-to-host update payload.
 struct HostingScrollViewUpdateContext: Equatable {
     var contentOffset: CGPoint
@@ -411,6 +551,10 @@ class HostingScrollView {
     private var lastScrollGestureAxis: Axis?
     private var orthogonalAccumulator = 0.0
     private let accumulatedAxisChangeThreshold = 10.0
+    private var targetProvider: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
+    private var targetConfiguration: ScrollTargetConfiguration?
+    private var cachedTargetOffset = CGPoint.zero
+    private(set) var currentPhaseState = ScrollPhaseState()
 
     let host: PlatformGroupContainer
     weak var parentContainer: PlatformContainer?
@@ -454,6 +598,7 @@ class HostingScrollView {
     @discardableResult
     func updateContext(_ context: HostingScrollViewUpdateContext) -> Bool {
         var context = context
+        var targetPublicationIsPreferred: Bool?
         publishContainerSize(context.containingSize)
         switch context.offsetMode {
         case let .target(targetProvider, config):
@@ -471,7 +616,9 @@ class HostingScrollView {
                 contentInsets: context.safeInsets,
                 containerSize: context.containingSize
             )
-            if let target = targetProvider?(geometry, layoutDirection) {
+            if let target = Update.ensure({
+                targetProvider?(geometry, layoutDirection)
+            }) {
                 animationTarget = target
                 context.contentOffset = ScrollViewUtilities.animationOffset(
                     targetFrame: target.rect,
@@ -487,9 +634,11 @@ class HostingScrollView {
                     decelerationState.targetOffsetState = nil
                     self.decelerationState = decelerationState
                 }
+                targetPublicationIsPreferred = config.animation == nil
             } else {
                 animationTarget = nil
             }
+            scheduleTargetReapplication(targetProvider, config: config)
         case .adjustment, .system:
             animationTarget = nil
             animationTargetConfig = nil
@@ -499,22 +648,105 @@ class HostingScrollView {
             containingSize: context.containingSize
         )
         pendingContext = context
+        if let targetPublicationIsPreferred {
+            updateGraphState(isPreferred: targetPublicationIsPreferred)
+        }
         retargetContentOffsetIfNeeded()
         return false
     }
 
-    private func publishContainerSize(_ size: CGSize) {
-        graphRef.withCurrent {
-            guard let graph = _AGGraph.current,
-                  containerSize.isValid(in: graph) else {
-                return
-            }
-            let attribute = containerSize.toStrong()
-            let current = graph.cachedValue(for: attribute.identifier) as? CGSize
-            if current != size {
-                attribute.setValue(size, transaction: Transaction.current)
+    private func scheduleTargetReapplication(
+        _ target: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?,
+        config: ScrollTargetConfiguration
+    ) {
+        guard _AGGraph.current === graphRef.graph else {
+            fatalError("Target reapplication requires the owning graph context.")
+        }
+        graphRef.graph.actionOutbox.append { [weak self] in
+            guard let self else { return }
+            Update.ensure {
+                let previousTarget = self.targetProvider
+                let previousConfiguration = self.targetConfiguration
+                self.targetProvider = target
+                self.targetConfiguration = config
+                self.cachedTargetOffset = CGPoint(
+                    x: CGFloat.infinity,
+                    y: CGFloat.infinity
+                )
+                self.updateAnimationTarget()
+                self.targetProvider = previousTarget
+                self.targetConfiguration = previousConfiguration
+                self.cachedTargetOffset = .zero
             }
         }
+    }
+
+    private func updateAnimationTarget() {
+        guard let targetProvider,
+              let targetConfiguration,
+              var context = pendingContext else {
+            return
+        }
+        let geometry = ScrollGeometry(
+            contentOffset: context.contentOffset,
+            contentSize: context.contentFrame.size,
+            contentInsets: context.safeInsets,
+            containerSize: context.containingSize
+        )
+        guard let target = targetProvider(geometry, layoutDirection) else {
+            return
+        }
+        let offset = ScrollViewUtilities.animationOffset(
+            targetFrame: target.rect,
+            anchor: target.anchor,
+            viewPortFrame: geometry.visibleRect,
+            contentFrame: context.contentFrame,
+            requiresVisibility: targetConfiguration.requiresVisibility
+        )
+        guard offset != cachedTargetOffset else { return }
+
+        animationTarget = target
+        animationTargetConfig = targetConfiguration
+        cachedTargetOffset = offset
+        context.contentOffset = offset
+        pendingContext = context
+        host.updateViewport(
+            contentOffset: offset,
+            containingSize: context.containingSize
+        )
+        if targetConfiguration.preservesVelocity, var decelerationState {
+            decelerationState.simulation.updateTarget(offset)
+            decelerationState.targetOffsetState = nil
+            self.decelerationState = decelerationState
+        }
+        updateGraphState(isPreferred: false)
+        retargetContentOffsetIfNeeded()
+    }
+
+    private func updateGraphState(isPreferred: Bool) {
+        let layoutStateValue = makeLayoutState()
+        let phaseStateValue: (
+            value: ScrollPhaseState,
+            attr: WeakAttribute<ScrollPhaseState>
+        )? = phaseState.isInvalid ? nil : (currentPhaseState, phaseState)
+        ScrollViewCommitMutation.commit(
+            layoutState: (layoutStateValue, layoutState),
+            phaseState: phaseStateValue,
+            isPreferred: isPreferred,
+            transaction: Transaction.current
+        )
+    }
+
+    private func publishContainerSize(_ size: CGSize) {
+        guard !containerSize.isInvalid,
+              containerSize.value != size else {
+            return
+        }
+        ScrollViewCommitMutation.commit(
+            containerSize: (size, containerSize),
+            isPreferred: false,
+            transaction: Transaction()
+        )
     }
 
     func updateConfiguration(_ configuration: ScrollViewConfiguration) {
@@ -650,152 +882,148 @@ class HostingScrollView {
         )
     }
 
+    private var liveContentOffset: CGPoint {
+        pendingContext?.contentOffset ?? host.bounds.origin
+    }
+
+    @discardableResult
+    private func updateLiveContentOffset(_ offset: CGPoint) -> Bool {
+        guard var context = pendingContext else {
+            return false
+        }
+        context.contentOffset = offset
+        pendingContext = context
+        host.updateViewport(
+            contentOffset: offset,
+            containingSize: context.containingSize
+        )
+        return true
+    }
+
     /// Publishes a host-originated offset, such as a platform wheel or scrollbar update.
     func publishSystemContentOffset(_ offset: CGPoint) {
-        graphRef.withCurrent {
-            guard let graph = _AGGraph.current,
-                  layoutState.isValid(in: graph) else {
-                return
-            }
-            let stateAttribute = layoutState.toStrong()
-            var state = stateAttribute.value
-            state.contentOffset = offset
-            state.contentOffsetMode = .system
-            state.contentOffsetSeed.value &+= 1
-            stateAttribute.setValue(state, transaction: Transaction.current)
-        }
+        guard updateLiveContentOffset(offset) else { return }
+        updateGraphState(isPreferred: false)
     }
 
     func willStartPanning() {
-        graphRef.withCurrent {
-            guard let graph = _AGGraph.current,
-                  layoutState.isValid(in: graph) else {
-                return
-            }
-            let currentOffset = layoutState.toStrong().value.contentOffset
-            decelerationState = nil
-            dragState = DragState(
-                initialOffset: currentOffset,
-                translation: .zero,
-                hasExplicitInteractionPhase: true
-            )
-            publishInteraction(
-                offset: currentOffset,
-                phase: .interacting,
-                velocity: _Velocity(valuePerSecond: .zero)
-            )
-        }
+        let currentOffset = liveContentOffset
+        decelerationState = nil
+        dragState = DragState(
+            initialOffset: currentOffset,
+            translation: .zero,
+            hasExplicitInteractionPhase: true
+        )
+        publishInteraction(
+            offset: currentOffset,
+            phase: .interacting,
+            velocity: _Velocity(valuePerSecond: .zero)
+        )
     }
 
     func dispatchScrollGesturePhase(_ gesturePhase: GesturePhase<ScrollGesture.Value>) {
-        graphRef.withCurrent {
-            guard let graph = _AGGraph.current,
-                  layoutState.isValid(in: graph) else {
-                return
+        let currentOffset = liveContentOffset
+        switch gesturePhase {
+        case .possible(.none):
+            return
+        case .possible(.some(let value)), .active(let value):
+            let translation: CGSize
+            let velocity: _Velocity<CGSize>
+            switch value {
+            case .pan(let pan):
+                translation = pan.translation
+                velocity = pan.velocity
+            case .wheel(let wheel):
+                translation = wheel
+                velocity = _Velocity(valuePerSecond: .zero)
             }
-            let currentOffset = layoutState.toStrong().value.contentOffset
-            switch gesturePhase {
-            case .possible(.none):
-                return
-            case .possible(.some(let value)), .active(let value):
-                let translation: CGSize
-                let velocity: _Velocity<CGSize>
-                switch value {
-                case .pan(let pan):
-                    translation = pan.translation
-                    velocity = pan.velocity
-                case .wheel(let wheel):
-                    translation = wheel
-                    velocity = _Velocity(valuePerSecond: .zero)
-                }
 
-                decelerationState = nil
-                var drag = dragState ?? DragState(
-                    initialOffset: currentOffset,
-                    translation: .zero
+            decelerationState = nil
+            var drag = dragState ?? DragState(
+                initialOffset: currentOffset,
+                translation: .zero
+            )
+            drag.translation = translation
+            dragState = drag
+            // Gesture translation follows the pointer; content offset moves
+            // in the opposite direction as if the content were being dragged.
+            let nextOffset = interactiveContentOffset(CGPoint(
+                x: drag.initialOffset.x - translation.width,
+                y: drag.initialOffset.y - translation.height
+            ))
+            let moved = nextOffset != currentOffset
+            publishInteraction(
+                offset: nextOffset,
+                phase: moved || drag.hasExplicitInteractionPhase
+                    ? .interacting
+                    : .tracking,
+                velocity: velocity
+            )
+
+        case .ended(let value):
+            let velocity: _Velocity<CGSize>
+            let eventTime: Time?
+            switch value {
+            case .pan(let pan):
+                velocity = pan.velocity
+                eventTime = pan.timestamp
+            case .wheel:
+                velocity = _Velocity(valuePerSecond: .zero)
+                eventTime = nil
+            }
+            let originalOffset = dragState?.initialOffset ?? currentOffset
+            dragState = nil
+            // Deceleration evolves content-space offset, so convert the
+            // pointer-space terminal velocity before starting the simulation.
+            let contentVelocity = velocity.map {
+                CGSize(width: -$0.width, height: -$0.height)
+            }
+            let boundedOffset = clampedContentOffset(currentOffset)
+            var simulation = makeDeceleration(
+                offset: currentOffset,
+                velocity: contentVelocity
+            )
+            let targetOffsetState = makeTargetOffsetState(
+                from: currentOffset,
+                originalOffset: originalOffset,
+                velocity: contentVelocity
+            )
+            let behaviorTarget = targetOffsetState?.resolvedOffset
+            simulation.updateTarget(behaviorTarget)
+            if contentVelocity.valuePerSecond != .zero
+                || currentOffset != boundedOffset
+                || (behaviorTarget != nil && behaviorTarget != currentOffset) {
+                decelerationState = DecelerationState(
+                    simulation: simulation,
+                    // Gesture timestamps use event time, while inertial
+                    // presentation advances on ViewGraph animation time.
+                    beginTime: (graphRef.context as? ViewGraph)?.currentTimestamp
+                        ?? eventTime,
+                    targetOffsetState: targetOffsetState
                 )
-                drag.translation = translation
-                dragState = drag
-                // Gesture translation follows the pointer; content offset moves
-                // in the opposite direction as if the content were being dragged.
-                let nextOffset = interactiveContentOffset(CGPoint(
-                    x: drag.initialOffset.x - translation.width,
-                    y: drag.initialOffset.y - translation.height
-                ))
-                let moved = nextOffset != currentOffset
                 publishInteraction(
-                    offset: nextOffset,
-                    phase: moved || drag.hasExplicitInteractionPhase
-                        ? .interacting
-                        : .tracking,
-                    velocity: velocity
-                )
-
-            case .ended(let value):
-                let velocity: _Velocity<CGSize>
-                let eventTime: Time?
-                switch value {
-                case .pan(let pan):
-                    velocity = pan.velocity
-                    eventTime = pan.timestamp
-                case .wheel:
-                    velocity = _Velocity(valuePerSecond: .zero)
-                    eventTime = nil
-                }
-                let originalOffset = dragState?.initialOffset ?? currentOffset
-                dragState = nil
-                // Deceleration evolves content-space offset, so convert the
-                // pointer-space terminal velocity before starting the simulation.
-                let contentVelocity = velocity.map {
-                    CGSize(width: -$0.width, height: -$0.height)
-                }
-                let boundedOffset = clampedContentOffset(currentOffset)
-                var simulation = makeDeceleration(
                     offset: currentOffset,
+                    phase: .decelerating,
                     velocity: contentVelocity
                 )
-                let targetOffsetState = makeTargetOffsetState(
-                    from: currentOffset,
-                    originalOffset: originalOffset,
-                    velocity: contentVelocity
-                )
-                let behaviorTarget = targetOffsetState?.resolvedOffset
-                simulation.updateTarget(behaviorTarget)
-                if contentVelocity.valuePerSecond != .zero
-                    || currentOffset != boundedOffset
-                    || (behaviorTarget != nil && behaviorTarget != currentOffset) {
-                    decelerationState = DecelerationState(
-                        simulation: simulation,
-                        // Gesture timestamps use event time, while inertial
-                        // presentation advances on ViewGraph animation time.
-                        beginTime: (graphRef.context as? ViewGraph)?.currentTimestamp
-                            ?? eventTime,
-                        targetOffsetState: targetOffsetState
-                    )
-                    publishInteraction(
-                        offset: currentOffset,
-                        phase: .decelerating,
-                        velocity: contentVelocity
-                    )
-                    scheduleMotionUpdate()
-                } else {
-                    decelerationState = nil
-                    publishInteraction(
-                        offset: currentOffset,
-                        phase: .idle,
-                        velocity: velocity
-                    )
-                }
-
-            case .failed:
-                dragState = nil
+                scheduleMotionUpdate()
+            } else {
                 decelerationState = nil
                 publishInteraction(
                     offset: currentOffset,
                     phase: .idle,
-                    velocity: _Velocity(valuePerSecond: .zero)
+                    velocity: velocity
                 )
             }
+
+        case .failed:
+            dragState = nil
+            decelerationState = nil
+            publishInteraction(
+                offset: currentOffset,
+                phase: .idle,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
         }
     }
 
@@ -858,9 +1086,8 @@ class HostingScrollView {
     }
 
     /// Applies the sampled residue-based rubber-band curve only while input is
-    /// directly manipulating the content. The graph state keeps this
-    /// presentation offset so the terminal deceleration can spring back from
-    /// the exact visible position instead of jumping to the nearest bound.
+    /// directly manipulating the content. The live host keeps this presentation
+    /// offset so terminal deceleration can spring back without a visible jump.
     private func interactiveContentOffset(_ offset: CGPoint) -> CGPoint {
         guard let context = pendingContext else {
             return offset
@@ -1086,58 +1313,47 @@ class HostingScrollView {
         phase: ScrollPhase,
         velocity: _Velocity<CGSize>
     ) {
-        guard let graph = _AGGraph.current,
-              layoutState.isValid(in: graph) else {
-            return
-        }
-        let stateAttribute = layoutState.toStrong()
-        var state = stateAttribute.value
-        state.contentOffset = offset
-        state.contentOffsetMode = .system
-        state.contentOffsetSeed.value &+= 1
+        guard updateLiveContentOffset(offset) else { return }
+        currentPhaseState = ScrollPhaseState(
+            phase: phase,
+            velocity: CGVector(
+                dx: velocity.valuePerSecond.width,
+                dy: velocity.valuePerSecond.height
+            )
+        )
 
         var transaction = Transaction.current
         // Only direct manipulation is continuous. Inertial samples remain
         // scroll-originated but form discrete frame updates.
         transaction.isContinuous = phase == .tracking || phase == .interacting
         transaction.fromScrollView = true
-        stateAttribute.setValue(state, transaction: transaction)
-
-        guard phaseState.isValid(in: graph) else {
-            return
-        }
-        let phaseAttribute = phaseState.toStrong()
-        let value = ScrollPhaseState(
-            phase: phase,
-            velocity: CGVector(
-                dx: velocity.valuePerSecond.width,
-                dy: velocity.valuePerSecond.height
-            )
+        ScrollViewCommitMutation.commit(
+            layoutState: (makeLayoutState(), layoutState),
+            phaseState: phaseState.isInvalid
+                ? nil
+                : (currentPhaseState, phaseState),
+            isPreferred: false,
+            transaction: transaction
         )
-        if phaseAttribute.value != value {
-            phaseAttribute.setValue(value, transaction: transaction)
-        }
     }
 
     private func publishPhase(
         _ phase: ScrollPhase,
         velocity: _Velocity<CGSize>
     ) {
-        guard let graph = _AGGraph.current,
-              phaseState.isValid(in: graph) else {
-            return
-        }
-        let phaseAttribute = phaseState.toStrong()
-        let value = ScrollPhaseState(
+        currentPhaseState = ScrollPhaseState(
             phase: phase,
             velocity: CGVector(
                 dx: velocity.valuePerSecond.width,
                 dy: velocity.valuePerSecond.height
             )
         )
-        if phaseAttribute.value != value {
-            phaseAttribute.setValue(value, transaction: Transaction.current)
-        }
+        guard !phaseState.isInvalid else { return }
+        ScrollViewCommitMutation.commit(
+            phaseState: (currentPhaseState, phaseState),
+            isPreferred: false,
+            transaction: Transaction.current
+        )
     }
 }
 

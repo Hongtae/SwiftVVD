@@ -272,6 +272,10 @@ extension IDView {
     static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         makeDynamicViewList(metadata: (), view: view, inputs: inputs)
     }
+
+    static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
+        Content._viewListCount(inputs: inputs)
+    }
 }
 
 func makeView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _ViewOutputs {

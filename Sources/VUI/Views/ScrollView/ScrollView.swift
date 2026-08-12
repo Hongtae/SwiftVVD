@@ -196,35 +196,9 @@ struct SystemScrollView<Content>: View where Content: View {
             value: CGSize(width: -.infinity, height: -.infinity)
         )
         let graphRef = _AGGraphContext.current ?? _AGGraphContext(graph: graph)
-        let hostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
-            MakeHostingScrollView(
-                _layoutState: layoutState,
-                _phaseState: phaseState,
-                _containerSize: resolvedContainerSize,
-                graphRef: graphRef
-            )
-        )
-        let platformContainer: Attribute<HostingScrollView.PlatformContainer>?
-        if needsPlatformAttachment {
-            platformContainer = graph.makeStatefulRule(
-                UpdatedScrollViewContainer(
-                    _scrollView: hostingScrollView
-                )
-            )
-        } else {
-            platformContainer = nil
-        }
-        let scrollable = ScrollViewScrollable(
-            graphRef: graphRef,
-            layoutState: layoutState,
-            hostingScrollView: hostingScrollView
-        )
-        let scrollableAttr: Attribute<any Scrollable> = graph.makeRule(
-            ScrollableProvider(scrollable: scrollable)
-        )
-        let contentGeometry = graph.makeIndirectAttribute(defaultValue: ScrollGeometry())
+        let environment = inputs.base.cachedEnvironment.value.environment
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
-            inputs.base.cachedEnvironment.value.environment.value.layoutDirection
+            environment.value.layoutDirection
         }
         let pixelLength: Attribute<CGFloat> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.animationPixelLength
@@ -232,7 +206,7 @@ struct SystemScrollView<Content>: View where Content: View {
 
         let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
         var cachedEnvironment = cachedEnvironmentAttribute.value
-        _ = cachedEnvironment.animatedPosition(for: inputs)
+        let animatedPosition = cachedEnvironment.animatedPosition(for: inputs)
         let animatedSize = cachedEnvironment.animatedSize(for: inputs)
         cachedEnvironmentAttribute.value = cachedEnvironment
 
@@ -271,42 +245,143 @@ struct SystemScrollView<Content>: View where Content: View {
                 oldSize: CGSize(width: -.infinity, height: -.infinity)
             )
         )
-
-        contentInputs.scrollable = OptionalAttribute(scrollableAttr)
-        let childSafeArea = graph.makeRule(
-            ScrollViewChildSafeArea(
-                safeAreaInsets: inputs.safeAreaInsets,
-                configuration: configuration
+        let defaultAnchors: Attribute<ScrollAnchorStorage> = graph.makeStatefulRule(
+            ScrollViewDefaultAnchors(
+                _configuration: configuration,
+                _anchors: inputs.base.scrollAnchors,
+                oldAnchors: ScrollAnchorStorage(),
+                oldAxes: .vertical
             )
         )
-        let safeAreaPosition: Attribute<CGPoint> = graph.makeRule(
-            ScrollViewChildPosition(
-                safeAreaInsets: childSafeArea,
-                axes: scrollableAxes,
-                layoutDirection: layoutDirection
+        let alignmentAdjustment: Attribute<CGSize> = graph.makeRule(
+            ScrollViewAlignmentAdjustment(
+                _configuration: configuration,
+                _scrollAnchors: defaultAnchors,
+                _contentFrame: frame,
+                _size: inputs.size
+            )
+        )
+        let animatedAlignmentAdjustment = alignmentAdjustment.animated(inputs: inputs.base)
+        let rtlAdjustment: Attribute<CGSize> = graph.makeRule(
+            ScrollViewRTLAlignmentAdjustment(
+                _configuration: configuration,
+                _scrollAnchors: defaultAnchors,
+                _contentFrame: frame,
+                _size: inputs.size,
+                _layoutDirection: layoutDirection
+            )
+        )
+        let adjustedPosition: Attribute<CGPoint> = graph.makeRule(
+            ScrollViewAdjustedPosition(
+                _position: animatedPosition,
+                _configuration: configuration,
+                _rtlAdjustment: rtlAdjustment
+            )
+        )
+        let adjustedSize: Attribute<ViewSize> = graph.makeRule(
+            ScrollViewAdjustedSize(
+                _size: animatedSize,
+                _rtlAdjustment: rtlAdjustment
+            )
+        )
+        let parentSafeAreaInsets = inputs.safeAreaInsets
+        let safeArea: Attribute<EdgeInsets> = graph.makeRule {
+            parentSafeAreaInsets.attribute?.value.value ?? EdgeInsets()
+        }
+        let adjustedSafeArea: Attribute<EdgeInsets> = graph.makeRule(
+            ScrollViewAdjustedSafeArea(
+                _safeArea: safeArea,
+                _configuration: configuration,
+                _alignmentAdjustment: alignmentAdjustment,
+                _rtlAdjustment: rtlAdjustment
+            )
+        )
+        let animatedAdjustedSafeArea = adjustedSafeArea.animated(inputs: inputs.base)
+        let childSafeArea: Attribute<EdgeInsets> = graph.makeRule(
+            ScrollViewChildSafeArea(
+                _safeArea: animatedAdjustedSafeArea,
+                _configuration: configuration
             )
         )
         let animatedChildSafeArea = childSafeArea.animated(inputs: inputs.base)
+        let childPosition: Attribute<CGPoint> = graph.makeRule(
+            ScrollViewChildPosition(
+                _safeArea: animatedChildSafeArea,
+                _layoutDirection: layoutDirection,
+                _axes: scrollableAxes
+            )
+        )
+        let childSafeAreaID = CoordinateSpace.ID()
+        let isClipEnabled: Attribute<Bool> = graph.makeRule {
+            let properties = environment.value.scrollEnvironmentStorage.properties
+            return properties.isClippingEnabled
+                || properties.clipDisabledBehavior == .automatic
+        }
+        let positionBinding = inputs.base.scrollPositionBinding(kind: .scrollView).attribute?.value
+        let adjustedState: Attribute<SystemScrollLayoutState> = graph.makeStatefulRule(
+            ScrollViewAdjustedState(
+                _size: inputs.size,
+                _configuration: configuration,
+                _defaultAnchors: defaultAnchors,
+                _state: layoutState,
+                _phaseState: phaseState,
+                _contentFrame: frame,
+                _pixelLength: pixelLength,
+                _phase: inputs.base.phase,
+                _transaction: inputs.base.transaction,
+                _layoutDirection: layoutDirection,
+                _positionBinding: positionBinding
+            )
+        )
+        let scrollEnvironmentStorage: Attribute<ScrollEnvironmentStorage> = graph.makeRule {
+            environment.value.scrollEnvironmentStorage
+        }
+        let adjustedScrollBehavior: Attribute<ResolvedScrollBehavior?> = graph.makeRule(
+            ScrollViewAdjustedBehavior(
+                _axes: scrollableAxes,
+                _scrollStorage: scrollEnvironmentStorage
+            )
+        )
+        let scrollableAttr: Attribute<any Scrollable> = graph.makeRule(
+            ScrollableProvider(
+                _state: layoutState,
+                _adjustedState: adjustedState,
+                _scrollBehavior: adjustedScrollBehavior,
+                _children: OptionalAttribute(),
+                _scrollView: OptionalAttribute()
+            )
+        )
+
+        contentInputs.scrollable = OptionalAttribute(scrollableAttr)
         contentInputs.transform = graph.makeRule(
-            ScrollViewContentTransformProvider(
-                transform: inputs.transform,
-                position: inputs.position,
-                safeAreaPosition: safeAreaPosition,
-                geometry: contentGeometry,
-                axes: scrollableAxes
+            ScrollViewChildTransform(
+                _configuration: configuration,
+                _contentFrame: frame,
+                _position: adjustedPosition,
+                _size: adjustedSize,
+                _transform: inputs.transform,
+                _state: layoutState,
+                _safeArea: animatedAdjustedSafeArea,
+                _childSafeArea: animatedChildSafeArea,
+                _childPosition: childPosition,
+                _alignmentAdjustment: animatedAlignmentAdjustment,
+                _isClipEnabled: isClipEnabled,
+                _layoutDirection: layoutDirection,
+                childSafeAreaID: childSafeAreaID
             )
         )
         contentInputs.safeAreaInsets = OptionalAttribute(graph.makeRule(
             ScrollViewChildSafeAreaInsets(
-                safeAreaInsets: animatedChildSafeArea,
-                layoutDirection: layoutDirection
+                _safeArea: animatedChildSafeArea,
+                _layoutDirection: layoutDirection,
+                childSafeAreaID: childSafeAreaID
             )
         ))
         contentInputs.size = graph.subscriptNode(
             parent: frame,
             keyPath: \ViewFrame.size
         )
-        contentInputs.position = safeAreaPosition
+        contentInputs.position = childPosition
         contentInputs.containerPosition = graph.makeInput(value: CGPoint.zero)
         contentInputs.containerSize = OptionalAttribute(childContainerSize)
         contentInputs.requestsLayoutComputer = true
@@ -335,33 +410,41 @@ struct SystemScrollView<Content>: View where Content: View {
             )
             outputs._layoutComputer = OptionalAttribute(layoutComputer)
         }
-        let defaultAnchors: Attribute<ScrollAnchorStorage> = graph.makeStatefulRule(
-            ScrollViewDefaultAnchors(
-                _configuration: configuration,
-                _anchors: inputs.base.scrollAnchors,
-                oldAnchors: ScrollAnchorStorage(),
-                oldAxes: .vertical
-            )
-        )
-        let positionBinding = inputs.base.scrollPositionBinding(kind: .scrollView).attribute?.value
-        let adjustedState: Attribute<SystemScrollLayoutState> = graph.makeStatefulRule(
-            ScrollViewAdjustedState(
-                _size: inputs.size,
-                _configuration: configuration,
-                _defaultAnchors: defaultAnchors,
-                _state: layoutState,
+        if let childScrollables = contentOutputs.preferences.value(
+            for: ScrollablePreferenceKey.self
+        ) {
+            graph.mutateRule(
+                scrollableAttr.identifier,
+                as: ScrollableProvider.self
+            ) { provider in
+                provider._children = OptionalAttribute(
+                    Attribute<[any Scrollable]>(childScrollables)
+                )
+            }
+        }
+        let hostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
+            MakeHostingScrollView(
+                _layoutState: layoutState,
                 _phaseState: phaseState,
-                _contentFrame: frame,
-                _pixelLength: pixelLength,
-                _phase: inputs.base.phase,
-                _transaction: inputs.base.transaction,
-                _layoutDirection: layoutDirection,
-                _positionBinding: positionBinding
+                _containerSize: resolvedContainerSize,
+                graphRef: graphRef
             )
         )
-        let environment = inputs.base.cachedEnvironment.value.environment
-        let scrollEnvironmentStorage: Attribute<ScrollEnvironmentStorage> = graph.makeRule {
-            environment.value.scrollEnvironmentStorage
+        graph.mutateRule(
+            scrollableAttr.identifier,
+            as: ScrollableProvider.self
+        ) { provider in
+            provider._scrollView = OptionalAttribute(hostingScrollView)
+        }
+        let platformContainer: Attribute<HostingScrollView.PlatformContainer>?
+        if needsPlatformAttachment {
+            platformContainer = graph.makeStatefulRule(
+                UpdatedScrollViewContainer(
+                    _scrollView: hostingScrollView
+                )
+            )
+        } else {
+            platformContainer = nil
         }
         let behaviorProperties: Attribute<ScrollTargetBehaviorProperties> = graph.makeStatefulRule(
             ScrollViewAdjustedBehaviorProperties(
@@ -381,31 +464,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 _layoutDirection: layoutDirection,
                 _isEnabled: isEnabled,
                 _isContainedInPlatter: OptionalAttribute()
-            )
-        )
-        let alignmentAdjustment: Attribute<CGSize> = graph.makeRule(
-            ScrollViewAlignmentAdjustment(
-                _configuration: configuration,
-                _scrollAnchors: defaultAnchors,
-                _contentFrame: frame,
-                _size: inputs.size
-            )
-        )
-        let rtlAdjustment: Attribute<CGSize> = graph.makeRule(
-            ScrollViewRTLAlignmentAdjustment(
-                _configuration: configuration,
-                _scrollAnchors: defaultAnchors,
-                _contentFrame: frame,
-                _size: inputs.size,
-                _layoutDirection: layoutDirection
-            )
-        )
-        let adjustedSafeArea: Attribute<EdgeInsets> = graph.makeRule(
-            ScrollViewAdjustedSafeArea(
-                _safeArea: childSafeArea,
-                _configuration: configuration,
-                _alignmentAdjustment: alignmentAdjustment,
-                _rtlAdjustment: rtlAdjustment
             )
         )
         let displayListFrame: Attribute<CGRect>?
@@ -454,10 +512,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 updated._container = OptionalAttribute(platformContainer)
             }
         }
-        _ = graph.makeSideEffectRule {
-            _ = updatedHostingScrollView.value
-            return ()
-        }
         // Motion is sampled from the graph clock, while the host object remains
         // stable across frames and owns the in-flight deceleration state.
         let motionHostingScrollView: Attribute<HostingScrollView> = graph.makeStatefulRule(
@@ -466,10 +520,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 _time: inputs.base.time
             )
         )
-        _ = graph.makeSideEffectRule {
-            _ = motionHostingScrollView.value
-            return ()
-        }
         let geometry: Attribute<ScrollGeometry> = graph.makeRule(
             ScrollGeometryProvider(
                 layoutState: adjustedState,
@@ -478,11 +528,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 layoutDirection: layoutDirection
             )
         )
-        graph.setIndirectTarget(contentGeometry, to: geometry)
-        scrollable.bindGeometry(geometry, layoutDirection: layoutDirection)
-        if let childScrollables = contentOutputs.preferences.value(for: ScrollablePreferenceKey.self) {
-            scrollable.bindChildScrollables(Attribute<[any Scrollable]>(childScrollables))
-        }
 
         if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
             let preferenceAttr: Attribute<[any Scrollable]> = graph.makeRule(
@@ -522,10 +567,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 outputs: contentOutputs
             )
         )
-        _ = graph.makeSideEffectRule {
-            _ = enqueueRequests.value
-            return ()
-        }
+        enqueueRequests.setFlags(.transactional, mask: .transactional)
 
         if wantsResponderAttachment {
             let childResponders = outputs.preferences.reducedValue(
@@ -558,7 +600,7 @@ struct SystemScrollView<Content>: View where Content: View {
             let displayList: Attribute<DisplayList> = graph.makeRule(
                 ScrollViewDisplayList(
                     identity: identityInputs.pushIdentity(),
-                    _scrollView: updatedHostingScrollView,
+                    _scrollView: motionHostingScrollView,
                     _frame: displayListFrame,
                     _contentList: OptionalAttribute(childDisplayList)
                 )
@@ -577,43 +619,73 @@ struct SystemScrollView<Content>: View where Content: View {
     }
 }
 
+private struct ScrollViewAdjustedPosition: Rule {
+    typealias Value = CGPoint
+
+    var _position: Attribute<CGPoint>
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _rtlAdjustment: Attribute<CGSize>
+
+    var value: CGPoint {
+        let position = _position.value
+        let insetOffset = _configuration.value.contentInsets.originOffset
+        let rtlAdjustment = _rtlAdjustment.value
+        return CGPoint(
+            x: position.x + insetOffset.width + rtlAdjustment.width,
+            y: position.y + insetOffset.height + rtlAdjustment.height
+        )
+    }
+}
+
+private struct ScrollViewAdjustedSize: Rule {
+    typealias Value = ViewSize
+
+    var _size: Attribute<ViewSize>
+    var _rtlAdjustment: Attribute<CGSize>
+
+    var value: ViewSize {
+        var size = _size.value
+        let adjustment = _rtlAdjustment.value
+        size.value.width -= adjustment.width
+        size.value.height -= adjustment.height
+        return size
+    }
+}
+
 private struct ScrollViewChildSafeArea: Rule {
     typealias Value = EdgeInsets
 
-    var safeAreaInsets: OptionalAttribute<SafeAreaInsets>
-    var configuration: Attribute<ScrollViewConfiguration>
+    var _safeArea: Attribute<EdgeInsets>
+    var _configuration: Attribute<ScrollViewConfiguration>
 
     var value: EdgeInsets {
-        guard let insets = safeAreaInsets.attribute?.value.value else {
-            return EdgeInsets()
-        }
         let edges = _SemanticFeature<Semantics_v6>.isEnabled
-            ? configuration.value.nonScrollableEdges
+            ? _configuration.value.nonScrollableEdges
             : Edge.Set(rawValue: 0)
-        return insets.in(edges)
+        return _safeArea.value.in(edges)
     }
 }
 
 private struct ScrollViewChildPosition: Rule {
     typealias Value = CGPoint
 
-    var safeAreaInsets: Attribute<EdgeInsets>
-    var axes: Attribute<Axis.Set>
-    var layoutDirection: Attribute<LayoutDirection>
+    var _safeArea: Attribute<EdgeInsets>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var _axes: Attribute<Axis.Set>
 
     var value: CGPoint {
         guard _SemanticFeature<Semantics_v6>.isEnabled else {
             return .zero
         }
-        let offset = safeAreaInsets.value
-            .xFlipIfRightToLeft { layoutDirection.value }
+        let offset = _safeArea.value
+            .xFlipIfRightToLeft { _layoutDirection.value }
             .in(originOffsetEdges)
             .originOffset
         return CGPoint(x: offset.width, y: offset.height)
     }
 
     private var originOffsetEdges: Edge.Set {
-        if layoutDirection.value == .rightToLeft && axes.value == .vertical {
+        if _layoutDirection.value == .rightToLeft && _axes.value == .vertical {
             return .vertical
         }
         return .all
@@ -623,142 +695,316 @@ private struct ScrollViewChildPosition: Rule {
 private struct ScrollViewChildSafeAreaInsets: Rule {
     typealias Value = SafeAreaInsets
 
-    var safeAreaInsets: Attribute<EdgeInsets>
-    var layoutDirection: Attribute<LayoutDirection>
+    var _safeArea: Attribute<EdgeInsets>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var childSafeAreaID: CoordinateSpace.ID
 
     var value: SafeAreaInsets {
         let elements: [SafeAreaInsets.Element] = _SemanticFeature<Semantics_v6>.isEnabled
             ? [
                 SafeAreaInsets.Element(
                     regions: .container,
-                    insets: safeAreaInsets.value.xFlipIfRightToLeft { layoutDirection.value },
+                    insets: _safeArea.value.xFlipIfRightToLeft { _layoutDirection.value },
                     cornerInsets: nil
                 ),
             ]
             : []
         return SafeAreaInsets(
-            space: ScrollCoordinateSpace.safeArea.id,
+            space: childSafeAreaID,
             elements: elements
         )
     }
 }
 
-/// Scrollable facade that sends graph requests through the hosting state carrier.
-private final class ScrollViewScrollable: Scrollable {
-    private let graphRef: _AGGraphContext
-    private let layoutState: Attribute<SystemScrollLayoutState>
-    private let hostingScrollView: Attribute<HostingScrollView>
-    private var geometry: Attribute<ScrollGeometry>?
-    private var layoutDirection: Attribute<LayoutDirection>?
-    private var childScrollables: Attribute<[any Scrollable]>?
+private struct ScrollViewChildTransform: Rule {
+    typealias Value = ViewTransform
 
-    init(
-        graphRef: _AGGraphContext,
-        layoutState: Attribute<SystemScrollLayoutState>,
-        hostingScrollView: Attribute<HostingScrollView>
-    ) {
-        self.graphRef = graphRef
-        self.layoutState = layoutState
-        self.hostingScrollView = hostingScrollView
-    }
+    var _configuration: Attribute<ScrollViewConfiguration>
+    var _contentFrame: Attribute<ViewFrame>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _transform: Attribute<ViewTransform>
+    var _state: Attribute<SystemScrollLayoutState>
+    var _safeArea: Attribute<EdgeInsets>
+    var _childSafeArea: Attribute<EdgeInsets>
+    var _childPosition: Attribute<CGPoint>
+    var _alignmentAdjustment: Attribute<CGSize>
+    var _isClipEnabled: Attribute<Bool>
+    var _layoutDirection: Attribute<LayoutDirection>
+    var childSafeAreaID: CoordinateSpace.ID
 
-    func bindGeometry(
-        _ geometry: Attribute<ScrollGeometry>,
-        layoutDirection: Attribute<LayoutDirection>
-    ) {
-        self.geometry = geometry
-        self.layoutDirection = layoutDirection
-    }
-
-    func bindChildScrollables(_ childScrollables: Attribute<[any Scrollable]>) {
-        self.childScrollables = childScrollables
-    }
-
-    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
-        graphRef.withCurrent {
-            guard let childScrollables else { return false }
-            for child in childScrollables.value {
-                if child.scroll(to: id) {
-                    return true
-                }
-            }
-            return false
+    var value: ViewTransform {
+        var transform = _transform.value
+        var containerSize = _size.value.value
+        if !(containerSize.width > 0) {
+            containerSize.width = 0
         }
-    }
-
-    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
-        graphRef.withCurrent {
-            guard let geometry,
-                  let layoutDirection,
-                  let resolvedTarget = target(geometry.value, layoutDirection.value) else {
-                return false
-            }
-            setContentOffset(
-                resolvedTarget.contentOffset(in: geometry.value),
-                mode: .target(
-                    target,
-                    config: ScrollTargetConfiguration(transaction: Transaction.current)
-                )
-            )
-            return true
+        if !(containerSize.height > 0) {
+            containerSize.height = 0
         }
-    }
 
-    var allowsContentOffsetAdjustments: Bool {
-        true
-    }
+        let configuration = _configuration.value
+        let contentFrame = _contentFrame.value
+        let state = _state.value
+        let contentInsets = state.systemContentInsets
+            .adding(configuration.contentInsets)
+            .adding(_safeArea.value)
+        let childSafeArea = _childSafeArea.value
+        let filteredChildSafeArea = childSafeArea
+            .in(configuration.nonScrollableEdges)
+            .xFlipIfRightToLeft { _layoutDirection.value }
+        let position = _position.value
+        let alignmentAdjustment = _alignmentAdjustment.value
+        let childSafeAreaOrigin = filteredChildSafeArea.originOffset
+        transform.resetPosition(CGPoint(
+            x: position.x
+                + alignmentAdjustment.width
+                - childSafeAreaOrigin.width
+                + contentFrame.origin.x,
+            y: position.y
+                + alignmentAdjustment.height
+                - childSafeAreaOrigin.height
+                + contentFrame.origin.y
+        ))
 
-    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
-        graphRef.withCurrent {
-            let current = layoutState.value.contentOffset
-            setContentOffset(
-                CGPoint(
-                    x: current.x + offset.width,
-                    y: current.y + offset.height
+        let flippedChildSafeArea = childSafeArea
+            .xFlipIfRightToLeft { _layoutDirection.value }
+        let safeAreaSize = containerSize.outset(by: flippedChildSafeArea)
+        let childPosition = _childPosition.value
+        if _SemanticFeature<Semantics_v6>.isEnabled {
+            transform.appendSizedSpace(id: childSafeAreaID, size: safeAreaSize)
+            transform.appendPosition(childPosition)
+        }
+
+        var buffer = ViewTransform.UnsafeBuffer()
+
+        if let preparedRect = state.contentRectToPrepare {
+            buffer.appendScrollGeometry(
+                ScrollGeometry.rootViewTransform(
+                    contentOffset: preparedRect.origin,
+                    containerSize: preparedRect.size
                 ),
-                mode: .adjustment(reason: reason)
+                isClipped: true
             )
-            return true
         }
-    }
 
-    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
-        graphRef.withCurrent {
-            guard let childScrollables else { return nil }
-            for child in childScrollables.value {
-                if let typedChild = child as? A {
-                    return body(typedChild)
-                }
-                if let result = child.mapFirstChild(ofType: type, body: body) {
-                    return result
-                }
-            }
-            return nil
+        let linkedOnOrAfterV6 = isLinkedOnOrAfter(.v6)
+        let contentIsClipped: Bool
+        if linkedOnOrAfterV6 && _isClipEnabled.value {
+            contentIsClipped = state.contentRectToPrepare == nil
+        } else {
+            contentIsClipped = !linkedOnOrAfterV6
         }
-    }
-
-    private func setContentOffset(
-        _ contentOffset: CGPoint,
-        mode: SystemScrollLayoutState.ContentOffsetMode
-    ) {
-        var state = layoutState.value
-        state.contentOffset = contentOffset
-        state.contentOffsetMode = mode
-        state.contentOffsetSeed.value &+= 1
-        layoutState.setValue(state, transaction: Transaction.current)
-        _ = hostingScrollView.value
+        buffer.appendScrollGeometry(
+            ScrollGeometry.viewTransform(
+                contentInsets: contentInsets,
+                contentSize: contentFrame.size.value,
+                containerSize: containerSize
+            ),
+            isClipped: contentIsClipped
+        )
+        buffer.appendSizedSpace(
+            id: ScrollCoordinateSpace.all.id,
+            size: containerSize,
+            transform: &transform
+        )
+        if configuration.axes.contains(.horizontal) {
+            buffer.appendSizedSpace(
+                id: ScrollCoordinateSpace.horizontal.id,
+                size: containerSize,
+                transform: &transform
+            )
+        }
+        if configuration.axes.contains(.vertical) {
+            buffer.appendSizedSpace(
+                id: ScrollCoordinateSpace.vertical.id,
+                size: containerSize,
+                transform: &transform
+            )
+        }
+        buffer.appendTranslation(CGSize(
+            width: state.contentOffset.x + state.systemTranslation.width,
+            height: state.contentOffset.y + state.systemTranslation.height
+        ))
+        buffer.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: contentFrame.size.value,
+            transform: &transform
+        )
+        if _SemanticFeature<Semantics_v6>.isEnabled {
+            buffer.appendTranslation(CGSize(
+                width: childPosition.x,
+                height: childPosition.y
+            ))
+            buffer.appendSizedSpace(
+                id: ScrollCoordinateSpace.safeArea.id,
+                size: safeAreaSize,
+                transform: &transform
+            )
+            buffer.appendTranslation(CGSize(
+                width: -childPosition.x,
+                height: -childPosition.y
+            ))
+        }
+        transform.append(movingContentsOf: &buffer)
+        return transform
     }
 }
 
-private extension ScrollTarget {
-    func contentOffset(in geometry: ScrollGeometry) -> CGPoint {
-        guard let anchor else {
-            return rect.origin
+/// Scrollable facade that commits requests back to the system layout state.
+private final class ScrollViewScrollable: Scrollable {
+    var _state: WeakAttribute<SystemScrollLayoutState>
+    var _adjustedState: WeakAttribute<SystemScrollLayoutState>
+    var _scrollBehavior: WeakAttribute<ResolvedScrollBehavior?>
+    var _children: WeakAttribute<[any Scrollable]>
+    var _scrollView: WeakAttribute<HostingScrollView>
+    var _lastUpdateSeed: MutableBox<UInt32>
+
+    init(
+        _state: WeakAttribute<SystemScrollLayoutState>,
+        _adjustedState: WeakAttribute<SystemScrollLayoutState>,
+        _scrollBehavior: WeakAttribute<ResolvedScrollBehavior?>,
+        _children: WeakAttribute<[any Scrollable]>,
+        _scrollView: WeakAttribute<HostingScrollView>,
+        _lastUpdateSeed: MutableBox<UInt32>
+    ) {
+        self._state = _state
+        self._adjustedState = _adjustedState
+        self._scrollBehavior = _scrollBehavior
+        self._children = _children
+        self._scrollView = _scrollView
+        self._lastUpdateSeed = _lastUpdateSeed
+    }
+
+    func scroll<ID>(to id: ID) -> Bool where ID: Hashable {
+        guard _AGGraph.current != nil else {
+            fatalError("ScrollViewScrollable.scroll(to:) requires an active _AGGraph context.")
         }
-        return CGPoint(
-            x: rect.minX + rect.width * anchor.x - geometry.visibleRect.width * anchor.x,
-            y: rect.minY + rect.height * anchor.y - geometry.visibleRect.height * anchor.y
+        for child in _children.value ?? [] {
+            if child.scroll(to: id) {
+                return true
+            }
+        }
+        return false
+    }
+
+    func setContentTarget(_ target: @escaping (ScrollGeometry, LayoutDirection) -> ScrollTarget?) -> Bool {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewScrollable.setContentTarget(_:) requires an active _AGGraph context.")
+        }
+        guard var state = _adjustedState.value,
+              _state.isValid(in: graph) else {
+            return false
+        }
+
+        var resolvedTarget = target
+        if let behavior = _scrollBehavior.value.flatMap({ $0 }) {
+            let previousTarget = resolvedTarget
+            resolvedTarget = { geometry, layoutDirection in
+                guard var target = previousTarget(geometry, layoutDirection) else {
+                    return nil
+                }
+                if layoutDirection == .rightToLeft {
+                    target.rect.origin.x = geometry.contentSize.width - target.rect.maxX
+                }
+                let originalTarget = target
+                let context = ScrollTargetBehaviorContext(
+                    originalTarget: originalTarget,
+                    velocity: .zero,
+                    geometry: geometry,
+                    axes: [],
+                    decelerationRate: .standard
+                )
+                behavior.updateTarget(&target, context: context)
+                if layoutDirection == .rightToLeft {
+                    target.rect.origin.x = geometry.contentSize.width - target.rect.maxX
+                }
+                return target
+            }
+        }
+
+        let translation = state.systemTranslation
+        if translation != .zero {
+            let previousTarget = resolvedTarget
+            resolvedTarget = { geometry, layoutDirection in
+                guard var target = previousTarget(geometry, layoutDirection) else {
+                    return nil
+                }
+                target.rect.origin.x -= translation.width
+                target.rect.origin.y -= translation.height
+                return target
+            }
+        }
+
+        let transaction = Transaction.current
+        let configuration = ScrollTargetConfiguration(transaction: transaction)
+        _lastUpdateSeed.value &+= 1
+        state.updateContentOffset(
+            mode: .target(resolvedTarget, config: configuration),
+            updateSeed: _lastUpdateSeed.value
         )
+        ScrollViewCommitMutation.commit(
+            layoutState: (state, _state),
+            isPreferred: true,
+            transaction: transaction
+        )
+        return true
+    }
+
+    var allowsContentOffsetAdjustments: Bool {
+        guard _AGGraph.current != nil else {
+            fatalError("ScrollViewScrollable.allowsContentOffsetAdjustments requires an active _AGGraph context.")
+        }
+        guard let state = _AGGraph.withoutTracking({ _state.value }) else {
+            return false
+        }
+        switch state.contentOffsetMode {
+        case .target:
+            return false
+        case .adjustment, .system:
+            return true
+        }
+    }
+
+    func adjustContentOffset(by offset: CGSize, reason: ContentOffsetAdjustmentReason) -> Bool {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollViewScrollable.adjustContentOffset(by:reason:) requires an active _AGGraph context.")
+        }
+        guard var state = _AGGraph.withoutTracking({ _adjustedState.value }),
+              _state.isValid(in: graph) else {
+            return false
+        }
+
+        let updateSeed = _lastUpdateSeed.value
+        if offset != .zero {
+            state.contentOffset.x += offset.width
+            state.contentOffset.y += offset.height
+            state.updateContentOffset(
+                mode: .adjustment(reason: reason),
+                updateSeed: updateSeed
+            )
+            ScrollViewCommitMutation.commit(
+                layoutState: (state, _state),
+                isPreferred: true
+            )
+        }
+        _lastUpdateSeed.value &+= 1
+        return true
+    }
+
+    func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
+        guard _AGGraph.current != nil else {
+            fatalError("ScrollViewScrollable.mapFirstChild(ofType:body:) requires an active _AGGraph context.")
+        }
+        if let scrollable = self as? A {
+            return body(scrollable)
+        }
+        for child in _children.value ?? [] {
+            if let result = child.mapFirstChild(ofType: type, body: body) {
+                return result
+            }
+        }
+        return nil
     }
 }
 
@@ -766,10 +1012,33 @@ private extension ScrollTarget {
 private struct ScrollableProvider: Rule {
     typealias Value = any Scrollable
 
-    var scrollable: ScrollViewScrollable
+    var _state: Attribute<SystemScrollLayoutState>
+    var _adjustedState: Attribute<SystemScrollLayoutState>
+    var _scrollBehavior: Attribute<ResolvedScrollBehavior?>
+    var _children: OptionalAttribute<[any Scrollable]>
+    var _scrollView: OptionalAttribute<HostingScrollView>
 
     var value: any Scrollable {
-        scrollable
+        ScrollViewScrollable(
+            _state: _state.asWeak(),
+            _adjustedState: _adjustedState.asWeak(),
+            _scrollBehavior: _scrollBehavior.asWeak(),
+            _children: WeakAttribute(_children.attribute),
+            _scrollView: WeakAttribute(_scrollView.attribute),
+            _lastUpdateSeed: MutableBox(0)
+        )
+    }
+}
+
+private struct ScrollViewAdjustedBehavior: Rule {
+    typealias Value = ResolvedScrollBehavior?
+
+    var _axes: Attribute<Axis.Set>
+    var _scrollStorage: Attribute<ScrollEnvironmentStorage>
+
+    var value: ResolvedScrollBehavior? {
+        guard !_axes.value.isEmpty else { return nil }
+        return _scrollStorage.value.properties.scrollBehavior
     }
 }
 
@@ -1411,9 +1680,14 @@ private struct ResolvedScrollBehaviorModifier: ViewModifier, _GraphInputsModifie
         var oldDefaultBehavior: ResolvedScrollBehavior?
 
         mutating func updateValue() {
-            let behavior = defaultBehavior
+            let defaultBehavior = defaultBehavior
+            var behavior = defaultBehavior
+            if behavior != nil {
+                behavior?.axes = _modifier.value.axes
+                behavior?._environment = _environment.asWeak()
+            }
             _AGGraph.setStatefulOutput(behavior)
-            oldDefaultBehavior = behavior
+            oldDefaultBehavior = defaultBehavior
         }
 
         private var defaultBehavior: ResolvedScrollBehavior? {

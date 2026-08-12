@@ -28,6 +28,24 @@ final class _AGUpdateContext {
 // The unchecked Sendable conformance is not a thread-safety guarantee.
 
 final class _AGGraph: Equatable, @unchecked Sendable {
+    private struct WeakSeedRegistry {
+        var nextSeed: UInt32 = 1
+        var reservedSeeds: Set<UInt32> = []
+        var owners: [UInt32: WeakObject<_AGGraph>] = [:]
+
+        mutating func reserve() -> UInt32 {
+            while nextSeed == 0 || reservedSeeds.contains(nextSeed) {
+                nextSeed &+= 1
+            }
+            let seed = nextSeed
+            reservedSeeds.insert(seed)
+            nextSeed &+= 1
+            return seed
+        }
+    }
+
+    private static let weakSeedRegistry = Mutex(WeakSeedRegistry())
+
     // MARK: Node Storage
 
     struct InputEdge {
@@ -163,7 +181,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     }
 
     struct NodeSlot {
-        var seed: UInt32    // generation counter incremented on each removal
+        var seed: UInt32    // generation token replaced on each removal
         var node: Node?     // nil = free slot
     }
 
@@ -259,6 +277,11 @@ final class _AGGraph: Equatable, @unchecked Sendable {
 
     // MARK: Stored Properties
 
+    // New slots in one graph share its initial weak generation. Reused slots
+    // receive another process-unique generation so stale eight-byte weak
+    // handles cannot resolve to a different graph or a replacement node.
+    let initialWeakSeed: UInt32
+
     // Thread-safe bridge for scheduling AG invalidations from arbitrary threads.
     let inbox: AGInbox = AGInbox()
 
@@ -338,7 +361,37 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         currentUpdateContextStorage.value
     }
 
-    init() {}
+    init() {
+        let seed = Self.weakSeedRegistry.withLock { $0.reserve() }
+        initialWeakSeed = seed
+        Self.weakSeedRegistry.withLock {
+            $0.owners[seed] = WeakObject(self)
+        }
+    }
+
+    func makeWeakSeed() -> UInt32 {
+        let seed = Self.weakSeedRegistry.withLock { $0.reserve() }
+        Self.weakSeedRegistry.withLock {
+            $0.owners[seed] = WeakObject(self)
+        }
+        return seed
+    }
+
+    static func graph(for attribute: AGWeakAttribute) -> _AGGraph? {
+        guard !attribute.isInvalid else { return nil }
+        let graph = weakSeedRegistry.withLock { registry -> _AGGraph? in
+            guard let graph = registry.owners[attribute.seed]?.value else {
+                registry.owners[attribute.seed] = nil
+                return nil
+            }
+            return graph
+        }
+        guard let graph,
+              graph._isValid(index: attribute.identifier, seed: attribute.seed) else {
+            return nil
+        }
+        return graph
+    }
 
     static func == (lhs: _AGGraph, rhs: _AGGraph) -> Bool {
         lhs === rhs

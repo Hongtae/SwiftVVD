@@ -166,7 +166,9 @@ final class MatchedGeometryScope: PropertyKey {
             x: size.value.width * args.anchor.x,
             y: size.value.height * args.anchor.y
         )]
-        source.transform.value.convertGlobal(from: .local, points: &points)
+        var transform = source.transform.value
+        transform.appendPosition(source.position.value)
+        transform.convertGlobal(from: .local, points: &points)
         let anchorPosition = points[0]
         let origin = CGPoint(
             x: anchorPosition.x - size.value.width * args.anchor.x,
@@ -515,9 +517,6 @@ private struct MatchedFrame: Rule, AsyncAttribute {
     var args: Attribute<MatchedGeometryArguments>
     var size: Attribute<ViewSize>
     var position: Attribute<CGPoint>
-    // The target position is authoritative for self geometry, while coordinate
-    // conversion must use the origin represented by the current transform.
-    var transformPosition: Attribute<CGPoint>
     var transform: Attribute<ViewTransform>
     var childLayoutComputer: OptionalAttribute<LayoutComputer>
 
@@ -551,12 +550,13 @@ private struct MatchedFrame: Rule, AsyncAttribute {
                 x: shared.origin.x + shared.size.value.width * arguments.anchor.x,
                 y: shared.origin.y + shared.size.value.height * arguments.anchor.y
             )]
-            transform.value.convertGlobal(to: .local, points: &targetAnchor)
-            let coordinateOrigin = transformPosition.value
+            var resolvedTransform = transform.value
+            resolvedTransform.appendPosition(ownPosition)
+            resolvedTransform.convertGlobal(to: .local, points: &targetAnchor)
             resolvedOrigin = CGPoint(
-                x: coordinateOrigin.x + targetAnchor[0].x
+                x: ownPosition.x + targetAnchor[0].x
                     - resolvedSize.value.width * arguments.anchor.x,
-                y: coordinateOrigin.y + targetAnchor[0].y
+                y: ownPosition.y + targetAnchor[0].y
                     - resolvedSize.value.height * arguments.anchor.y
             )
         } else {
@@ -661,7 +661,6 @@ public struct _MatchedGeometryEffect<ID: Hashable>: MultiViewModifier, Primitive
                 args: args,
                 size: targetSize,
                 position: targetPosition,
-                transformPosition: inputs.position,
                 transform: inputs.transform,
                 childLayoutComputer: OptionalAttribute(childLayoutComputer)
             )

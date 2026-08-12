@@ -89,7 +89,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             }
         }
 
-        let (automaticGraph, automaticState, automaticPhase, automaticHost) = makeHost(
+        let (automaticGraph, _, _, automaticHost) = makeHost(
             behavior: .automatic
         )
         _AGGraph.withCurrent(automaticGraph) {
@@ -101,22 +101,26 @@ final class SystemScrollViewHostTests: XCTestCase {
             )
             automaticHost.dispatchScrollGesturePhase(.active(.pan(active)))
             XCTAssertEqual(
-                automaticState.value.contentOffset.y,
+                automaticHost.makeLayoutState().contentOffset.y,
                 -3.846153846153843,
                 accuracy: 0.0000000001
             )
-            XCTAssertEqual(automaticPhase.value.phase, .interacting)
+            XCTAssertEqual(automaticHost.currentPhaseState.phase, .interacting)
 
             automaticHost.dispatchScrollGesturePhase(.ended(.pan(active)))
             XCTAssertTrue(automaticHost.isDecelerating)
-            XCTAssertEqual(automaticPhase.value.phase, .decelerating)
+            XCTAssertEqual(automaticHost.currentPhaseState.phase, .decelerating)
             XCTAssertTrue(automaticHost.updateMotion(at: Time(seconds: 1)))
             XCTAssertTrue(automaticHost.updateMotion(at: Time(seconds: 1.5)))
-            XCTAssertEqual(automaticState.value.contentOffset.y, 0, accuracy: 0.0000000001)
-            XCTAssertEqual(automaticPhase.value.phase, .idle)
+            XCTAssertEqual(
+                automaticHost.makeLayoutState().contentOffset.y,
+                0,
+                accuracy: 0.0000000001
+            )
+            XCTAssertEqual(automaticHost.currentPhaseState.phase, .idle)
         }
 
-        let (sizedGraph, sizedState, sizedPhase, sizedHost) = makeHost(
+        let (sizedGraph, _, _, sizedHost) = makeHost(
             behavior: .basedOnSize
         )
         _AGGraph.withCurrent(sizedGraph) {
@@ -126,8 +130,8 @@ final class SystemScrollViewHostTests: XCTestCase {
                 touchType: .indirect,
                 velocity: _Velocity(valuePerSecond: .zero)
             ))))
-            XCTAssertEqual(sizedState.value.contentOffset, .zero)
-            XCTAssertEqual(sizedPhase.value.phase, .tracking)
+            XCTAssertEqual(sizedHost.makeLayoutState().contentOffset, .zero)
+            XCTAssertEqual(sizedHost.currentPhaseState.phase, .tracking)
         }
     }
 
@@ -161,10 +165,16 @@ final class SystemScrollViewHostTests: XCTestCase {
                 velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
             ))))
 
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 50))
-            XCTAssertEqual(state.value.contentOffsetMode, .system)
-            XCTAssertEqual(phase.value.phase, .interacting)
-            XCTAssertEqual(phase.value.velocity, CGVector(dx: 0, dy: -300))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 0, y: 50)
+            )
+            XCTAssertEqual(host.makeLayoutState().contentOffsetMode, .system)
+            XCTAssertEqual(host.currentPhaseState.phase, .interacting)
+            XCTAssertEqual(
+                host.currentPhaseState.velocity,
+                CGVector(dx: 0, dy: -300)
+            )
 
             host.dispatchScrollGesturePhase(.ended(.pan(PanGesture.Value(
                 timestamp: Time(seconds: 1.1),
@@ -173,12 +183,18 @@ final class SystemScrollViewHostTests: XCTestCase {
                 velocity: _Velocity(valuePerSecond: CGSize(width: 0, height: -300))
             ))))
 
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 50))
-            XCTAssertEqual(phase.value.phase, .decelerating)
-            XCTAssertEqual(phase.value.velocity, CGVector(dx: 0, dy: 300))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 0, y: 50)
+            )
+            XCTAssertEqual(host.currentPhaseState.phase, .decelerating)
+            XCTAssertEqual(
+                host.currentPhaseState.velocity,
+                CGVector(dx: 0, dy: 300)
+            )
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.1)))
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.2)))
-            XCTAssertGreaterThan(state.value.contentOffset.y, 50)
+            XCTAssertGreaterThan(host.makeLayoutState().contentOffset.y, 50)
         }
     }
 
@@ -239,8 +255,11 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
             XCTAssertFalse(host.isDecelerating)
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 180))
-            XCTAssertEqual(phase.value.phase, .idle)
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 0, y: 180)
+            )
+            XCTAssertEqual(host.currentPhaseState.phase, .idle)
         }
     }
 
@@ -287,7 +306,10 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
             XCTAssertFalse(host.isDecelerating)
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 180))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 0, y: 180)
+            )
         }
     }
 
@@ -335,7 +357,7 @@ final class SystemScrollViewHostTests: XCTestCase {
 
             recorder.overrideTargetOrigin = CGPoint(x: 0, y: 260)
             _ = host.updateContext(HostingScrollViewUpdateContext(
-                contentOffset: state.value.contentOffset,
+                contentOffset: host.makeLayoutState().contentOffset,
                 contentFrame: context.contentFrame,
                 containingSize: context.containingSize,
                 offsetMode: .system,
@@ -346,7 +368,10 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 1)))
             XCTAssertTrue(host.updateMotion(at: Time(seconds: 4)))
             XCTAssertFalse(host.isDecelerating)
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 0, y: 260))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 0, y: 260)
+            )
         }
     }
 
@@ -1136,16 +1161,275 @@ final class SystemScrollViewHostTests: XCTestCase {
         )
     }
 
-    func testHostingScrollViewRoundTripsGraphAndSystemState() {
+    // ASSERTIONS systemScrollViewCommitMutationMergeObserved
+    func testScrollViewCommitMutationUsesObservedMergePolicy() {
         let graph = _AGGraph()
         let graphRef = _AGGraphContext(graph: graph)
 
         graphRef.withCurrent {
-            let state = graph.makeInput(value: SystemScrollLayoutState(
+            let firstLayout = graph.makeInput(value: SystemScrollLayoutState())
+            let secondLayout = graph.makeInput(value: SystemScrollLayoutState())
+            let phase = graph.makeInput(value: ScrollPhaseState())
+            let container = graph.makeInput(value: CGSize.zero)
+            let otherContainer = graph.makeInput(value: CGSize.zero)
+
+            var mutation = ScrollViewCommitMutation(
+                layoutState: (
+                    SystemScrollLayoutState(contentOffset: CGPoint(x: 1, y: 2)),
+                    firstLayout.asWeak()
+                ),
+                phaseState: nil,
+                containerSize: (CGSize(width: 10, height: 20), container.asWeak()),
+                isPreferred: false
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: mutation).children.compactMap(\.label),
+                ["layoutState", "phaseState", "containerSize", "isPreferred"]
+            )
+
+            XCTAssertTrue(mutation.merge(ScrollViewCommitMutation(
+                layoutState: (
+                    SystemScrollLayoutState(contentOffset: CGPoint(x: 3, y: 4)),
+                    firstLayout.asWeak()
+                ),
+                phaseState: (ScrollPhaseState(phase: .interacting), phase.asWeak()),
+                containerSize: (CGSize(width: 30, height: 40), container.asWeak()),
+                isPreferred: false
+            )))
+            XCTAssertEqual(
+                mutation.layoutState?.value.contentOffset,
+                CGPoint(x: 3, y: 4)
+            )
+            XCTAssertEqual(mutation.phaseState?.value.phase, .interacting)
+            XCTAssertEqual(mutation.containerSize?.value, CGSize(width: 30, height: 40))
+            XCTAssertFalse(mutation.isPreferred)
+
+            XCTAssertFalse(mutation.merge(ScrollViewCommitMutation(
+                layoutState: nil,
+                phaseState: nil,
+                containerSize: (CGSize(width: 50, height: 60), otherContainer.asWeak()),
+                isPreferred: false
+            )))
+            XCTAssertEqual(mutation.containerSize?.value, CGSize(width: 30, height: 40))
+
+            var preferred = ScrollViewCommitMutation(
+                layoutState: (
+                    SystemScrollLayoutState(contentOffset: CGPoint(x: 7, y: 8)),
+                    secondLayout.asWeak()
+                ),
+                phaseState: nil,
+                containerSize: nil,
+                isPreferred: true
+            )
+            XCTAssertTrue(preferred.merge(ScrollViewCommitMutation(
+                layoutState: (
+                    SystemScrollLayoutState(contentOffset: CGPoint(x: 9, y: 10)),
+                    secondLayout.asWeak()
+                ),
+                phaseState: nil,
+                containerSize: nil,
+                isPreferred: false
+            )))
+            XCTAssertEqual(
+                preferred.layoutState?.value.contentOffset,
+                CGPoint(x: 7, y: 8)
+            )
+            XCTAssertTrue(preferred.isPreferred)
+            XCTAssertFalse(preferred.merge(ScrollViewCommitMutation(
+                layoutState: nil,
+                phaseState: nil,
+                containerSize: nil,
+                isPreferred: true
+            )))
+
+            var promoted = ScrollViewCommitMutation(
+                layoutState: nil,
+                phaseState: nil,
+                containerSize: nil,
+                isPreferred: false
+            )
+            XCTAssertTrue(promoted.merge(ScrollViewCommitMutation(
+                layoutState: (
+                    SystemScrollLayoutState(contentOffset: CGPoint(x: 11, y: 12)),
+                    firstLayout.asWeak()
+                ),
+                phaseState: nil,
+                containerSize: nil,
+                isPreferred: true
+            )))
+            XCTAssertEqual(
+                promoted.layoutState?.value.contentOffset,
+                CGPoint(x: 11, y: 12)
+            )
+            XCTAssertTrue(promoted.isPreferred)
+        }
+    }
+
+    func testScrollViewCommitMutationAppliesAllStatesInOneHostTransaction() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        var layout: Attribute<SystemScrollLayoutState>!
+        var phase: Attribute<ScrollPhaseState>!
+        var container: Attribute<CGSize>!
+        var containerTransaction: Transaction?
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            layout = graph.makeInput(value: SystemScrollLayoutState())
+            phase = graph.makeInput(value: ScrollPhaseState())
+            container = graph.makeInput(value: CGSize.zero)
+            let nextLayout = SystemScrollLayoutState(
+                contentOffset: CGPoint(x: 13, y: 14),
+                contentOffsetMode: .adjustment(reason: .translation)
+            )
+            let nextPhase = ScrollPhaseState(phase: .interacting)
+            let nextContainer = CGSize(width: 90, height: 140)
+
+            Update.ensure {
+                ScrollViewCommitMutation.commit(
+                    layoutState: (nextLayout, layout.asWeak()),
+                    phaseState: (nextPhase, phase.asWeak()),
+                    containerSize: (nextContainer, container.asWeak()),
+                    isPreferred: false,
+                    transaction: Transaction()
+                )
+                XCTAssertTrue(viewGraph.hasPendingTransactions)
+                XCTAssertEqual(layout.value.contentOffset, .zero)
+                XCTAssertEqual(phase.value.phase, .idle)
+                XCTAssertEqual(container.value, .zero)
+            }
+
+            XCTAssertEqual(layout.value, nextLayout)
+            XCTAssertEqual(phase.value, nextPhase)
+            XCTAssertEqual(container.value, nextContainer)
+            containerTransaction = viewGraph.data.graph.transaction(
+                for: container.identifier
+            )
+        }
+
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+        let transaction = try XCTUnwrap(containerTransaction)
+        XCTAssertTrue(transaction.fromScrollView)
+    }
+
+    func testScrollViewCommitMutationResolvesOwnerOutsideGraphContext() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        var layout = WeakAttribute<SystemScrollLayoutState>()
+        var phase = WeakAttribute<ScrollPhaseState>()
+        var container = WeakAttribute<CGSize>()
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            layout = graph.makeInput(
+                value: SystemScrollLayoutState()
+            ).asWeak()
+            phase = graph.makeInput(value: ScrollPhaseState()).asWeak()
+            container = graph.makeInput(value: CGSize.zero).asWeak()
+        }
+
+        let nextLayout = SystemScrollLayoutState(
+            contentOffset: CGPoint(x: 13, y: 14),
+            contentOffsetMode: .adjustment(reason: .translation)
+        )
+        let nextPhase = ScrollPhaseState(phase: .interacting)
+        let nextContainer = CGSize(width: 90, height: 140)
+        XCTAssertNil(_AGGraph.current)
+
+        Update.ensure {
+            XCTAssertNil(_AGGraph.current)
+            ScrollViewCommitMutation.commit(
+                layoutState: (nextLayout, layout),
+                phaseState: (nextPhase, phase),
+                containerSize: (nextContainer, container),
+                isPreferred: false,
+                transaction: Transaction()
+            )
+            XCTAssertTrue(viewGraph.hasPendingTransactions)
+        }
+
+        XCTAssertNil(_AGGraph.current)
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+        XCTAssertEqual(layout.value, nextLayout)
+        XCTAssertEqual(phase.value, nextPhase)
+        XCTAssertEqual(container.value, nextContainer)
+        XCTAssertNil(_AGGraph.current)
+    }
+
+    func testScrollViewCommitMutationRequestsImmediateUpdateForSystemMode() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let delegate = ScrollCommitViewGraphDelegate(graph: viewGraph)
+        viewGraph.viewDelegate = delegate
+        var layout: Attribute<SystemScrollLayoutState>!
+
+        viewGraph.data.withCurrent {
+            layout = viewGraph.data.graph.makeInput(
+                value: SystemScrollLayoutState()
+            )
+            Update.ensure {
+                ScrollViewCommitMutation.commit(
+                    layoutState: (
+                        SystemScrollLayoutState(
+                            contentOffset: CGPoint(x: 4, y: 5),
+                            contentOffsetMode: .system
+                        ),
+                        layout.asWeak()
+                    ),
+                    isPreferred: false,
+                    transaction: Transaction()
+                )
+                XCTAssertTrue(viewGraph.hasPendingTransactions)
+                XCTAssertTrue(delegate.requestedDelays.isEmpty)
+            }
+        }
+
+        XCTAssertEqual(delegate.requestedDelays, [0])
+        XCTAssertTrue(viewGraph.hasPendingTransactions)
+        viewGraph.flushTransactions()
+        viewGraph.data.withCurrent {
+            XCTAssertEqual(layout.value.contentOffset, CGPoint(x: 4, y: 5))
+        }
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+    }
+
+    func testHostingScrollViewRoundTripsGraphAndSystemState() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        var state = WeakAttribute<SystemScrollLayoutState>()
+        var host: HostingScrollView!
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let stateAttribute = graph.makeInput(value: SystemScrollLayoutState(
                 contentOffset: CGPoint(x: 2, y: 3),
                 contentOffsetSeed: VersionSeed(value: 7)
             ))
-            let host = HostingScrollView(graphRef: graphRef, layoutState: state.asWeak())
+            state = stateAttribute.asWeak()
+            host = HostingScrollView(
+                graphRef: _AGGraphContext(graph: graph),
+                layoutState: state
+            )
             let insets = EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
 
             host.updateContext(HostingScrollViewUpdateContext(
@@ -1162,12 +1446,91 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertEqual(platformState.systemContentInsets, insets)
             XCTAssertEqual(platformState.contentOffsetMode, .system)
             XCTAssertEqual(platformState.contentOffsetSeed.value, 0)
-
-            host.publishSystemContentOffset(CGPoint(x: 30, y: 40))
-            XCTAssertEqual(state.value.contentOffset, CGPoint(x: 30, y: 40))
-            XCTAssertEqual(state.value.contentOffsetMode, .system)
-            XCTAssertEqual(state.value.contentOffsetSeed.value, 8)
         }
+
+        Update.ensure {
+            host.publishSystemContentOffset(CGPoint(x: 30, y: 40))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset,
+                CGPoint(x: 30, y: 40)
+            )
+            XCTAssertEqual(
+                state.value?.contentOffset,
+                CGPoint(x: 2, y: 3)
+            )
+            XCTAssertTrue(viewGraph.hasPendingTransactions)
+        }
+
+        viewGraph.flushTransactions()
+        XCTAssertEqual(state.value?.contentOffset, CGPoint(x: 30, y: 40))
+        XCTAssertEqual(state.value?.contentOffsetMode, .system)
+        XCTAssertEqual(state.value?.contentOffsetSeed.value, 0)
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+    }
+
+    // ASSERTIONS systemScrollViewContainerSizeCommitLifecycleObserved
+    func testHostingScrollViewDefersAndCoalescesContainerSizeCommit() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        var containerSize: Attribute<CGSize>!
+        var scrollHost: HostingScrollView!
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            containerSize = graph.makeInput(value: CGSize.zero)
+            scrollHost = HostingScrollView(
+                graphRef: _AGGraphContext(graph: graph),
+                layoutState: graph.makeInput(
+                    value: SystemScrollLayoutState()
+                ).asWeak(),
+                containerSize: containerSize.asWeak()
+            )
+
+            _ = scrollHost.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 300, height: 400),
+                containingSize: CGSize(width: 80, height: 120),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+            _ = scrollHost.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 300, height: 400),
+                containingSize: CGSize(width: 90, height: 140),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+
+            XCTAssertEqual(containerSize.value, .zero)
+        }
+
+        XCTAssertTrue(viewGraph.hasPendingTransactions)
+        viewGraph.flushTransactions()
+
+        try viewGraph.data.withCurrent {
+            XCTAssertEqual(containerSize.value, CGSize(width: 90, height: 140))
+            let transaction = try XCTUnwrap(
+                viewGraph.data.graph.transaction(for: containerSize.identifier)
+            )
+            XCTAssertTrue(transaction.fromScrollView)
+        }
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
+
+        viewGraph.data.withCurrent {
+            _ = scrollHost.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 300, height: 400),
+                containingSize: CGSize(width: 90, height: 140),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+        }
+        XCTAssertFalse(viewGraph.hasPendingTransactions)
     }
 
     func testHostingScrollViewResolvesVisibilityAwareTargetIntoPendingContext() {
@@ -1208,6 +1571,57 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertNil(host.animationTarget)
             XCTAssertNil(host.animationTargetConfig)
         }
+    }
+
+    // ASSERTIONS systemScrollViewTargetVisibilityApplicationObserved
+    func testHostingScrollViewReappliesTargetThroughGraphActionOutbox() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        var host: HostingScrollView!
+        var targetY: CGFloat = 100
+        var providerGraphBindings: [Bool] = []
+
+        graphRef.withCurrent {
+            host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: graph.makeInput(
+                    value: SystemScrollLayoutState()
+                ).asWeak()
+            )
+        }
+
+        graphRef.withCurrent {
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 200, height: 1_000),
+                containingSize: CGSize(width: 200, height: 200),
+                offsetMode: .target(
+                    { _, _ in
+                        providerGraphBindings.append(_AGGraph.current != nil)
+                        return ScrollTarget(
+                            rect: CGRect(x: 0, y: targetY, width: 200, height: 40),
+                            anchor: .top
+                        )
+                    },
+                    config: ScrollTargetConfiguration()
+                ),
+                safeInsets: EdgeInsets()
+            ))
+        }
+
+        XCTAssertEqual(providerGraphBindings, [true])
+        XCTAssertEqual(host.pendingContext?.contentOffset.y, 100)
+        XCTAssertEqual(graph.actionOutbox.count, 1)
+
+        targetY = 400
+        let actions = graph.actionOutbox
+        graph.actionOutbox.removeAll()
+        XCTAssertNil(_AGGraph.current)
+        actions.forEach { $0() }
+
+        XCTAssertEqual(providerGraphBindings, [true, false])
+        XCTAssertEqual(host.pendingContext?.contentOffset.y, 400)
+        XCTAssertFalse(Update.isActive)
     }
 
     func testMakeHostingScrollViewReusesHostObject() {
@@ -1685,6 +2099,32 @@ final class SystemScrollViewHostTests: XCTestCase {
 }
 
 private final class ScrollHostTestResponder: ViewResponder {
+}
+
+private final class ScrollCommitViewGraphDelegate: ViewGraphDelegate {
+    weak var graph: ViewGraph?
+    var requestedDelays: [Double] = []
+
+    init(graph: ViewGraph) {
+        self.graph = graph
+    }
+
+    func updateGraph<T>(body: (GraphHost) -> T) -> T {
+        guard let graph else {
+            fatalError("The view graph must outlive its delegate.")
+        }
+        return body(graph)
+    }
+
+    func graphDidChange() {}
+
+    func requestUpdate(after: Double) {
+        requestedDelays.append(after)
+    }
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        self as? T
+    }
 }
 
 private final class HostScrollTargetBehaviorRecorder {

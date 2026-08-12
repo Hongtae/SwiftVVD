@@ -11,7 +11,7 @@ import Foundation
 
 /// Per-child geometry computed by the layout engine during the layout pass.
 /// Used as the output type of LayoutEngineBox.childGeometries and LayoutChildGeometry rule.
-struct ViewGeometry: Equatable {
+struct ViewGeometry: Equatable, _AGTypeDescriptorEquatable {
     /// Position in parent-local coordinates (top-left corner after anchor resolution).
     var origin: CGPoint
 
@@ -55,7 +55,7 @@ extension ViewGeometry: Animatable {
 /// `width`/`height` are computed accessors into `value`.
 /// `proposal` stores the proposal that was used to compute this size; needed by the
 /// animation system to interpolate between layout frames.
-struct ViewSize: Equatable, Sendable {
+struct ViewSize: Equatable, Sendable, _AGTypeDescriptorEquatable {
     var value: CGSize
     private var _proposedWidth: CGFloat
     private var _proposedHeight: CGFloat
@@ -117,12 +117,18 @@ extension ViewSize: Animatable {
 public struct ScrollGeometry: Equatable, Sendable, CustomDebugStringConvertible {
     /// The current scroll offset (content origin offset from the container origin).
     public var contentOffset: CGPoint {
-        didSet { updateVisibleRect() }
+        didSet {
+            visibleRect.origin.x += contentOffset.x - oldValue.x
+            visibleRect.origin.y += contentOffset.y - oldValue.y
+        }
     }
     public var contentSize:   CGSize
     public var contentInsets: EdgeInsets
     public var containerSize: CGSize {
-        didSet { updateVisibleRect() }
+        didSet {
+            visibleRect.size.width += containerSize.width - oldValue.width
+            visibleRect.size.height += containerSize.height - oldValue.height
+        }
     }
     public private(set) var visibleRect: CGRect
 
@@ -168,10 +174,6 @@ public struct ScrollGeometry: Equatable, Sendable, CustomDebugStringConvertible 
         "trailing: \(contentInsets.trailing)>, " +
         "containerSize \(containerSize), " +
         "visibleRect \(visibleRect)>"
-    }
-
-    private mutating func updateVisibleRect() {
-        visibleRect = CGRect(origin: contentOffset, size: containerSize)
     }
 
     static func rootViewTransform(contentOffset: CGPoint, containerSize: CGSize) -> ScrollGeometry {
@@ -235,12 +237,11 @@ extension CGSize {
 
 /// The cumulative coordinate-space transform applied to a view.
 ///
-/// Internally stores two independent layers:
+/// Internally stores two coordinated layers:
 ///
-/// 1. **`_transformItems`** - ordered sequence of non-translation transforms
-///    (affine rotations/scales, projection transforms, scroll offsets, etc.)
-///    in local-to-global application order.
-///    Appended by `appendAffineTransform`, `appendProjectionTransform`, etc.
+/// 1. **`_transformItems`** - ordered transform elements in global-to-local
+///    traversal order. Appending a non-folded element first commits the current
+///    folded translation at that exact position in the sequence.
 ///
 /// 2. **Position storage** - a position adjustment plus a folded
 ///    global-to-local translation. Appending a position replaces the previous
@@ -250,14 +251,15 @@ extension CGSize {
 ///
 /// Converting **global to local** (`convertGlobal(to: .local, ...)`) is the
 /// canonical hit-test path:
-///   1. Subtract the resolved position.
-///   2. Apply the inverse of each `_transformItem` in **reverse** order.
+///   1. Traverse committed elements in forward order.
+///   2. Apply the remaining folded translation last.
 ///
 /// Converting **local to global** (`convertGlobal(from: .local, ...)`) is used
 /// to compute a child view's global position from its parent-local offset:
-///   1. Apply each `_transformItem` in **forward** order.
-///   2. Add the resolved position.
-struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
+///   1. Apply the inverse folded translation first.
+///   2. Traverse committed elements in reverse, inverted order.
+struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
+    _AGTypeDescriptorEquatable {
 
     // Item
 
@@ -290,9 +292,86 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         case sizedSpaceID(id: CoordinateSpace.ID, size: CGSize)
     }
 
+    struct UnsafeBuffer: Sendable {
+        fileprivate var items: [Item] = []
+        fileprivate var count = 0
+
+        init() {}
+
+        mutating func appendTranslation(_ size: CGSize) {
+            guard size != .zero else { return }
+            append(.translation(size))
+        }
+
+        mutating func appendAffineTransform(
+            _ transform: CGAffineTransform,
+            inverse: Bool
+        ) {
+            if transform.a == 1,
+               transform.b == 0,
+               transform.c == 0,
+               transform.d == 1 {
+                appendTranslation(CGSize(
+                    width: inverse ? -transform.tx : transform.tx,
+                    height: inverse ? -transform.ty : transform.ty
+                ))
+            } else {
+                append(.affineTransform(transform, inverse: inverse))
+            }
+        }
+
+        mutating func appendProjectionTransform(
+            _ transform: ProjectionTransform,
+            inverse: Bool
+        ) {
+            if transform.isAffine {
+                appendAffineTransform(
+                    CGAffineTransform(
+                        a: transform.m11,
+                        b: transform.m12,
+                        c: transform.m21,
+                        d: transform.m22,
+                        tx: transform.m31,
+                        ty: transform.m32
+                    ),
+                    inverse: inverse
+                )
+            } else {
+                append(.projectionTransform(transform, inverse: inverse))
+            }
+        }
+
+        mutating func appendCoordinateSpace(
+            id: CoordinateSpace.ID,
+            transform: inout ViewTransform
+        ) {
+            append(.coordinateSpaceID(id))
+        }
+
+        mutating func appendSizedSpace(
+            id: CoordinateSpace.ID,
+            size: CGSize,
+            transform: inout ViewTransform
+        ) {
+            append(.sizedSpaceID(id: id, size: size))
+        }
+
+        mutating func appendScrollGeometry(
+            _ geometry: ScrollGeometry,
+            isClipped: Bool
+        ) {
+            append(.scrollGeometry(geometry, isClipped: isClipped))
+        }
+
+        private mutating func append(_ item: Item) {
+            items.append(item)
+            count += 1
+        }
+    }
+
     // Storage
 
-    /// Non-translation transform items, in local-to-global order.
+    /// Committed transform items, in global-to-local traversal order.
     private var _transformItems: [Item] = []
 
     /// Most recently appended position used to replace absolute placement.
@@ -341,45 +420,81 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
     /// Appends a translation in the current local coordinate space.
     mutating func appendTranslation(_ size: CGSize) {
-        _transformItems.append(.translation(size))
+        _positionTranslation.width += size.width
+        _positionTranslation.height += size.height
+    }
+
+    mutating func append(movingContentsOf buffer: inout UnsafeBuffer) {
+        commitPositionTranslation()
+        _transformItems.append(contentsOf: buffer.items)
+        buffer.items.removeAll(keepingCapacity: false)
+        buffer.count = 0
     }
 
     /// Appends a 2-D affine transform.
     /// Pass `inverse: true` when the transform maps local coordinates to
     /// global coordinates.
     mutating func appendAffineTransform(_ t: CGAffineTransform, inverse: Bool) {
-        _transformItems.append(.affineTransform(t, inverse: inverse))
+        if t.a == 1, t.b == 0, t.c == 0, t.d == 1 {
+            appendTranslation(CGSize(
+                width: inverse ? -t.tx : t.tx,
+                height: inverse ? -t.ty : t.ty
+            ))
+        } else {
+            commitPositionTranslation()
+            _transformItems.append(.affineTransform(t, inverse: inverse))
+        }
     }
 
     /// Appends a 3-D projective transform.
     /// Pass `inverse: true` when the transform maps local coordinates to
     /// global coordinates.
     mutating func appendProjectionTransform(_ t: ProjectionTransform, inverse: Bool) {
-        _transformItems.append(.projectionTransform(t, inverse: inverse))
+        if t.isAffine {
+            appendAffineTransform(
+                CGAffineTransform(
+                    a: t.m11,
+                    b: t.m12,
+                    c: t.m21,
+                    d: t.m22,
+                    tx: t.m31,
+                    ty: t.m32
+                ),
+                inverse: inverse
+            )
+        } else {
+            commitPositionTranslation()
+            _transformItems.append(.projectionTransform(t, inverse: inverse))
+        }
     }
 
     /// Appends a scroll-container geometry descriptor.
     mutating func appendScrollGeometry(_ sg: ScrollGeometry, isClipped: Bool) {
+        commitPositionTranslation()
         _transformItems.append(.scrollGeometry(sg, isClipped: isClipped))
     }
 
     /// Marks the current position in the chain as a named coordinate space.
     mutating func appendCoordinateSpace(name: AnyHashable) {
+        commitPositionTranslation()
         _transformItems.append(.coordinateSpaceName(name))
     }
 
     /// Marks the current position in the chain as an internal coordinate space.
     mutating func appendCoordinateSpace(id: CoordinateSpace.ID) {
+        commitPositionTranslation()
         _transformItems.append(.coordinateSpaceID(id))
     }
 
     /// Marks the current position as a sized named coordinate space.
     mutating func appendSizedSpace(name: AnyHashable, size: CGSize) {
+        commitPositionTranslation()
         _transformItems.append(.sizedSpace(name: name, size: size))
     }
 
     /// Marks the current position as a sized internal coordinate space.
     mutating func appendSizedSpace(id: CoordinateSpace.ID, size: CGSize) {
+        commitPositionTranslation()
         _transformItems.append(.sizedSpaceID(id: id, size: size))
     }
 
@@ -401,9 +516,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
     /// Converts `points` from global window coordinates into the view's local space.
     ///
-    /// This is the canonical hit-test path:
-    /// 1. Subtract the view's resolved position.
-    /// 2. Apply the inverse of each `_transformItem` in reverse order.
+    /// This is the canonical hit-test path. Stored items are already ordered
+    /// from the global space toward the descendant local space.
     func convertGlobal<A: MutableCollection>(
         to space: CoordinateSpace,
         points: inout A
@@ -412,50 +526,28 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         case .global:
             return
         case .local:
-            break
+            applyGlobalToLocal(points: &points)
+            return
         case .named(let name):
             guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: name) else {
                 return
             }
-            for i in points.indices {
-                points[i].x -= globalPosition.x
-                points[i].y -= globalPosition.y
-            }
-            let suffixStart = _transformItems.index(after: markerIndex)
-            for item in _transformItems[suffixStart...].reversed() {
-                _applyItem(item, inverted: true, to: &points)
+            for item in _transformItems[...markerIndex] {
+                _applyTraversalItem(item, to: &points)
             }
             return
-        }
-        for i in points.indices {
-            points[i].x -= globalPosition.x
-            points[i].y -= globalPosition.y
-        }
-        // Step 2: undo non-translation items in reverse.
-        for item in _transformItems.reversed() {
-            _applyItem(item, inverted: true, to: &points)
         }
     }
 
     /// Converts `points` from the view's local space into global window coordinates.
     ///
-    /// Used to compute a child view's global position from its parent-local offset:
-    /// 1. Apply each `_transformItem` in forward order.
-    /// 2. Add the resolved position.
+    /// Used to compute a child view's global position from its parent-local offset.
     func convertGlobal<A: MutableCollection>(
         from space: CoordinateSpace,
         points: inout A
     ) where A.Element == CGPoint {
         guard case .local = space else { return }
-        // Step 1: apply non-translation items forward.
-        for item in _transformItems {
-            _applyItem(item, inverted: false, to: &points)
-        }
-        // Step 2: apply global translation.
-        for i in points.indices {
-            points[i].x += globalPosition.x
-            points[i].y += globalPosition.y
-        }
+        applyLocalToGlobal(points: &points)
     }
 
     /// Converts local points into the nearest matching internal coordinate
@@ -470,9 +562,18 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
             return
         }
 
+        if _positionTranslation != .zero {
+            _applyTraversalItem(
+                .translation(CGSize(
+                    width: -_positionTranslation.width,
+                    height: -_positionTranslation.height
+                )),
+                to: &points
+            )
+        }
         let suffixStart = _transformItems.index(after: markerIndex)
-        for item in _transformItems[suffixStart...] {
-            _applyItem(item, inverted: false, to: &points)
+        for item in _transformItems[suffixStart...].reversed() {
+            _applyTraversalItem(iterationItem(item, inverted: true), to: &points)
         }
     }
 
@@ -514,11 +615,11 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     }
 
     var containingScrollGeometry: ScrollGeometry? {
-        firstScrollGeometry(inverted: false)
+        resolvedScrollGeometry(allowUnclipped: false)
     }
 
     var nearestScrollGeometry: ScrollGeometry? {
-        firstScrollGeometry(inverted: true)
+        resolvedScrollGeometry(allowUnclipped: true)
     }
 
     var scrollCoordinateSpaces: [ScrollCoordinateSpace] {
@@ -545,12 +646,16 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     }
 
     var translations: [CGSize] {
-        _transformItems.compactMap { item in
+        var values: [CGSize] = _transformItems.compactMap { item in
             guard case let .translation(value) = item else {
                 return nil
             }
             return value
         }
+        if !_transformItems.isEmpty, _positionTranslation != .zero {
+            values.append(_positionTranslation)
+        }
+        return values
     }
 
     func size(ofNamedCoordinateSpace name: AnyHashable) -> CGSize? {
@@ -575,12 +680,50 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
 
     // Private helpers
 
-    private func firstScrollGeometry(inverted: Bool) -> ScrollGeometry? {
+    private mutating func commitPositionTranslation() {
+        guard _positionTranslation != .zero else { return }
+        _transformItems.append(.translation(_positionTranslation))
+        _positionTranslation = .zero
+    }
+
+    private func applyGlobalToLocal<A: MutableCollection>(
+        points: inout A
+    ) where A.Element == CGPoint {
+        if _transformItems.isEmpty {
+            if _positionTranslation != .zero {
+                _applyTraversalItem(.translation(_positionTranslation), to: &points)
+            }
+            return
+        }
+        forEach(inverted: false) { item, _ in
+            _applyTraversalItem(item, to: &points)
+        }
+    }
+
+    private func applyLocalToGlobal<A: MutableCollection>(
+        points: inout A
+    ) where A.Element == CGPoint {
+        if _transformItems.isEmpty {
+            if _positionTranslation != .zero {
+                _applyTraversalItem(
+                    .translation(CGSize(
+                        width: -_positionTranslation.width,
+                        height: -_positionTranslation.height
+                    )),
+                    to: &points
+                )
+            }
+            return
+        }
+        forEach(inverted: true) { item, _ in
+            _applyTraversalItem(item, to: &points)
+        }
+    }
+
+    private func resolvedScrollGeometry(allowUnclipped: Bool) -> ScrollGeometry? {
         var geometry: ScrollGeometry?
-        forEach(inverted: inverted) { item, stop in
-            guard case let .scrollGeometry(value, _) = item else { return }
-            geometry = value
-            stop = true
+        forEach(inverted: false) { item, _ in
+            item.apply(to: &geometry, allowUnclipped: allowUnclipped)
         }
         return geometry
     }
@@ -635,55 +778,33 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
         return nil
     }
 
-    private func _applyItem<A: MutableCollection>(
+    private func _applyTraversalItem<A: MutableCollection>(
         _ item: Item,
-        inverted: Bool,
         to points: inout A
     ) where A.Element == CGPoint {
         switch item {
         case .affineTransform(let t, let isLocalToGlobal):
-            let effective: CGAffineTransform = (inverted == isLocalToGlobal)
-                ? t.inverted()
-                : t
+            let effective = isLocalToGlobal ? t.inverted() : t
             for i in points.indices {
                 points[i] = points[i].applying(effective)
             }
 
         case .projectionTransform(let t, let isLocalToGlobal):
-            let effective: ProjectionTransform = (inverted == isLocalToGlobal)
-                ? t.inverted()
-                : t
+            let effective = isLocalToGlobal ? t.inverted() : t
             for i in points.indices {
                 points[i] = points[i].applying(effective)
             }
 
         case .translation(let sz):
-            if inverted {
-                for i in points.indices {
-                    points[i].x -= sz.width
-                    points[i].y -= sz.height
-                }
-            } else {
-                for i in points.indices {
-                    points[i].x += sz.width
-                    points[i].y += sz.height
-                }
+            for i in points.indices {
+                points[i].x += sz.width
+                points[i].y += sz.height
             }
 
-        case .scrollGeometry(let sg, _):
-            // The content is shifted by contentOffset; to go global to local, subtract it.
-            let dx = sg.contentOffset.x
-            let dy = sg.contentOffset.y
-            if inverted {
-                for i in points.indices { points[i].x -= dx; points[i].y -= dy }
-            } else {
-                for i in points.indices { points[i].x += dx; points[i].y += dy }
-            }
-
-        case .coordinateSpaceName, .coordinateSpaceID,
+        case .scrollGeometry,
+             .coordinateSpaceName, .coordinateSpaceID,
              .sizedSpace, .sizedSpaceID:
-            // Coordinate-space markers and position items are handled separately
-            // (position via globalPosition; markers are no-ops for point conversion).
+            // Geometry and coordinate-space items carry traversal metadata.
             break
         }
     }
@@ -691,6 +812,46 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable {
     // Identity
 
     static let identity = ViewTransform()
+}
+
+private extension ViewTransform.Item {
+    func apply(to geometry: inout ScrollGeometry?, allowUnclipped: Bool) {
+        switch self {
+        case let .translation(offset):
+            geometry?.contentOffset.x += offset.width
+            geometry?.contentOffset.y += offset.height
+
+        case let .affineTransform(transform, inverse):
+            let preservesAxisAlignment =
+                (transform.b == 0 && transform.c == 0) ||
+                (transform.a == 0 && transform.d == 0)
+            guard preservesAxisAlignment else {
+                geometry = nil
+                return
+            }
+            guard var geometryValue = geometry else {
+                return
+            }
+            let effectiveTransform = inverse ? transform.inverted() : transform
+            geometryValue.contentOffset = geometryValue.contentOffset.applying(effectiveTransform)
+            geometryValue.containerSize = geometryValue.containerSize.applying(effectiveTransform)
+            geometry = geometryValue
+
+        case .projectionTransform:
+            geometry = nil
+
+        case let .scrollGeometry(value, isClipped):
+            if isClipped || allowUnclipped {
+                geometry = value
+            }
+
+        case .coordinateSpaceName,
+             .coordinateSpaceID,
+             .sizedSpace,
+             .sizedSpaceID:
+            break
+        }
+    }
 }
 
 extension CGRect {
@@ -795,77 +956,6 @@ extension ScrollGeometry {
             containerSize: containerSize,
             visibleRect: visibleRect
         )
-    }
-}
-
-struct ScrollViewContentTransformProvider: Rule {
-    typealias Value = ViewTransform
-
-    var transform: Attribute<ViewTransform>
-    var position: Attribute<CGPoint>
-    var safeAreaPosition: Attribute<CGPoint>
-    var geometry: Attribute<ScrollGeometry>
-    var axes: Attribute<Axis.Set>
-    var isClipped: Bool
-
-    init(
-        transform: Attribute<ViewTransform>,
-        position: Attribute<CGPoint>,
-        safeAreaPosition: Attribute<CGPoint>,
-        geometry: Attribute<ScrollGeometry>,
-        axes: Attribute<Axis.Set>,
-        isClipped: Bool = true
-    ) {
-        self.transform = transform
-        self.position = position
-        self.safeAreaPosition = safeAreaPosition
-        self.geometry = geometry
-        self.axes = axes
-        self.isClipped = isClipped
-    }
-
-    var value: ViewTransform {
-        var value = transform.value
-        value.resetPosition(position.value)
-        let scrollGeometry = geometry.value
-        value.appendScrollGeometry(
-            ScrollGeometry.rootViewTransform(
-                contentOffset: scrollGeometry.contentOffset,
-                containerSize: scrollGeometry.containerSize
-            ),
-            isClipped: true
-        )
-        value.appendScrollGeometry(
-            ScrollGeometry.viewTransform(
-                contentInsets: scrollGeometry.contentInsets,
-                contentSize: scrollGeometry.contentSize,
-                containerSize: scrollGeometry.containerSize
-            ),
-            isClipped: isClipped
-        )
-        value.appendSizedSpace(id: ScrollCoordinateSpace.all.id, size: scrollGeometry.containerSize)
-        let axes = axes.value
-        if axes.contains(.horizontal) {
-            value.appendSizedSpace(id: ScrollCoordinateSpace.horizontal.id, size: scrollGeometry.containerSize)
-        }
-        if axes.contains(.vertical) {
-            value.appendSizedSpace(id: ScrollCoordinateSpace.vertical.id, size: scrollGeometry.containerSize)
-        }
-        value.appendTranslation(CGSize(
-            width: scrollGeometry.contentOffset.x,
-            height: scrollGeometry.contentOffset.y
-        ))
-        value.appendSizedSpace(id: ScrollCoordinateSpace.content.id, size: scrollGeometry.contentSize)
-        if _SemanticFeature<Semantics_v6>.isEnabled {
-            let position = safeAreaPosition.value
-            value.appendTranslation(CGSize(width: position.x, height: position.y))
-            value.appendSizedSpace(
-                id: ScrollCoordinateSpace.safeArea.id,
-                size: scrollGeometry.containerSize.outset(by: scrollGeometry.contentInsets)
-            )
-            value.appendTranslation(CGSize(width: -position.x, height: -position.y))
-        }
-        return value
     }
 }
 

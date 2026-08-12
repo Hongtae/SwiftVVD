@@ -506,7 +506,7 @@ final class GesturePhaseSurfaceTests: XCTestCase {
             let convertedNamed = try XCTUnwrap(
                 namedOutput.value[eventID] as? VUI.MouseEvent
             )
-            XCTAssertEqual(convertedNamed.location, CGPoint(x: 15, y: 27))
+            XCTAssertEqual(convertedNamed.location, CGPoint(x: 20, y: 34))
         }
     }
 
@@ -533,11 +533,11 @@ final class GesturePhaseSurfaceTests: XCTestCase {
                 to: .named(AnyHashable("scroll-node")),
                 points: &namedPoints
             )
-            XCTAssertEqual(namedPoints, [CGPoint(x: 15, y: 27)])
+            XCTAssertEqual(namedPoints, [CGPoint(x: 20, y: 34)])
 
             var localPoints = [CGPoint(x: 115, y: 227)]
             inputs.transform.value.convertGlobal(to: .local, points: &localPoints)
-            XCTAssertEqual(localPoints, [CGPoint(x: 10, y: 20)])
+            XCTAssertEqual(localPoints, [CGPoint(x: 20, y: 34)])
 
             var missingPoints = [CGPoint(x: 115, y: 227)]
             inputs.transform.value.convertGlobal(

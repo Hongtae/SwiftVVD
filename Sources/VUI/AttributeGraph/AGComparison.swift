@@ -7,6 +7,23 @@
 
 import Synchronization
 
+protocol _AGTypeDescriptorEquatable {
+    static func _agTypeDescriptorValuesEqual(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer
+    ) -> Bool
+}
+
+extension _AGTypeDescriptorEquatable where Self: Equatable {
+    static func _agTypeDescriptorValuesEqual(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer
+    ) -> Bool {
+        lhs.assumingMemoryBound(to: Self.self).pointee
+            == rhs.assumingMemoryBound(to: Self.self).pointee
+    }
+}
+
 private struct _AGComparisonField {
     var offset: Int
     var type: Any.Type

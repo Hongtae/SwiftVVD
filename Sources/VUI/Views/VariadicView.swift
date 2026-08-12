@@ -152,7 +152,7 @@ extension _VariadicView_Children: RandomAccessCollection {
     public var startIndex: Int { 0 }
     public var endIndex: Int {
         Self.withCollectionUpdate {
-            list.count(style: _ViewList_IteratorStyle())
+            list.count
         }
     }
     public subscript(index: Int) -> Element {

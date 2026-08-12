@@ -84,6 +84,67 @@ final class GraphHostSeedMutationLifecycleTests: XCTestCase {
         XCTAssertFalse(host.isUpdating)
     }
 
+    // ASSERTIONS lazySectionGridPlacementPhaseLifecycleObserved
+    func testFinishTransactionUpdateBatchesMutationSideEffectsBeforeSubgraphUpdate() {
+        let host = GraphHost()
+        var sources: [Attribute<Int>] = []
+        var observedSums: [Int] = []
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                sources = (0..<11).map { _ in
+                    host.data.graph.makeInput(value: 0)
+                }
+                host.data.graph.makeSideEffectRule {
+                    observedSums.append(sources.reduce(0) { $0 + $1.value })
+                }
+            }
+        }
+        XCTAssertEqual(observedSums, [0])
+
+        host.startTransactionUpdate()
+        host.continueTransaction(CustomGraphMutation {
+            for source in sources {
+                source.setValue(1)
+            }
+        })
+        host.finishTransactionUpdate(
+            in: host.data.rootSubgraph,
+            postUpdate: { _ in },
+            id: nil
+        )
+
+        XCTAssertEqual(observedSums, [0, 11])
+        XCTAssertFalse(host.isUpdating)
+    }
+
+    func testRunTransactionBatchesBodySideEffectsBeforeSubgraphUpdate() {
+        let host = GraphHost()
+        var sources: [Attribute<Int>] = []
+        var observedSums: [Int] = []
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                sources = (0..<11).map { _ in
+                    host.data.graph.makeInput(value: 0)
+                }
+                host.data.graph.makeSideEffectRule {
+                    observedSums.append(sources.reduce(0) { $0 + $1.value })
+                }
+            }
+        }
+        XCTAssertEqual(observedSums, [0])
+
+        host.runTransaction(nil, do: {
+            for source in sources {
+                source.setValue(1)
+            }
+        }, id: nil)
+
+        XCTAssertEqual(observedSums, [0, 11])
+        XCTAssertFalse(host.isUpdating)
+    }
+
     func testFinishTransactionUpdateRepeatsWhenDrainEnqueuesMorePendingWork() {
         let host = GraphHost()
         let recorder = FinishTransactionUpdateRecorder()

@@ -267,6 +267,9 @@ private final class ScrollViewChildCollectionScrollable: ScrollableCollection {
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
         mapFirstChildCallCount += 1
+        if let scrollable = self as? A {
+            return body(scrollable)
+        }
         if let marker = firstChildMarker as? A {
             return body(marker)
         }
@@ -379,6 +382,11 @@ private func viewAlignedSubview(id: AnyHashable, frame: CGRect) -> ScrollableCol
 
 private final class ScrollViewTargetSubgraphRecorder {
     var itemSubgraphs: [Int: AGSubgraph] = [:]
+}
+
+private struct ScrollViewSectionGridTargetID: Hashable {
+    var section: Int
+    var row: Int
 }
 
 private struct ScrollViewTargetRow: View, TestPrimitiveView {
@@ -615,6 +623,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
         return result
     }
 
+    // ASSERTIONS layoutChildContainerInputPropagationObserved layoutChildTransformInputPropagationObserved
     func testUnaryPaddingPreservesNearestContainerInputs() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -635,18 +644,21 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
             inputs.containerPosition = containerPosition
             inputs.containerSize = OptionalAttribute(containerSize)
+            let inheritedTransform = inputs.transform
 
             let modifier = graph.makeInput(
                 value: _PaddingLayout(edges: .all, insets: EdgeInsets())
             )
             var childContainerPosition: Attribute<CGPoint>?
             var childContainerSize: Attribute<ViewSize>?
+            var childTransform: Attribute<ViewTransform>?
             _ = _PaddingLayout._makeView(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: inputs
             ) { _, childInputs in
                 childContainerPosition = childInputs.containerPosition
                 childContainerSize = childInputs.containerSize.attribute
+                childTransform = childInputs.transform
                 return _ViewOutputs(
                     layoutComputer: OptionalAttribute(
                         graph.makeInput(
@@ -665,6 +677,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(
                 try XCTUnwrap(childContainerSize).identifier,
                 containerSize.identifier
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(childTransform).identifier,
+                inheritedTransform.identifier
             )
         }
     }
@@ -689,18 +705,21 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
             inputs.containerPosition = containerPosition
             inputs.containerSize = OptionalAttribute(containerSize)
+            let inheritedTransform = inputs.transform
 
             let modifier = graph.makeInput(
                 value: PositionAwareContainerRelayLayout()
             )
             var childContainerPosition: Attribute<CGPoint>?
             var childContainerSize: Attribute<ViewSize>?
+            var childTransform: Attribute<ViewTransform>?
             _ = PositionAwareContainerRelayLayout._makeView(
                 modifier: _GraphValue(_attribute: modifier),
                 inputs: inputs
             ) { _, childInputs in
                 childContainerPosition = childInputs.containerPosition
                 childContainerSize = childInputs.containerSize.attribute
+                childTransform = childInputs.transform
                 return _ViewOutputs(
                     layoutComputer: OptionalAttribute(
                         graph.makeInput(
@@ -720,10 +739,14 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 try XCTUnwrap(childContainerSize).identifier,
                 containerSize.identifier
             )
+            XCTAssertEqual(
+                try XCTUnwrap(childTransform).identifier,
+                inheritedTransform.identifier
+            )
         }
     }
 
-    // ASSERTIONS layoutChildContainerInputPropagationObserved
+    // ASSERTIONS layoutChildContainerInputPropagationObserved layoutChildTransformInputPropagationObserved
     func testVStackPreservesNearestContainerInputsForChildren() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -749,6 +772,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
             inputs.containerPosition = containerPosition
             inputs.containerSize = OptionalAttribute(containerSize)
+            let inheritedTransform = inputs.transform
 
             _ = type(of: stack)._makeView(
                 view: _GraphValue(_attribute: stackAttribute),
@@ -763,10 +787,14 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 try XCTUnwrap(recorder.containerSize).identifier,
                 containerSize.identifier
             )
+            XCTAssertEqual(
+                try XCTUnwrap(recorder.transform).identifier,
+                inheritedTransform.identifier
+            )
         }
     }
 
-    // ASSERTIONS layoutChildContainerInputPropagationObserved
+    // ASSERTIONS layoutChildContainerInputPropagationObserved layoutChildTransformInputPropagationObserved
     func testDynamicVStackPreservesNearestContainerInputsForChildren() throws {
         let host = GraphHost()
         try host.data.withCurrent {
@@ -799,6 +827,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 )
                 inputs.containerPosition = containerPosition
                 inputs.containerSize = OptionalAttribute(containerSize)
+                let inheritedTransform = inputs.transform
 
                 let outputs = type(of: stack)._makeView(
                     view: _GraphValue(_attribute: stackAttribute),
@@ -813,6 +842,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 XCTAssertEqual(
                     try XCTUnwrap(recorder.containerSize).identifier,
                     containerSize.identifier
+                )
+                XCTAssertEqual(
+                    try XCTUnwrap(recorder.transform).identifier,
+                    inheritedTransform.identifier
                 )
             }
         }
@@ -1344,12 +1377,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 containerSize: CGSize(width: 100, height: 80)
             )
             let target = try XCTUnwrap(parent.contentTargets[0](geometry, .leftToRight))
-            XCTAssertEqual(target.rect, CGRect(x: -12, y: 282, width: 40, height: 20))
+            XCTAssertEqual(target.rect, CGRect(x: 12, y: 318, width: 40, height: 20))
             XCTAssertEqual(target.anchor, .bottom)
         }
     }
 
-    func testDynamicLayoutScrollableMapsFirstChildThroughParentDirectChildAndRecursion() throws {
+    // ASSERTIONS: SCROLLABLE_CONTAINER_TARGET_ROUTING mapFirstChildSelfThenChildrenPinned
+    func testDynamicLayoutScrollableMapsFirstChildThroughSelfAndChildren() throws {
         let host = GraphHost()
         let parent = ScrollViewParentScrollable()
         let child = ScrollViewChildCollectionScrollable()
@@ -1399,12 +1433,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 return scrollable as? any ScrollableCollection
             }.first)
 
-            let parentResult = collection.mapFirstChild(ofType: ScrollViewLookupMarker.self) { $0.value }
-            XCTAssertEqual(parentResult, 11)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            let selfResult = collection.mapFirstChild(
+                ofType: (any ScrollableCollection).self
+            ) { $0.visibleCollectionViewIDs }
+            XCTAssertEqual(selfResult, collection.visibleCollectionViewIDs)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
             XCTAssertEqual(child.mapFirstChildCallCount, 0)
 
-            parent.firstChildMarker = nil
             parent.mapFirstChildCallCount = 0
             child.mapFirstChildCallCount = 0
 
@@ -1412,15 +1447,15 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 collection.mapFirstChild(ofType: ScrollViewChildCollectionScrollable.self) { $0 }
             )
             XCTAssertTrue(directChild === child)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
-            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
+            XCTAssertEqual(child.mapFirstChildCallCount, 1)
 
             parent.mapFirstChildCallCount = 0
             child.mapFirstChildCallCount = 0
 
             let childResult = collection.mapFirstChild(ofType: ScrollViewLookupMarker.self) { $0.value }
             XCTAssertEqual(childResult, 22)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
             XCTAssertEqual(child.mapFirstChildCallCount, 1)
         }
     }
@@ -2523,42 +2558,44 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let transform = try XCTUnwrap(recorder.transform).value
             let containing = try XCTUnwrap(transform.containingScrollGeometry)
             let nearest = try XCTUnwrap(transform.nearestScrollGeometry)
+            var sawCommittedPosition = false
             var scrollGeometryFollowsPosition = false
             transform.forEach(inverted: false) { item, stop in
                 switch item {
+                case .translation:
+                    sawCommittedPosition = true
                 case .scrollGeometry:
-                    scrollGeometryFollowsPosition = true
+                    scrollGeometryFollowsPosition = sawCommittedPosition
                     stop = true
                 default:
                     break
                 }
             }
-            XCTAssertEqual(transform.globalPosition, position)
             XCTAssertTrue(scrollGeometryFollowsPosition)
 
-            XCTAssertEqual(containing.contentOffset, .zero)
-            XCTAssertTrue(containing.contentSize.width.isInfinite)
-            XCTAssertTrue(containing.contentSize.height.isInfinite)
-            XCTAssertEqual(containing.containerSize, size)
-            XCTAssertEqual(containing.visibleRect, CGRect(origin: .zero, size: size))
-
-            XCTAssertEqual(nearest.contentOffset, .zero)
             let expectedContentSize = CGSize(
                 width: size.width - contentInsets.leading - contentInsets.trailing,
                 height: recordingContentSize.height
             )
-            XCTAssertEqual(nearest.contentSize, expectedContentSize)
-            XCTAssertEqual(nearest.contentInsets, contentInsets)
-            XCTAssertEqual(nearest.containerSize, size)
-            XCTAssertEqual(
-                nearest.visibleRect,
-                CGRect(
-                    x: -contentInsets.leading,
-                    y: -contentInsets.top,
-                    width: size.width + contentInsets.leading + contentInsets.trailing,
-                    height: size.height + contentInsets.top + contentInsets.bottom
+            let resolvedContentInsets = contentInsets.adding(parentSafeAreaInsets)
+            let expectedGeometry = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: expectedContentSize,
+                contentInsets: resolvedContentInsets,
+                containerSize: size,
+                visibleRect: CGRect(
+                    x: -resolvedContentInsets.leading,
+                    y: -resolvedContentInsets.top,
+                    width: size.width
+                        + resolvedContentInsets.leading
+                        + resolvedContentInsets.trailing,
+                    height: size.height
+                        + resolvedContentInsets.top
+                        + resolvedContentInsets.bottom
                 )
             )
+            XCTAssertEqual(containing, expectedGeometry)
+            XCTAssertEqual(nearest, expectedGeometry)
 
             XCTAssertEqual(transform.scrollCoordinateSpaces, [
                 .all,
@@ -2578,17 +2615,19 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(
                 spaceSizes[3].1,
                 CGSize(
-                    width: size.width + contentInsets.leading + contentInsets.trailing,
-                    height: size.height + contentInsets.top + contentInsets.bottom
+                    width: size.width
+                        + parentSafeAreaInsets.leading
+                        + parentSafeAreaInsets.trailing,
+                    height: size.height
                 )
             )
             XCTAssertEqual(Array(transform.translations.suffix(3)), [
-                CGSize.zero,
+                CGSize(width: -parentSafeAreaInsets.leading, height: 0),
                 CGSize(width: parentSafeAreaInsets.leading, height: 0),
                 CGSize(width: -parentSafeAreaInsets.leading, height: 0),
             ])
             let childSafeAreaInsets = try XCTUnwrap(recorder.safeAreaInsets?.value)
-            XCTAssertEqual(childSafeAreaInsets.space, ScrollCoordinateSpace.safeArea.id)
+            XCTAssertNotEqual(childSafeAreaInsets.space, ScrollCoordinateSpace.safeArea.id)
             XCTAssertEqual(childSafeAreaInsets.next, .empty)
             XCTAssertEqual(childSafeAreaInsets.elements.count, 1)
             let childSafeAreaElement = try XCTUnwrap(childSafeAreaInsets.elements.first)
@@ -2654,9 +2693,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             let transform = try XCTUnwrap(recorder.transform).value
-            XCTAssertEqual(Array(transform.translations.suffix(2)), [CGSize.zero, CGSize.zero])
+            XCTAssertEqual(
+                transform.translations,
+                [CGSize(width: parentSafeAreaInsets.trailing, height: 0)]
+            )
             let childSafeAreaInsets = try XCTUnwrap(recorder.safeAreaInsets?.value)
-            XCTAssertEqual(childSafeAreaInsets.space, ScrollCoordinateSpace.safeArea.id)
+            XCTAssertNotEqual(childSafeAreaInsets.space, ScrollCoordinateSpace.safeArea.id)
             XCTAssertEqual(childSafeAreaInsets.next, .empty)
             XCTAssertEqual(childSafeAreaInsets.elements.count, 1)
             let childSafeAreaElement = try XCTUnwrap(childSafeAreaInsets.elements.first)
@@ -2672,52 +2714,6 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 )
             )
             XCTAssertEqual(childSafeAreaInsets.value, childSafeAreaElement.insets)
-        }
-    }
-
-    func testScrollViewContentTransformUsesSafeAreaPositionForSafeAreaSpace() {
-
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        ref.withCurrent {
-            let insets = EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4)
-            let geometry = ScrollGeometry(
-                contentOffset: CGPoint(x: 6, y: 7),
-                contentSize: CGSize(width: 140, height: 240),
-                contentInsets: insets,
-                containerSize: CGSize(width: 50, height: 60)
-            )
-            let safeAreaPosition = CGPoint(x: 9, y: 11)
-            let provider = ScrollViewContentTransformProvider(
-                transform: graph.makeInput(value: ViewTransform.identity),
-                position: graph.makeInput(value: CGPoint(x: 100, y: 200)),
-                safeAreaPosition: graph.makeInput(value: safeAreaPosition),
-                geometry: graph.makeInput(value: geometry),
-                axes: graph.makeInput(value: Axis.Set.vertical)
-            )
-
-            let transform = provider.value
-            XCTAssertEqual(transform.globalPosition, CGPoint(x: 100, y: 200))
-            XCTAssertEqual(transform.scrollCoordinateSpaces, [
-                .all,
-                .vertical,
-                .content,
-                .safeArea,
-            ])
-            XCTAssertEqual(Array(transform.translations.suffix(3)), [
-                CGSize(width: geometry.contentOffset.x, height: geometry.contentOffset.y),
-                CGSize(width: safeAreaPosition.x, height: safeAreaPosition.y),
-                CGSize(width: -safeAreaPosition.x, height: -safeAreaPosition.y),
-            ])
-            XCTAssertEqual(transform.scrollCoordinateSpaceSizes.last?.0, .safeArea)
-            XCTAssertEqual(
-                transform.scrollCoordinateSpaceSizes.last?.1,
-                CGSize(
-                    width: geometry.containerSize.width + insets.leading + insets.trailing,
-                    height: geometry.containerSize.height + insets.top + insets.bottom
-                )
-            )
         }
     }
 
@@ -2774,12 +2770,20 @@ final class ScrollViewSurfaceTests: XCTestCase {
     func testViewTransformForEachEmitsFoldedTranslationInTraversalDirection() {
         var transform = ViewTransform.identity
         transform.appendTranslation(CGSize(width: 1, height: 2))
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 20, height: 30)
+        )
         transform.appendPosition(CGPoint(x: 10, y: 15))
 
         var forward: [ViewTransform.Item] = []
         transform.forEach(inverted: false) { item, _ in forward.append(item) }
         XCTAssertEqual(forward, [
             .translation(CGSize(width: 1, height: 2)),
+            .sizedSpaceID(
+                id: ScrollCoordinateSpace.content.id,
+                size: CGSize(width: 20, height: 30)
+            ),
             .translation(CGSize(width: -10, height: -15)),
         ])
 
@@ -2787,8 +2791,124 @@ final class ScrollViewSurfaceTests: XCTestCase {
         transform.forEach(inverted: true) { item, _ in inverted.append(item) }
         XCTAssertEqual(inverted, [
             .translation(CGSize(width: 10, height: 15)),
+            .sizedSpaceID(
+                id: ScrollCoordinateSpace.content.id,
+                size: CGSize(width: 20, height: 30)
+            ),
             .translation(CGSize(width: -1, height: -2)),
         ])
+    }
+
+    // ASSERTIONS viewTransformBufferedAppendDisassemblyObserved viewTransformBufferedAppendObserved viewTransformCoordinateConversionRuntimeObserved
+    func testViewTransformMovingBufferCommitsPositionBeforeScrollGeometry() {
+        XCTAssertEqual(MemoryLayout<ViewTransform.UnsafeBuffer>.size, 16)
+
+        let geometry = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 300, height: 400),
+            containerSize: CGSize(width: 100, height: 100)
+        )
+        var transform = ViewTransform.identity
+        transform.resetPosition(CGPoint(x: 60, y: 60))
+        var buffer = ViewTransform.UnsafeBuffer()
+        buffer.appendScrollGeometry(geometry, isClipped: true)
+        buffer.appendTranslation(CGSize(width: 20, height: 30))
+        transform.append(movingContentsOf: &buffer)
+
+        var forward: [ViewTransform.Item] = []
+        transform.forEach(inverted: false) { item, _ in forward.append(item) }
+        XCTAssertEqual(forward, [
+            .translation(CGSize(width: -60, height: -60)),
+            .scrollGeometry(geometry, isClipped: true),
+            .translation(CGSize(width: 20, height: 30)),
+        ])
+        XCTAssertEqual(
+            transform.containingScrollGeometry?.contentOffset,
+            CGPoint(x: 20, y: 30)
+        )
+
+        var local = [CGPoint(x: 60, y: 60)]
+        transform.convertGlobal(to: .local, points: &local)
+        XCTAssertEqual(local, [CGPoint(x: 20, y: 30)])
+        transform.convertGlobal(from: .local, points: &local)
+        XCTAssertEqual(local, [CGPoint(x: 60, y: 60)])
+
+        transform.append(movingContentsOf: &buffer)
+        var afterSecondMove: [ViewTransform.Item] = []
+        transform.forEach(inverted: false) { item, _ in
+            afterSecondMove.append(item)
+        }
+        XCTAssertEqual(afterSecondMove, forward)
+    }
+
+    func testViewTransformScrollGeometryTraversalSelectsClippedAndNearestWindows() {
+        let containing = ScrollGeometry(
+            contentOffset: CGPoint(x: 10, y: 20),
+            contentSize: CGSize(width: 300, height: 400),
+            containerSize: CGSize(width: 30, height: 40)
+        )
+        let nearest = ScrollGeometry(
+            contentOffset: CGPoint(x: 50, y: 60),
+            contentSize: CGSize(width: 500, height: 600),
+            containerSize: CGSize(width: 15, height: 25)
+        )
+        var transform = ViewTransform.identity
+        transform.appendScrollGeometry(containing, isClipped: true)
+        transform.appendScrollGeometry(nearest, isClipped: false)
+        transform.appendTranslation(CGSize(width: 3, height: 4))
+
+        var expectedContaining = containing
+        expectedContaining.contentOffset = CGPoint(x: 13, y: 24)
+        var expectedNearest = nearest
+        expectedNearest.contentOffset = CGPoint(x: 53, y: 64)
+        XCTAssertEqual(transform.containingScrollGeometry, expectedContaining)
+        XCTAssertEqual(transform.nearestScrollGeometry, expectedNearest)
+    }
+
+    func testViewTransformScrollGeometryAppliesOnlySupportedTransformItems() {
+        let geometry = ScrollGeometry(
+            contentOffset: CGPoint(x: 2, y: 3),
+            contentSize: CGSize(width: 100, height: 200),
+            containerSize: CGSize(width: 10, height: 20)
+        )
+        var axisAligned = ViewTransform.identity
+        axisAligned.appendScrollGeometry(geometry, isClipped: true)
+        axisAligned.appendAffineTransform(
+            CGAffineTransform(a: 2, b: 0, c: 0, d: 3, tx: 5, ty: 7),
+            inverse: false
+        )
+        XCTAssertEqual(
+            axisAligned.containingScrollGeometry,
+            ScrollGeometry(
+                contentOffset: CGPoint(x: 9, y: 16),
+                contentSize: CGSize(width: 100, height: 200),
+                containerSize: CGSize(width: 20, height: 60)
+            )
+        )
+
+        var rotated = ViewTransform.identity
+        rotated.appendScrollGeometry(geometry, isClipped: true)
+        rotated.appendAffineTransform(
+            CGAffineTransform(rotationAngle: .pi / 4),
+            inverse: false
+        )
+        XCTAssertNil(rotated.containingScrollGeometry)
+        XCTAssertNil(rotated.nearestScrollGeometry)
+
+        var projected = ViewTransform.identity
+        projected.appendScrollGeometry(geometry, isClipped: true)
+        projected.appendProjectionTransform(
+            ProjectionTransform(CGAffineTransform(translationX: 3, y: 4)),
+            inverse: false
+        )
+        XCTAssertEqual(
+            projected.containingScrollGeometry?.contentOffset,
+            CGPoint(x: 5, y: 7)
+        )
+        XCTAssertEqual(
+            projected.nearestScrollGeometry?.contentOffset,
+            CGPoint(x: 5, y: 7)
+        )
     }
 
     func testSystemScrollViewScrollableAppliesScrollToPointRequestToGeometryState() {
@@ -3130,6 +3250,137 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
             XCTAssertEqual(updatedGeometry.contentOffset, CGPoint(x: 0, y: 1_500))
             XCTAssertEqual(updatedGeometry.visibleRect.origin, CGPoint(x: 0, y: 1_500))
+        }
+    }
+
+    // ASSERTIONS: lazySiblingGridSectionPlacementLifecycleObserved, systemScrollViewUpdaterConsumerFlagsObserved, windowAppearancePreferencePullLifecycleObserved
+    func testSystemScrollViewSectionedGridUsesInitialEstimateForNonVisibleTarget() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        var scrollablePreference: AGAttribute!
+        var geometryPreference: AGAttribute!
+        var displayListPreference: AGAttribute!
+        var respondersPreference: AGAttribute!
+
+        try viewGraph.data.withCurrent {
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let graph = viewGraph.data.graph
+                var preferenceKeys = PreferenceKeys()
+                preferenceKeys.add(ScrollablePreferenceKey.self)
+                preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+                preferenceKeys.add(DisplayList.Key.self)
+                preferenceKeys.add(ViewRespondersKey.self)
+                let content = LazyVGrid(
+                    columns: [
+                        GridItem(.fixed(40), spacing: 0),
+                        GridItem(.fixed(40), spacing: 0),
+                    ],
+                    spacing: 0
+                ) {
+                    ForEach(0..<10, id: \.self) { section in
+                        Section {
+                            ForEach(0..<20, id: \.self) { row in
+                                ScrollViewTargetRow(
+                                    id: section * 20 + row,
+                                    height: 20
+                                )
+                                .frame(width: 40, height: 20)
+                                .id(ScrollViewSectionGridTargetID(
+                                    section: section,
+                                    row: row
+                                ))
+                            }
+                        } header: {
+                            ScrollViewTargetRow(
+                                id: -section - 1,
+                                height: 10
+                            )
+                            .frame(width: 80, height: 10)
+                        }
+                    }
+                }
+                let view = SystemScrollView(
+                    configuration: ScrollViewConfiguration(),
+                    content: content
+                )
+                let viewAttr = graph.makeInput(value: view)
+                var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
+                inputs.size = graph.makeInput(
+                    value: ViewSize(CGSize(width: 100, height: 100))
+                )
+
+                let outputs = type(of: view)._makeView(
+                    view: _GraphValue(_attribute: viewAttr),
+                    inputs: inputs
+                )
+                scrollablePreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollablePreferenceKey.self)
+                )
+                geometryPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
+                )
+                displayListPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: DisplayList.Key.self)
+                )
+                respondersPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ViewRespondersKey.self)
+                )
+                _ = Attribute<[any Scrollable]>(scrollablePreference).value
+                _ = Attribute<DisplayList>(displayListPreference).value
+                _ = Attribute<[ViewResponder]>(respondersPreference).value
+            }
+        }
+
+        viewGraph.flushTransactions()
+
+        try viewGraph.data.withCurrent {
+            let scrollables = Attribute<[any Scrollable]>(scrollablePreference).value
+            let scrollable = try XCTUnwrap(scrollables.first)
+            let lazyScrollable = try XCTUnwrap(
+                scrollable.mapFirstChild(ofType: LazyScrollable<LazyVGridLayout>.self) { $0 }
+            )
+            let geometry = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let initialGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            let targetID = ScrollViewSectionGridTargetID(section: 7, row: 10)
+
+            let targetBuilder = try XCTUnwrap(lazyScrollable.makeTarget(for: targetID))
+            let target = try XCTUnwrap(targetBuilder(initialGeometry, .leftToRight))
+            // This attached cross-platform host has display and responder
+            // consumers but no window-appearance preference bridge, so the
+            // pre-request section cache contains three placement samples.
+            XCTAssertEqual(
+                target.rect.origin.y,
+                1_528.9473684210527,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(target.rect.width, 100, accuracy: 0.001)
+
+            var transaction = Transaction()
+            transaction.scrollTargetAnchor = .top
+            withTransaction(transaction) {
+                XCTAssertTrue(scrollable.scroll(to: targetID))
+            }
+        }
+
+        viewGraph.data.withCurrent {
+            _ = Attribute<DisplayList>(displayListPreference).value
+            _ = Attribute<[ViewResponder]>(respondersPreference).value
+        }
+        viewGraph.flushTransactions()
+
+        try viewGraph.data.withCurrent {
+            let geometry = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            XCTAssertEqual(
+                updatedGeometry.contentOffset.y,
+                1_528.9473684210527,
+                accuracy: 0.001
+            )
         }
     }
 

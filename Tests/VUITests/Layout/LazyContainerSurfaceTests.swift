@@ -10,6 +10,138 @@ private func withCurrentTestSubgraph<R>(
     }
 }
 
+private func testLazyStackPlacementContext(
+    subviews: _LazyLayout_Subviews,
+    axis: Axis,
+    visible: ClosedRange<CGFloat>,
+    visibleLength: CGFloat,
+    containerLength: CGFloat,
+    minorSize: CGFloat,
+    pinnedViews: PinnedScrollableViews = []
+) -> _LazyLayout_PlacementContext {
+    guard let graph = _AGGraph.current else {
+        fatalError("Lazy stack placement tests require an active graph.")
+    }
+
+    let viewSize: CGSize
+    let containerSize: CGSize
+    let contentOffset: CGPoint
+    let viewportSize: CGSize
+    switch axis {
+    case .horizontal:
+        viewSize = CGSize(width: visibleLength, height: minorSize)
+        containerSize = CGSize(width: containerLength, height: minorSize)
+        contentOffset = CGPoint(x: visible.lowerBound, y: 0)
+        viewportSize = CGSize(
+            width: visible.upperBound - visible.lowerBound,
+            height: minorSize
+        )
+    case .vertical:
+        viewSize = CGSize(width: minorSize, height: visibleLength)
+        containerSize = CGSize(width: minorSize, height: containerLength)
+        contentOffset = CGPoint(x: 0, y: visible.lowerBound)
+        viewportSize = CGSize(
+            width: minorSize,
+            height: visible.upperBound - visible.lowerBound
+        )
+    }
+
+    var transform = ViewTransform()
+    transform.appendScrollGeometry(
+        ScrollGeometry(
+            contentOffset: contentOffset,
+            contentSize: containerSize,
+            containerSize: viewportSize
+        ),
+        isClipped: true
+    )
+    return _LazyLayout_PlacementContext(
+        base: _LazyLayout_SizeAndSpacingContext(
+            ruleContext: subviews.context,
+            owner: subviews.context.attribute,
+            environment: graph.makeInput(value: EnvironmentValues()),
+            containerSize: OptionalAttribute(
+                graph.makeInput(value: ViewSize(containerSize))
+            )
+        ),
+        size: ViewSize(viewSize),
+        transform: transform,
+        pinnedViews: pinnedViews
+    )
+}
+
+private extension _LazyStack_Cache
+where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
+    mutating func resolveIndexAndPosition(
+        stack: LayoutType,
+        subviews: _LazyLayout_Subviews,
+        visible: ClosedRange<CGFloat>,
+        minor: MinorProperties<LayoutType>
+    ) -> (index: Int, position: CGFloat) {
+        let context = testLazyStackPlacementContext(
+            subviews: subviews,
+            axis: LayoutType.majorAxis,
+            visible: visible,
+            visibleLength: visible.upperBound - visible.lowerBound,
+            containerLength: visible.upperBound,
+            minorSize: minor.size
+        )
+        var placer = StackPlacement(
+            stack: stack,
+            axis: LayoutType.majorAxis,
+            minor: minor,
+            visible: visible,
+            pinnedViews: stack.pinnedViews,
+            estimations: estimations
+        )
+        let properties = PlacementProperties(
+            minor: minor,
+            visible: visible,
+            visibleLength: visible.upperBound - visible.lowerBound,
+            containerLength: visible.upperBound
+        )
+        guard let result = stack.resolveIndexAndPosition(
+            subviews: subviews,
+            context: context,
+            cache: &self,
+            placer: &placer,
+            properties: properties
+        ) else {
+            fatalError("Lazy stack resolver unexpectedly returned no start.")
+        }
+        return result
+    }
+}
+
+private func placeLazyStack<LayoutType: LazyStack>(
+    _ stack: LayoutType,
+    subviews: _LazyLayout_Subviews,
+    visible: ClosedRange<CGFloat>,
+    visibleLength: CGFloat,
+    containerLength: CGFloat,
+    minorSize: CGFloat,
+    cache: inout _LazyStack_Cache<LayoutType>
+) -> _LazyLayout_Placements
+where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
+    let context = testLazyStackPlacementContext(
+        subviews: subviews,
+        axis: LayoutType.majorAxis,
+        visible: visible,
+        visibleLength: visibleLength,
+        containerLength: containerLength,
+        minorSize: minorSize,
+        pinnedViews: stack.pinnedViews
+    )
+    var placements = _LazyLayout_Placements()
+    stack.place(
+        subviews: subviews,
+        context: context,
+        cache: &cache,
+        in: &placements
+    )
+    return placements
+}
+
 private struct LazyFixedItemView: View, TestPrimitiveView {
     typealias Body = Never
 
@@ -938,23 +1070,17 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 spacing: 0,
                 pinnedViews: []
             )
-            var minorSize = CGFloat(120)
-            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let minorSize = CGFloat(120)
             var stackCache = _LazyStack_Cache<LazyVGridLayout>()
 
-            let placements = stackCache.place(
-                stack: layout,
+            let placements = placeLazyStack(
+                layout,
                 subviews: subviews,
-                from: 0,
-                position: 0,
-                visible: CGFloat(0)..<CGFloat(200),
+                visible: CGFloat(0)...CGFloat(200),
                 visibleLength: 100,
                 containerLength: 200,
-                minor: MinorProperties(
-                    count: minorGeometry.count,
-                    size: minorSize,
-                    geometry: minorGeometry.data
-                )
+                minorSize: minorSize,
+                cache: &stackCache
             )
 
             let placedByIndex = Dictionary(uniqueKeysWithValues: placements.subviews.map { ($0.index, $0) })
@@ -980,7 +1106,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placedFooter.placement.proposedSize.width, 120)
             XCTAssertEqual(placedFooter.frame, CGRect(x: 0, y: 130, width: 120, height: 24))
             XCTAssertEqual(stackCache.placedIndices, 0..<6)
-            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)..<CGFloat(154))
+            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)...CGFloat(154))
 
             let horizontalHeader = makeRegion([CGSize(width: 30, height: 120)])
             let horizontalContent = makeRegion(Array(repeating: CGSize(width: 50, height: 60), count: 4))
@@ -1003,23 +1129,17 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 spacing: 0,
                 pinnedViews: []
             )
-            var horizontalMinorSize = CGFloat(120)
-            let horizontalMinorGeometry = horizontalLayout.minorGeometry(updatingSize: &horizontalMinorSize)
+            let horizontalMinorSize = CGFloat(120)
             var horizontalStackCache = _LazyStack_Cache<LazyHGridLayout>()
 
-            let horizontalPlacements = horizontalStackCache.place(
-                stack: horizontalLayout,
+            let horizontalPlacements = placeLazyStack(
+                horizontalLayout,
                 subviews: horizontalSubviews,
-                from: 0,
-                position: 0,
-                visible: CGFloat(0)..<CGFloat(200),
+                visible: CGFloat(0)...CGFloat(200),
                 visibleLength: 100,
                 containerLength: 200,
-                minor: MinorProperties(
-                    count: horizontalMinorGeometry.count,
-                    size: horizontalMinorSize,
-                    geometry: horizontalMinorGeometry.data
-                )
+                minorSize: horizontalMinorSize,
+                cache: &horizontalStackCache
             )
 
             let horizontalByIndex = Dictionary(uniqueKeysWithValues: horizontalPlacements.subviews.map { ($0.index, $0) })
@@ -1045,7 +1165,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placedHorizontalFooter.placement.proposedSize.height, 120)
             XCTAssertEqual(placedHorizontalFooter.frame, CGRect(x: 130, y: 0, width: 24, height: 120))
             XCTAssertEqual(horizontalStackCache.placedIndices, 0..<6)
-            XCTAssertEqual(horizontalStackCache.placedExtent, CGFloat(0)..<CGFloat(154))
+            XCTAssertEqual(horizontalStackCache.placedExtent, CGFloat(0)...CGFloat(154))
         }
     }
 
@@ -1286,7 +1406,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             let placementProperties = PlacementProperties<LazyVStackLayout>(
                 minor: minorProperties,
-                visible: CGFloat(3)..<CGFloat(19),
+                visible: CGFloat(3)...CGFloat(19),
                 resetEstimates: true,
                 estimatesChanged: true,
                 visibleLength: 16,
@@ -1347,8 +1467,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 minor: minorProperties,
                 endIndex: 12,
                 placedIndices: 2..<8,
-                placedExtent: CGFloat(5)..<CGFloat(40),
-                visibleExtent: CGFloat(6)..<CGFloat(30),
+                placedExtent: CGFloat(5)...CGFloat(40),
+                visibleExtent: CGFloat(6)...CGFloat(30),
                 visibleLength: 24,
                 containerLength: 120,
                 estimations: estimations
@@ -1356,8 +1476,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(stackCache.minor?.count, 2)
             XCTAssertEqual(stackCache.endIndex, 12)
             XCTAssertEqual(stackCache.placedIndices, 2..<8)
-            XCTAssertEqual(stackCache.placedExtent, CGFloat(5)..<CGFloat(40))
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(6)..<CGFloat(30))
+            XCTAssertEqual(stackCache.placedExtent, CGFloat(5)...CGFloat(40))
+            XCTAssertEqual(stackCache.visibleExtent, CGFloat(6)...CGFloat(30))
             XCTAssertEqual(stackCache.visibleLength, 24)
             XCTAssertEqual(stackCache.containerLength, 120)
             XCTAssertEqual(stackCache.estimations.lengthToCount[12], 2)
@@ -1368,8 +1488,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertNil(stackCache.minor)
             XCTAssertNil(stackCache.endIndex)
             XCTAssertTrue(stackCache.placedIndices.isEmpty)
-            XCTAssertTrue(stackCache.placedExtent.isEmpty)
-            XCTAssertTrue(stackCache.visibleExtent.isEmpty)
+            XCTAssertEqual(stackCache.placedExtent, CGFloat.zero...CGFloat.zero)
+            XCTAssertEqual(stackCache.visibleExtent, CGFloat.zero...CGFloat.zero)
             XCTAssertEqual(stackCache.visibleLength, 24)
             XCTAssertEqual(stackCache.containerLength, 120)
 
@@ -1377,7 +1497,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: LazyVStackLayout(base: _VStackLayout(), pinnedViews: [.sectionHeaders]),
                 axis: .vertical,
                 minor: minorProperties,
-                visible: CGFloat(5)..<CGFloat(35),
+                visible: CGFloat(5)...CGFloat(35),
                 pinnedViews: [.sectionHeaders],
                 queriedIndex: 6,
                 index: 7,
@@ -1503,7 +1623,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     contentInsets: nearestInsets,
                     containerSize: CGSize(width: 20, height: 25)
                 ),
-                isClipped: true
+                isClipped: false
             )
 
             let context = _LazyLayout_PlacementContext(
@@ -1544,6 +1664,47 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 CGRect(x: 130, y: 0, width: 60, height: 100)
             )
             XCTAssertTrue(context.allowsTranslations)
+        }
+    }
+
+    func testLazyPlacementContextResetsPositionBeforeResolvingScrollGeometry() {
+        let host = GraphHost()
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let base = _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                environment: graph.makeInput(value: EnvironmentValues())
+            )
+            var transform = ViewTransform()
+            transform.appendScrollGeometry(
+                ScrollGeometry(
+                    contentOffset: CGPoint(x: 30, y: 40),
+                    contentSize: CGSize(width: 300, height: 400),
+                    contentInsets: EdgeInsets(),
+                    containerSize: CGSize(width: 80, height: 90)
+                ),
+                isClipped: true
+            )
+            transform.setPositionAdjustment(CGSize(width: 4, height: 6))
+
+            let context = _LazyLayout_PlacementContext(
+                base: base,
+                position: CGPoint(x: 10, y: 15),
+                size: ViewSize(width: 300, height: 400),
+                transform: transform
+            )
+
+            XCTAssertEqual(
+                context.containingScrollGeometry.contentOffset,
+                CGPoint(x: 24, y: 31)
+            )
+            XCTAssertEqual(
+                context.nearestScrollGeometry.contentOffset,
+                CGPoint(x: 24, y: 31)
+            )
         }
     }
 
@@ -1966,7 +2127,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: LazyVStackLayout(base: _VStackLayout(), pinnedViews: []),
                 axis: .vertical,
                 minor: minor,
-                visible: CGFloat(10)..<CGFloat(30),
+                visible: CGFloat(10)...CGFloat(30),
                 queriedIndex: nil,
                 index: 2,
                 position: 12,
@@ -2158,7 +2319,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         HVGridGeometry(position: 30, size: 50, anchor: .trailing),
                     ]
                 ),
-                visible: CGFloat(0)..<CGFloat(120),
+                visible: CGFloat(0)...CGFloat(120),
                 index: 0,
                 position: 10,
                 placedIndex: (min: Int.max, max: Int.min),
@@ -2182,7 +2343,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placement.position, 65)
             XCTAssertEqual(placement.index, 2)
             XCTAssertEqual(placement.estimations.lengthToCount[55], 1)
-            XCTAssertEqual(placement.estimations.spacingToCount[0], 1)
+            XCTAssertNil(placement.estimations.spacingToCount[0])
             XCTAssertFalse(placement.estimations.zeroIndices.contains(0))
 
             let firstPlacement = try XCTUnwrap(firstItem.pendingPlacement)
@@ -2233,7 +2394,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: layout,
                 axis: .vertical,
                 minor: MinorProperties(count: 1, size: 80, geometry: 80),
-                visible: CGFloat(0)..<CGFloat(160),
+                visible: CGFloat(0)...CGFloat(160),
                 index: 0,
                 position: 7,
                 placedIndex: (min: Int.max, max: Int.min),
@@ -2254,7 +2415,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(placement.estimations.lengthToCount[30], 1)
             XCTAssertEqual(placement.estimations.lengthToCount[40], 1)
             XCTAssertEqual(placement.estimations.lengthToCount[50], 1)
-            XCTAssertEqual(placement.estimations.spacingToCount[0], 1)
+            XCTAssertNil(placement.estimations.spacingToCount[0])
             XCTAssertEqual(placement.estimations.spacingToCount[5], 2)
 
             for index in sizes.indices {
@@ -2309,7 +2470,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: layout,
                 axis: .vertical,
                 minor: MinorProperties(count: 1, size: 80, geometry: 80),
-                visible: CGFloat(0)..<CGFloat(160),
+                visible: CGFloat(0)...CGFloat(160),
                 index: 99,
                 skipFirst: true,
                 position: 44,
@@ -2344,7 +2505,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: layout,
                 axis: .vertical,
                 minor: MinorProperties(count: 1, size: 80, geometry: 80),
-                visible: CGFloat(0)..<CGFloat(160),
+                visible: CGFloat(0)...CGFloat(160),
                 placedIndex: (min: Int.max, max: Int.min),
                 placedPosition: (min: .infinity, max: -.infinity),
                 placedQuery: (min: .infinity, max: -.infinity)
@@ -2416,7 +2577,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: layout,
                 axis: .vertical,
                 minor: MinorProperties(count: 1, size: 80, geometry: 80),
-                visible: CGFloat(0)..<CGFloat(100),
+                visible: CGFloat(0)...CGFloat(100),
                 index: 0,
                 position: 7,
                 currentSubviews: [pendingSubview],
@@ -2485,7 +2646,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         HVGridGeometry(position: 20, size: 30, anchor: .leading),
                     ]
                 ),
-                visible: CGFloat(0)..<CGFloat(300),
+                visible: CGFloat(0)...CGFloat(300),
                 placedIndex: (min: Int.max, max: Int.min),
                 placedPosition: (min: .infinity, max: -.infinity),
                 placedQuery: (min: .infinity, max: -.infinity)
@@ -2496,7 +2657,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 from: 3,
                 position: 100,
                 stopping: .afterVisible,
-                style: _ViewList_IteratorStyle()
+                style: _ViewList_IteratorStyle(value: 4)
             ))
             XCTAssertFalse(placement.skipFirst)
             XCTAssertEqual(placement.placedSubviews.map(\.index), [0, 3, 4])
@@ -2547,8 +2708,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 base: _ViewList_Group(lists: [header, content, footer])
             )
 
-            XCTAssertEqual(viewSection.count(style: _ViewList_IteratorStyle()), 4)
-            XCTAssertEqual(viewSection.estimatedCount(style: _ViewList_IteratorStyle()), 4)
+            let sectionStyle = _ViewList_IteratorStyle(value: 2)
+            XCTAssertEqual(viewSection.count(style: sectionStyle), 4)
+            XCTAssertEqual(viewSection.estimatedCount(style: sectionStyle), 4)
 
             let (cache, _, _) = makeLazyCache(host: host)
             let context = AnyRuleContext(attribute: graph.makeInput(value: ()).identifier)
@@ -2990,6 +3152,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             _ = section.content.apply(from: &skippedFrom) { subview, _ in
                 skippedContentIDs.append(subview.data.id)
             }
+            XCTAssertEqual(skippedFrom, 0)
             XCTAssertEqual(skippedContentIDs, Array(contentIDs.dropFirst(2)))
             guard let headerID = headerIDs.first,
                   let footerID = footerIDs.first,
@@ -4485,7 +4648,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 stack: layout,
                 axis: .vertical,
                 minor: MinorProperties(count: 1, size: 80, geometry: 80),
-                visible: CGFloat(0)..<CGFloat(160),
+                visible: CGFloat(0)...CGFloat(160),
                 index: 42,
                 position: -10,
                 stoppingCondition: .afterIndex(42),
@@ -4565,16 +4728,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let resolved = stackCache.resolveIndexAndPosition(
                 stack: layout,
                 subviews: subviews,
-                visible: CGFloat(70)..<CGFloat(180),
+                visible: CGFloat(70)...CGFloat(180),
                 minor: MinorProperties(count: 1, size: 80, geometry: 80)
             )
 
             XCTAssertEqual(resolved.index, 1)
             XCTAssertEqual(resolved.position, 30)
-            XCTAssertEqual(stackCache.minor?.count, 1)
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(70)..<CGFloat(180))
             XCTAssertEqual(stackCache.estimations.lengthToCount[25], 1)
-            XCTAssertEqual(stackCache.estimations.spacingToCount[0], 1)
+            XCTAssertNil(stackCache.estimations.spacingToCount[0])
         }
     }
 
@@ -4623,14 +4784,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let resolved = stackCache.resolveIndexAndPosition(
                 stack: layout,
                 subviews: subviews,
-                visible: CGFloat(70)..<CGFloat(180),
+                visible: CGFloat(70)...CGFloat(180),
                 minor: MinorProperties(count: 1, size: 80, geometry: 80)
             )
 
             XCTAssertEqual(resolved.index, 1)
             XCTAssertEqual(resolved.position, 30)
-            XCTAssertEqual(stackCache.minor?.count, 1)
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(70)..<CGFloat(180))
             XCTAssertEqual(stackCache.estimations.lengthToCount[25], 1)
             XCTAssertEqual(stackCache.estimations.spacingToCount[0], 1)
         }
@@ -4689,7 +4848,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let resolved = stackCache.resolveIndexAndPosition(
                 stack: layout,
                 subviews: subviews,
-                visible: CGFloat(90)..<CGFloat(220),
+                visible: CGFloat(90)...CGFloat(220),
                 minor: MinorProperties(count: 1, size: 80, geometry: 80)
             )
 
@@ -4774,7 +4933,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 120),
+                    visible: lowerBound...(lowerBound + 120),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -4801,12 +4960,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 120),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -4887,7 +5040,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 120),
+                    visible: lowerBound...(lowerBound + 120),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -4914,12 +5067,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 120),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -4994,7 +5141,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 120),
+                    visible: lowerBound...(lowerBound + 120),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5016,12 +5163,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 120),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5096,7 +5237,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 120),
+                    visible: lowerBound...(lowerBound + 120),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5118,12 +5259,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 120),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5211,7 +5346,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 40),
+                    visible: lowerBound...(lowerBound + 40),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5232,12 +5367,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 40),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5325,7 +5454,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 40),
+                    visible: lowerBound...(lowerBound + 40),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5346,12 +5475,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 40),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5421,7 +5544,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 50),
+                    visible: lowerBound...(lowerBound + 50),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5442,12 +5565,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 50),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5517,7 +5634,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 50),
+                    visible: lowerBound...(lowerBound + 50),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5538,12 +5655,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 50),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5627,7 +5738,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 80),
+                    visible: lowerBound...(lowerBound + 80),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5649,12 +5760,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 80),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5738,7 +5843,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 80),
+                    visible: lowerBound...(lowerBound + 80),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5760,12 +5865,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 80),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -5886,7 +5985,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 70),
+                    visible: lowerBound...(lowerBound + 70),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -5912,12 +6011,6 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 70),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
@@ -6038,7 +6131,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = stackCache.resolveIndexAndPosition(
                     stack: layout,
                     subviews: subviews,
-                    visible: lowerBound..<(lowerBound + 70),
+                    visible: lowerBound...(lowerBound + 70),
                     minor: MinorProperties(count: 1, size: 180, geometry: 180)
                 )
                 return (resolved.index, resolved.position, stackCache)
@@ -6064,17 +6157,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 let resolved = resolve(testCase.lowerBound)
                 XCTAssertEqual(resolved.index, testCase.index, "lowerBound \(testCase.lowerBound)")
                 XCTAssertEqual(resolved.position, testCase.position, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(resolved.cache.minor?.count, 1, "lowerBound \(testCase.lowerBound)")
-                XCTAssertEqual(
-                    resolved.cache.visibleExtent,
-                    testCase.lowerBound..<(testCase.lowerBound + 70),
-                    "lowerBound \(testCase.lowerBound)"
-                )
             }
         }
     }
 
-    func testLazyStackCachePlaceDelegatesToStackPlacementAndWritesPlacedState() {
+    func testLazyStackPlaceCommitsPlacedStateAndMergesEstimates() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -6101,35 +6188,34 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 estimations: EstimationCache(lengthToCount: [12: 2])
             )
 
-            let placements = stackCache.place(
-                stack: layout,
+            let placements = placeLazyStack(
+                layout,
                 subviews: subviews,
-                from: 0,
-                position: 7,
-                visible: CGFloat(0)..<CGFloat(160),
+                visible: CGFloat(0)...CGFloat(160),
                 visibleLength: 160,
                 containerLength: 220,
-                minor: MinorProperties(count: 1, size: 80, geometry: 80)
+                minorSize: 80,
+                cache: &stackCache
             )
 
             XCTAssertEqual(placements.subviews.map(\.index), [0, 1, 2])
-            XCTAssertEqual(placements.validRect, CGRect(x: 0, y: 7, width: 80, height: 130))
+            XCTAssertEqual(placements.validRect, CGRect(x: 0, y: 0, width: 80, height: 130))
             XCTAssertFalse(placements.invalidSize)
             XCTAssertEqual(placements.translation, .zero)
             XCTAssertFalse(placements.wasCancelled)
             XCTAssertEqual(stackCache.minor?.count, 1)
             XCTAssertEqual(stackCache.endIndex, 3)
             XCTAssertEqual(stackCache.placedIndices, 0..<3)
-            XCTAssertEqual(stackCache.placedExtent, CGFloat(7)..<CGFloat(137))
-            XCTAssertEqual(stackCache.visibleExtent, CGFloat(0)..<CGFloat(160))
+            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)...CGFloat(130))
+            XCTAssertEqual(stackCache.visibleExtent, CGFloat(0)...CGFloat(160))
             XCTAssertEqual(stackCache.visibleLength, 160)
             XCTAssertEqual(stackCache.containerLength, 220)
             XCTAssertNil(stackCache.estimations.lengthToCount[12])
-            XCTAssertEqual(stackCache.estimations.lengthToCount[30], 1)
-            XCTAssertEqual(stackCache.estimations.lengthToCount[40], 1)
+            XCTAssertEqual(stackCache.estimations.lengthToCount[30], 2)
+            XCTAssertEqual(stackCache.estimations.lengthToCount[40], 2)
             XCTAssertEqual(stackCache.estimations.lengthToCount[50], 1)
-            XCTAssertEqual(stackCache.estimations.spacingToCount[0], 1)
-            XCTAssertEqual(stackCache.estimations.spacingToCount[5], 2)
+            XCTAssertNil(stackCache.estimations.spacingToCount[0])
+            XCTAssertEqual(stackCache.estimations.spacingToCount[5], 3)
         }
     }
 
@@ -6157,15 +6243,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             var stackCache = _LazyStack_Cache<LazyVStackLayout>()
 
-            let placements = stackCache.place(
-                stack: layout,
+            let placements = placeLazyStack(
+                layout,
                 subviews: subviews,
-                from: 0,
-                position: 0,
-                visible: CGFloat(0)..<CGFloat(100),
+                visible: CGFloat(0)...CGFloat(100),
                 visibleLength: 100,
                 containerLength: 4_800,
-                minor: MinorProperties(count: 1, size: 100, geometry: 100)
+                minorSize: 100,
+                cache: &stackCache
             )
 
             XCTAssertEqual(placements.subviews.map(\.index), [0, 1, 2])
@@ -6173,7 +6258,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertFalse(placements.wasCancelled)
             XCTAssertNil(stackCache.endIndex)
             XCTAssertEqual(stackCache.placedIndices, 0..<3)
-            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)..<CGFloat(120))
+            XCTAssertEqual(stackCache.placedExtent, CGFloat(0)...CGFloat(120))
         }
     }
 
@@ -6217,23 +6302,16 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     attribute: graph.makeInput(value: ()).identifier
                 )
                 let subviews = cache.subviews(context: context)
-                let visible = testCase.offset..<(testCase.offset + 100)
+                let visible = testCase.offset...(testCase.offset + 100)
                 var stackCache = _LazyStack_Cache<LazyVStackLayout>()
-                let start = stackCache.resolveIndexAndPosition(
-                    stack: layout,
+                let placements = placeLazyStack(
+                    layout,
                     subviews: subviews,
-                    visible: visible,
-                    minor: minor
-                )
-                let placements = stackCache.place(
-                    stack: layout,
-                    subviews: subviews,
-                    from: start.index,
-                    position: start.position,
                     visible: visible,
                     visibleLength: 100,
                     containerLength: 4_800,
-                    minor: minor
+                    minorSize: minor.size,
+                    cache: &stackCache
                 )
 
                 XCTAssertEqual(
@@ -7835,7 +7913,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheSecondPlacedCommitPromotesWillAppearThroughPhaseMutation() {
+    func testLazyLayoutViewCacheFirstPlacedCommitPromotesWillAppearThroughPhaseMutation() {
+        // ASSERTIONS: lazyInitialPhaseSettlementObserved
         let host = GraphHost()
         let (cache, item, state) = host.data.withCurrent {
             makeLazyCache(host: host)
@@ -7861,18 +7940,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             let firstOutput = commitPlacedSubviews([placedSubview], to: cache)
 
-            XCTAssertFalse(cache.isFirstCommit)
-            XCTAssertFalse(host.hasPendingTransactions)
-            XCTAssertEqual(state.value.phase, .willAppear)
-
-            _ = commitPlacedSubviews(
-                [placedSubview],
-                to: cache,
-                from: firstOutput
-            )
-
+            XCTAssertTrue(cache.isFirstCommit)
             XCTAssertTrue(host.hasPendingTransactions)
             XCTAssertEqual(state.value.phase, .willAppear)
+            XCTAssertEqual(firstOutput[0].placement, placedSubview.placement)
         }
 
         host.flushTransactions()
@@ -7882,6 +7953,15 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(state.value.phase, .identity)
             XCTAssertTrue(state.value.enableTransitions)
             XCTAssertFalse(state.value.isRemoved)
+
+            _ = commitPlacedSubviews(
+                [placedSubview],
+                to: cache,
+                from: [placedSubview]
+            )
+
+            XCTAssertFalse(cache.isFirstCommit)
+            XCTAssertFalse(host.hasPendingTransactions)
         }
     }
 
@@ -7907,6 +7987,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
 
             XCTAssertTrue(cache.isFirstCommit)
+            XCTAssertTrue(host.hasPendingTransactions)
         }
     }
 
@@ -12290,7 +12371,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     contentSize: CGSize(width: 100, height: 500),
                     containerSize: CGSize(width: 100, height: 100)
                 ),
-                isClipped: true
+                isClipped: false
             )
             XCTAssertEqual(disjointTransform.containingScrollGeometry?.visibleRect.minY, 0)
             XCTAssertEqual(disjointTransform.nearestScrollGeometry?.visibleRect.minY, 200)
@@ -12329,7 +12410,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     contentSize: CGSize(width: 100, height: 500),
                     containerSize: CGSize(width: 100, height: 100)
                 ),
-                isClipped: true
+                isClipped: false
             )
             var overlappingPrefetcher = makeLazyVStackPrefetcher(
                 graph: graph,
@@ -12956,6 +13037,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: SCROLLABLE_CONTAINER_TARGET_ROUTING mapFirstChildSelfThenChildrenPinned
     func testLazyScrollableStoresOptionalConcreteCacheAndUsesCacheCollectionIDs() {
         let host = GraphHost()
 
@@ -13053,27 +13135,27 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 ScrollTarget(rect: CGRect(x: 0, y: 12, width: 12, height: 12), anchor: .center)
             )
 
-            parent.firstChildMarker = LazyScrollableLookupMarker(11)
-            let parentResult = scrollable.mapFirstChild(ofType: LazyScrollableLookupMarker.self) { $0.value }
-            XCTAssertEqual(parentResult, 11)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            let selfResult = scrollable.mapFirstChild(
+                ofType: LazyScrollable<LazyVGridLayout>.self
+            ) { $0 }
+            XCTAssertNotNil(selfResult)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
             XCTAssertEqual(child.mapFirstChildCallCount, 0)
 
-            parent.firstChildMarker = nil
             parent.mapFirstChildCallCount = 0
             child.mapFirstChildCallCount = 0
             child.firstChildMarker = LazyScrollableLookupMarker(22)
             let childResult = scrollable.mapFirstChild(ofType: LazyScrollableLookupMarker.self) { $0.value }
             XCTAssertEqual(childResult, 22)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
             XCTAssertEqual(child.mapFirstChildCallCount, 1)
 
             parent.mapFirstChildCallCount = 0
             child.mapFirstChildCallCount = 0
             let directChild = scrollable.mapFirstChild(ofType: LazyRecordingScrollable.self) { $0 }
             XCTAssertTrue(directChild === child)
-            XCTAssertEqual(parent.mapFirstChildCallCount, 1)
-            XCTAssertEqual(child.mapFirstChildCallCount, 0)
+            XCTAssertEqual(parent.mapFirstChildCallCount, 0)
+            XCTAssertEqual(child.mapFirstChildCallCount, 1)
         }
     }
 
@@ -13456,9 +13538,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             XCTAssertTrue(request.value)
             XCTAssertEqual(parent.targetRequestCount, 1)
+            // ASSERTIONS: viewTransformCoordinateConversionRuntimeObserved
             XCTAssertEqual(
                 parent.lastTarget,
-                ScrollTarget(rect: CGRect(x: -11, y: 17, width: 100, height: 15), anchor: .top)
+                ScrollTarget(rect: CGRect(x: 11, y: 43, width: 100, height: 15), anchor: .top)
             )
         }
     }
@@ -14588,6 +14671,9 @@ private final class LazyRecordingScrollable: Scrollable {
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
         mapFirstChildCallCount += 1
+        if let scrollable = self as? A {
+            return body(scrollable)
+        }
         if let marker = firstChildMarker as? A {
             return body(marker)
         }

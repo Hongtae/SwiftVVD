@@ -274,8 +274,11 @@ func _AGGraphGetWeakValue<Value>(
     _ attribute: WeakAttribute<Value>,
     options: AGValueOptions
 ) -> (value: Value, flags: AGChangedValueFlags)? {
-    guard let strong = attribute.attribute else { return nil }
-    return _AGGraphGetValue(strong, options: options)
+    guard let graph = attribute.graph else { return nil }
+    return _AGGraphContext(graph: graph).withCurrent {
+        guard let strong = attribute.attribute else { return nil }
+        return _AGGraphGetValue(strong, options: options)
+    }
 }
 
 func AGGraphGetWeakValue<Value>(

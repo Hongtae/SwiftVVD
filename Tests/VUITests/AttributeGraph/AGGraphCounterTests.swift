@@ -140,6 +140,54 @@ final class AGGraphCounterTests: XCTestCase {
         XCTAssertNil(weak.attribute)
     }
 
+    func testWeakAttributeResolvesItsOwningGraphWithoutCurrentContext() {
+        let firstGraph = _AGGraph()
+        let secondGraph = _AGGraph()
+        var first = WeakAttribute<Int>()
+        var second = WeakAttribute<Int>()
+
+        _AGGraphContext(graph: firstGraph).withCurrent {
+            first = firstGraph.makeInput(value: 11).asWeak()
+        }
+        _AGGraphContext(graph: secondGraph).withCurrent {
+            second = secondGraph.makeInput(value: 22).asWeak()
+        }
+
+        XCTAssertNil(_AGGraph.current)
+        XCTAssertEqual(first.base.identifier, second.base.identifier)
+        XCTAssertNotEqual(first.base.seed, second.base.seed)
+        XCTAssertTrue(first.graph === firstGraph)
+        XCTAssertTrue(second.graph === secondGraph)
+        XCTAssertEqual(first.value, 11)
+        XCTAssertEqual(second.value, 22)
+        XCTAssertNil(_AGGraph.current)
+    }
+
+    func testWeakAttributeRejectsRemovedGenerationOutsideGraphContext() {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        var stale = WeakAttribute<Int>()
+        var replacement = WeakAttribute<Int>()
+
+        context.withCurrent {
+            let first = graph.makeInput(value: 11)
+            stale = first.asWeak()
+            graph.removeNode(first.identifier)
+
+            let second = graph.makeInput(value: 22)
+            replacement = second.asWeak()
+        }
+
+        XCTAssertNil(_AGGraph.current)
+        XCTAssertEqual(stale.base.identifier, replacement.base.identifier)
+        XCTAssertNotEqual(stale.base.seed, replacement.base.seed)
+        XCTAssertNil(stale.graph)
+        XCTAssertNil(stale.value)
+        XCTAssertTrue(replacement.graph === graph)
+        XCTAssertEqual(replacement.value, 22)
+        XCTAssertNil(_AGGraph.current)
+    }
+
     func testExplicitInputRegistersDependencyWithoutReadingValue() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -719,6 +767,81 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testTypeDescriptorEqualitySuppressesEquivalentRuleOutput() {
+        // ASSERTIONS: viewSizeTypeDescriptorEqualityObserved
+        // ASSERTIONS: viewGeometryTypeDescriptorEqualityObserved
+        // ASSERTIONS: viewTransformTypeDescriptorEqualityObserved
+        func requireDescriptorEquality<T: _AGTypeDescriptorEquatable>(
+            _ type: T.Type
+        ) {}
+        requireDescriptorEquality(ViewSize.self)
+        requireDescriptorEquality(ViewGeometry.self)
+        requireDescriptorEquality(ViewTransform.self)
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = OutputPropagationRecorder()
+        DescriptorEquatableOutput.equalityCallCount = 0
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let intermediate = graph.makeRule(
+                DescriptorEquatableOutputRule(
+                    source: source,
+                    recorder: recorder
+                )
+            )
+            let downstream = graph.makeRule {
+                recorder.downstreamEvaluations += 1
+                return intermediate.value.semanticValue
+            }
+
+            XCTAssertEqual(downstream.value, 1)
+            source.setValue(11)
+
+            XCTAssertEqual(downstream.value, 1)
+            XCTAssertEqual(recorder.intermediateEvaluations, 2)
+            XCTAssertEqual(recorder.downstreamEvaluations, 1)
+            XCTAssertGreaterThan(DescriptorEquatableOutput.equalityCallCount, 0)
+
+            source.setValue(2)
+
+            XCTAssertEqual(downstream.value, 2)
+            XCTAssertEqual(recorder.intermediateEvaluations, 3)
+            XCTAssertEqual(recorder.downstreamEvaluations, 2)
+        }
+    }
+
+    func testGenericEquatableRuleOutputDoesNotDispatchEqualityWitness() {
+        // ASSERTIONS: attributeGraphRuleOutputGenericEquatableNotDispatchedObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = OutputPropagationRecorder()
+        GenericEquatableOutput.equalityCallCount = 0
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let intermediate = graph.makeRule(
+                GenericEquatableOutputRule(
+                    source: source,
+                    recorder: recorder
+                )
+            )
+            let downstream = graph.makeRule {
+                recorder.downstreamEvaluations += 1
+                return intermediate.value.semanticValue
+            }
+
+            XCTAssertEqual(downstream.value, 1)
+            source.setValue(11)
+
+            XCTAssertEqual(downstream.value, 1)
+            XCTAssertEqual(recorder.intermediateEvaluations, 2)
+            XCTAssertEqual(recorder.downstreamEvaluations, 2)
+            XCTAssertEqual(GenericEquatableOutput.equalityCallCount, 0)
+        }
+    }
+
     func testStatefulRuleWithoutPublishedOutputStopsDownstreamEvaluation() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -905,6 +1028,52 @@ final class AGGraphCounterTests: XCTestCase {
             ]))
             XCTAssertTrue(graph.slots[outputIndex].node!.needsEvaluation)
             XCTAssertEqual(output.value, 34)
+        }
+    }
+
+    // ASSERTIONS attributeGraphDirtyTransitionGateObserved
+    func testRepeatedInvalidationStopsAtAlreadyDirtyDependent() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let first = graph.makeInput(value: 1)
+            let second = graph.makeInput(value: 10)
+            let shared = graph.makeRule {
+                first.value + second.value
+            }
+            let downstream = graph.makeRule {
+                shared.value * 2
+            }
+
+            XCTAssertEqual(downstream.value, 22)
+
+            first.setValue(2)
+            let downstreamIndex = Int(downstream.identifier.rawValue)
+            let firstTraversal = graph.slots[downstreamIndex].node!
+                .invalidationTraversal
+            XCTAssertTrue(graph.slots[downstreamIndex].node!.needsEvaluation)
+
+            second.setValue(20)
+
+            XCTAssertEqual(
+                graph.slots[downstreamIndex].node!.invalidationTraversal,
+                firstTraversal,
+                "An already-dirty shared node must stop repeated descendant traversal."
+            )
+            let sharedIndex = Int(shared.identifier.rawValue)
+            let changedInputs = Set(
+                graph.slots[sharedIndex].node!.inputs.compactMap { input in
+                    input.flags & _AGGraph.InputEdge.changed != 0
+                        ? input.attribute
+                        : nil
+                }
+            )
+            XCTAssertEqual(changedInputs, Set([
+                first.identifier.rawValue,
+                second.identifier.rawValue,
+            ]))
+            XCTAssertEqual(downstream.value, 44)
         }
     }
 
@@ -1612,6 +1781,56 @@ private struct ObservedDestroyOrderRule: StatefulRule, ObservedAttribute {
 
 private struct NonEquatableInput {
     var value: Int
+}
+
+private struct DescriptorEquatableOutput: Equatable, _AGTypeDescriptorEquatable {
+    nonisolated(unsafe) static var equalityCallCount = 0
+
+    var semanticValue: Int
+    var ignoredValue: Int
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        equalityCallCount += 1
+        return lhs.semanticValue == rhs.semanticValue
+    }
+}
+
+private struct DescriptorEquatableOutputRule: Rule {
+    var source: Attribute<Int>
+    var recorder: OutputPropagationRecorder
+
+    var value: DescriptorEquatableOutput {
+        recorder.intermediateEvaluations += 1
+        return DescriptorEquatableOutput(
+            semanticValue: source.value % 10,
+            ignoredValue: source.value
+        )
+    }
+}
+
+private struct GenericEquatableOutput: Equatable {
+    nonisolated(unsafe) static var equalityCallCount = 0
+
+    var semanticValue: Int
+    var ignoredValue: Int
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        equalityCallCount += 1
+        return lhs.semanticValue == rhs.semanticValue
+    }
+}
+
+private struct GenericEquatableOutputRule: Rule {
+    var source: Attribute<Int>
+    var recorder: OutputPropagationRecorder
+
+    var value: GenericEquatableOutput {
+        recorder.intermediateEvaluations += 1
+        return GenericEquatableOutput(
+            semanticValue: source.value % 10,
+            ignoredValue: source.value
+        )
+    }
 }
 
 private final class OutputPropagationRecorder {

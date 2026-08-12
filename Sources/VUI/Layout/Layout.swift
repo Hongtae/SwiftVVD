@@ -1299,7 +1299,6 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
 
         var childIndex: Int32 = 0
         var layoutAttributes: [LayoutProxyAttributes] = []
-        let parentTransform = inputs.transform
         let traitsList = item.list.map(OptionalAttribute.init) ??
             OptionalAttribute<any ViewList>()
 
@@ -1334,13 +1333,8 @@ struct DynamicLayoutViewAdaptor: DynamicContainerAdaptor {
 
             childInputs.position = childPosition
             childInputs.size = childSize
-            childInputs.transform = graph.makeRule {
-                var transform = parentTransform.value
-                transform.appendPosition(childPosition.value)
-                return transform
-            }
-            // Layout placement does not redefine the nearest container
-            // channels; descendants keep the inherited position and size.
+            // Layout placement does not redefine the transform or nearest
+            // container channels.
             childInputs.safeAreaInsets = inputs.safeAreaInsets
             childInputs.stackOrientation = inputs.stackOrientation
 
@@ -2240,17 +2234,10 @@ extension Layout {
                 // position and size values.
                 let posAttr = geometry.origin()
                 let sizeAttr = geometry.size()
-                let parentTransformAttr = inputs.transform
-                let childTransformAttr: Attribute<ViewTransform> = graph.makeRule {
-                    var t = parentTransformAttr.value
-                    t.appendPosition(posAttr.value)
-                    return t
-                }
                 childInputs.position = posAttr
                 childInputs.size = sizeAttr
-                childInputs.transform = childTransformAttr
-                // Layout placement does not redefine the nearest container
-                // channels; descendants keep the inherited position and size.
+                // Layout placement does not redefine the transform or nearest
+                // container channels.
                 childInputs.safeAreaInsets = inputs.safeAreaInsets
                 childInputs.stackOrientation = layoutInputs.stackOrientation
                 childInputs[DynamicStackOrientation.self] =

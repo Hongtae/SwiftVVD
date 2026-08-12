@@ -842,7 +842,18 @@ final class ForEachState<Data, ID, Content>
                 inputs: inputs
             )
         }
-        resolveViewsPerElement(from: outputs.staticCount)
+        let viewsPerElement: Int?
+        if let staticCount = outputs.staticCount {
+            viewsPerElement = staticCount
+        } else {
+            switch viewsPerElementCount {
+            case .uninitialized, .countingDebugReplaceableViews:
+                viewsPerElement = Content._viewListCount(inputs: inputs.countInputs)
+            case .resolved, .indeterminate:
+                viewsPerElement = nil
+            }
+        }
+        resolveViewsPerElement(from: viewsPerElement)
 
         item.views = outputs.views
         if case .dynamicList(let base, let modifier) = outputs.views {
@@ -1470,7 +1481,8 @@ final class ForEachState<Data, ID, Content>
 
             let childList = self.list(for: item)
             if let childOffset = childList.firstOffset(forID: id, style: style) {
-                found = self.offset(before: item, style: style) + childOffset
+                let prefix = self.offset(before: item, style: style)
+                found = prefix + childOffset
                 return false
             }
             return true

@@ -3,6 +3,43 @@ import XCTest
 @testable import VUI
 
 final class WindowControllerLayoutSchedulingTests: XCTestCase {
+    func testViewGraphActionOutboxDrainsWithoutGraphBinding() {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    WindowControllerLayoutSchedulingTests.self
+                )
+            )
+        )
+        var actionRan = false
+        var observedGraphBinding = true
+        var observedUpdateScope = false
+
+        controller.viewGraph.data.withCurrent {
+            controller.viewGraph.data.graph.actionOutbox.append {
+                actionRan = true
+                observedGraphBinding = _AGGraph.current != nil
+                observedUpdateScope = Update.isActive
+            }
+        }
+
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            shouldDrawFrame: false,
+            withGC
+        )
+
+        XCTAssertTrue(actionRan)
+        XCTAssertFalse(observedGraphBinding)
+        XCTAssertTrue(observedUpdateScope)
+    }
+
     @MainActor
     func testScrollViewRootDisplayListMountsContentOnlyInsidePlatformGroup() throws {
         let controller = WindowController(
@@ -24,7 +61,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             redraw: &redraw,
             withGC
         )
-
         let list = try displayList(in: controller)
         XCTAssertEqual(list.items.count, 1, displayListTreeDescription(list))
         let item = try XCTUnwrap(list.items.first)
@@ -38,6 +74,695 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             effect.contents.interpolationBounds,
             CGRect(x: 0, y: 0, width: 80, height: 320)
         )
+    }
+
+    @MainActor
+    func testScrollViewReaderRealizesMountedLazyNonVisibleTarget() throws {
+        let probe = LayoutSchedulingScrollViewReaderProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingScrollViewReaderRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingScrollViewReaderRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view reader test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertEqual(try XCTUnwrap(host.pendingContext).contentOffset, .zero)
+        XCTAssertFalse(
+            shapeFillRecords(in: try displayList(in: controller)).contains {
+                $0.color.provider.red > $0.color.provider.green &&
+                    $0.color.provider.red > $0.color.provider.blue
+            }
+        )
+
+        try controller.viewGraph.data.withCurrent {
+            try XCTUnwrap(probe.proxy).scrollTo(150, anchor: .top)
+        }
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+        controller.updateView(
+            tick: 2,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(2.0 / 60.0),
+            contentSize: CGSize(width: 220, height: 220),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            3_000,
+            accuracy: 0.001
+        )
+        let refreshedRoot = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let refreshedHost = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: refreshedRoot)
+                .flatMap { $0.hostContainer?.scrollView }
+        )
+        XCTAssertTrue(refreshedHost === host)
+
+        let lazyState = try controller.viewGraph.data.withCurrent {
+            let proxy = try XCTUnwrap(probe.proxy)
+            let scrollables = proxy._values.toStrong().value
+            let lazy = try XCTUnwrap(
+                scrollables.first?.mapFirstChild(
+                    ofType: LazyScrollable<LazyVStackLayout>.self
+                ) { $0 }
+            )
+            let cache = try XCTUnwrap(lazy.cache)
+            return (
+                ids: lazy.visibleCollectionViewIDs,
+                itemCount: cache.items.count
+            )
+        }
+        XCTAssertTrue(
+            lazyState.ids.first { id in
+                id.explicitID == AnyHashable(150) ||
+                    id.explicitID == AnyHashable(Optional(150))
+            } != nil
+        )
+        XCTAssertLessThan(lazyState.itemCount, 20)
+
+        let records = shapeFillRecords(in: try displayList(in: controller))
+        XCTAssertTrue(
+            records.contains {
+                $0.color.provider.red > $0.color.provider.green &&
+                    $0.color.provider.red > $0.color.provider.blue
+            },
+            "records: " + records.map {
+                "\(String(reflecting: $0.color)):\($0.bounds)"
+            }.joined(separator: ", ")
+        )
+    }
+
+    @MainActor
+    func testScrollViewReaderRealizesMountedTextLazyNonVisibleTarget() async throws {
+        let probe = LayoutSchedulingScrollViewReaderProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingTextScrollViewReaderRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingTextScrollViewReaderRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 520, height: 470),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertEqual(try XCTUnwrap(host.pendingContext).contentOffset, .zero)
+
+        for tick in 1...3 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
+
+        let estimateSnapshot = try controller.viewGraph.data.withCurrent {
+            let proxy = try XCTUnwrap(probe.proxy)
+            let scrollables = proxy._values.toStrong().value
+            let lazy = try XCTUnwrap(
+                scrollables.first?.mapFirstChild(
+                    ofType: LazyScrollable<LazyVStackLayout>.self
+                ) { $0 }
+            )
+            let cache = try XCTUnwrap(lazy.cache).cacheState
+            return (
+                average: cache.estimations.average,
+                spacings: cache.estimations.spacingToCount
+            )
+        }
+        XCTAssertEqual(estimateSnapshot.average.length, 30, accuracy: 0.001)
+        XCTAssertEqual(
+            try XCTUnwrap(estimateSnapshot.average.spacing),
+            4,
+            accuracy: 0.001
+        )
+        XCTAssertNil(estimateSnapshot.spacings[0])
+
+        try controller.viewGraph.data.withCurrent {
+            try XCTUnwrap(probe.proxy).scrollTo(150, anchor: .top)
+        }
+        var observedOffsets = [try XCTUnwrap(host.pendingContext).contentOffset.y]
+        controller.updateView(
+            tick: 4,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(4.0 / 60.0),
+            contentSize: CGSize(width: 520, height: 470),
+            redraw: &redraw,
+            withGC
+        )
+        observedOffsets.append(
+            try XCTUnwrap(host.pendingContext).contentOffset.y
+        )
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
+        for tick in 5...6 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+            observedOffsets.append(
+                try XCTUnwrap(host.pendingContext).contentOffset.y
+            )
+        }
+
+        for offset in observedOffsets.dropFirst() {
+            XCTAssertEqual(offset, 5_104, accuracy: 0.001)
+        }
+
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            5_104,
+            accuracy: 0.001,
+            "offsets: \(observedOffsets)"
+        )
+        let refreshedRoot = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let refreshedHost = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: refreshedRoot)
+                .flatMap { $0.hostContainer?.scrollView }
+        )
+        XCTAssertTrue(refreshedHost === host)
+    }
+
+    @MainActor
+    func testScrollViewReaderButtonActionResolvesOwningGraph() throws {
+        let probe = LayoutSchedulingButtonScrollViewReaderProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingButtonScrollViewReaderRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    LayoutSchedulingButtonScrollViewReaderRoot.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        var redraw = false
+        for tick in 0...3 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: tick == 0 ? 0 : 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(
+                    Double(tick) / 60.0
+                ),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertEqual(try XCTUnwrap(host.pendingContext).contentOffset, .zero)
+        XCTAssertNil(_AGGraph.current)
+
+        let location = CGPoint(x: 260, y: 235)
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: 0
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: 0
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        XCTAssertEqual(probe.actionCount, 1)
+        XCTAssertTrue(probe.actionHadNoGraphContext)
+        XCTAssertNil(_AGGraph.current)
+
+        for tick in 4...6 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(
+                    Double(tick) / 60.0
+                ),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            5_104,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
+    func testModalScrollViewReaderButtonActionRealizesMountedTarget() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
+              let renderQueue = deviceContext.renderQueue() else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let previousAppContext = appContext
+        appContext = LayoutSchedulingAppContext(
+            graphicsDeviceContext: deviceContext
+        )
+        defer { appContext = previousAppContext }
+
+        let probe = LayoutSchedulingStatefulScrollViewReaderProbe()
+        let parent = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(EmptyView.self)
+            )
+        )
+        let child = parent.viewGraph.data.withCurrent {
+            let sourceGraph = parent.viewGraph.data.graph
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(
+                value: AnyView(
+                    SheetContent(
+                        content: AnyView(
+                            LayoutSchedulingStatefulScrollViewReaderRoot(
+                                probe: probe
+                            )
+                        )
+                    )
+                )
+            )
+            return ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: sourceGraph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(
+                        LayoutSchedulingStatefulScrollViewReaderRoot.self
+                    )
+                ),
+                parentController: parent,
+                usesPlatformWindow: true
+            )
+        }
+        let withGC: WindowContext.WithGraphicsContext = { _, handler in
+            guard let commandBuffer = renderQueue.makeCommandBuffer(),
+                  let context = GraphicsContext(
+                    sceneResources: child.sceneResources,
+                    environment: child.environment,
+                    viewport: CGRect(x: 0, y: 0, width: 520, height: 470),
+                    contentOffset: .zero,
+                    contentScaleFactor: 1,
+                    resolution: CGSize(width: 520, height: 470),
+                    commandBuffer: commandBuffer
+                  ) else {
+                return XCTFail("Unable to create the scroll-view resource graphics context.")
+            }
+            handler(context)
+            XCTAssertTrue(commandBuffer.commit())
+        }
+        var redraw = false
+        for tick in 0...3 {
+            child.updateView(
+                tick: UInt64(tick),
+                delta: tick == 0 ? 0 : 1.0 / 60.0,
+                date: child.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        let root = try XCTUnwrap(
+            child.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertEqual(try XCTUnwrap(host.pendingContext).contentOffset, .zero)
+
+        let renderer = DisplayList.GraphicsRenderer()
+        let initialCommandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
+        let initialContext = try XCTUnwrap(GraphicsContext(
+            sceneResources: child.sceneResources,
+            environment: child.environment,
+            viewport: CGRect(x: 0, y: 0, width: 520, height: 470),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: 520, height: 470),
+            commandBuffer: initialCommandBuffer
+        ))
+        initialContext.clear(with: .white)
+        renderer.render(
+            list: try displayList(in: child),
+            at: child.animationTimestamp,
+            in: initialContext
+        )
+        let initialCondition = NSCondition()
+        var initialCompleted = false
+        initialCommandBuffer.addCompletedHandler { _ in
+            initialCondition.lock()
+            initialCompleted = true
+            initialCondition.broadcast()
+            initialCondition.unlock()
+        }
+        initialCondition.lock()
+        XCTAssertTrue(initialCommandBuffer.commit())
+        let initialTimeout = Date(timeIntervalSinceNow: 5)
+        while !initialCompleted {
+            if !initialCondition.wait(until: initialTimeout) {
+                XCTFail("GPU command buffer timed out")
+                break
+            }
+        }
+        initialCondition.unlock()
+
+        try XCTUnwrap(probe.action)()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+
+        for tick in 4...6 {
+            child.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: child.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 520, height: 470),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        XCTAssertEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            5_104,
+            accuracy: 0.001
+        )
+        let list = try displayList(in: child)
+        XCTAssertFalse(list.items.isEmpty)
+
+        let commandBuffer = try XCTUnwrap(renderQueue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: child.sceneResources,
+            environment: child.environment,
+            viewport: CGRect(x: 0, y: 0, width: 520, height: 470),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: 520, height: 470),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .white)
+        renderer.render(
+            list: list,
+            at: child.animationTimestamp,
+            in: context
+        )
+        let condition = NSCondition()
+        var completed = false
+        commandBuffer.addCompletedHandler { _ in
+            condition.lock()
+            completed = true
+            condition.broadcast()
+            condition.unlock()
+        }
+        condition.lock()
+        XCTAssertTrue(commandBuffer.commit())
+        let timeout = Date(timeIntervalSinceNow: 5)
+        while !completed {
+            if !condition.wait(until: timeout) {
+                XCTFail("GPU command buffer timed out")
+                break
+            }
+        }
+        condition.unlock()
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: 520 * 470 * 4
+        )
+        let viewport = CGRect(x: 114, y: 131, width: 300, height: 260)
+            .insetBy(dx: 2, dy: 2)
+            .integral
+        var nonWhitePixelCount = 0
+        for y in Int(viewport.minY)..<Int(viewport.maxY) {
+            for x in Int(viewport.minX)..<Int(viewport.maxX) {
+                let index = ((y * 520) + x) * 4
+                if bytes[index] < 250 ||
+                    bytes[index + 1] < 250 ||
+                    bytes[index + 2] < 250 {
+                    nonWhitePixelCount += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(
+            nonWhitePixelCount,
+            100,
+            displayListTreeDescription(list)
+        )
+    }
+
+    @MainActor
+    func testSiblingGridReadersPreserveIndependentColdSectionEstimate() throws {
+        // ASSERTIONS: lazySiblingGridSectionPlacementLifecycleObserved
+        let probe = LayoutSchedulingSiblingGridReaderProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSiblingGridReaderRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSiblingGridReaderRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Sibling grid reader test should not request graphics resources.")
+        }
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 140, height: 260),
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responders = allHostingScrollViewResponders(in: root)
+        XCTAssertEqual(responders.count, 2)
+        let hosts = try responders.map {
+            try XCTUnwrap($0.hostContainer?.scrollView)
+        }
+        XCTAssertTrue(hosts.allSatisfy {
+            $0.pendingContext?.contentOffset == .zero
+        })
+
+        try controller.viewGraph.data.withCurrent {
+            try XCTUnwrap(probe.sectionProxy).scrollTo(
+                LayoutSchedulingSectionGridTargetID(section: 7, row: 10),
+                anchor: .top
+            )
+            try XCTUnwrap(probe.plainProxy).scrollTo(150, anchor: .top)
+        }
+        for tick in 1...2 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(
+                    Double(tick) / 60.0
+                ),
+                contentSize: CGSize(width: 140, height: 260),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        let offsets = try hosts.map {
+            try XCTUnwrap($0.pendingContext).contentOffset.y
+        }.sorted()
+        XCTAssertEqual(offsets[0], 1_500, accuracy: 0.001)
+        XCTAssertEqual(offsets[1], 1_528.9473684210527, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testSiblingGridReadersPreserveParameterizedSectionEstimates() async throws {
+        // ASSERTIONS: lazyScrollViewReaderGridSectionParameterizedOffsetObserved
+        let cases: [(LayoutSchedulingSiblingGridReaderConfiguration, [CGFloat])] = [
+            (
+                LayoutSchedulingSiblingGridReaderConfiguration(
+                    columnCount: 1,
+                    viewportWidth: 60
+                ),
+                [2_919.4736842105267, 3_000]
+            ),
+            (
+                LayoutSchedulingSiblingGridReaderConfiguration(
+                    columnCount: 3,
+                    viewportWidth: 140
+                ),
+                [1_000, 1_105.2631578947369]
+            ),
+            (
+                LayoutSchedulingSiblingGridReaderConfiguration(
+                    rowsPerSection: 21
+                ),
+                [1_500, 1_657.8947368421054]
+            ),
+            (
+                LayoutSchedulingSiblingGridReaderConfiguration(
+                    rowHeight: 30,
+                    headerHeight: 15
+                ),
+                [1_500, 2_193.5714285714284]
+            ),
+        ]
+
+        for (configuration, expected) in cases {
+            let offsets = try await siblingGridReaderOffsets(configuration: configuration)
+            XCTAssertEqual(offsets.count, expected.count)
+            for (actual, expected) in zip(offsets, expected) {
+                XCTAssertEqual(actual, expected, accuracy: 0.001)
+            }
+        }
+    }
+
+    @MainActor
+    private func siblingGridReaderOffsets(
+        configuration: LayoutSchedulingSiblingGridReaderConfiguration
+    ) async throws -> [CGFloat] {
+        let probe = LayoutSchedulingSiblingGridReaderProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingSiblingGridReaderRoot(
+                probe: probe,
+                configuration: configuration
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingSiblingGridReaderRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Sibling grid reader test should not request graphics resources.")
+        }
+        let contentSize = CGSize(
+            width: configuration.viewportWidth + 40,
+            height: configuration.viewportHeight * 2 + 60
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: contentSize,
+            redraw: &redraw,
+            withGC
+        )
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responders = allHostingScrollViewResponders(in: root)
+        XCTAssertEqual(responders.count, 2)
+        let hosts = try responders.map {
+            try XCTUnwrap($0.hostContainer?.scrollView)
+        }
+        XCTAssertTrue(hosts.allSatisfy {
+            $0.pendingContext?.contentOffset == .zero
+        })
+        try controller.viewGraph.data.withCurrent {
+            try XCTUnwrap(probe.sectionProxy).scrollTo(
+                LayoutSchedulingSectionGridTargetID(section: 7, row: 10),
+                anchor: .top
+            )
+            try XCTUnwrap(probe.plainProxy).scrollTo(150, anchor: .top)
+        }
+        for tick in 1...2 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: contentSize,
+                redraw: &redraw,
+                withGC
+            )
+        }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
+
+        return try hosts.map {
+            try XCTUnwrap($0.pendingContext).contentOffset.y
+        }.sorted()
     }
 
     @MainActor
@@ -217,6 +942,41 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             40,
             accuracy: 0.001
         )
+
+        let offsetBeforeMotion = try XCTUnwrap(host.pendingContext).contentOffset.y
+        XCTAssertTrue(controller.viewGraph.hasScheduledViewUpdate)
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 3,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(1.0 / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        let firstMotionOffset = try XCTUnwrap(host.pendingContext).contentOffset.y
+        XCTAssertNotEqual(firstMotionOffset, offsetBeforeMotion, accuracy: 0.001)
+        XCTAssertTrue(controller.viewGraph.hasScheduledViewUpdate)
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 4,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(2.0 / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        XCTAssertNotEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            firstMotionOffset,
+            accuracy: 0.001
+        )
     }
 
     @MainActor
@@ -328,6 +1088,41 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertFalse(
             controller.gestureGraph?.eventBindingManager.bindings.values
                 .contains { $0.responder === responder } ?? true
+        )
+        XCTAssertTrue(host.isDecelerating)
+        let offsetBeforeMotion = try XCTUnwrap(host.pendingContext).contentOffset.y
+        XCTAssertTrue(controller.viewGraph.hasScheduledViewUpdate)
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 3,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(1.0 / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        let firstMotionOffset = try XCTUnwrap(host.pendingContext).contentOffset.y
+        XCTAssertNotEqual(firstMotionOffset, offsetBeforeMotion, accuracy: 0.001)
+        XCTAssertTrue(controller.viewGraph.hasScheduledViewUpdate)
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 4,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(2.0 / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        XCTAssertNotEqual(
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            firstMotionOffset,
+            accuracy: 0.001
         )
     }
 
@@ -1412,6 +2207,57 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 leafPlaceSubviews: 2
             )
         )
+    }
+
+    // ASSERTIONS scrollHostPresentationDoesNotRelayoutEagerContentObserved
+    @MainActor
+    func testSystemScrollHostOffsetDoesNotRelayoutEagerContent() throws {
+        let counter = LayoutMeasurementCounter()
+        let controller = WindowController(
+            content: LayoutMeasurementScrollRoot(counter: counter),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutMeasurementScrollRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll host layout test should not request graphics resources.")
+        }
+        var redraw = false
+        for tick in 0...1 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: tick == 0 ? 0 : 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 220, height: 180),
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let settled = counter.snapshot()
+
+        Update.ensure {
+            host.publishSystemContentOffset(CGPoint(x: 0, y: 40))
+        }
+        redraw = false
+        controller.updateView(
+            tick: 2,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(2.0 / 60.0),
+            contentSize: CGSize(width: 220, height: 180),
+            redraw: &redraw,
+            withGC
+        )
+
+        XCTAssertEqual(host.host.bounds.origin, CGPoint(x: 0, y: 40))
+        XCTAssertEqual(counter.snapshot() - settled, .zero)
     }
 
     @MainActor
@@ -8299,6 +9145,26 @@ private struct LayoutMeasurementRoot: View {
     }
 }
 
+private struct LayoutMeasurementScrollRoot: View {
+    let counter: LayoutMeasurementCounter
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LayoutMeasurementContainer(counter: counter, revision: 0) {
+                ForEach(0..<36, id: \.self) { _ in
+                    LayoutMeasurementLeaf(
+                        counter: counter,
+                        size: CGSize(width: 160, height: 30)
+                    ) {
+                        Color.clear
+                    }
+                }
+            }
+        }
+        .frame(width: 180, height: 140)
+    }
+}
+
 private struct LayoutSchedulingRoot: View {
     let counter: LayoutSchedulingCounter
 
@@ -8321,6 +9187,271 @@ private struct LayoutSchedulingScrollViewAttachmentRoot: View {
             }
         }
         .frame(width: 100, height: 100)
+    }
+}
+
+private final class LayoutSchedulingScrollViewReaderProbe {
+    var proxy: ScrollViewProxy?
+}
+
+private struct LayoutSchedulingScrollViewReaderRoot: View {
+    let probe: LayoutSchedulingScrollViewReaderProbe
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            LayoutSchedulingScrollViewReaderContent(
+                proxy: proxy,
+                probe: probe
+            )
+        }
+    }
+}
+
+private struct LayoutSchedulingScrollViewReaderContent: View {
+    let proxy: ScrollViewProxy
+    let probe: LayoutSchedulingScrollViewReaderProbe
+
+    var body: some View {
+        probe.proxy = proxy
+        return ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<200, id: \.self) { row in
+                    (row == 150 ? Color.red : Color.green)
+                        .frame(width: 80, height: 20)
+                        .id(row)
+                }
+            }
+        }
+        .frame(width: 100, height: 100)
+    }
+}
+
+private struct LayoutSchedulingTextScrollViewReaderRoot: View {
+    let probe: LayoutSchedulingScrollViewReaderProbe
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            LayoutSchedulingTextScrollViewReaderContent(
+                proxy: proxy,
+                probe: probe
+            )
+        }
+    }
+}
+
+private struct LayoutSchedulingTextScrollViewReaderContent: View {
+    let proxy: ScrollViewProxy
+    let probe: LayoutSchedulingScrollViewReaderProbe
+
+    var body: some View {
+        probe.proxy = proxy
+        return ScrollView(.vertical) {
+            LazyVStack(spacing: 4) {
+                ForEach(0..<200, id: \.self) { row in
+                    Text("Row \(row)")
+                        .frame(width: 280, height: 30, alignment: .leading)
+                        .id(row)
+                }
+            }
+        }
+        .frame(width: 300, height: 260)
+    }
+}
+
+private final class LayoutSchedulingButtonScrollViewReaderProbe {
+    var actionCount = 0
+    var actionHadNoGraphContext = false
+    var proxy: ScrollViewProxy?
+}
+
+private struct LayoutSchedulingButtonScrollViewReaderRoot: View {
+    let probe: LayoutSchedulingButtonScrollViewReaderProbe
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            probe.proxy = proxy
+            return ZStack {
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 4) {
+                        ForEach(0..<200, id: \.self) { row in
+                            Text("Row \(row)")
+                                .frame(
+                                    width: 280,
+                                    height: 30,
+                                    alignment: .leading
+                                )
+                                .id(row)
+                        }
+                    }
+                }
+                .frame(width: 300, height: 260)
+
+                Button("Scroll to row 150") {
+                    probe.actionCount += 1
+                    probe.actionHadNoGraphContext = _AGGraph.current == nil
+                    proxy.scrollTo(150, anchor: .top)
+                }
+                .frame(width: 520, height: 470)
+            }
+        }
+    }
+}
+
+private final class LayoutSchedulingStatefulScrollViewReaderProbe {
+    var action: (() -> Void)?
+}
+
+private struct LayoutSchedulingStatefulScrollViewReaderRoot: View {
+    let probe: LayoutSchedulingStatefulScrollViewReaderProbe
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            LayoutSchedulingStatefulScrollViewReaderContent(
+                proxy: proxy,
+                probe: probe
+            )
+        }
+    }
+}
+
+private struct LayoutSchedulingStatefulScrollViewReaderContent: View {
+    let proxy: ScrollViewProxy
+    let probe: LayoutSchedulingStatefulScrollViewReaderProbe
+
+    @State private var lastRequest = "none"
+    @State private var contentOffset = CGPoint.zero
+
+    var body: some View {
+        probe.action = {
+            lastRequest = "150 / top"
+            proxy.scrollTo(150, anchor: .top)
+        }
+        return VStack(spacing: 12) {
+            Text("ScrollView Reader")
+                .font(.system(size: 22, weight: .semibold))
+            HStack(spacing: 10) {
+                Button("Row 0") {
+                    lastRequest = "0 / top"
+                    proxy.scrollTo(0, anchor: .top)
+                }
+                Button("Row 75") {
+                    lastRequest = "75 / center"
+                    proxy.scrollTo(75, anchor: .center)
+                }
+                Button("Row 150") {
+                    lastRequest = "150 / top"
+                    proxy.scrollTo(150, anchor: .top)
+                }
+            }
+            Text("Request: \(lastRequest), offset: \(Int(contentOffset.y))")
+                .font(.system(.caption))
+                .foregroundColor(.secondary)
+            ScrollView {
+                LazyVStack(spacing: 4) {
+                    ForEach(0..<200, id: \.self) { row in
+                        Text("Row \(row)")
+                            .frame(
+                                width: 280,
+                                height: 30,
+                                alignment: .leading
+                            )
+                            .border(row == 150 ? .blue : .gray, width: 1)
+                            .id(row)
+                    }
+                }
+            }
+            .frame(width: 300, height: 260)
+            .onScrollGeometryChange(for: CGPoint.self) { geometry in
+                geometry.contentOffset
+            } action: { _, newValue in
+                contentOffset = newValue
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 470)
+    }
+}
+
+private final class LayoutSchedulingSiblingGridReaderProbe {
+    var plainProxy: ScrollViewProxy?
+    var sectionProxy: ScrollViewProxy?
+}
+
+private struct LayoutSchedulingSectionGridTargetID: Hashable {
+    var section: Int
+    var row: Int
+}
+
+private struct LayoutSchedulingSiblingGridReaderConfiguration {
+    var columnCount: Int = 2
+    var sectionCount: Int = 10
+    var rowsPerSection: Int = 20
+    var rowHeight: CGFloat = 20
+    var headerHeight: CGFloat = 10
+    var viewportWidth: CGFloat = 100
+    var viewportHeight: CGFloat = 100
+}
+
+private struct LayoutSchedulingSiblingGridReaderRoot: View {
+    let probe: LayoutSchedulingSiblingGridReaderProbe
+    var configuration = LayoutSchedulingSiblingGridReaderConfiguration()
+
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.fixed(40), spacing: 0),
+            count: configuration.columnCount
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            ScrollViewReader { proxy in
+                probe.plainProxy = proxy
+                return ScrollView(.vertical) {
+                    LazyVGrid(columns: columns, spacing: 0) {
+                        ForEach(0..<200, id: \.self) { row in
+                            Color.green
+                                .frame(width: 40, height: 20)
+                                .id(row)
+                        }
+                    }
+                }
+                .frame(
+                    width: configuration.viewportWidth,
+                    height: configuration.viewportHeight
+                )
+            }
+            ScrollViewReader { proxy in
+                probe.sectionProxy = proxy
+                return ScrollView(.vertical) {
+                    LazyVGrid(columns: columns, spacing: 0) {
+                        ForEach(0..<configuration.sectionCount, id: \.self) { section in
+                            Section {
+                                ForEach(0..<configuration.rowsPerSection, id: \.self) { row in
+                                    Color.green
+                                        .frame(width: 40, height: configuration.rowHeight)
+                                        .id(LayoutSchedulingSectionGridTargetID(
+                                            section: section,
+                                            row: row
+                                        ))
+                                }
+                            } header: {
+                                Color.blue
+                                    .frame(
+                                        width: 40 * CGFloat(configuration.columnCount),
+                                        height: configuration.headerHeight
+                                    )
+                            }
+                        }
+                    }
+                }
+                .frame(
+                    width: configuration.viewportWidth,
+                    height: configuration.viewportHeight
+                )
+            }
+        }
+        .padding(20)
     }
 }
 

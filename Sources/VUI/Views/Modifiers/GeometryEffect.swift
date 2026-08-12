@@ -64,7 +64,7 @@ private struct GeometryEffectTransform<Effect: GeometryEffect>:
 
     var value: ViewTransform {
         var transform = _transform.value
-        transform.appendPosition(_position.value)
+        transform.resetPosition(_position.value)
 
         var projection = _effect.value.effectValue(size: _size.value)
         if _layoutDirection.value == .rightToLeft {

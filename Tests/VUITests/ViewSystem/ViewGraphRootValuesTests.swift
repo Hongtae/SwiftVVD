@@ -2,6 +2,35 @@ import XCTest
 @testable import VUI
 
 final class ViewGraphRootValuesTests: XCTestCase {
+    func testRootOutputsInstantiateAfterTheProposedSizeInputExists() throws {
+        // ASSERTIONS: viewGraphRootInstantiationOrderObserved
+        let host = TestRootValueUpdaterHost()
+        let recorder = RootOutputInstantiationRecorder()
+        let viewGraph = ViewGraph(
+            rootViewType: RootOutputInstantiationView.self,
+            content: RootOutputInstantiationView(recorder: recorder),
+            rendererHost: host
+        )
+        host.storage = viewGraph
+
+        XCTAssertNotNil(viewGraph.rootGeometry)
+        XCTAssertNil(viewGraph.rootLayoutComputer)
+        XCTAssertFalse(viewGraph.isInstantiated)
+        XCTAssertEqual(recorder.makeViewCount, 0)
+
+        let size = CGSize(width: 123, height: 456)
+        viewGraph.setSize(size)
+        try viewGraph.data.withCurrent {
+            XCTAssertEqual(try XCTUnwrap(viewGraph.sizeAttr).value.value, size)
+        }
+
+        viewGraph.instantiateIfNeeded()
+
+        XCTAssertTrue(viewGraph.isInstantiated)
+        XCTAssertNotNil(viewGraph.rootLayoutComputer)
+        XCTAssertEqual(recorder.makeViewCount, 1)
+    }
+
     func testRootValueRawOrderMatchesCurrentHostSurface() {
         XCTAssertEqual(ViewGraphRootValues.rootView.rawValue, 0x1)
         XCTAssertEqual(ViewGraphRootValues.environment.rawValue, 0x2)
@@ -43,6 +72,30 @@ final class ViewGraphRootValuesTests: XCTestCase {
         XCTAssertFalse(viewGraph.mayDeferUpdate)
         XCTAssertEqual(delegate.setNeedsUpdateCount, 2)
     }
+}
+
+private final class RootOutputInstantiationRecorder: @unchecked Sendable {
+    var makeViewCount = 0
+}
+
+private struct RootOutputInstantiationView: View, PrimitiveView, LeafViewLayout {
+    var recorder: RootOutputInstantiationRecorder
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        view._attribute.value.recorder.makeViewCount += 1
+        var outputs = _ViewOutputs()
+        makeLeafLayout(&outputs, view: view, inputs: inputs)
+        return outputs
+    }
+
+    func sizeThatFits(in proposal: _ProposedSize) -> CGSize {
+        .zero
+    }
+
+    typealias Body = Never
 }
 
 private final class TestRootValueUpdaterHost: ViewRendererHost, ViewGraphRootValueUpdater {

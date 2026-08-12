@@ -218,6 +218,10 @@ struct AGWeakAttribute: Hashable, CustomStringConvertible, Sendable {
 #endif
     }
 
+    var graph: AGGraphRef? {
+        _AGGraph.graph(for: self)
+    }
+
     var attribute: AGAttribute? {
         get {
             guard let graph = _AGGraph.current, isValid(in: graph) else {
@@ -644,7 +648,7 @@ struct WeakAttribute<T>: Hashable, CustomStringConvertible, Sendable {
         set { attribute = newValue }
     }
 
-    var value: T? { attribute?.value }
+    var value: T? { _AGGraphGetWeakValue(self, options: [])?.value }
     var wrappedValue: T? { value }
 
     subscript<Member>(dynamicMember keyPath: KeyPath<T, Member>) -> Attribute<Member>? {
@@ -652,6 +656,8 @@ struct WeakAttribute<T>: Hashable, CustomStringConvertible, Sendable {
     }
 
     var description: String { base.description }
+
+    var graph: AGGraphRef? { base.graph }
 
     func toStrong() -> Attribute<T> { Attribute<T>(base.toStrong()) }
 

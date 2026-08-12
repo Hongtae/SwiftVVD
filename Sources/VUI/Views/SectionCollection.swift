@@ -1156,7 +1156,7 @@ struct SectionAccumulator {
         var start = 0
         _ = list.applyNodes(
             from: &start,
-            style: _ViewList_IteratorStyle(),
+            style: _ViewList_IteratorStyle(value: 2),
             list: listAttribute,
             transform: _ViewList_TemporarySublistTransform()
         ) { start, style, node, transform in

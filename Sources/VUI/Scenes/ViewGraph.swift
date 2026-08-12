@@ -473,6 +473,10 @@ class ViewGraph: ViewGraphHost {
     // Update scheduling callback.
     weak var viewDelegate: (any ViewGraphDelegate)?
 
+    func requestImmediateUpdate() {
+        viewDelegate?.requestUpdate(after: 0)
+    }
+
     // AG transaction lifecycle callback.
     private weak var graphDelegateStorage: (any GraphDelegate)?
 
@@ -527,8 +531,19 @@ class ViewGraph: ViewGraphHost {
     private(set) var rootDisplayList: Attribute<DisplayList>?
     private(set) var rootResourceList: Attribute<ResourceList>?
     private(set) var rootViewResponders: Attribute<[ViewResponder]>?
+    // Captures root output construction until the host instantiates outputs.
+    private var rootOutputsBuilder: (() -> Void)?
 
     override var isValid: Bool { rootLayoutComputer != nil }
+
+    func setSize(_ size: CGSize) {
+        data.withCurrent {
+            guard let sizeAttr else {
+                fatalError("ViewGraph proposed size is not initialized.")
+            }
+            sizeAttr.setValue(ViewSize(size))
+        }
+    }
 
     // Requested output bitmask.
     // defaults = displayList | viewResponders | layout | focus.
@@ -856,7 +871,7 @@ class ViewGraph: ViewGraphHost {
                           makeContent: (_AGGraph) -> _GraphValue<V>) {
         self.requestedOutputs = requestedOutputs
         super.init(data: GraphHost.Data())
-        // Wire rendererHost before building the root view.
+        // Wire rendererHost before capturing and instantiating root outputs.
         self.rendererHost = rendererHost
         featureBuffer.append(HitTestBindingFeature())
         for feature in features {
@@ -871,217 +886,214 @@ class ViewGraph: ViewGraphHost {
         var transactionAttrResult: Attribute<Transaction>? = nil
         var phaseAttrResult: Attribute<_GraphInputs.Phase>? = nil
         var rootGeometryResult: Attribute<ViewGeometry>?   = nil
-        var rootLCResult:    Attribute<LayoutComputer>?    = nil
-        var rootSizeResult:  Attribute<CGSize>?            = nil
-        var rootDLResult:    Attribute<DisplayList>?       = nil
-        var rootRLResult:    Attribute<ResourceList>?      = nil
-        var rootRespondersResult: Attribute<[ViewResponder]>? = nil
 
         self.data.withCurrent {
             // Root construction inherits the host's root subgraph so every
             // node and nested responder has a stable lifecycle owner.
             AGSubgraph.withCurrent(self.rootSubgraph) {
-            let g = self.graph
-            let contentGV = makeContent(g)
+                let g = self.graph
+                let contentGV = makeContent(g)
 
-            let timeAttr        = g.makeInput(value: time)
-            let phaseAttr       = self.data._phase
-            let transactionAttr = self.data._transaction
-            let envAttr         = g.makeInput(value: initialEnvironment)
-            let graphInputs = _GraphInputs(
-                time: timeAttr,
-                phase: phaseAttr,
-                environment: envAttr,
-                transaction: transactionAttr
-            )
-            var prefKeys = PreferenceKeys()
-            prefKeys.add(DisplayList.Key.self)
-            prefKeys.add(ResourceList.Key.self)
-            prefKeys.add(ViewRespondersKey.self)
-            prefKeys.add(SheetPreference.Key.self)
-            prefKeys.add(AlertStorage.PreferenceKey.self)
-            prefKeys.add(ConfirmationDialog.PreferenceKey.self)
-
-            let hostKeysAttr = g.makeInput(value: prefKeys)
-            let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
-            hostPreferenceKeys = hostKeysAttr
-
-            let transformAttr    = g.makeInput(value: ViewTransform.identity)
-            let containerPosAttr = g.makeInput(value: CGPoint.zero)
-            self.zeroPointAttr = containerPosAttr
-            let sizeAttr         = g.makeInput(value: ViewSize(.zero))
-            let safeAreaInsetsAttr = g.makeInput(
-                value: _SafeAreaInsetsModifier()
-            )
-            let rootGeometry = g.makeRule(
-                RootGeometry(
-                    proposedSize: sizeAttr,
-                    safeAreaInsets: OptionalAttribute(safeAreaInsetsAttr)
+                let timeAttr        = g.makeInput(value: time)
+                let phaseAttr       = self.data._phase
+                let transactionAttr = self.data._transaction
+                let envAttr         = g.makeInput(value: initialEnvironment)
+                let graphInputs = _GraphInputs(
+                    time: timeAttr,
+                    phase: phaseAttr,
+                    environment: envAttr,
+                    transaction: transactionAttr
                 )
-            )
-            let positionAttr = rootGeometry.origin()
-            let rootSizeAttr = rootGeometry.size()
-            var viewInputs = _ViewInputs(
-                base: graphInputs,
-                customInputs: PropertyList(),
-                preferences: prefsInputs,
-                transform: transformAttr,
-                position: positionAttr,
-                containerPosition: containerPosAttr,
-                size: rootSizeAttr,
-                safeAreaInsets: OptionalAttribute(),
-                containerSize: OptionalAttribute(),
-                stackOrientation: nil
-            )
-            viewInputs.requestsLayoutComputer = true
-            viewInputs.needsGeometry = true
-            featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
-            viewInputs.makeRootMatchedGeometryScope()
+                var prefKeys = PreferenceKeys()
+                prefKeys.add(DisplayList.Key.self)
+                prefKeys.add(ResourceList.Key.self)
+                prefKeys.add(ViewRespondersKey.self)
+                prefKeys.add(SheetPreference.Key.self)
+                prefKeys.add(AlertStorage.PreferenceKey.self)
+                prefKeys.add(ConfirmationDialog.PreferenceKey.self)
 
-            let layoutDirection = viewInputs.base.cachedEnvironment.value.attribute(
-                id: .layoutDirection
-            ) {
-                $0.layoutDirection
-            }
-            rootGeometry.mutateBody(
-                as: RootGeometry.self,
-                invalidating: true
-            ) {
-                $0.layoutDirection = OptionalAttribute(layoutDirection)
-            }
+                let hostKeysAttr = g.makeInput(value: prefKeys)
+                let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
+                hostPreferenceKeys = hostKeysAttr
 
-            // GestureResponder.init reads the shared gesture graph from ViewGraph.
-            var outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
-            rootGeometry.mutateBody(
-                as: RootGeometry.self,
-                invalidating: true
-            ) {
-                $0.childLayoutComputer = outputs._layoutComputer
-            }
-            featureBuffer.modifyViewOutputs(outputs: &outputs, inputs: viewInputs, graph: self)
-            makePreferenceOutlets(outputs: outputs)
-
-            let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
-            let displayNodes  = outputs.preferences.values(for: DisplayList.Key.self)
-            if !resourceNodes.isEmpty {
-                // Resource requests carry the transaction that first produced
-                // them. Keep the root reduction eager so a later transaction
-                // cannot replace that ownership before the backend loads it.
-                rootRLResult = g.makeSideEffectRule {
-                    var combined = ResourceList.Key.defaultValue
-                    for nodeID in resourceNodes {
-                        let list = Attribute<ResourceList>(nodeID).value
-                        ResourceList.Key.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-            }
-            if !displayNodes.isEmpty {
-                rootDLResult = g.makeRule {
-                    var combined = DisplayList.Key.defaultValue
-                    for nodeID in displayNodes {
-                        let list = Attribute<DisplayList>(nodeID).value
-                        DisplayList.Key.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-            }
-
-            let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
-            if !responderNodes.isEmpty {
-                rootRespondersResult = g.makeRule {
-                    var combined: [ViewResponder] = ViewRespondersKey.defaultValue
-                    for nodeID in responderNodes {
-                        let list = Attribute<[ViewResponder]>(nodeID).value
-                        ViewRespondersKey.reduce(value: &combined) { list }
-                    }
-                    return combined
-                }
-            }
-
-            let sheetNodes = outputs.preferences.values(for: SheetPreference.Key.self)
-            if !sheetNodes.isEmpty {
-                let sheetAttr: Attribute<SheetPreference.Value> = g.makeRule {
-                    var combined = SheetPreference.Key.defaultValue
-                    for nodeID in sheetNodes {
-                        let val = Attribute<SheetPreference.Value>(nodeID).value
-                        SheetPreference.Key.reduce(value: &combined) { val }
-                    }
-                    return combined
-                }
-                g.makeSideEffectRule { [weak self] in
-                    guard let host = self?.rendererHost as? WindowController else { return }
-                    let value = sheetAttr.value
-                    let transaction = _AGGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
-                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
-                    host.updateSheetPresentation(
-                        value,
-                        transaction: transaction,
-                        viewPhase: viewPhase
+                let transformAttr    = g.makeInput(value: ViewTransform.identity)
+                let containerPosAttr = g.makeInput(value: CGPoint.zero)
+                self.zeroPointAttr = containerPosAttr
+                let sizeAttr         = g.makeInput(value: ViewSize(.zero))
+                let safeAreaInsetsAttr = g.makeInput(
+                    value: _SafeAreaInsetsModifier()
+                )
+                let rootGeometry = g.makeRule(
+                    RootGeometry(
+                        proposedSize: sizeAttr,
+                        safeAreaInsets: OptionalAttribute(safeAreaInsetsAttr)
                     )
-                }
-            }
+                )
+                let positionAttr = rootGeometry.origin()
+                let rootSizeAttr = rootGeometry.size()
+                var viewInputs = _ViewInputs(
+                    base: graphInputs,
+                    customInputs: PropertyList(),
+                    preferences: prefsInputs,
+                    transform: transformAttr,
+                    position: positionAttr,
+                    containerPosition: containerPosAttr,
+                    size: rootSizeAttr,
+                    safeAreaInsets: OptionalAttribute(),
+                    containerSize: OptionalAttribute(),
+                    stackOrientation: nil
+                )
+                viewInputs.requestsLayoutComputer = true
+                viewInputs.needsGeometry = true
+                featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
+                viewInputs.makeRootMatchedGeometryScope()
 
-            let alertNodes = outputs.preferences.values(for: AlertStorage.PreferenceKey.self)
-            if !alertNodes.isEmpty {
-                let alertAttr: Attribute<AlertStorage.PreferenceKey.Value> = g.makeRule {
-                    var combined = AlertStorage.PreferenceKey.defaultValue
-                    for nodeID in alertNodes {
-                        let val = Attribute<AlertStorage.PreferenceKey.Value>(nodeID).value
-                        AlertStorage.PreferenceKey.reduce(value: &combined) { val }
+                self.rootOutputsBuilder = { [unowned self] in
+                    let layoutDirection = viewInputs.base.cachedEnvironment.value.attribute(
+                        id: .layoutDirection
+                    ) {
+                        $0.layoutDirection
                     }
-                    return combined
-                }
-                g.makeSideEffectRule { [weak self] in
-                    guard let host = self?.rendererHost as? WindowController else { return }
-                    let alerts = Array(alertAttr.value.values.map { $0.preference })
-                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
-                    host.updateAlertPresentation(
-                        alerts,
-                        viewPhase: viewPhase
-                    )
-                }
-            }
-
-            let dialogNodes = outputs.preferences.values(for: ConfirmationDialog.PreferenceKey.self)
-            if !dialogNodes.isEmpty {
-                let dialogAttr: Attribute<ConfirmationDialog.PreferenceKey.Value> = g.makeRule {
-                    var combined = ConfirmationDialog.PreferenceKey.defaultValue
-                    for nodeID in dialogNodes {
-                        let val = Attribute<ConfirmationDialog.PreferenceKey.Value>(nodeID).value
-                        ConfirmationDialog.PreferenceKey.reduce(value: &combined) { val }
+                    rootGeometry.mutateBody(
+                        as: RootGeometry.self,
+                        invalidating: true
+                    ) {
+                        $0.layoutDirection = OptionalAttribute(layoutDirection)
                     }
-                    return combined
-                }
-                g.makeSideEffectRule { [weak self] in
-                    guard let host = self?.rendererHost as? WindowController else { return }
-                    let dialogs = Array(dialogAttr.value.values.map { $0.preference })
-                    let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
-                    host.updateConfirmationDialogPresentation(
-                        dialogs,
-                        viewPhase: viewPhase
-                    )
-                }
-            }
 
-            if let rootLC = outputs._layoutComputer.attribute {
-                rootLCResult = rootLC
-                // Modal/aux platform windows need the root view's natural
-                // size, not the host window's proposed sizeAttr. This rule
-                // registers dependencies through LayoutComputer.sizeThatFits
-                // and is only read by child controllers that auto-fit.
-                rootSizeResult = g.makeRule {
-                    rootLC.value.sizeThatFits(.unspecified)
-                }
-            }
+                    // GestureResponder.init reads the shared gesture graph from ViewGraph.
+                    var outputs: _ViewOutputs = V._makeView(view: contentGV, inputs: viewInputs)
+                    rootGeometry.mutateBody(
+                        as: RootGeometry.self,
+                        invalidating: true
+                    ) {
+                        $0.childLayoutComputer = outputs._layoutComputer
+                    }
+                    featureBuffer.modifyViewOutputs(outputs: &outputs, inputs: viewInputs, graph: self)
+                    makePreferenceOutlets(outputs: outputs)
 
-            sizeAttrResult  = sizeAttr
-            safeAreaInsetsAttrResult = safeAreaInsetsAttr
-            envAttrResult   = envAttr
-            timeAttrResult  = timeAttr
-            transactionAttrResult = transactionAttr
-            phaseAttrResult = phaseAttr
-            rootGeometryResult = rootGeometry
+                    let resourceNodes = outputs.preferences.values(for: ResourceList.Key.self)
+                    let displayNodes  = outputs.preferences.values(for: DisplayList.Key.self)
+                    if !resourceNodes.isEmpty {
+                        // Resource requests carry the transaction that first produced
+                        // them. Keep the root reduction eager so a later transaction
+                        // cannot replace that ownership before the backend loads it.
+                        self.rootResourceList = g.makeSideEffectRule {
+                            var combined = ResourceList.Key.defaultValue
+                            for nodeID in resourceNodes {
+                                let list = Attribute<ResourceList>(nodeID).value
+                                ResourceList.Key.reduce(value: &combined) { list }
+                            }
+                            return combined
+                        }
+                    }
+                    if !displayNodes.isEmpty {
+                        self.rootDisplayList = g.makeRule {
+                            var combined = DisplayList.Key.defaultValue
+                            for nodeID in displayNodes {
+                                let list = Attribute<DisplayList>(nodeID).value
+                                DisplayList.Key.reduce(value: &combined) { list }
+                            }
+                            return combined
+                        }
+                    }
+
+                    let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
+                    if !responderNodes.isEmpty {
+                        self.rootViewResponders = g.makeRule {
+                            var combined: [ViewResponder] = ViewRespondersKey.defaultValue
+                            for nodeID in responderNodes {
+                                let list = Attribute<[ViewResponder]>(nodeID).value
+                                ViewRespondersKey.reduce(value: &combined) { list }
+                            }
+                            return combined
+                        }
+                    }
+
+                    let sheetNodes = outputs.preferences.values(for: SheetPreference.Key.self)
+                    if !sheetNodes.isEmpty {
+                        let sheetAttr: Attribute<SheetPreference.Value> = g.makeRule {
+                            var combined = SheetPreference.Key.defaultValue
+                            for nodeID in sheetNodes {
+                                let val = Attribute<SheetPreference.Value>(nodeID).value
+                                SheetPreference.Key.reduce(value: &combined) { val }
+                            }
+                            return combined
+                        }
+                        g.makeSideEffectRule { [weak self] in
+                            guard let host = self?.rendererHost as? WindowController else { return }
+                            let value = sheetAttr.value
+                            let transaction = _AGGraph.current?.transaction(for: sheetAttr.identifier) ?? Transaction()
+                            let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
+                            host.updateSheetPresentation(
+                                value,
+                                transaction: transaction,
+                                viewPhase: viewPhase
+                            )
+                        }
+                    }
+
+                    let alertNodes = outputs.preferences.values(for: AlertStorage.PreferenceKey.self)
+                    if !alertNodes.isEmpty {
+                        let alertAttr: Attribute<AlertStorage.PreferenceKey.Value> = g.makeRule {
+                            var combined = AlertStorage.PreferenceKey.defaultValue
+                            for nodeID in alertNodes {
+                                let val = Attribute<AlertStorage.PreferenceKey.Value>(nodeID).value
+                                AlertStorage.PreferenceKey.reduce(value: &combined) { val }
+                            }
+                            return combined
+                        }
+                        g.makeSideEffectRule { [weak self] in
+                            guard let host = self?.rendererHost as? WindowController else { return }
+                            let alerts = Array(alertAttr.value.values.map { $0.preference })
+                            let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
+                            host.updateAlertPresentation(
+                                alerts,
+                                viewPhase: viewPhase
+                            )
+                        }
+                    }
+
+                    let dialogNodes = outputs.preferences.values(for: ConfirmationDialog.PreferenceKey.self)
+                    if !dialogNodes.isEmpty {
+                        let dialogAttr: Attribute<ConfirmationDialog.PreferenceKey.Value> = g.makeRule {
+                            var combined = ConfirmationDialog.PreferenceKey.defaultValue
+                            for nodeID in dialogNodes {
+                                let val = Attribute<ConfirmationDialog.PreferenceKey.Value>(nodeID).value
+                                ConfirmationDialog.PreferenceKey.reduce(value: &combined) { val }
+                            }
+                            return combined
+                        }
+                        g.makeSideEffectRule { [weak self] in
+                            guard let host = self?.rendererHost as? WindowController else { return }
+                            let dialogs = Array(dialogAttr.value.values.map { $0.preference })
+                            let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
+                            host.updateConfirmationDialogPresentation(
+                                dialogs,
+                                viewPhase: viewPhase
+                            )
+                        }
+                    }
+
+                    if let rootLC = outputs._layoutComputer.attribute {
+                        self.rootLayoutComputer = rootLC
+                        // Modal/aux platform windows need the root view's natural
+                        // size, not the host window's proposed sizeAttr. This rule
+                        // registers dependencies through LayoutComputer.sizeThatFits
+                        // and is only read by child controllers that auto-fit.
+                        self.rootFittedSize = g.makeRule {
+                            rootLC.value.sizeThatFits(.unspecified)
+                        }
+                    }
+                }
+
+                sizeAttrResult  = sizeAttr
+                safeAreaInsetsAttrResult = safeAreaInsetsAttr
+                envAttrResult   = envAttr
+                timeAttrResult  = timeAttr
+                transactionAttrResult = transactionAttr
+                phaseAttrResult = phaseAttr
+                rootGeometryResult = rootGeometry
             }
         }
 
@@ -1092,11 +1104,12 @@ class ViewGraph: ViewGraphHost {
         self.transactionAttr    = transactionAttrResult
         self.phaseAttr          = phaseAttrResult
         self.rootGeometry       = rootGeometryResult
-        self.rootLayoutComputer = rootLCResult
-        self.rootFittedSize     = rootSizeResult
-        self.rootDisplayList    = rootDLResult
-        self.rootResourceList   = rootRLResult
-        self.rootViewResponders = rootRespondersResult
+    }
+
+    override func instantiateOutputs() {
+        guard let rootOutputsBuilder else { return }
+        self.rootOutputsBuilder = nil
+        rootOutputsBuilder()
     }
 
     /// Flushes queued graph transactions around host output evaluation.

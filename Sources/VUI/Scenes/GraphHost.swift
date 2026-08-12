@@ -920,18 +920,20 @@ class GraphHost: CustomReflectable {
     ) {
         instantiateIfNeeded()
         data.withCurrent {
-            if let transaction {
-                data._transaction.setValue(transaction)
-            }
-            startTransactionUpdate(id: id)
-            body()
-            finishTransactionUpdate(
-                in: data.rootSubgraph,
-                postUpdate: { _ in },
-                id: id
-            )
-            if transaction != nil {
-                data._transaction.setValue(Transaction())
+            data.graph.withGraphUpdateCounterIfNeeded {
+                if let transaction {
+                    data._transaction.setValue(transaction)
+                }
+                startTransactionUpdate(id: id)
+                body()
+                finishTransactionUpdate(
+                    in: data.rootSubgraph,
+                    postUpdate: { _ in },
+                    id: id
+                )
+                if transaction != nil {
+                    data._transaction.setValue(Transaction())
+                }
             }
         }
     }
@@ -1036,8 +1038,10 @@ class GraphHost: CustomReflectable {
         var passCount = 0
 
         repeat {
-            drainGraphMutationPass()
-            subgraph.update(flags: 1)
+            data.graph.withGraphUpdateCounterIfNeeded {
+                drainGraphMutationPass()
+                subgraph.update(flags: 1)
+            }
 
             let needsFollowUp = !continuations.isEmpty
             postUpdate(needsFollowUp)

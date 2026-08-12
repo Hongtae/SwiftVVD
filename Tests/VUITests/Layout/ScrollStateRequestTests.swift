@@ -53,6 +53,24 @@ final class ScrollStateRequestTests: XCTestCase {
         geometry.contentSize = CGSize(width: 1, height: 2)
         geometry.contentInsets = EdgeInsets(top: 9, leading: 8, bottom: 7, trailing: 6)
         XCTAssertEqual(geometry.visibleRect, CGRect(x: 10, y: 11, width: 40, height: 50))
+
+        var customVisibleGeometry = ScrollGeometry(
+            contentOffset: CGPoint(x: 2, y: 3),
+            contentSize: CGSize(width: 200, height: 300),
+            contentInsets: insets,
+            containerSize: CGSize(width: 20, height: 30),
+            visibleRect: CGRect(x: -4, y: -5, width: 32, height: 44)
+        )
+        customVisibleGeometry.contentOffset = CGPoint(x: 12, y: 18)
+        XCTAssertEqual(
+            customVisibleGeometry.visibleRect,
+            CGRect(x: 6, y: 10, width: 32, height: 44)
+        )
+        customVisibleGeometry.containerSize = CGSize(width: 25, height: 40)
+        XCTAssertEqual(
+            customVisibleGeometry.visibleRect,
+            CGRect(x: 6, y: 10, width: 37, height: 54)
+        )
     }
 
     func testScrollPhaseAndPhaseStateSurface() {
@@ -1464,7 +1482,7 @@ final class ScrollStateRequestTests: XCTestCase {
             }
             assertRequestKindEqual(
                 request.kind,
-                .updateValue(.init(targetDistance: (CGFloat(10 * 10 + 10 * 10)).squareRoot()))
+                .updateValue(.init(targetDistance: (CGFloat(18 * 18 + 18 * 18)).squareRoot()))
             )
             XCTAssertEqual(request.newPosition._anyViewID, AnyHashable("visible"))
             XCTAssertEqual(request.newPosition, ScrollPosition(_scrollPositionID: AnyHashable("visible"), anchor: .bottom))
@@ -1478,7 +1496,7 @@ final class ScrollStateRequestTests: XCTestCase {
 
         ref.withCurrent {
             var selectedTransform = ViewTransform.identity
-            selectedTransform.appendTranslation(CGSize(width: -100, height: -100))
+            selectedTransform.appendTranslation(CGSize(width: 100, height: 100))
 
             let collection = FixedVisibleCollectionScrollable(subviews: [
                 ScrollableCollectionSubview(
@@ -1539,11 +1557,11 @@ final class ScrollStateRequestTests: XCTestCase {
         ]
         transform.convert(to: .all, points: &points)
 
-        XCTAssertEqual(points[0], CGPoint(x: 0, y: 0))
-        XCTAssertEqual(points[1], CGPoint(x: 10, y: 20))
+        XCTAssertEqual(points[0], CGPoint(x: 50, y: 80))
+        XCTAssertEqual(points[1], CGPoint(x: 60, y: 100))
     }
 
-    func testViewTransformScrollCoordinateConversionStopsAtMarkerBeforeGlobalPosition() {
+    func testViewTransformScrollCoordinateConversionComposesFoldedPositionAfterMarker() {
         var transform = ViewTransform.identity
         transform.appendTranslation(CGSize(width: 300, height: 300))
         transform.appendSizedSpace(
@@ -1559,8 +1577,8 @@ final class ScrollStateRequestTests: XCTestCase {
         ]
         transform.convert(to: .all, points: &points)
 
-        XCTAssertEqual(points[0], CGPoint(x: 0, y: 0))
-        XCTAssertEqual(points[1], CGPoint(x: 10, y: 20))
+        XCTAssertEqual(points[0], CGPoint(x: 1_050, y: 2_080))
+        XCTAssertEqual(points[1], CGPoint(x: 1_060, y: 2_100))
     }
 
     func testViewTransformScrollCoordinateConversionFallsBackToGlobalWhenMarkerIsMissing() {
@@ -1570,7 +1588,7 @@ final class ScrollStateRequestTests: XCTestCase {
         var points = [CGPoint(x: 5, y: 6)]
         transform.convert(to: .all, points: &points)
 
-        XCTAssertEqual(points, [CGPoint(x: 8, y: 10)])
+        XCTAssertEqual(points, [CGPoint(x: 2, y: 2)])
     }
 
     func testViewTransformConvertsContentAndSafeAreaUsingNearestMarkers() {
@@ -1589,7 +1607,7 @@ final class ScrollStateRequestTests: XCTestCase {
 
         var points = [CGPoint(x: 10, y: 20)]
         nestedContent.convert(to: .content, points: &points)
-        XCTAssertEqual(points, [CGPoint(x: 5, y: 13)])
+        XCTAssertEqual(points, [CGPoint(x: 15, y: 27)])
 
         var safeArea = ViewTransform.identity
         safeArea.appendSizedSpace(
@@ -1605,7 +1623,7 @@ final class ScrollStateRequestTests: XCTestCase {
 
         let rect = CGRect(x: 10, y: 20, width: 30, height: 40)
             .converted(to: .safeArea, using: safeArea)
-        XCTAssertEqual(rect, CGRect(x: 4, y: 12, width: 30, height: 40))
+        XCTAssertEqual(rect, CGRect(x: 16, y: 28, width: 30, height: 40))
     }
 
     func testScrollStateRequestTransformConvertsSubviewFrameToNearestScrollCoordinateSpace() {
@@ -1619,7 +1637,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 id: ScrollCoordinateSpace.all.id,
                 size: CGSize(width: 50, height: 50)
             )
-            selectedTransform.appendTranslation(CGSize(width: -100, height: -100))
+            selectedTransform.appendTranslation(CGSize(width: 100, height: 100))
 
             let collection = FixedVisibleCollectionScrollable(subviews: [
                 ScrollableCollectionSubview(
@@ -1660,7 +1678,7 @@ final class ScrollStateRequestTests: XCTestCase {
         }
     }
 
-    func testScrollStateRequestTransformIgnoresGlobalPositionAfterScrollCoordinateMarker() {
+    func testScrollStateRequestTransformComposesPositionAfterScrollCoordinateMarker() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
 
@@ -1671,8 +1689,7 @@ final class ScrollStateRequestTests: XCTestCase {
                 id: ScrollCoordinateSpace.all.id,
                 size: CGSize(width: 50, height: 50)
             )
-            selectedTransform.appendTranslation(CGSize(width: -100, height: -100))
-            selectedTransform.appendPosition(CGPoint(x: 1_000, y: 1_000))
+            selectedTransform.appendPosition(CGPoint(x: -100, y: -100))
 
             let collection = FixedVisibleCollectionScrollable(subviews: [
                 ScrollableCollectionSubview(

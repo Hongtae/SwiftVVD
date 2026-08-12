@@ -587,10 +587,14 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
         }
     }
 
-    func testResetPositionTransformTracksPositionAndPreservesOtherItems() {
+    func testResetPositionTransformFoldsTranslationAndPreservesCommittedItems() {
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
             var transform = ViewTransform.identity
+            transform.appendSizedSpace(
+                name: AnyHashable("preserved"),
+                size: CGSize(width: 12, height: 18)
+            )
             transform.appendTranslation(CGSize(width: 3, height: 5))
             transform.appendPosition(CGPoint(x: 20, y: 30))
             let transformAttribute = graph.makeInput(value: transform)
@@ -602,15 +606,19 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
                 )
             )
 
-            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 7, y: 11))
-            XCTAssertEqual(reset.value.translations, [CGSize(width: 3, height: 5)])
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 4, y: 6))
+            XCTAssertEqual(
+                reset.value.size(ofNamedCoordinateSpace: AnyHashable("preserved")),
+                CGSize(width: 12, height: 18)
+            )
+            XCTAssertEqual(reset.value.translations, [CGSize(width: -4, height: -6)])
 
             var descendant = reset.value
             descendant.appendPosition(CGPoint(x: 4, y: 6))
-            XCTAssertEqual(descendant.globalPosition, CGPoint(x: 11, y: 17))
+            XCTAssertEqual(descendant.globalPosition, CGPoint(x: 8, y: 12))
 
             position.setValue(CGPoint(x: 2, y: 4))
-            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 2, y: 4))
+            XCTAssertEqual(reset.value.globalPosition, CGPoint(x: -1, y: -1))
         }
     }
 

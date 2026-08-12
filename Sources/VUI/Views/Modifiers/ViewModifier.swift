@@ -1256,17 +1256,10 @@ extension UnaryLayout where PlacementContextType == PlacementContext {
                     _localPosition: localChildPosition
                 )
             )
-            let parentTransform = inputs.transform
-            let childTransform: Attribute<ViewTransform> = graph.makeRule {
-                var transform = parentTransform.value
-                transform.appendPosition(childPosition.value)
-                return transform
-            }
             // Unary geometry replaces only the child's local frame channels.
-            // The nearest container channels pass through unchanged.
+            // Transform and nearest-container channels pass through unchanged.
             childInputs.position = childPosition
             childInputs.size = childSize
-            childInputs.transform = childTransform
         } else {
             childGeometry = nil
         }
@@ -1370,16 +1363,10 @@ where PlacementContextType == _PositionAwarePlacementContext {
                 parent: geometry,
                 keyPath: \ViewGeometry.dimensions.size
             )
-            let parentTransform = inputs.transform
             // Unary geometry replaces only the child's local frame channels.
-            // The nearest container channels pass through unchanged.
+            // Transform and nearest-container channels pass through unchanged.
             childInputs.position = childPosition
             childInputs.size = childSize
-            childInputs.transform = graph.makeRule {
-                var transform = parentTransform.value
-                transform.appendPosition(childPosition.value)
-                return transform
-            }
         } else {
             geometryLayoutComputer = nil
             childGeometry = nil

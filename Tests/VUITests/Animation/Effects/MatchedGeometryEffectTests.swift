@@ -583,6 +583,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
     }
 
     // ASSERTIONS matchedGeometryBodyInputAnimationPolicyObserved
+    // ASSERTIONS matchedGeometryPositionTransformCompositionObserved
     func testSourceRegistrationUsesTargetGeometryDuringLayoutAnimation() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
@@ -984,7 +985,8 @@ final class MatchedGeometryEffectTests: XCTestCase {
     }
 
     // ASSERTIONS matchedGeometryPresentationHitTestObserved
-    func testNestedTransformAndDisplayTrackMatchedPresentation() throws {
+    // ASSERTIONS matchedGeometryPositionTransformCompositionObserved
+    func testNestedDisplayTracksPresentationWhileBodyTransformKeepsTargetInput() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
             var baseInputs = makeViewInputs(graph: graph)
@@ -1086,7 +1088,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                 from: .local,
                 points: &points
             )
-            XCTAssertEqual(points[0], contentOrigin)
+            XCTAssertEqual(points[0], CGPoint(x: 300, y: 200))
         }
     }
 

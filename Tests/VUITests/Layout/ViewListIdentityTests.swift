@@ -441,11 +441,14 @@ final class ViewListIdentityTests: XCTestCase {
 
             XCTAssertTrue(completed)
             XCTAssertEqual(from, 0)
-            XCTAssertEqual(starts, [3, 0, 0])
-            XCTAssertEqual(styles, [7, 6, 7])
-            XCTAssertEqual(ids, [42, 42, 42])
-            XCTAssertEqual(headerFlags, [true, false, false])
-            XCTAssertEqual(footerFlags, [false, false, true])
+            // ASSERTIONS: sectionListTraversalDisassemblyObserved
+            // An offset exactly equal to the scaled header count consumes
+            // that region; content and footer are the remaining callbacks.
+            XCTAssertEqual(starts, [0, 0])
+            XCTAssertEqual(styles, [6, 7])
+            XCTAssertEqual(ids, [42, 42])
+            XCTAssertEqual(headerFlags, [false, false])
+            XCTAssertEqual(footerFlags, [false, true])
 
             var hierarchicalFrom = 0
             var hierarchicalRegions = 0
