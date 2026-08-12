@@ -31,6 +31,70 @@ final class ViewGraphRootValuesTests: XCTestCase {
         XCTAssertEqual(recorder.makeViewCount, 1)
     }
 
+    func testLayoutRootPublishesContainerSizeInputBeforeInstantiation() throws {
+        // ASSERTIONS: viewGraphRootInstantiationOrderObserved
+        let host = TestRootValueUpdaterHost()
+        let recorder = RootOutputInstantiationRecorder()
+        let viewGraph = ViewGraph(
+            rootViewType: RootOutputInstantiationView.self,
+            content: RootOutputInstantiationView(recorder: recorder),
+            rendererHost: host
+        )
+        host.storage = viewGraph
+
+        let containerSize = ViewSize(
+            CGSize(width: 321, height: 654),
+            proposal: _ProposedSize(width: 123, height: 456)
+        )
+        viewGraph.setContainerSize(containerSize)
+        viewGraph.instantiateIfNeeded()
+
+        try viewGraph.data.withCurrent {
+            XCTAssertEqual(
+                try XCTUnwrap(viewGraph.containerSizeAttr).value,
+                containerSize
+            )
+        }
+        XCTAssertEqual(recorder.containerSize, containerSize)
+    }
+
+    func testRootWithoutLayoutOutputOmitsContainerSizeInput() {
+        // ASSERTIONS: viewGraphRootInstantiationOrderObserved
+        let host = TestRootValueUpdaterHost()
+        let recorder = RootOutputInstantiationRecorder()
+        let viewGraph = ViewGraph(
+            rootViewType: RootOutputInstantiationView.self,
+            content: RootOutputInstantiationView(recorder: recorder),
+            rendererHost: host,
+            requestedOutputs: []
+        )
+        host.storage = viewGraph
+
+        XCTAssertNil(viewGraph.containerSizeAttr)
+        viewGraph.setContainerSize(ViewSize(CGSize(width: 10, height: 20)))
+        viewGraph.instantiateIfNeeded()
+
+        XCTAssertNil(recorder.containerSize)
+    }
+
+    func testRootDisplayListOutputUsesOrdinaryUnflaggedRule() throws {
+        // ASSERTIONS: viewGraphRootDisplayListUnflaggedObserved
+        let host = TestRootValueUpdaterHost()
+        let viewGraph = ViewGraph(
+            rootViewType: Color.self,
+            content: Color.red,
+            rendererHost: host
+        )
+        host.storage = viewGraph
+        viewGraph.setSize(CGSize(width: 40, height: 40))
+        viewGraph.instantiateIfNeeded()
+
+        try viewGraph.data.withCurrent {
+            let displayList = try XCTUnwrap(viewGraph.rootDisplayList)
+            XCTAssertTrue(displayList.flags.isEmpty)
+        }
+    }
+
     func testRootValueRawOrderMatchesCurrentHostSurface() {
         XCTAssertEqual(ViewGraphRootValues.rootView.rawValue, 0x1)
         XCTAssertEqual(ViewGraphRootValues.environment.rawValue, 0x2)
@@ -76,6 +140,7 @@ final class ViewGraphRootValuesTests: XCTestCase {
 
 private final class RootOutputInstantiationRecorder: @unchecked Sendable {
     var makeViewCount = 0
+    var containerSize: ViewSize?
 }
 
 private struct RootOutputInstantiationView: View, PrimitiveView, LeafViewLayout {
@@ -85,7 +150,9 @@ private struct RootOutputInstantiationView: View, PrimitiveView, LeafViewLayout 
         view: _GraphValue<Self>,
         inputs: _ViewInputs
     ) -> _ViewOutputs {
-        view._attribute.value.recorder.makeViewCount += 1
+        let recorder = view._attribute.value.recorder
+        recorder.makeViewCount += 1
+        recorder.containerSize = inputs.containerSize.attribute?.value
         var outputs = _ViewOutputs()
         makeLeafLayout(&outputs, view: view, inputs: inputs)
         return outputs

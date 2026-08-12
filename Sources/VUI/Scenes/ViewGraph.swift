@@ -516,6 +516,7 @@ class ViewGraph: ViewGraphHost {
 
     // AG input attributes updated by WindowController's root-value updater.
     private(set) var sizeAttr: Attribute<ViewSize>?
+    private(set) var containerSizeAttr: Attribute<ViewSize>?
     private(set) var safeAreaInsetsAttr: Attribute<_SafeAreaInsetsModifier>?
     private(set) var envAttr: Attribute<EnvironmentValues>?
     private(set) var timeAttr: Attribute<Time>?
@@ -542,6 +543,12 @@ class ViewGraph: ViewGraphHost {
                 fatalError("ViewGraph proposed size is not initialized.")
             }
             sizeAttr.setValue(ViewSize(size))
+        }
+    }
+
+    func setContainerSize(_ size: ViewSize) {
+        data.withCurrent {
+            containerSizeAttr?.setValue(size)
         }
     }
 
@@ -880,6 +887,7 @@ class ViewGraph: ViewGraphHost {
         let time = Time(seconds: 0)
 
         var sizeAttrResult:  Attribute<ViewSize>?          = nil
+        var containerSizeAttrResult: Attribute<ViewSize>?  = nil
         var safeAreaInsetsAttrResult: Attribute<_SafeAreaInsetsModifier>? = nil
         var envAttrResult:   Attribute<EnvironmentValues>? = nil
         var timeAttrResult:  Attribute<Time>?              = nil
@@ -920,6 +928,9 @@ class ViewGraph: ViewGraphHost {
                 let containerPosAttr = g.makeInput(value: CGPoint.zero)
                 self.zeroPointAttr = containerPosAttr
                 let sizeAttr         = g.makeInput(value: ViewSize(.zero))
+                let containerSizeAttr = requestedOutputs.contains(.layout)
+                    ? g.makeInput(value: ViewSize(.zero))
+                    : nil
                 let safeAreaInsetsAttr = g.makeInput(
                     value: _SafeAreaInsetsModifier()
                 )
@@ -940,7 +951,7 @@ class ViewGraph: ViewGraphHost {
                     containerPosition: containerPosAttr,
                     size: rootSizeAttr,
                     safeAreaInsets: OptionalAttribute(),
-                    containerSize: OptionalAttribute(),
+                    containerSize: OptionalAttribute(containerSizeAttr),
                     stackOrientation: nil
                 )
                 viewInputs.requestsLayoutComputer = true
@@ -1088,6 +1099,7 @@ class ViewGraph: ViewGraphHost {
                 }
 
                 sizeAttrResult  = sizeAttr
+                containerSizeAttrResult = containerSizeAttr
                 safeAreaInsetsAttrResult = safeAreaInsetsAttr
                 envAttrResult   = envAttr
                 timeAttrResult  = timeAttr
@@ -1098,6 +1110,7 @@ class ViewGraph: ViewGraphHost {
         }
 
         self.sizeAttr           = sizeAttrResult
+        self.containerSizeAttr  = containerSizeAttrResult
         self.safeAreaInsetsAttr = safeAreaInsetsAttrResult
         self.envAttr            = envAttrResult
         self.timeAttr           = timeAttrResult
@@ -1114,20 +1127,30 @@ class ViewGraph: ViewGraphHost {
 
     /// Flushes queued graph transactions around host output evaluation.
     override func updateOutputs(at time: Time) {
+        updateOutputs(at: time, afterTransaction: {})
+    }
+
+    func updateOutputs(
+        at time: Time,
+        afterTransaction: () -> Void
+    ) {
         beginNextUpdate(at: time)
-        flushTransactions()
+        flushTransactions(afterEach: afterTransaction)
         while data.graph.inbox.hasPendingWork {
             let pendingTransaction = data.graph.inbox.nextTransaction
             runTransaction(pendingTransaction, do: {
                 _ = data.graph.inbox.drainOne()
                 data.graph.drainActions()
             }, id: nil)
+            afterTransaction()
         }
         runTransaction(nil, do: {
             super.updateOutputs(at: time)
         }, id: nil)
-        flushTransactions()
+        afterTransaction()
+        flushTransactions(afterEach: afterTransaction)
         updatePreferences()
+        afterTransaction()
     }
 
     func beginNextUpdate(at time: Time) {
@@ -1146,7 +1169,8 @@ class ViewGraph: ViewGraphHost {
                 )
                 nextUpdate = (NextUpdate(), NextUpdate())
             }
-            data.updateSeed &+= 1
+            let nextUpdateSeed = data._updateSeed.value &+ 1
+            data._updateSeed.setValue(nextUpdateSeed)
         }
     }
 

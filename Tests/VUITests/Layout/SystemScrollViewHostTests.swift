@@ -1573,7 +1573,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS systemScrollViewTargetVisibilityApplicationObserved
+    // ASSERTIONS systemScrollViewDeferredTargetInvocationContextObserved
     func testHostingScrollViewReappliesTargetThroughGraphActionOutbox() {
         let graph = _AGGraph()
         let graphRef = _AGGraphContext(graph: graph)
@@ -1620,6 +1620,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         actions.forEach { $0() }
 
         XCTAssertEqual(providerGraphBindings, [true, false])
+        XCTAssertNil(_AGGraph.current)
         XCTAssertEqual(host.pendingContext?.contentOffset.y, 400)
         XCTAssertFalse(Update.isActive)
     }

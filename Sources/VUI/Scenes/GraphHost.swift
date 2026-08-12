@@ -898,7 +898,10 @@ class GraphHost: CustomReflectable {
 
     func startTransactionUpdate(id: UInt32? = nil) {
         inTransaction = true
-        data.transactionSeed &+= 1
+        data.withCurrent {
+            let nextTransactionSeed = data._transactionSeed.value &+ 1
+            data._transactionSeed.setValue(nextTransactionSeed)
+        }
     }
 
     func finishTransactionUpdate(

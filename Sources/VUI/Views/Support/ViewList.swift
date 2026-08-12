@@ -276,8 +276,8 @@ struct BaseViewList: ViewList {
             traits: traits,
             list: list
         )
-        let result = to(&from, style, .sublist(sublist), transform)
         from = 0
+        let result = to(&from, style, .sublist(sublist), transform)
         return result
     }
 }

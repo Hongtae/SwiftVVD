@@ -876,23 +876,18 @@ class WindowController: WindowDelegate,
         }
         let hadPendingWork = sourceGraph.inbox.hasPendingWork ||
             !sourceGraph.actionOutbox.isEmpty
+        // Preserve the host-turn boundary: work emitted while the source graph
+        // drains belongs to its next update rather than this snapshot.
+        let deferredActions = sourceGraph.actionOutbox
+        sourceGraph.actionOutbox.removeAll()
         _AGGraph.withCurrent(sourceGraph) {
             while sourceGraph.inbox.hasPendingWork {
                 _ = sourceGraph.inbox.drainOne()
                 sourceGraph.drainActions()
             }
         }
-        let drainedOutbox = drainActionOutbox(sourceGraph)
-        return hadPendingWork || drainedOutbox
-    }
-
-    @discardableResult
-    private func drainActionOutbox(_ graph: _AGGraph) -> Bool {
-        let actions = graph.actionOutbox
-        guard !actions.isEmpty else { return false }
-        graph.actionOutbox.removeAll()
-        actions.forEach { $0() }
-        return true
+        deferredActions.forEach { $0() }
+        return hadPendingWork
     }
 
     private func _updateView(tick: UInt64, delta: Double, date: Date,
@@ -938,6 +933,7 @@ class WindowController: WindowDelegate,
         if sizeChanged {
             cachedContentSize = layoutContentSize
             viewGraph.setSize(layoutContentSize)
+            viewGraph.setContainerSize(ViewSize(layoutContentSize))
         }
 
         let events = self.inputEvents.withLock { events in
@@ -1003,6 +999,18 @@ class WindowController: WindowDelegate,
         var drainedViewOutbox = false
         var loadedResources = false
         var resourcesUpdatedGraph = false
+        // Snapshot only continuations queued by an earlier host turn. Output
+        // evaluation can append work that must run after the next graph update.
+        var deferredViewActions = viewGraph.data.graph.actionOutbox
+        viewGraph.data.graph.actionOutbox.removeAll()
+
+        func drainDeferredViewActions() -> Bool {
+            guard !deferredViewActions.isEmpty else { return false }
+            let actions = deferredViewActions
+            deferredViewActions.removeAll()
+            actions.forEach { $0() }
+            return true
+        }
 
         func runRootLayoutPass(
             notifiesLayoutUpdate: Bool,
@@ -1046,9 +1054,6 @@ class WindowController: WindowDelegate,
                         onViewLayoutUpdated()
                     }
                 }
-                drainedViewOutbox =
-                    drainActionOutbox(viewGraph.data.graph) ||
-                    drainedViewOutbox
             }
             return !layoutChangeSet.isEmpty
         }
@@ -1126,74 +1131,30 @@ class WindowController: WindowDelegate,
                 }
             }
 
-            if !events.isEmpty {
-                // Platform event bridges normally finish their Update scope before
-                // host graph evaluation. Buffered events run inside this frame's
-                // outer scope, so drain their queued callbacks at the same boundary.
-                Update.dispatchActions()
-            }
-
             // updateOutputs flushes dirty bits, async changes, then evaluates AG.
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
             flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()
-            var lastViewInboxTransaction: Transaction?
-            while viewGraph.data.graph.inbox.hasPendingWork {
-                let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
-                viewGraph.runTransaction(pendingTransaction, do: {
-                    viewGraph.beginNextUpdate(at: time)
-                    lastViewInboxTransaction = viewGraph.data.graph.inbox.drainOne()
-                    viewGraph.data.graph.drainActions()
-                }, id: nil)
-                drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
-                let currentRequiresPresentation =
-                    lastViewInboxTransaction?.effectiveAnimation != nil ||
-                    lastViewInboxTransaction?.hasLocalAnimationCompletionState == true
-                let nextTransaction = viewGraph.data.graph.inbox.nextTransaction
-                let nextRequiresPresentation =
-                    nextTransaction?.effectiveAnimation != nil ||
-                    nextTransaction?.hasLocalAnimationCompletionState == true
-                // Plain writes queued in the same frame do not own an observable
-                // presentation boundary. Animated and completion-owning writes
-                // still sample the current outputs before the next transaction.
-                let coalescesPlainWrites =
-                    !currentRequiresPresentation &&
-                    !nextRequiresPresentation
-                if viewGraph.data.graph.inbox.hasPendingWork,
-                   !coalescesPlainWrites {
-                    _ = runRootLayoutPass(
-                        notifiesLayoutUpdate: false,
-                        samplesDisplayList: true
-                    )
-                    let resourceLoad = loadRootResourcesIfNeeded()
-                    if resourceLoad.didLoad {
-                        loadedResources = true
-                    }
-                    if resourceLoad.updatedGraph {
-                        resourcesUpdatedGraph = true
-                        _ = runRootLayoutPass(
-                            notifiesLayoutUpdate: false,
-                            samplesDisplayList: true
-                        )
-                    }
-                }
-            }
-            viewGraph.flushTransactions {
+            Update.dispatchActions()
+            viewGraph.updateOutputs(at: time, afterTransaction: {
+                // Backend resources are deferred until a graphics context exists.
+                // Consume them before the next graph transaction begins.
                 let resourceLoad = loadRootResourcesIfNeeded()
                 if resourceLoad.didLoad {
                     loadedResources = true
                 }
                 if resourceLoad.updatedGraph {
                     resourcesUpdatedGraph = true
-                    _ = runRootLayoutPass(
-                        notifiesLayoutUpdate: false,
-                        samplesDisplayList: true
-                    )
                 }
+            })
+
+            Update.dispatchActions()
+            viewGraph.flushTransactions()
+            viewGraph.data.withCurrent {
+                _ = viewGraph.rootDisplayList?.value
             }
-            viewGraph.updateOutputs(at: time)
             gestureGraph?.eventBindingManager.rootResponder =
                 viewGraph.responderNode
-            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
+            drainedViewOutbox = drainDeferredViewActions() || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
             let resourceLoad = loadRootResourcesIfNeeded()
@@ -1207,13 +1168,11 @@ class WindowController: WindowDelegate,
                     while viewGraph.data.graph.inbox.hasPendingWork {
                         let pendingTransaction = viewGraph.data.graph.inbox.nextTransaction
                         viewGraph.runTransaction(pendingTransaction, do: {
-                            viewGraph.beginNextUpdate(at: time)
                             lastResourceTransaction = viewGraph.data.graph.inbox.drainOne()
                             viewGraph.data.graph.drainActions()
                         }, id: nil)
                     }
                     _ = lastResourceTransaction
-                    drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
                 }
             }
         }
@@ -1263,7 +1222,6 @@ class WindowController: WindowDelegate,
                 }
                 displayListChanged = !displayListChangeSet.isEmpty
             }
-            drainedViewOutbox = drainActionOutbox(viewGraph.data.graph) || drainedViewOutbox
             redraw = shouldRedrawFrame || displayListChanged || drainedViewOutbox
         } else {
             redraw = shouldRedrawFrame
@@ -1337,7 +1295,7 @@ class WindowController: WindowDelegate,
         if !(animationTimestamp < displayListRenderer.nextTime) {
             viewChangedWhileDrawing = true
         }
-        if drainActionOutbox(viewGraph.data.graph) {
+        if !viewGraph.data.graph.actionOutbox.isEmpty {
             viewChangedWhileDrawing = true
         }
         // Overlay presentation children: draw on top after self.
@@ -1980,7 +1938,7 @@ class WindowController: WindowDelegate,
             ) != nil
         }
 
-        let gestureDelta = CGSize(width: -delta.x, height: -delta.y)
+        let gestureDelta = CGSize(width: delta.x, height: delta.y)
         let eventPhase: EventPhase
         let eventID: EventID
         let binding: EventBinding
@@ -2427,7 +2385,9 @@ class WindowController: WindowDelegate,
     }
 
     func updateSafeArea()      {}  // Safe area is not wired yet.
-    func updateContainerSize() {}  // Container size is not wired yet.
+    func updateContainerSize() {
+        viewGraph.setContainerSize(ViewSize(cachedContentSize))
+    }
     func updateTransform()         {}  // Transform root input is not wired yet.
     func updateFocusStore()        {}  // Focus store is not wired yet.
     func updateFocusedItem()       {}  // Focused item is not wired yet.

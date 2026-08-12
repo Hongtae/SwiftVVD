@@ -40,6 +40,50 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertTrue(observedUpdateScope)
     }
 
+    func testViewGraphActionOutboxDefersWorkProducedDuringCurrentHostTurn() {
+        // ASSERTIONS lazyScrollTargetGraphUpdateOrderObserved
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    WindowControllerLayoutSchedulingTests.self
+                )
+            )
+        )
+        let counter = LayoutSchedulingCounter()
+        controller.enqueueInputAction {
+            controller.viewGraph.data.graph.actionOutbox.append {
+                counter.placements += 1
+            }
+        }
+
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            shouldDrawFrame: false,
+            withGC
+        )
+
+        XCTAssertEqual(counter.placements, 0)
+        XCTAssertEqual(controller.viewGraph.data.graph.actionOutbox.count, 1)
+
+        controller.updateFrame(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 220, height: 220),
+            shouldDrawFrame: false,
+            withGC
+        )
+
+        XCTAssertEqual(counter.placements, 1)
+        XCTAssertTrue(controller.viewGraph.data.graph.actionOutbox.isEmpty)
+    }
+
     @MainActor
     func testScrollViewRootDisplayListMountsContentOnlyInsidePlatformGroup() throws {
         let controller = WindowController(
@@ -383,6 +427,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS systemScrollViewDeferredTargetInvocationContextObserved
     @MainActor
     func testModalScrollViewReaderButtonActionRealizesMountedTarget() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
@@ -648,39 +693,40 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             try XCTUnwrap($0.pendingContext).contentOffset.y
         }.sorted()
         XCTAssertEqual(offsets[0], 1_500, accuracy: 0.001)
-        XCTAssertEqual(offsets[1], 1_528.9473684210527, accuracy: 0.001)
+        XCTAssertEqual(offsets[1], 1_529, accuracy: 0.001)
     }
 
     @MainActor
     func testSiblingGridReadersPreserveParameterizedSectionEstimates() async throws {
         // ASSERTIONS: lazyScrollViewReaderGridSectionParameterizedOffsetObserved
+        // ASSERTIONS: lazyIndexPositionCachedVisibleStartObserved
         let cases: [(LayoutSchedulingSiblingGridReaderConfiguration, [CGFloat])] = [
             (
                 LayoutSchedulingSiblingGridReaderConfiguration(
                     columnCount: 1,
                     viewportWidth: 60
                 ),
-                [2_919.4736842105267, 3_000]
+                [2_919.5, 3_000]
             ),
             (
                 LayoutSchedulingSiblingGridReaderConfiguration(
                     columnCount: 3,
                     viewportWidth: 140
                 ),
-                [1_000, 1_105.2631578947369]
+                [1_000, 1_105.5]
             ),
             (
                 LayoutSchedulingSiblingGridReaderConfiguration(
                     rowsPerSection: 21
                 ),
-                [1_500, 1_657.8947368421054]
+                [1_500, 1_658]
             ),
             (
                 LayoutSchedulingSiblingGridReaderConfiguration(
                     rowHeight: 30,
                     headerHeight: 15
                 ),
-                [1_500, 2_193.5714285714284]
+                [1_500, 2_193.5]
             ),
         ]
 
@@ -708,6 +754,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 sceneID: SceneID(LayoutSchedulingSiblingGridReaderRoot.self)
             )
         )
+        controller.contentScaleFactorOverride = 2
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
             XCTFail("Sibling grid reader test should not request graphics resources.")
         }
@@ -716,14 +763,27 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             height: configuration.viewportHeight * 2 + 60
         )
         var redraw = false
-        controller.updateView(
-            tick: 0,
-            delta: 0,
-            date: controller.date,
-            contentSize: contentSize,
-            redraw: &redraw,
-            withGC
-        )
+        Update.ensure {
+            controller.updateView(
+                tick: 0,
+                delta: 0,
+                date: controller.date,
+                contentSize: contentSize,
+                redraw: &redraw,
+                withGC
+            )
+        }
+
+        Update.ensure {
+            controller.updateView(
+                tick: 1,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(1.0 / 60.0),
+                contentSize: contentSize,
+                redraw: &redraw,
+                withGC
+            )
+        }
 
         let root = try XCTUnwrap(
             controller.gestureGraph?.eventBindingManager.rootResponder
@@ -744,15 +804,17 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             try XCTUnwrap(probe.plainProxy).scrollTo(150, anchor: .top)
         }
-        for tick in 1...2 {
-            controller.updateView(
-                tick: UInt64(tick),
-                delta: 1.0 / 60.0,
-                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
-                contentSize: contentSize,
-                redraw: &redraw,
-                withGC
-            )
+        for tick in 2...3 {
+            Update.ensure {
+                controller.updateView(
+                    tick: UInt64(tick),
+                    delta: 1.0 / 60.0,
+                    date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                    contentSize: contentSize,
+                    redraw: &redraw,
+                    withGC
+                )
+            }
         }
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
@@ -765,6 +827,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }.sorted()
     }
 
+    // ASSERTIONS systemScrollViewWheelOffsetSignObserved
     @MainActor
     func testScrollViewHostConsumesDiscreteWheelAtMountedResponderBoundary() throws {
         let controller = WindowController(
@@ -810,7 +873,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         XCTAssertTrue(controller.handleMouseWheel(
             at: CGPoint(x: 110, y: 110),
-            delta: CGPoint(x: 0, y: 40)
+            delta: CGPoint(x: 0, y: -40)
         ))
         controller.updateView(
             tick: 1,
@@ -828,6 +891,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS systemScrollViewWheelOffsetSignObserved
     @MainActor
     func testScrollViewHostConsumesPhasedWheelWithoutPanThreshold() throws {
         let phaseProbe = LayoutSchedulingScrollPhaseProbe()
@@ -893,7 +957,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 deviceID: 0,
                 buttonID: 0,
                 location: location,
-                delta: CGPoint(x: 0, y: 4),
+                delta: CGPoint(x: 0, y: -4),
                 timestamp: 0.1,
                 scrollData: ScrollEventData(
                     phase: .changed,
@@ -924,7 +988,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 deviceID: 0,
                 buttonID: 0,
                 location: location,
-                delta: CGPoint(x: 0, y: 20),
+                delta: CGPoint(x: 0, y: -20),
                 timestamp: 0.2,
                 scrollData: ScrollEventData(
                     phase: .ended,
@@ -1531,7 +1595,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         XCTAssertTrue(controller.handleMouseWheel(
             at: location,
-            delta: CGPoint(x: 0, y: 40)
+            delta: CGPoint(x: 0, y: -40)
         ))
         controller.updateView(
             tick: 1,
@@ -1611,6 +1675,20 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertFalse(outerHost.wantsForwardedScrollEvents(for: .horizontal))
         XCTAssertFalse(outerHost.wantsForwardedScrollEvents(for: .vertical))
 
+        innerHost.publishSystemContentOffset(CGPoint(x: 100, y: 0))
+        outerHost.publishSystemContentOffset(CGPoint(x: 0, y: 20))
+        update()
+        XCTAssertEqual(
+            try XCTUnwrap(innerHost.pendingContext).contentOffset.x,
+            100,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(outerHost.pendingContext).contentOffset.y,
+            20,
+            accuracy: 0.001
+        )
+
         let location = try XCTUnwrap(firstCommonHitPoint(
             for: [outer, inner],
             in: CGSize(width: 260, height: 260)
@@ -1645,19 +1723,19 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         send(.changed, delta: CGPoint(x: 0, y: 6), timestamp: 0.2)
         XCTAssertEqual(
             try XCTUnwrap(outerHost.pendingContext).contentOffset.y,
-            0,
+            20,
             accuracy: 0.001
         )
 
         send(.changed, delta: CGPoint(x: 0, y: 6), timestamp: 0.3)
         XCTAssertEqual(
             try XCTUnwrap(innerHost.pendingContext).contentOffset.x,
-            28,
+            72,
             accuracy: 0.001
         )
         XCTAssertEqual(
             try XCTUnwrap(outerHost.pendingContext).contentOffset.y,
-            6,
+            14,
             accuracy: 0.001
         )
 

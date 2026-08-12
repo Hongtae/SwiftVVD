@@ -620,12 +620,14 @@ class HostingScrollView {
                 targetProvider?(geometry, layoutDirection)
             }) {
                 animationTarget = target
-                context.contentOffset = ScrollViewUtilities.animationOffset(
-                    targetFrame: target.rect,
-                    anchor: target.anchor,
-                    viewPortFrame: geometry.visibleRect,
-                    contentFrame: context.contentFrame,
-                    requiresVisibility: config.requiresVisibility
+                context.contentOffset = platformAlignedContentOffset(
+                    ScrollViewUtilities.animationOffset(
+                        targetFrame: target.rect,
+                        anchor: target.anchor,
+                        viewPortFrame: geometry.visibleRect,
+                        contentFrame: context.contentFrame,
+                        requiresVisibility: config.requiresVisibility
+                    )
                 )
                 if config.preservesVelocity, var decelerationState {
                     // Retarget only the destination. The simulation keeps its
@@ -696,12 +698,14 @@ class HostingScrollView {
         guard let target = targetProvider(geometry, layoutDirection) else {
             return
         }
-        let offset = ScrollViewUtilities.animationOffset(
-            targetFrame: target.rect,
-            anchor: target.anchor,
-            viewPortFrame: geometry.visibleRect,
-            contentFrame: context.contentFrame,
-            requiresVisibility: targetConfiguration.requiresVisibility
+        let offset = platformAlignedContentOffset(
+            ScrollViewUtilities.animationOffset(
+                targetFrame: target.rect,
+                anchor: target.anchor,
+                viewPortFrame: geometry.visibleRect,
+                contentFrame: context.contentFrame,
+                requiresVisibility: targetConfiguration.requiresVisibility
+            )
         )
         guard offset != cachedTargetOffset else { return }
 
@@ -721,6 +725,17 @@ class HostingScrollView {
         }
         updateGraphState(isPreferred: false)
         retargetContentOffsetIfNeeded()
+    }
+
+    private func platformAlignedContentOffset(_ offset: CGPoint) -> CGPoint {
+        let scale = environment._contentScaleFactor
+        guard scale.isFinite, scale > 0 else {
+            return offset
+        }
+        return CGPoint(
+            x: (offset.x * scale).rounded() / scale,
+            y: (offset.y * scale).rounded() / scale
+        )
     }
 
     private func updateGraphState(isPreferred: Bool) {
@@ -1783,8 +1798,8 @@ final class HostingScrollViewResponder: MultiViewResponder,
                 eventID = id
                 translation = .zero
             }
-            translation.width -= event.scrollingDelta.width
-            translation.height -= event.scrollingDelta.height
+            translation.width += event.scrollingDelta.width
+            translation.height += event.scrollingDelta.height
             return translation
         }
 
@@ -1959,10 +1974,7 @@ final class HostingScrollViewResponder: MultiViewResponder,
         let phase: GesturePhase<ScrollGesture.Value>
         switch event.kind {
         case .discrete:
-            let delta = CGSize(
-                width: -event.scrollingDelta.width,
-                height: -event.scrollingDelta.height
-            )
+            let delta = event.scrollingDelta
             switch event.phase {
             case .began, .active:
                 phase = .active(.wheel(delta))
