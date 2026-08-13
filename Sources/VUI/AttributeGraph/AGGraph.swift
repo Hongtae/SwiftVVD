@@ -224,19 +224,6 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         }
     }
 
-    struct RelativePath: Hashable {
-        let parentID: UInt32
-        let keyPath: AnyKeyPath
-
-        static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.parentID == rhs.parentID && lhs.keyPath == rhs.keyPath
-        }
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(parentID)
-            hasher.combine(keyPath)
-        }
-    }
-
     struct RelativeOffsetPath: Hashable {
         let parentID: UInt32
         let byteOffset: Int
@@ -258,8 +245,6 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     // Hashable Rule cache entries are graph-owned storage. The key keeps
     // the selected subgraph and concrete rule identity separate.
     var cachedRuleEntries: [CachedRuleKey: any CachedRuleEntry] = [:]
-    // Cache for KeyPath-derived child nodes
-    var pathIDs: [RelativePath: UInt32] = [:]
     // Cache for PointerOffset-derived child nodes
     var offsetPathIDs: [RelativeOffsetPath: UInt32] = [:]
     // Cache for untyped raw body-offset handles.

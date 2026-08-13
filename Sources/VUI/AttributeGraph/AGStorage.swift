@@ -964,10 +964,8 @@ extension _AGGraph {
             )
         }
 
-        // 3. Remove from KeyPath cache / cross-graph observer registry if applicable
+        // 3. Remove from offset caches / cross-graph observer registry if applicable
         switch slots[index].node?.kind {
-        case .keyPath(let parent, let kp):
-            pathIDs.removeValue(forKey: RelativePath(parentID: parent.rawValue, keyPath: kp))
         case .offset(let parent, let byteOffset, let valueType, _):
             offsetPathIDs.removeValue(forKey: RelativeOffsetPath(
                 parentID: parent.rawValue,
@@ -2486,15 +2484,9 @@ extension _AGGraph {
 
     // MARK: KeyPath Nodes
 
-    /// Dynamically creates or retrieves a child node representing a property accessed via KeyPath.
+    /// Creates a child node representing a property accessed via KeyPath.
     func subscriptNode<T, U>(parent: Attribute<T>, keyPath: KeyPath<T, U>) -> Attribute<U> {
         assert(_AGGraph.current === self)
-        let rp = RelativePath(parentID: parent.identifier.rawValue, keyPath: keyPath)
-
-        if let existingIndex = pathIDs[rp] {
-            return Attribute(AGAttribute(rawValue: existingIndex))
-        }
-
         let index = allocateSlot()
         slots[Int(index)].node = Node(
             value: nil,
@@ -2506,7 +2498,6 @@ extension _AGGraph {
             kind: .keyPath(parent: parent.identifier, kp: keyPath)
         )
         registerAttributeInfo(at: index, valueType: U.self)
-        pathIDs[rp] = index
         addPermanentDependency(
             from: AGAttribute(rawValue: index),
             dependsOn: parent.identifier

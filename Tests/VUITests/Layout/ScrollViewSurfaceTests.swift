@@ -3456,6 +3456,110 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS scrollActionDispatcherTransactionalSchedulingObserved
+    func testScrollActionModifiersCreateTransactionalDispatchersWithoutWrapperRules() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            func dispatcherIDs() -> Set<UInt32> {
+                Set(graph.attributeInfos.compactMap { rawID, info in
+                    guard let bodyType = info.body?.bodyType,
+                          String(reflecting: bodyType).contains("ScrollActionDispatcher") else {
+                        return nil
+                    }
+                    return rawID
+                })
+            }
+
+            func assertNewTransactionalDispatcher(
+                after previous: Set<UInt32>,
+                file: StaticString = #filePath,
+                line: UInt = #line
+            ) -> Set<UInt32> {
+                let current = dispatcherIDs()
+                let added = current.subtracting(previous)
+                XCTAssertEqual(added.count, 1, file: file, line: line)
+                guard let rawID = added.first,
+                      let node = graph.slots[Int(rawID)].node else {
+                    return current
+                }
+                XCTAssertTrue(
+                    node.flags.contains(.transactional),
+                    file: file,
+                    line: line
+                )
+                XCTAssertTrue(
+                    node.outputs.isEmpty,
+                    "The dispatcher must not feed an eager wrapper rule.",
+                    file: file,
+                    line: line
+                )
+                return current
+            }
+
+            var seenDispatchers = dispatcherIDs()
+            let phaseValues = graph.makeInput(value: [ScrollPhaseState()])
+            let geometryValues = graph.makeInput(value: [makeScrollGeometryState(offsetX: 0)])
+
+            let phaseModifier = graph.makeInput(
+                value: OnScrollPhaseChangeModifier { _, _ in }
+            )
+            _ = OnScrollPhaseChangeModifier._makeView(
+                modifier: _GraphValue(_attribute: phaseModifier),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.setValue(
+                    phaseValues.identifier,
+                    for: ScrollPhasePreferenceKey.self
+                )
+                return outputs
+            }
+            seenDispatchers = assertNewTransactionalDispatcher(after: seenDispatchers)
+
+            let contextModifier = graph.makeInput(
+                value: OnScrollPhaseContextChangeModifier { _, _, _ in }
+            )
+            _ = OnScrollPhaseContextChangeModifier._makeView(
+                modifier: _GraphValue(_attribute: contextModifier),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.setValue(
+                    phaseValues.identifier,
+                    for: ScrollPhasePreferenceKey.self
+                )
+                outputs.preferences.setValue(
+                    geometryValues.identifier,
+                    for: ScrollGeometryPreferenceKey.self
+                )
+                return outputs
+            }
+            seenDispatchers = assertNewTransactionalDispatcher(after: seenDispatchers)
+
+            let geometryModifier = graph.makeInput(
+                value: OnScrollGeometryChangeModifier<CGFloat>(
+                    transform: { $0.contentOffset.x },
+                    action: { _, _ in },
+                    prefersLast: false
+                )
+            )
+            _ = OnScrollGeometryChangeModifier<CGFloat>._makeView(
+                modifier: _GraphValue(_attribute: geometryModifier),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.setValue(
+                    geometryValues.identifier,
+                    for: ScrollGeometryPreferenceKey.self
+                )
+                return outputs
+            }
+            _ = assertNewTransactionalDispatcher(after: seenDispatchers)
+        }
+    }
+
     func testScrollActionDispatcherQueuesPhaseActionsAfterInitialOutput() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

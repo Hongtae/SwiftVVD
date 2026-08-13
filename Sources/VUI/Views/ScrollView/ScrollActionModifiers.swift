@@ -89,10 +89,7 @@ struct OnScrollPhaseChangeModifier: ViewModifier, MultiViewModifier {
                     prefersLast: OptionalAttribute()
                 )
             )
-            _ = graph.makeSideEffectRule {
-                _ = dispatcher.value
-                return ()
-            }
+            dispatcher.flags = .transactional
         }
         return outputs
     }
@@ -155,10 +152,7 @@ struct OnScrollPhaseContextChangeModifier: ViewModifier, MultiViewModifier {
                 prefersLast: OptionalAttribute()
             )
         )
-        _ = graph.makeSideEffectRule {
-            _ = dispatcher.value
-            return ()
-        }
+        dispatcher.flags = .transactional
         return outputs
     }
 
@@ -218,10 +212,7 @@ struct OnScrollGeometryChangeModifier<T: Equatable>: ViewModifier, MultiViewModi
                     prefersLast: OptionalAttribute(modifier[\.prefersLast]._attribute)
                 )
             )
-            _ = graph.makeSideEffectRule {
-                _ = dispatcher.value
-                return ()
-            }
+            dispatcher.flags = .transactional
         }
         return outputs
     }

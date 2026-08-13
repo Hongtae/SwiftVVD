@@ -891,6 +891,76 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS scrollGeometryObserverPullPathObserved
+    // ASSERTIONS scrollObserverStateCadenceObserved
+    // ASSERTIONS scrollActionDispatcherTransactionalSchedulingObserved
+    @MainActor
+    func testLazyScrollPublishesEachDiscreteWheelOffset() throws {
+        let probe = LayoutSchedulingLazyScrollObserverProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingLazyScrollObserverRoot(probe: probe),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingLazyScrollObserverRoot.self)
+            )
+        )
+        let contentSize = CGSize(width: 820, height: 680)
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        let startDate = controller.date
+
+        func updateHost(tick: Int, delta: Double = 1.0 / 60.0) {
+            controller.updateFrame(
+                tick: UInt64(tick),
+                delta: delta,
+                date: startDate.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: contentSize,
+                shouldDrawFrame: false,
+                withGC
+            )
+        }
+
+        for tick in 0...1 {
+            updateHost(tick: tick, delta: tick == 0 ? 0 : 1.0 / 60.0)
+        }
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        XCTAssertEqual(try XCTUnwrap(host.pendingContext).containingSize.height, 360)
+
+        let wheelPoint = CGPoint(x: contentSize.width / 2, y: contentSize.height / 2)
+        var publishedOffsets: [CGPoint] = []
+        var observedOffsets: [CGPoint] = []
+        for sample in 0..<6 {
+            controller.enqueueInputAction { [weak controller] in
+                _ = controller?.handleMouseWheel(
+                    at: wheelPoint,
+                    delta: CGPoint(x: 0, y: -688)
+                )
+            }
+            let tick = sample + 2
+            updateHost(tick: tick)
+            publishedOffsets.append(try XCTUnwrap(host.pendingContext).contentOffset)
+            observedOffsets.append(try XCTUnwrap(probe.geometryActions.last).contentOffset)
+            let currentRoot = try XCTUnwrap(
+                controller.gestureGraph?.eventBindingManager.rootResponder
+                    as? MultiViewResponder
+            )
+            let currentResponder = try XCTUnwrap(
+                firstHostingScrollViewResponder(in: currentRoot)
+            )
+            let currentHost = try XCTUnwrap(currentResponder.hostContainer?.scrollView)
+            XCTAssertTrue(currentHost === host, "sample \(sample)")
+        }
+
+        for (sample, pair) in zip(publishedOffsets, observedOffsets).enumerated() {
+            XCTAssertEqual(pair.1.y, pair.0.y, accuracy: 0.001, "sample \(sample)")
+        }
+    }
+
     // ASSERTIONS systemScrollViewWheelOffsetSignObserved
     @MainActor
     func testScrollViewHostConsumesPhasedWheelWithoutPanThreshold() throws {
@@ -9342,6 +9412,84 @@ private struct LayoutMeasurementScrollRoot: View {
             geometry.contentOffset
         } action: { _, newValue in
             geometryProbe.offsets.append(newValue)
+        }
+    }
+}
+
+private struct LayoutSchedulingLazyScrollGeometry: Equatable {
+    var contentOffset = CGPoint.zero
+    var contentSize = CGSize.zero
+    var containerSize = CGSize.zero
+    var visibleRect = CGRect.zero
+
+    init() {}
+
+    init(_ geometry: ScrollGeometry) {
+        contentOffset = geometry.contentOffset
+        contentSize = geometry.contentSize
+        containerSize = geometry.containerSize
+        visibleRect = geometry.visibleRect
+    }
+}
+
+private final class LayoutSchedulingLazyScrollObserverProbe: @unchecked Sendable {
+    var geometryActions: [LayoutSchedulingLazyScrollGeometry] = []
+    var phases: [ScrollPhase] = []
+    var phaseGeometries: [LayoutSchedulingLazyScrollGeometry] = []
+    var renderedGeometry = LayoutSchedulingLazyScrollGeometry()
+}
+
+private struct LayoutSchedulingLazyScrollObserverRoot: View {
+    let probe: LayoutSchedulingLazyScrollObserverProbe
+    @State private var geometry = LayoutSchedulingLazyScrollGeometry()
+    @State private var phase = ScrollPhase.idle
+
+    var body: some View {
+        probe.renderedGeometry = geometry
+        return VStack(spacing: 8) {
+            Text(
+                verbatim: "phase \(phase.debugDescription) offset \(geometry.contentOffset.y) "
+                    + "content \(geometry.contentSize.height)"
+            )
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 7) {
+                    ForEach(0..<120, id: \.self) { row in
+                        VStack(spacing: 5) {
+                            Text(verbatim: "row \(row)")
+                            if row == 4 {
+                                ScrollView(.horizontal) {
+                                    HStack(spacing: 6) {
+                                        ForEach(0..<24, id: \.self) { column in
+                                            Text(verbatim: "nested \(column)")
+                                                .frame(width: 88, height: 32)
+                                        }
+                                    }
+                                }
+                                .frame(width: 520, height: 52)
+                            }
+                        }
+                            .frame(
+                                width: 640,
+                                height: row == 4 ? 108 : (row.isMultiple(of: 9) ? 58 : 38),
+                                alignment: .leading
+                            )
+                            .id(row)
+                    }
+                }
+            }
+            .frame(width: 700, height: 360)
+            .onScrollGeometryChange(for: LayoutSchedulingLazyScrollGeometry.self) { geometry in
+                LayoutSchedulingLazyScrollGeometry(geometry)
+            } action: { _, newValue in
+                geometry = newValue
+                probe.geometryActions.append(newValue)
+            }
+            .onScrollPhaseChange { _, newPhase, context in
+                phase = newPhase
+                geometry = LayoutSchedulingLazyScrollGeometry(context.geometry)
+                probe.phases.append(newPhase)
+                probe.phaseGeometries.append(LayoutSchedulingLazyScrollGeometry(context.geometry))
+            }
         }
     }
 }

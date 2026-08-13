@@ -385,6 +385,58 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testKeyPathProjectionHasConstructionLocalSubgraphLifetime() {
+        // ASSERTIONS attributeGraphProjectionSubgraphLifetimeObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let sourceSubgraph = AGSubgraph()
+            let source = AGSubgraph.withCurrent(sourceSubgraph) {
+                graph.makeInput(
+                    value: KeyPathChangedInputPair(first: 1, second: 10)
+                )
+            }
+
+            let firstSubgraph = AGSubgraph()
+            let (first, repeatedFirst) = AGSubgraph.withCurrent(firstSubgraph) {
+                (
+                    graph.subscriptNode(parent: source, keyPath: \.second),
+                    graph.subscriptNode(parent: source, keyPath: \.second)
+                )
+            }
+            let secondSubgraph = AGSubgraph()
+            let second = AGSubgraph.withCurrent(secondSubgraph) {
+                graph.subscriptNode(parent: source, keyPath: \.second)
+            }
+
+            XCTAssertNotEqual(first.identifier, repeatedFirst.identifier)
+            XCTAssertNotEqual(first.identifier, second.identifier)
+            XCTAssertNotEqual(repeatedFirst.identifier, second.identifier)
+            XCTAssertTrue(
+                graph.subgraph(for: first.identifier) === firstSubgraph
+            )
+            XCTAssertTrue(
+                graph.subgraph(for: repeatedFirst.identifier) === firstSubgraph
+            )
+            XCTAssertTrue(
+                graph.subgraph(for: second.identifier) === secondSubgraph
+            )
+            XCTAssertEqual(first.value, 10)
+            XCTAssertEqual(repeatedFirst.value, 10)
+            XCTAssertEqual(second.value, 10)
+
+            let firstID = Int(first.identifier.rawValue)
+            let repeatedFirstID = Int(repeatedFirst.identifier.rawValue)
+            firstSubgraph.invalidate()
+
+            XCTAssertNil(graph.slots[firstID].node)
+            XCTAssertNil(graph.slots[repeatedFirstID].node)
+            XCTAssertEqual(second.value, 10)
+            XCTAssertTrue(secondSubgraph.isValid)
+        }
+    }
+
     func testBreadthFirstSearchChecksStartAndDeduplicatesCycles() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
