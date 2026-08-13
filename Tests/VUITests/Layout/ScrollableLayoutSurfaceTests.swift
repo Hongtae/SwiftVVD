@@ -165,6 +165,29 @@ private final class ScrollableLayoutRecorder {
     }
 }
 
+private func makeTestScrollViewProxy(
+    graph: _AGGraph,
+    config: _ScrollViewConfig,
+    contentOffset: CGPoint,
+    contentSize: CGSize,
+    pageSize: CGSize,
+    seed: UInt32 = 0
+) -> _ScrollViewProxy {
+    let offset = graph.makeInput(value: contentOffset)
+    let node = ScrollViewNode(
+        graphRef: _AGGraphContext(graph: graph),
+        contentOffset: offset,
+        config: config,
+        pixelLength: graph.makeInput(value: CGFloat(1))
+    )
+    node.isInitialized = true
+    node.modelOffset = contentOffset
+    node.presentationOffset = contentOffset
+    node.contentSize = contentSize
+    node.containerSize = pageSize
+    return _ScrollViewProxy(node: node, seed: seed)
+}
+
 private final class ScrollableLayoutDelegateGraphHost: GraphHost {
     private let delegateRecorder: ScrollableLayoutGraphDelegateRecorder
 
@@ -792,6 +815,51 @@ private struct OffsetSensitiveValidRectScrollableLayout: _ScrollableLayout {
             height: CGFloat(max(proxy.count, 1)) * rowStride
         )
         proxy.validRect = CGRect(origin: .zero, size: proxy.contentSize)
+    }
+}
+
+private struct NonVisibleTargetScrollableLayout: _ScrollableLayout {
+    var recorder: ScrollableLayoutRecorder
+
+    func update(state: inout Void, proxy: inout _ScrollableLayoutProxy) {
+        recorder.proxyInputs.append(
+            ScrollableProxyInputRecord(
+                size: proxy.size,
+                visibleRect: proxy.visibleRect
+            )
+        )
+
+        let rowHeight: CGFloat = 30
+        let rowStride: CGFloat = 34
+        let paddedVisibleRect = proxy.visibleRect.insetBy(dx: 0, dy: -80)
+        var visibleItems: [_ScrollableLayoutItem] = []
+        for index in 0..<proxy.count {
+            let rect = CGRect(
+                x: 0,
+                y: CGFloat(index) * rowStride,
+                width: proxy.size.width,
+                height: rowHeight
+            )
+            guard rect.intersects(paddedVisibleRect) else { continue }
+            visibleItems.append(
+                _ScrollableLayoutItem(
+                    id: proxy[index],
+                    proposedSize: rect.size,
+                    anchoring: .topLeading,
+                    at: rect.origin
+                )
+            )
+        }
+
+        let contentSize = CGSize(
+            width: proxy.size.width,
+            height: CGFloat(proxy.count) * rowStride
+        )
+        proxy.visibleItems = visibleItems
+        proxy.contentSize = contentSize
+        proxy.validRect = paddedVisibleRect.intersection(
+            CGRect(origin: .zero, size: contentSize)
+        )
     }
 }
 
@@ -1703,12 +1771,6 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             config.contentOffset = .initially(CGPoint(x: 12, y: 34))
             config.contentInsets = EdgeInsets(top: 10, leading: 5, bottom: 20, trailing: 15)
 
-            let proxy = graph.makeInput(value: _ScrollViewProxy(
-                config: config,
-                contentOffset: CGPoint(x: 12, y: 34),
-                contentSize: CGSize(width: 200, height: 160),
-                pageSize: CGSize(width: 100, height: 80)
-            ))
             let contentOffset = graph.makeInput(value: CGPoint(x: 12, y: 34))
             let node = ScrollViewNode(
                 graphRef: _AGGraphContext(graph: graph),
@@ -1716,6 +1778,13 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 config: config,
                 pixelLength: graph.makeInput(value: CGFloat(1))
             )
+            node.isInitialized = true
+            node.contentSize = CGSize(width: 200, height: 160)
+            node.containerSize = CGSize(width: 100, height: 80)
+            let proxy = graph.makeInput(value: _ScrollViewProxy(
+                node: node,
+                seed: node.propertySeed &+ node.behavior.seed
+            ))
             let modifier: Attribute<ScrollViewChildModifier.Value> = graph.makeRule(
                 ScrollViewChildModifier(_proxy: proxy, node: node)
             )
@@ -2261,21 +2330,25 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewProxyDerivedGeometryAppliesContentInsets() {
+        let graph = _AGGraph()
         var config = _ScrollViewConfig()
         config.contentInsets = EdgeInsets(top: 10, leading: 5, bottom: 20, trailing: 15)
-        let proxy = _ScrollViewProxy(
-            config: config,
-            contentOffset: CGPoint(x: 12, y: 34),
-            contentSize: CGSize(width: 200, height: 160),
-            pageSize: CGSize(width: 100, height: 80)
-        )
+        _AGGraph.withCurrent(graph) {
+            let proxy = makeTestScrollViewProxy(
+                graph: graph,
+                config: config,
+                contentOffset: CGPoint(x: 12, y: 34),
+                contentSize: CGSize(width: 200, height: 160),
+                pageSize: CGSize(width: 100, height: 80)
+            )
 
-        XCTAssertEqual(proxy.minContentOffset, .zero)
-        XCTAssertEqual(proxy.maxContentOffset, CGPoint(x: 120, y: 110))
-        XCTAssertEqual(
-            proxy.visibleRect,
-            CGRect(x: 7, y: 24, width: 100, height: 80)
-        )
+            XCTAssertEqual(proxy.minContentOffset, .zero)
+            XCTAssertEqual(proxy.maxContentOffset, CGPoint(x: 120, y: 110))
+            XCTAssertEqual(
+                proxy.visibleRect,
+                CGRect(x: 7, y: 24, width: 100, height: 80)
+            )
+        }
     }
 
     func testEventDirectionsRawValuesMatchSwiftUIAxisBits() {
@@ -2290,58 +2363,66 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testScrollViewProxyNextPageUsesInsetViewportAndClampsToContent() {
+        let graph = _AGGraph()
         var config = _ScrollViewConfig()
         config.contentInsets = EdgeInsets(top: 10, leading: 20, bottom: 30, trailing: 40)
-        var proxy = _ScrollViewProxy(
-            config: config,
-            contentOffset: CGPoint(x: 300, y: 300),
-            contentSize: CGSize(width: 1_000, height: 800),
-            pageSize: CGSize(width: 300, height: 200)
-        )
+        _AGGraph.withCurrent(graph) {
+            var proxy = makeTestScrollViewProxy(
+                graph: graph,
+                config: config,
+                contentOffset: CGPoint(x: 300, y: 300),
+                contentSize: CGSize(width: 1_000, height: 800),
+                pageSize: CGSize(width: 300, height: 200)
+            )
 
-        XCTAssertEqual(proxy.contentOffsetOfNextPage(.left), CGPoint(x: 60, y: 300))
-        XCTAssertEqual(proxy.contentOffsetOfNextPage(.right), CGPoint(x: 540, y: 300))
-        XCTAssertEqual(proxy.contentOffsetOfNextPage(.up), CGPoint(x: 300, y: 140))
-        XCTAssertEqual(proxy.contentOffsetOfNextPage(.down), CGPoint(x: 300, y: 460))
-        XCTAssertEqual(
-            proxy.contentOffsetOfNextPage([.right, .down]),
-            CGPoint(x: 540, y: 460)
-        )
+            XCTAssertEqual(proxy.contentOffsetOfNextPage(.left), CGPoint(x: 60, y: 300))
+            XCTAssertEqual(proxy.contentOffsetOfNextPage(.right), CGPoint(x: 540, y: 300))
+            XCTAssertEqual(proxy.contentOffsetOfNextPage(.up), CGPoint(x: 300, y: 140))
+            XCTAssertEqual(proxy.contentOffsetOfNextPage(.down), CGPoint(x: 300, y: 460))
+            XCTAssertEqual(
+                proxy.contentOffsetOfNextPage([.right, .down]),
+                CGPoint(x: 540, y: 460)
+            )
 
-        proxy.contentOffset = CGPoint(x: 900, y: 700)
-        XCTAssertEqual(proxy.contentOffsetOfNextPage([.right, .down]), proxy.maxContentOffset)
+            proxy.contentOffset = CGPoint(x: 900, y: 700)
+            XCTAssertEqual(proxy.contentOffsetOfNextPage([.right, .down]), proxy.maxContentOffset)
+        }
     }
 
     func testScrollViewProxyScrollRectUsesMinimalInsetViewportAdjustment() {
+        let graph = _AGGraph()
         var config = _ScrollViewConfig()
         config.contentInsets = EdgeInsets(top: 10, leading: 20, bottom: 30, trailing: 40)
-        let proxy = _ScrollViewProxy(
-            config: config,
-            contentOffset: CGPoint(x: 100, y: 100),
-            contentSize: CGSize(width: 1_000, height: 800),
-            pageSize: CGSize(width: 300, height: 200)
-        )
-        var completions: [Bool] = []
+        _AGGraph.withCurrent(graph) {
+            let proxy = makeTestScrollViewProxy(
+                graph: graph,
+                config: config,
+                contentOffset: CGPoint(x: 100, y: 100),
+                contentSize: CGSize(width: 1_000, height: 800),
+                pageSize: CGSize(width: 300, height: 200)
+            )
+            var completions: [Bool] = []
 
-        proxy.scrollRectToVisible(
-            CGRect(x: 100, y: 120, width: 40, height: 40),
-            animated: false
-        ) { completions.append($0) }
-        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 100))
-        XCTAssertEqual(completions, [true])
+            proxy.scrollRectToVisible(
+                CGRect(x: 100, y: 120, width: 40, height: 40),
+                animated: false
+            ) { completions.append($0) }
+            XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 100))
+            XCTAssertEqual(completions, [true])
 
-        proxy.scrollRectToVisible(
-            CGRect(x: 400, y: 300, width: 50, height: 40),
-            animated: false
-        ) { completions.append($0) }
-        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 210, y: 180))
-        XCTAssertEqual(completions, [true, false])
+            proxy.scrollRectToVisible(
+                CGRect(x: 400, y: 300, width: 50, height: 40),
+                animated: false
+            ) { completions.append($0) }
+            XCTAssertEqual(proxy.contentOffset, CGPoint(x: 210, y: 180))
+            XCTAssertEqual(completions, [true, false])
 
-        proxy.scrollRectToVisible(
-            CGRect(x: 100, y: 50, width: 400, height: 300),
-            animated: false
-        )
-        XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 50))
+            proxy.scrollRectToVisible(
+                CGRect(x: 100, y: 50, width: 400, height: 300),
+                animated: false
+            )
+            XCTAssertEqual(proxy.contentOffset, CGPoint(x: 100, y: 50))
+        }
     }
 
     func testScrollViewProxyLiveNodeRoutesAnimatedAndDiscreteCommits() {
@@ -2358,14 +2439,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             )
             node.containerSize = CGSize(width: 100, height: 80)
             node.contentSize = CGSize(width: 100, height: 500)
-            let proxy = _ScrollViewProxy(
-                config: node.config,
-                contentOffset: .zero,
-                contentSize: node.contentSize!,
-                pageSize: node.containerSize!,
-                node: node
-            )
-            XCTAssertEqual(proxy, _ScrollViewProxy(node: node))
+            let proxy = _ScrollViewProxy(node: node, seed: 7)
+            XCTAssertEqual(labels(of: proxy), ["node", "seed"])
+            XCTAssertEqual(proxy, _ScrollViewProxy(node: node, seed: 7))
+            XCTAssertNotEqual(proxy, _ScrollViewProxy(node: node, seed: 8))
             var completions: [Bool] = []
 
             proxy.setContentOffset(CGPoint(x: 0, y: 180), animated: false) {
@@ -2468,11 +2545,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             node.containerSize = CGSize(width: 200, height: 100)
             node.contentSize = CGSize(width: 200, height: 800)
             let proxy = _ScrollViewProxy(
-                config: node.config,
-                contentOffset: initial,
-                contentSize: node.contentSize!,
-                pageSize: node.containerSize!,
-                node: node
+                node: node,
+                seed: node.propertySeed &+ node.behavior.seed
             )
             let active = PanGesture.Value(
                 timestamp: Time(seconds: 1),
@@ -2537,7 +2611,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 calls.append((current, original, velocity.valuePerSecond, size))
                 return CGPoint(x: 400, y: 500)
             }
-            let proxy = _ScrollViewProxy(node: node)
+            let proxy = _ScrollViewProxy(
+                node: node,
+                seed: node.propertySeed &+ node.behavior.seed
+            )
             let active = PanGesture.Value(
                 timestamp: Time(seconds: 1),
                 translation: CGSize(width: -30, height: -40),
@@ -2583,7 +2660,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             node.contentSize = CGSize(width: 240, height: 2_720)
             node.modelOffset = bindingValue
             node.presentationOffset = bindingValue
-            let proxy = _ScrollViewProxy(node: node)
+            let proxy = _ScrollViewProxy(
+                node: node,
+                seed: node.propertySeed &+ node.behavior.seed
+            )
             var completions: [Bool] = []
 
             proxy.setContentOffset(CGPoint(x: 0, y: 900), animated: true) {
@@ -2652,7 +2732,10 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 scrollingHorizontally: false,
                 ended: false
             ))
-            let proxy = _ScrollViewProxy(node: node)
+            let proxy = _ScrollViewProxy(
+                node: node,
+                seed: node.propertySeed &+ node.behavior.seed
+            )
             var completions: [Bool] = []
 
             proxy.setContentOffset(CGPoint(x: 70, y: 90), animated: false) {
@@ -2706,6 +2789,69 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             let geometry = try XCTUnwrap(capturedGeometry)
             XCTAssertEqual(geometry.contentOffset, CGPoint(x: 40, y: 60))
             XCTAssertEqual(geometry.contentSize, CGSize(width: 120, height: 110))
+        }
+    }
+
+    func testScrollViewUpdatePublishesProxySeedForContainerAndConfigChanges() throws {
+        let graph = _AGGraph()
+        let recorder = ScrollableLayoutRecorder()
+
+        try _AGGraph.withCurrent(graph) {
+            typealias Scroll = _ScrollView<ScrollViewInputRecordingProvider>
+
+            var config = _ScrollViewConfig()
+            config.contentOffset = .initially(.zero)
+            let provider = ScrollViewInputRecordingProvider(
+                recorder: recorder,
+                fixedContentSize: CGSize(width: 300, height: 500)
+            )
+            let mainAttr = graph.makeInput(
+                value: Scroll.Main(contentProvider: provider, config: config)
+            )
+            let sizeAttr = graph.makeInput(value: ViewSize(width: 100, height: 80))
+            var inputs = makeViewInputs(graph: graph, size: sizeAttr)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
+
+            let outputs = Scroll.Main._makeView(
+                view: _GraphValue(_attribute: mainAttr),
+                inputs: inputs
+            )
+            let scrollablesAttr = try XCTUnwrap(
+                outputs.preferences.value(for: ScrollablePreferenceKey.self)
+            )
+            let scrollable = Attribute<ScrollablePreferenceKey.Value>(scrollablesAttr).value[0]
+            let node = try XCTUnwrap(
+                Mirror(reflecting: scrollable).children
+                    .first(where: { $0.label == "node" })?.value as? ScrollViewNode
+            )
+
+            let initialProxy = try XCTUnwrap(node.currentProxy)
+            let initialPropertySeed = node.propertySeed
+            XCTAssertEqual(initialProxy.pageSize, CGSize(width: 100, height: 80))
+
+            sizeAttr.setValue(ViewSize(width: 140, height: 90))
+            let resizedProxy = try XCTUnwrap(node.currentProxy)
+            XCTAssertTrue(initialProxy.node === resizedProxy.node)
+            XCTAssertEqual(node.propertySeed, initialPropertySeed &+ 1)
+            XCTAssertEqual(resizedProxy.seed, initialProxy.seed &+ 1)
+            XCTAssertNotEqual(initialProxy, resizedProxy)
+            XCTAssertEqual(resizedProxy.pageSize, CGSize(width: 140, height: 90))
+
+            config.contentInsets = EdgeInsets(
+                top: 3,
+                leading: 5,
+                bottom: 7,
+                trailing: 11
+            )
+            mainAttr.setValue(Scroll.Main(contentProvider: provider, config: config))
+            let configuredProxy = try XCTUnwrap(node.currentProxy)
+            XCTAssertTrue(resizedProxy.node === configuredProxy.node)
+            XCTAssertEqual(node.propertySeed, initialPropertySeed &+ 2)
+            XCTAssertEqual(configuredProxy.seed, resizedProxy.seed &+ 1)
+            XCTAssertNotEqual(resizedProxy, configuredProxy)
+            XCTAssertEqual(configuredProxy.config.contentInsets, config.contentInsets)
+
+            // ASSERTIONS: scrollViewUpdateInputSeedPropagationObserved
         }
     }
 
@@ -3275,6 +3421,94 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
             XCTAssertFalse(recorder.makeViewIDs.contains(3))
             XCTAssertFalse(recorder.makeViewIDs.contains(4))
         }
+    }
+
+    func testScrollableLayoutPrivateProxyTargetRealizesNonVisibleAdaptorItem() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = ScrollableLayoutRecorder()
+
+        try host.data.withCurrent {
+            typealias LayoutView = _ScrollableLayoutView<
+                [ScrollableRecordingRow],
+                NonVisibleTargetScrollableLayout
+            >
+            typealias Scroll = _ScrollView<LayoutView>
+
+            let rows = (0..<120).map {
+                ScrollableRecordingRow(id: $0, recorder: recorder)
+            }
+            let provider = LayoutView(
+                data: rows,
+                layout: NonVisibleTargetScrollableLayout(recorder: recorder)
+            )
+            let main = graph.makeInput(
+                value: Scroll.Main(
+                    contentProvider: provider,
+                    config: _ScrollViewConfig()
+                )
+            )
+            let size = graph.makeInput(value: ViewSize(width: 240, height: 140))
+            var inputs = makeViewInputs(graph: graph, size: size)
+            inputs.needsGeometry = true
+            inputs.preferences.keys.add(ScrollableMaterializationPreferenceKey.self)
+            inputs.preferences.keys.add(ScrollablePreferenceKey.self)
+
+            let outputs = Scroll.Main._makeView(
+                view: _GraphValue(_attribute: main),
+                inputs: inputs
+            )
+            let materialization = try materializeDynamicItems(in: outputs)
+            XCTAssertFalse(recorder.makeViewIDs.contains(100))
+            XCTAssertLessThan(recorder.makeViewIDs.count, 20)
+
+            let scrollablesID = try XCTUnwrap(
+                outputs.preferences.value(for: ScrollablePreferenceKey.self)
+            )
+            let scrollable = try XCTUnwrap(
+                Attribute<ScrollablePreferenceKey.Value>(scrollablesID).value.first
+            )
+            XCTAssertTrue(
+                scrollable.setContentTarget { geometry, _ in
+                    ScrollTarget(
+                        rect: CGRect(
+                            x: 0,
+                            y: 3_290,
+                            width: geometry.containerSize.width,
+                            height: geometry.containerSize.height
+                        )
+                    )
+                }
+            )
+
+            _ = materialization.value
+            XCTAssertEqual(recorder.proxyInputs.last?.visibleRect.minY, 3_290)
+            XCTAssertNotNil(recorder.geometryProbes[100])
+            recorder.sampleGeometry(for: [100], recordingInputs: false)
+            XCTAssertEqual(recorder.placements.last, [100])
+            XCTAssertLessThan(Set(recorder.makeViewIDs).count, 20)
+        }
+
+        host.flushTransactions()
+
+        // ASSERTIONS: scrollableLayoutPrivateProxyTargetRealizationObserved,
+        // scrollableLayoutPrivateProxyHostFlowObserved,
+        // scrollViewProxyNodeSeedIdentityObserved,
+        // scrollableLayoutPrivateRuleConformancesObserved
+    }
+
+    func testScrollableLayoutViewRetainsMarkerAndProviderRoles() {
+        typealias LayoutView = _ScrollableLayoutView<
+            [ScrollableRecordingRow],
+            NonVisibleTargetScrollableLayout
+        >
+        let erasedType: Any.Type = LayoutView.self
+
+        XCTAssertTrue(erasedType is any PrimitiveView.Type)
+        XCTAssertTrue(erasedType is any UnaryView.Type)
+        XCTAssertTrue(erasedType is any _ScrollableContentProvider.Type)
+
+        // ASSERTIONS: scrollableLayoutMarkerProtocolsObserved
     }
 
     func testScrollableLayoutViewPlacesVisibleItemsAndReusesOneUnusedItem() throws {

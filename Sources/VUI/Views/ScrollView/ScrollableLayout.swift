@@ -1676,32 +1676,50 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
     }
 
     mutating func updateValue() {
-        let current = _view.value
-        _node.updateConfig(current.config)
-        _node.update(resetSeed: _phase.value.resetSeed)
-        let contentProvider = current.contentProvider
-        _node.decelerationTarget = { contentOffset, originalContentOffset, velocity, size in
-            contentProvider.decelerationTarget(
-                contentOffset: contentOffset,
-                originalContentOffset: originalContentOffset,
-                velocity: velocity,
-                size: size
-            )
+        var nodeChanged = _node.update(resetSeed: _phase.value.resetSeed)
+
+        let containerSize = _containerSize.changedValue(options: [])
+        let pageSize = containerSize.value.value
+        if containerSize.changed {
+            _node.containerSize = pageSize
+            _node.propertySeed &+= 1
+            nodeChanged = true
+        }
+
+        let currentInput = _view.changedValue(options: [])
+        let current = currentInput.value
+        if currentInput.changed {
+            _node.updateConfig(current.config)
+            let contentProvider = current.contentProvider
+            _node.decelerationTarget = { contentOffset, originalContentOffset, velocity, size in
+                contentProvider.decelerationTarget(
+                    contentOffset: contentOffset,
+                    originalContentOffset: originalContentOffset,
+                    velocity: velocity,
+                    size: size
+                )
+            }
+            _node.propertySeed &+= 1
+            nodeChanged = true
         }
         _ = _environment.value
         let time = _time.value
 
         let sourceAttribute = _node.attribute.toStrong()
-        _ = sourceAttribute.value
+        let sourceInput = sourceAttribute.changedValue(options: [])
+        if sourceInput.changed {
+            nodeChanged = true
+        }
         let transaction = _AGGraph.withoutTracking {
             _transaction.value
         }
-        let pageSize = _containerSize.value.value
-        _node.containerSize = pageSize
 
         warnIfBindingWasRead(in: current.config)
         let bindingOffset = updateBindingOffset(for: current.config)
-        var nodeChanged = _node.updateContentOffset(in: transaction, bindingOffset: bindingOffset)
+        if _node.updateContentOffset(in: transaction, bindingOffset: bindingOffset) {
+            _node.propertySeed &+= 1
+            nodeChanged = true
+        }
         let behaviorSeed = _node.behavior.seed
         var presentationOffset = _node.presentationOffset
         _ = _node.behavior.iterateDeceleration(
@@ -1717,17 +1735,13 @@ private struct ScrollViewUpdate<Provider>: StatefulRule where Provider: _Scrolla
         if behaviorSeed != _node.behavior.seed {
             nodeChanged = true
         }
-        if nodeChanged {
-            _node.propertySeed &+= 1
-        }
 
-        _AGGraph.setStatefulOutput(_ScrollViewProxy(
-            config: current.config,
-            contentOffset: _node.currentContentOffset,
-            contentSize: _node.currentContentSize ?? pageSize,
-            pageSize: pageSize,
-            node: _node
-        ))
+        if nodeChanged || !hasValue {
+            _AGGraph.setStatefulOutput(_ScrollViewProxy(
+                node: _node,
+                seed: _node.propertySeed &+ _node.behavior.seed
+            ))
+        }
     }
 
     private mutating func warnIfBindingWasRead(in config: _ScrollViewConfig) {
@@ -1879,8 +1893,6 @@ private struct _ScrollViewMainGeometryProvider: Rule {
             containerSize: containerSize,
             config: proxyValue.config
         )
-        proxyValue._setContentSize(contentSize)
-        proxyValue._setContentOffset(contentOffset)
         let visibleSize = containerSize.outset(by: proxyValue.config.contentInsets)
         var geometry = ScrollGeometry(
             contentOffset: contentOffset,
@@ -1918,20 +1930,13 @@ public struct _ScrollViewRoot<P>: View where P: _ScrollableContentProvider {
 /// Mutable scroll-view proxy shared with scrollable layout implementations.
 public struct _ScrollViewProxy: Equatable {
     public var config: _ScrollViewConfig {
-        storage.node?.config ?? storage.config
+        node.config
     }
 
     public var contentOffset: CGPoint {
-        get { storage.node?.currentContentOffset ?? storage.contentOffset }
+        get { node.currentContentOffset }
         set {
-            if let node = storage.node {
-                node.requestContentOffset(newValue, animated: false, completion: nil)
-            } else {
-                storage.contentOffset = _scrollViewClampContentOffset(
-                    newValue,
-                    maxContentOffset: maxContentOffset
-                )
-            }
+            node.requestContentOffset(newValue, animated: false, completion: nil)
         }
     }
 
@@ -1943,8 +1948,8 @@ public struct _ScrollViewProxy: Equatable {
             contentInsets: config.contentInsets
         )
     }
-    public var contentSize: CGSize { storage.node?.currentContentSize ?? storage.contentSize }
-    public var pageSize: CGSize { storage.node?.containerSize ?? storage.pageSize }
+    public var contentSize: CGSize { node.currentContentSize ?? .zero }
+    public var pageSize: CGSize { node.containerSize ?? .zero }
     public var visibleRect: CGRect {
         CGRect(
             x: contentOffset.x - config.contentInsets.leading,
@@ -1954,48 +1959,37 @@ public struct _ScrollViewProxy: Equatable {
         )
     }
     public var isDragging: Bool {
-        guard let node = storage.node else { return false }
         if case .dragging = node.behavior.phase { return true }
         return false
     }
     public var isDecelerating: Bool {
-        guard let node = storage.node else { return false }
         if case .decelerating = node.behavior.phase { return true }
         return false
     }
     public var isScrolling: Bool { isDragging || isDecelerating }
     var isMostlyDecelerating: Bool { isDecelerating }
     public var isScrollingHorizontally: Bool {
-        guard let node = storage.node,
-              case .dragging(let state) = node.behavior.phase else {
+        guard case .dragging(let state) = node.behavior.phase else {
             return false
         }
         return state.scrollingHorizontally
     }
     public var isScrollingVertically: Bool {
-        guard let node = storage.node,
-              case .dragging(let state) = node.behavior.phase else {
+        guard case .dragging(let state) = node.behavior.phase else {
             return false
         }
         return state.scrollingVertically
     }
 
-    private var storage: Storage
+    var node: ScrollViewNode
+    var seed: UInt32
 
     init(
-        config: _ScrollViewConfig = _ScrollViewConfig(),
-        contentOffset: CGPoint = .zero,
-        contentSize: CGSize = .zero,
-        pageSize: CGSize = .zero,
-        node: ScrollViewNode? = nil
+        node: ScrollViewNode,
+        seed: UInt32
     ) {
-        self.storage = Storage(
-            config: config,
-            contentOffset: contentOffset,
-            contentSize: contentSize,
-            pageSize: pageSize,
-            node: node
-        )
+        self.node = node
+        self.seed = seed
     }
 
     public func setContentOffset(
@@ -2003,20 +1997,7 @@ public struct _ScrollViewProxy: Equatable {
         animated: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        if let node = storage.node {
-            node.requestContentOffset(newOffset, animated: animated, completion: completion)
-            return
-        }
-        let finishedWithoutMovement = storage.contentOffset == newOffset
-        storage.contentOffset = _scrollViewClampContentOffset(
-            newOffset,
-            maxContentOffset: maxContentOffset
-        )
-        if let completion {
-            Update.enqueueAction {
-                completion(finishedWithoutMovement)
-            }
-        }
+        node.requestContentOffset(newOffset, animated: animated, completion: completion)
     }
 
     public func scrollRectToVisible(
@@ -2080,49 +2061,14 @@ public struct _ScrollViewProxy: Equatable {
         return _scrollViewClampContentOffset(target, maxContentOffset: maxContentOffset)
     }
 
-    func _setContentOffset(_ contentOffset: CGPoint) {
-        storage.contentOffset = contentOffset
-    }
-
-    func _setContentSize(_ contentSize: CGSize) {
-        storage.contentSize = contentSize
-    }
-
     func _dispatchScrollGesturePhase(_ phase: GesturePhase<ScrollGesture.Value>) {
-        storage.node?.withCurrent {
-            storage.node?.dispatchScrollGesturePhase(phase)
+        node.withCurrent {
+            node.dispatchScrollGesturePhase(phase)
         }
     }
-
-    var node: ScrollViewNode? { storage.node }
 
     public static func == (lhs: _ScrollViewProxy, rhs: _ScrollViewProxy) -> Bool {
-        if let lhsNode = lhs.storage.node, let rhsNode = rhs.storage.node {
-            return lhsNode === rhsNode
-        }
-        return lhs.storage === rhs.storage
-    }
-
-    private final class Storage {
-        var config: _ScrollViewConfig
-        var contentOffset: CGPoint
-        var contentSize: CGSize
-        var pageSize: CGSize
-        weak var node: ScrollViewNode?
-
-        init(
-            config: _ScrollViewConfig,
-            contentOffset: CGPoint,
-            contentSize: CGSize,
-            pageSize: CGSize,
-            node: ScrollViewNode?
-        ) {
-            self.config = config
-            self.contentOffset = contentOffset
-            self.contentSize = contentSize
-            self.pageSize = pageSize
-            self.node = node
-        }
+        lhs.node === rhs.node && lhs.seed == rhs.seed
     }
 }
 

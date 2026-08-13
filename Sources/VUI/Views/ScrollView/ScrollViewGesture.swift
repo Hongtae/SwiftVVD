@@ -87,9 +87,7 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
     }
 
     var gesture: ContentGesture {
-        guard let node = proxy.node else {
-            fatalError("ScrollViewGesture requires a live ScrollViewNode")
-        }
+        let node = proxy.node
         let scrollGesture = proxy.config.gestureProvider.gesture(proxy: proxy)
         let chain = CallbackGesture(
             modifier: CallbacksGesture(callbacks: self),
@@ -108,12 +106,10 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
         state: inout Void
     ) -> (() -> ())? {
         _ = state
-        guard proxy.node != nil else { return nil }
         return { proxy._dispatchScrollGesturePhase(phase) }
     }
 
     func cancel(state: Void) -> (() -> ())? {
-        guard proxy.node != nil else { return nil }
         return { proxy._dispatchScrollGesturePhase(.failed) }
     }
 
