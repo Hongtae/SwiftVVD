@@ -35,22 +35,20 @@ public protocol Screen: Identifiable where ID == ScreenID {
     /// object identity, wl_output name, or another stable display token.
     var id: ScreenID { get }
 
-    /// Full display rectangle in screen-space points.
+    /// Full display rectangle in the platform's external window coordinate space.
     ///
-    /// This is a logical coordinate rectangle used for window placement, not a
-    /// physical pixel rectangle. AppKit and UIKit use points. Win32 backends
-    /// should expose the same logical screen-space unit used by the rest of
-    /// VVD, with scaleFactor used when backing pixels are needed.
+    /// The coordinate space and unit match `Window.origin` and
+    /// `Window.windowFrame`. AppKit uses points with a top-left origin after
+    /// coordinate conversion, while Win32 uses screen pixels.
     var frame: CGRect { get }
 
-    /// Visible display rectangle for normal window placement, in screen-space points.
+    /// Visible display rectangle for normal window placement.
     ///
     /// This excludes the menu bar, Dock, taskbar, or similar reserved system
-    /// UI. AppKit maps this to NSScreen.visibleFrame; Win32 maps this to the
-    /// monitor work area. It is still a logical point rectangle, not pixels.
+    /// UI. It uses the same external coordinate space and unit as `frame`.
     var visibleFrame: CGRect { get }
 
-    /// Edge insets for fullscreen content safety, in screen-space points.
+    /// Edge insets for fullscreen content safety, in the platform screen unit.
     ///
     /// These are areas where important fullscreen content can be obscured or
     /// hard to interact with, such as a notch, rounded display corners, or

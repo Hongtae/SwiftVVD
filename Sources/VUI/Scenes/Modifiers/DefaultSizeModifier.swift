@@ -58,7 +58,7 @@ public struct TransformSceneListModifier: _SceneModifier {
 extension Scene {
     public func defaultSize(_ size: CGSize) -> some Scene {
         modifier(TransformSceneListModifier { items in
-            for i in items.indices where items[i].sceneConfiguration.defaultSize == nil {
+            for i in items.indices {
                 items[i].sceneConfiguration.defaultSize = size
             }
         })

@@ -368,6 +368,10 @@ final class WaylandWindow: Window {
         xdg_toplevel_set_minimized(self.xdgToplevel)
     }
 
+    func center() {
+        // Toplevel placement is controlled by the Wayland compositor.
+    }
+
     func requestToClose() -> Bool {
         var close = true
         if self.isValid {

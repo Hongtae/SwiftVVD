@@ -223,12 +223,16 @@ public protocol Window: AnyObject {
     var activated: Bool { get }
     var visible: Bool { get }
 
+    /// Content bounds in scale-adjusted logical content coordinates.
     var contentBounds: CGRect { get }
+    /// Outer window frame in the platform's external screen coordinates.
     var windowFrame: CGRect { get }
     var contentScaleFactor: CGFloat { get }
     var resolution: CGSize { get set }
 
+    /// Outer window origin in the same external coordinates as `windowFrame`.
     var origin: CGPoint { get set }
+    /// Content size in scale-adjusted logical content coordinates.
     var contentSize: CGSize { get set }
     
     var title: String { get set }
@@ -241,6 +245,7 @@ public protocol Window: AnyObject {
     func hide()
     func activate()
     func minimize()
+    func center()
 
     @discardableResult
     func requestToClose() -> Bool
@@ -279,6 +284,18 @@ public protocol Window: AnyObject {
 }
 
 extension Window {
+    public func center() {
+        guard let screen else { return }
+        let visibleFrame = screen.visibleFrame
+        let outerSize = windowFrame.size
+        origin = CGPoint(
+            x: visibleFrame.minX
+                + (visibleFrame.width - outerSize.width) * 0.5,
+            y: visibleFrame.minY
+                + (visibleFrame.height - outerSize.height) * 0.5
+        )
+    }
+
     public func showMouse(_: Bool, forDeviceID: Int) {}
     public func isMouseVisible(forDeviceID: Int) -> Bool { false }
     public func lockMouse(_: Bool, forDeviceID: Int) {}

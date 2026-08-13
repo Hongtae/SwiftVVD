@@ -87,8 +87,11 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     var windowFrame: CGRect {
         if let screen = self.window?.screen {
             let frame = self.window!.frame
-            let y = screen.frame.height - frame.maxY
-            return CGRect(x: frame.minX, y: y, width: frame.width, height: frame.height)
+            let referenceY = AppKitScreen.desktopTop(fallback: screen)
+            return AppKitScreen.topLeftRect(
+                fromNative: frame,
+                referenceY: referenceY
+            )
         }
         let rect = self.frame
         return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height)

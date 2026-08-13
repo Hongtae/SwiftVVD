@@ -142,6 +142,9 @@ final class UIKitWindow: Window {
         uiView?.isHidden = true
     }
 
+    func center() {
+    }
+
     func requestToClose() -> Bool {
         var close = true
         if self.isValid {

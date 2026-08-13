@@ -10,7 +10,7 @@ import Foundation
 extension Scene {
     public func defaultPosition(_ position: UnitPoint) -> some Scene {
         modifier(TransformSceneListModifier { items in
-            for i in items.indices where items[i].sceneConfiguration.defaultPosition == nil {
+            for i in items.indices {
                 items[i].sceneConfiguration.defaultPosition = position
             }
         })

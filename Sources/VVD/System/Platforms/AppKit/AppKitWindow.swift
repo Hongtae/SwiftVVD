@@ -67,8 +67,11 @@ final class AppKitWindow: Window {
                 if nsView.window?.contentView === self.view {
                     let frame = nsView.window!.frame
                     if let screen = nsView.window?.screen {
-                        let height = screen.frame.height
-                        return CGPoint(x: frame.minX, y: height - frame.maxY)
+                        let referenceY = AppKitScreen.desktopTop(fallback: screen)
+                        return AppKitScreen.topLeftRect(
+                            fromNative: frame,
+                            referenceY: referenceY
+                        ).origin
                     }
                     return frame.origin
                 } else {
@@ -82,9 +85,12 @@ final class AppKitWindow: Window {
                 if nsView.window?.contentView === self.view {
                     let window = nsView.window!
                     if let screen = window.screen {
-                        let height = screen.frame.height
-                        let y = height - value.y
-                        window.setFrameTopLeftPoint(NSPoint(x: value.x, y: y))
+                        let referenceY = AppKitScreen.desktopTop(fallback: screen)
+                        let nativePoint = AppKitScreen.nativePoint(
+                            fromTopLeft: value,
+                            referenceY: referenceY
+                        )
+                        window.setFrameTopLeftPoint(nativePoint)
                     } else {
                         window.setFrameOrigin(value)
                     }
@@ -199,6 +205,8 @@ final class AppKitWindow: Window {
         } else if style.contains(.utilityWindow) {
             window.level = .init(rawValue: Int(CGWindowLevelForKey(.utilityWindow)))
         }
+
+        window.center()
         
         self.postWindowEvent(
             WindowEvent(type: .created,
@@ -254,6 +262,10 @@ final class AppKitWindow: Window {
 
     func minimize() {
         nsView?.window?.miniaturize(nil)
+    }
+
+    func center() {
+        nsView?.window?.center()
     }
 
     func requestToClose() -> Bool {
@@ -356,9 +368,13 @@ final class AppKitWindow: Window {
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
         if let nsView, let window {
             let ptWindow = nsView.convert(point, to: nil)
-            var ptScreen = window.convertPoint(toScreen: ptWindow)
-            if let frame = window.screen?.frame {
-                ptScreen.y = frame.height - ptScreen.y
+            let ptScreen = window.convertPoint(toScreen: ptWindow)
+            if let screen = window.screen {
+                let referenceY = AppKitScreen.desktopTop(fallback: screen)
+                return AppKitScreen.topLeftPoint(
+                    fromNative: ptScreen,
+                    referenceY: referenceY
+                )
             }
             return ptScreen
         }
@@ -367,11 +383,15 @@ final class AppKitWindow: Window {
     
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
         if let nsView, let window {
-            var point = point
-            if let frame = window.screen?.frame {
-                point.y = frame.minY + (frame.height - point.y)
+            var nativePoint = point
+            if let screen = window.screen {
+                let referenceY = AppKitScreen.desktopTop(fallback: screen)
+                nativePoint = AppKitScreen.nativePoint(
+                    fromTopLeft: point,
+                    referenceY: referenceY
+                )
             }
-            let ptWindow = window.convertPoint(fromScreen: point)
+            let ptWindow = window.convertPoint(fromScreen: nativePoint)
             return nsView.convert(ptWindow, from: nil)
         }
         return point

@@ -13,12 +13,22 @@ struct AppKitScreen: Screen {
     let id: ScreenID
     let screen: NSScreen
 
+    private var topLeftReferenceY: CGFloat {
+        Self.desktopTop(fallback: screen)
+    }
+
     var frame: CGRect {
-        screen.frame
+        Self.topLeftRect(
+            fromNative: screen.frame,
+            referenceY: topLeftReferenceY
+        )
     }
 
     var visibleFrame: CGRect {
-        screen.visibleFrame
+        Self.topLeftRect(
+            fromNative: screen.visibleFrame,
+            referenceY: topLeftReferenceY
+        )
     }
 
     var safeAreaInsets: ScreenInsets {
@@ -76,6 +86,38 @@ struct AppKitScreen: Screen {
     init(_ screen: NSScreen) {
         self.id = Self.screenID(for: screen)
         self.screen = screen
+    }
+
+    static func desktopTop(fallback screen: NSScreen?) -> CGFloat {
+        // AppKit's zero screen defines the shared desktop origin. A fixed
+        // reference keeps converted global Y coordinates stable across displays.
+        NSScreen.screens.first?.frame.maxY ?? screen?.frame.maxY ?? 0
+    }
+
+    static func topLeftRect(
+        fromNative rect: CGRect,
+        referenceY: CGFloat
+    ) -> CGRect {
+        CGRect(
+            x: rect.minX,
+            y: referenceY - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    static func topLeftPoint(
+        fromNative point: CGPoint,
+        referenceY: CGFloat
+    ) -> CGPoint {
+        CGPoint(x: point.x, y: referenceY - point.y)
+    }
+
+    static func nativePoint(
+        fromTopLeft point: CGPoint,
+        referenceY: CGFloat
+    ) -> CGPoint {
+        CGPoint(x: point.x, y: referenceY - point.y)
     }
 }
 

@@ -117,6 +117,10 @@ class WindowContext: @unchecked Sendable {
             if let window = VVD.makeWindow(name: title,
                                            style: style,
                                            delegate: delegate) {
+                Self.applyInitialSceneConfiguration(
+                    self.sceneConfiguration,
+                    to: window
+                )
                 if let graphicsDevice = appContext?.graphicsDeviceContext {
                     if GraphicsContext.cachePipelineContext(graphicsDevice) == false {
                         Log.error("Failed to cache GraphicsPipelineStates")
@@ -147,6 +151,34 @@ class WindowContext: @unchecked Sendable {
             }
         }
         return self.window
+    }
+
+    @MainActor
+    static func applyInitialSceneConfiguration(
+        _ configuration: WindowSceneConfiguration,
+        to window: any PlatformWindow
+    ) {
+        if let defaultSize = configuration.defaultSize {
+            window.contentSize = defaultSize
+        }
+
+        guard let initialPosition = configuration.defaultPosition else {
+            window.center()
+            return
+        }
+
+        guard let screen = window.screen else {
+            return
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let outerSize = window.windowFrame.size
+        window.origin = CGPoint(
+            x: visibleFrame.minX
+                + (visibleFrame.width - outerSize.width) * initialPosition.x,
+            y: visibleFrame.minY
+                + (visibleFrame.height - outerSize.height) * initialPosition.y
+        )
     }
 
     private func runUpdateTask() -> Task<Void, Never> {

@@ -469,14 +469,8 @@ final class Win32Window: Window {
         self.contentScaleFactor = dpiScaleForWindow(hWnd)
         let invScale = 1.0 / self.contentScaleFactor
 
-        self.contentBounds = CGRect(x: CGFloat(rc1.left),
-                                    y: CGFloat(rc1.top),
-                                    width: CGFloat(rc1.right - rc1.left) * invScale,
-                                    height: CGFloat(rc1.bottom - rc1.top) * invScale)
-        self.windowFrame = CGRect(x: Int(rc2.left),
-                                  y: Int(rc2.top),
-                                  width: Int(rc2.right - rc2.left),
-                                  height: Int(rc2.bottom - rc2.top))
+        self.contentBounds = CGRect(rc1, scale: invScale)
+        self.windowFrame = CGRect(rc2)
 
         SetWindowPos(hWnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
         SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
@@ -595,6 +589,25 @@ final class Win32Window: Window {
         if let hWnd = self.hWnd {
             ShowWindow(hWnd, SW_MINIMIZE)
         }
+    }
+
+    func center() {
+        guard self.modalPresentationContext?.mode != .attached,
+              let hWnd,
+              let screen = Win32Screen(
+                MonitorFromWindow(hWnd, DWORD(MONITOR_DEFAULTTONEAREST))
+              ) else {
+            return
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let outerSize = self.windowFrame.size
+        self.origin = CGPoint(
+            x: visibleFrame.minX
+                + (visibleFrame.width - outerSize.width) * 0.5,
+            y: visibleFrame.minY
+                + (visibleFrame.height - outerSize.height) * 0.5
+        )
     }
 
     // MARK: - Close Handling
@@ -2004,15 +2017,10 @@ final class Win32Window: Window {
                     moved = true
                 }
                 if resized || moved {
-                    window.windowFrame = CGRect(x: Int(rcWindow.left),
-                                                y: Int(rcWindow.top),
-                                                width: Int(rcWindow.right - rcWindow.left),
-                                                height: Int(rcWindow.bottom - rcWindow.top))
+                    window.windowFrame = CGRect(rcWindow)
                     let invScale = 1.0 / window.contentScaleFactor
-                    window.contentBounds = CGRect(x: CGFloat(rcClient.left),
-                                                  y: CGFloat(rcClient.top),
-                                                  width: CGFloat(rcClient.right - rcClient.left) * invScale,
-                                                  height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
+                    window.contentBounds = CGRect(rcClient, scale: invScale)
+
                     if resized {
                         window.beginResizeEventIfNeeded()
                         window.postWindowEvent(type: .resized)
@@ -2048,23 +2056,25 @@ final class Win32Window: Window {
                         window.postWindowEvent(type: .minimized)
                     }
                 } else {
+                    let size = CGSize(width: Int(LOWORD(lParam)),
+                                      height: Int(HIWORD(lParam)))
+                    window.contentBounds.size =
+                        size * (1.0 / window.contentScaleFactor) // DPI-scaled size.
+
+                    var rc = RECT()
+                    if GetWindowRect(hWnd, &rc) {
+                        window.windowFrame = CGRect(rc)
+                    } else {
+                        let err = win32ErrorString(GetLastError())
+                        Log.error("WM_SIZE: GetWindowRect failed: \(err)")
+                    }
+
                     if window.minimized || window.visible == false {
                         window.minimized = false
                         window.visible = true
                         window.postWindowEvent(type: .shown)
                     } else {
-                        let w = Int(LOWORD(lParam))
-                        let h = Int(HIWORD(lParam))
-                        let size = CGSize(width: w, height: h)  // Pixel size.
                         window.beginResizeEventIfNeeded()
-                        window.contentBounds.size = size * (1.0 / window.contentScaleFactor) // DPI-scaled size.
-
-                        var rc = RECT()
-                        GetWindowRect(hWnd, &rc)
-                        window.windowFrame = CGRect(x: Int(rc.left),
-                                                    y: Int(rc.top),
-                                                    width: Int(rc.right - rc.left),
-                                                    height: Int(rc.bottom - rc.top))
                         window.postWindowEvent(type: .resized)
                     }
                 }
@@ -2087,11 +2097,11 @@ final class Win32Window: Window {
                 if window.resizing == false {
                     var rect = RECT()
                     if GetWindowRect(hWnd, &rect) {
-                        window.windowFrame = CGRect(x: Int(rect.left),
-                                                    y: Int(rect.top),
-                                                    width: Int(rect.right - rect.left),
-                                                    height: Int(rect.bottom - rect.top))
+                        window.windowFrame = CGRect(rect)
                         window.postWindowEvent(type: .moved)
+                    } else {
+                        let err = win32ErrorString(GetLastError())
+                        Log.error("WM_MOVE: GetWindowRect failed: \(err)")
                     }
                 }
                 window.repositionAttachedModal()
@@ -2119,15 +2129,10 @@ final class Win32Window: Window {
                     GetClientRect(hWnd, &rcClient)
                     GetWindowRect(hWnd, &rcWindow)
 
-                    window.windowFrame = CGRect(x: Int(rcWindow.left),
-                                                y: Int(rcWindow.top),
-                                                width: Int(rcWindow.right - rcWindow.left),
-                                                height: Int(rcWindow.bottom - rcWindow.top))
+                    window.windowFrame = CGRect(rcWindow)
                     let invScale = 1.0 / scaleFactor
-                    window.contentBounds = CGRect(x: CGFloat(rcClient.left),
-                                                  y: CGFloat(rcClient.top),
-                                                  width: CGFloat(rcClient.right - rcClient.left) * invScale,
-                                                  height: CGFloat(rcClient.bottom - rcClient.top) * invScale)
+                    window.contentBounds = CGRect(rcClient, scale: invScale)
+
                     window.postWindowEvent(type: .resized)
                 }
                 window.repositionActiveAttachedModal()
@@ -2191,8 +2196,10 @@ final class Win32Window: Window {
                 break
             case UINT(WM_CAPTURECHANGED):
                 _ = window.cancelActiveMouseButtons(timestamp: messageTimestamp())
-                PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
-                break
+                // The new capture owner controls the transition. Scheduling the
+                // application's capture reconciler here can run after a native
+                // move/size loop acquires capture and release that capture again.
+                return 0
             case UINT(WM_CANCELMODE):
                 let timestamp = messageTimestamp()
                 _ = window.cancelActiveMouseButtons(timestamp: timestamp)
@@ -2638,6 +2645,26 @@ final class Win32Window: Window {
             }
         }
         return DefWindowProcW(hWnd, uMsg, wParam, lParam)
+    }
+}
+
+fileprivate extension CGRect {
+    init(_ rect: RECT) {
+        self.init(
+            x: Int(rect.left),
+            y: Int(rect.top),
+            width: Int(rect.right - rect.left),
+            height: Int(rect.bottom - rect.top)
+        )
+    }
+
+    init(_ rect: RECT, scale: CGFloat) {
+        self.init(
+            x: CGFloat(rect.left) * scale,
+            y: CGFloat(rect.top) * scale,
+            width: CGFloat(rect.right - rect.left) * scale,
+            height: CGFloat(rect.bottom - rect.top) * scale
+        )
     }
 }
 #endif // ENABLE_WIN32
