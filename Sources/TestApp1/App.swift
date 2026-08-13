@@ -8,6 +8,7 @@ struct TestApp1: App {
                 .environment(\.resourceBundle, .module)
                 //.environment(\._debugLayout, true)
         }
+        .defaultSize(width: 1280, height: 800)
         .drawDebugInfo(.frameInfo,
                        .updateTiming,
                        .queue,
