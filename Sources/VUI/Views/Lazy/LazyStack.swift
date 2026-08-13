@@ -1117,10 +1117,26 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
     }
 
     func firstIndex<ID: Hashable>(
-        of id: ID,
+        id: ID,
         style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(value: 2)
     ) -> Int? {
         node.firstOffset(forID: id, style: style)
+    }
+
+    func firstIndex(
+        of id: _ViewList_ID.Canonical,
+        style: _ViewList_IteratorStyle = _ViewList_IteratorStyle(value: 2)
+    ) -> Int? {
+        var from = 0
+        var index = 0
+        let completed = apply(from: &from, style: style) { subview, stop in
+            if subview.data.id.canonicalID == id {
+                stop = true
+            } else {
+                index += 1
+            }
+        }
+        return completed ? nil : index
     }
 
     @discardableResult
@@ -3523,6 +3539,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
         border: CGSize,
         ignoring pinnedViews: PinnedScrollableViews
     ) -> _ViewList_ID.Canonical? {
+        let placedSubviews = placedSubviews
         guard let source = placedSubviews.first(where: { lazyCollectionID($0.id, matches: id) }) else {
             return nil
         }
@@ -3531,7 +3548,7 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
             dy: -border.height
         )
         var best: (index: Int, distance: CGFloat)?
-        for candidate in placedSubviews {
+        for (offset, candidate) in placedSubviews.enumerated() {
             guard !lazyCollectionID(candidate.id, matches: id),
                   !candidate.matches(pinnedViews),
                   let distance = navigationDistance(
@@ -3542,13 +3559,13 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
                 continue
             }
             if best == nil || distance < best!.distance {
-                best = (candidate.index, distance)
+                best = (offset, distance)
             }
         }
-        guard let index = best?.index else {
+        guard let offset = best?.index else {
             return nil
         }
-        return collectionViewID(at: index)
+        return placedSubviews[offset].id.canonicalID
     }
 
     static func hasMultipleViewsInAxis(_ axis: Axis) -> Bool {
@@ -3561,22 +3578,35 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
     }
 
     func firstCollectionViewIndex(of id: _ViewList_ID.Canonical) -> Int? {
-        cache?._list.value.firstOffset(of: id)
+        guard let cache,
+              AGSubgraphIsValid(cache.parentSubgraph) else {
+            return nil
+        }
+        guard let attribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError("LazyScrollable collection lookup requires a rule context.")
+        }
+        return cache.subviews(
+            context: AnyRuleContext(attribute: attribute)
+        ).firstIndex(of: id)
     }
 
     func applyCollectionViewIDs(
         from index: inout Int,
         to body: (_ViewList_ID.Canonical, inout Bool) -> Void
     ) -> Bool {
-        guard let cache else { return false }
-        var emitted = false
-        let completed = cache._list.value.applyIDs(from: &index, listAttribute: cache._list) { id in
-            emitted = true
-            var stop = false
-            body(id.canonicalID, &stop)
-            return !stop
+        guard let cache,
+              AGSubgraphIsValid(cache.parentSubgraph) else {
+            return true
         }
-        return emitted && completed
+        guard let attribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError("LazyScrollable collection traversal requires a rule context.")
+        }
+        let subviews = cache.subviews(
+            context: AnyRuleContext(attribute: attribute)
+        )
+        return subviews.apply(from: &index) { subview, stop in
+            body(subview.data.id.canonicalID, &stop)
+        }
     }
 
     func collectionViewID(for subgraph: AGSubgraph) -> _ViewList_ID.Canonical? {
@@ -3585,8 +3615,11 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
 
     func scroll(toCollectionViewID id: _ViewList_ID.Canonical, anchor: UnitPoint?) -> Bool {
         guard let cache,
-              let attribute = _AGGraph.currentRuleContextAttribute else {
+              AGSubgraphIsValid(cache.parentSubgraph) else {
             return false
+        }
+        guard let attribute = _AGGraph.currentRuleContextAttribute else {
+            fatalError("LazyScrollable collection scroll requires a rule context.")
         }
         let context = AnyRuleContext(attribute: attribute)
         let subviews = cache.subviews(context: context)
@@ -3650,16 +3683,6 @@ struct LazyScrollable<LayoutType: LazyLayout>: ScrollableCollection, ScrollableC
 
     private var resolvedParent: (any Scrollable)? {
         value(for: _parent)
-    }
-
-    private func collectionViewID(at index: Int) -> _ViewList_ID.Canonical? {
-        var offset = index
-        var result: _ViewList_ID.Canonical?
-        _ = cache?._list.value.applyIDs(from: &offset, listAttribute: cache?._list) { id in
-            result = id.canonicalID
-            return false
-        }
-        return result
     }
 
     private func navigationFrame(for placedSubview: _LazyLayout_PlacedSubview) -> CGRect {
@@ -6405,7 +6428,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
             return nil
         }
         return subviews.firstIndex(
-            of: id,
+            id: id,
             style: _ViewList_IteratorStyle(value: UInt(minor.count) << 1)
         )
     }

@@ -2476,6 +2476,20 @@ struct _ViewList_Group: ViewList {
         }
     }
 
+    func firstOffset<A: Hashable>(
+        forID id: A,
+        style: _ViewList_IteratorStyle
+    ) -> Int? {
+        var precedingCount = 0
+        for entry in lists {
+            if let offset = entry.list.firstOffset(forID: id, style: style) {
+                return precedingCount + offset
+            }
+            precedingCount += entry.list.count(style: style)
+        }
+        return nil
+    }
+
     func appendViewIDs(into accumulator: inout HeterogeneousViewIDsAccumulator) {
         for entry in lists {
             entry.list.appendViewIDs(into: &accumulator)

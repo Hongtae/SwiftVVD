@@ -4786,6 +4786,135 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazyScrollableCollectionSubviewProducerObserved
+    // ASSERTIONS: lazySectionGridCollectionTargetFormulaObserved
+    func testLazySectionGridCollectionAndLayoutIndexesUseTheirObservedStyles() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+
+            func region(
+                count: Int,
+                implicitID: Int,
+                height: CGFloat
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(
+                        graph: graph,
+                        sizes: Array(
+                            repeating: CGSize(width: 40, height: height),
+                            count: count
+                        )
+                    ),
+                    implicitID: implicitID
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            var sectionEntries: [(
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            )] = []
+            for section in 0..<10 {
+                let header = region(
+                    count: 1,
+                    implicitID: 1_000 + section,
+                    height: 10
+                )
+                let content = region(
+                    count: 20,
+                    implicitID: 2_000 + section,
+                    height: 20
+                )
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: UInt32(section),
+                    base: _ViewList_Group(lists: [header, content])
+                )
+                sectionEntries.append((
+                    sectionList,
+                    graph.makeInput(value: sectionList)
+                ))
+            }
+            let list: any ViewList = _ViewList_Group(lists: sectionEntries)
+            let layout = LazyVGridLayout(
+                columns: Array(
+                    repeating: GridItem(.fixed(40), spacing: 0),
+                    count: 3
+                ),
+                alignment: .leading,
+                spacing: 5,
+                pinnedViews: []
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 2_500,
+                containerLength: 100,
+                minorSize: 100
+            )
+            let targetID = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 10).canonicalID
+
+            // Collection traversal uses style 2, so each prior section is
+            // one header plus twenty body IDs: 7 * 21 + 1 + 10.
+            XCTAssertEqual(subviews.firstIndex(of: targetID), 158)
+            // Layout lookup uses three-track style 6. Each header consumes a
+            // full three-track group and each 20-item body rounds to 21:
+            // 7 * 24 + 3 + 10.
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: targetID,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                181
+            )
+
+            var minorSize = CGFloat(100)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let stackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<6,
+                placedExtent: CGFloat(0)...CGFloat(46.25),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [18.125: 1],
+                    spacingToCount: [5: 1]
+                )
+            )
+            let targetRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 181,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(targetRect.origin.y, 1_392.5, accuracy: 0.000_001)
+            XCTAssertEqual(targetRect.size.height, 18.125, accuracy: 0.000_001)
+            XCTAssertEqual(targetRect.size.width, 120, accuracy: 0.000_001)
+        }
+    }
+
     func testLazyStackResolveIndexAndPositionUsesCachedRelativeEstimate() {
         // ASSERTIONS: lazyIndexPositionRuntimeObserved
         let host = GraphHost()
@@ -11817,6 +11946,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     // ASSERTIONS: SCROLLABLE_CONTAINER_TARGET_ROUTING mapFirstChildSelfThenChildrenPinned
+    // ASSERTIONS: lazyScrollableCacheParentSubgraphValidityObserved
     func testLazyScrollableStoresOptionalConcreteCacheAndUsesCacheCollectionIDs() {
         let host = GraphHost()
 
@@ -11885,14 +12015,64 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var index = 0
             var appliedIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &index) { id, stop in
-                appliedIDs.append(id)
-                stop = false
+            _AGGraph.withRuleContext(cache._placedSubviews.identifier) {
+                XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &index) { id, stop in
+                    appliedIDs.append(id)
+                    stop = false
+                })
+                XCTAssertEqual(appliedIDs.count, 2)
+                XCTAssertEqual(appliedIDs.map(\.implicitID), [0, 1])
+                XCTAssertEqual(scrollable.firstCollectionViewIndex(of: appliedIDs[1]), 1)
+            }
+
+            let cacheless = LazyScrollable<LazyVGridLayout>(
+                position: graph.makeInput(value: CGPoint.zero).asWeak(),
+                transform: graph.makeInput(value: ViewTransform()).asWeak(),
+                parent: parentAttr.asWeak(),
+                children: childrenAttr.asWeak(),
+                cache: nil
+            )
+            var cachelessIndex = 7
+            XCTAssertTrue(cacheless.applyCollectionViewIDs(from: &cachelessIndex) { _, _ in
+                XCTFail("A cacheless lazy collection must not emit an ID.")
             })
-            XCTAssertEqual(index, 2)
-            XCTAssertEqual(appliedIDs.count, 2)
-            XCTAssertEqual(appliedIDs.map(\.implicitID), [0, 1])
-            XCTAssertEqual(scrollable.firstCollectionViewIndex(of: appliedIDs[1]), 1)
+            XCTAssertEqual(cachelessIndex, 7)
+            XCTAssertNil(cacheless.firstCollectionViewIndex(of: appliedIDs[1]))
+
+            let invalidCache = makeConcreteLazyGridCache(
+                host: host,
+                layout: LazyVGridLayout(
+                    columns: [GridItem(.fixed(12))],
+                    alignment: .center,
+                    spacing: 0,
+                    pinnedViews: []
+                ),
+                nearestScrollableAxes: .vertical
+            )
+            invalidCache._list = graph.makeInput(value: list as any ViewList)
+            let invalidScrollable = LazyScrollable<LazyVGridLayout>(
+                position: graph.makeInput(value: CGPoint.zero).asWeak(),
+                transform: graph.makeInput(value: ViewTransform()).asWeak(),
+                parent: parentAttr.asWeak(),
+                children: childrenAttr.asWeak(),
+                cache: invalidCache
+            )
+            invalidCache.parentSubgraph.invalidate()
+            XCTAssertFalse(AGSubgraphIsValid(invalidCache.parentSubgraph))
+
+            var invalidIndex = 9
+            XCTAssertTrue(invalidScrollable.applyCollectionViewIDs(from: &invalidIndex) { _, _ in
+                XCTFail("An invalid lazy cache must not emit an ID.")
+            })
+            XCTAssertEqual(invalidIndex, 9)
+            XCTAssertNil(invalidScrollable.firstCollectionViewIndex(of: appliedIDs[1]))
+            XCTAssertFalse(
+                invalidScrollable.scroll(
+                    toCollectionViewID: appliedIDs[1],
+                    anchor: .center
+                )
+            )
+            XCTAssertEqual(parent.targetRequestCount, 0)
 
             let visible = scrollable.visibleSubviews
             XCTAssertEqual(visible.count, 1)
@@ -11938,7 +12118,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyScrollableNextVisibleCollectionViewIDUsesVisibleLazyIndexes() {
+    func testLazyScrollableNextVisibleCollectionViewIDUsesPlacedSubviewArrayOffsets() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -11983,7 +12163,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                         anchoring: .topLeading,
                         at: origin
                     ),
-                    index: implicitID
+                    index: 100 + implicitID * 7
                 )
             }
 
@@ -12016,15 +12196,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 cache: cache
             )
 
-            var collectionIndex = 0
-            var collectionIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
-                collectionIDs.append(id)
-                stop = false
-            })
-            XCTAssertEqual(collectionIDs.count, 7)
+            let visibleIDs = scrollable.visibleCollectionViewIDs
+            XCTAssertEqual(visibleIDs.count, 7)
 
-            let source = collectionIDs[2]
+            let source = visibleIDs[2]
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
                     towards: .top,
@@ -12032,7 +12207,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: []
                 ),
-                collectionIDs[1]
+                visibleIDs[1]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
@@ -12041,7 +12216,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: []
                 ),
-                collectionIDs[0]
+                visibleIDs[0]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
@@ -12050,7 +12225,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: []
                 ),
-                collectionIDs[3]
+                visibleIDs[3]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
@@ -12059,7 +12234,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: [.sectionFooters]
                 ),
-                collectionIDs[6]
+                visibleIDs[6]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
@@ -12068,7 +12243,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: []
                 ),
-                collectionIDs[4]
+                visibleIDs[4]
             )
             XCTAssertEqual(
                 scrollable.nextVisibleCollectionViewID(
@@ -12077,7 +12252,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     border: .zero,
                     ignoring: [.sectionHeaders]
                 ),
-                collectionIDs[5]
+                visibleIDs[5]
             )
             XCTAssertNil(
                 scrollable.nextVisibleCollectionViewID(
@@ -12139,14 +12314,18 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var collectionIndex = 0
             var collectionIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
-                collectionIDs.append(id)
-                stop = false
-            })
+            _AGGraph.withRuleContext(cache._placedSubviews.identifier) {
+                XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
+                    collectionIDs.append(id)
+                    stop = false
+                })
+            }
             XCTAssertEqual(collectionIDs.count, 3)
 
             let targetID = collectionIDs[2]
-            XCTAssertEqual(scrollable.firstCollectionViewIndex(of: targetID), 2)
+            _AGGraph.withRuleContext(cache._placedSubviews.identifier) {
+                XCTAssertEqual(scrollable.firstCollectionViewIndex(of: targetID), 2)
+            }
             let request = graph.makeStatefulRule(
                 LazyScrollableTargetRequest(
                     scrollable: scrollable,
@@ -12218,10 +12397,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var collectionIndex = 0
             var collectionIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
-                collectionIDs.append(id)
-                stop = false
-            })
+            _AGGraph.withRuleContext(cache._placedSubviews.identifier) {
+                XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
+                    collectionIDs.append(id)
+                    stop = false
+                })
+            }
 
             let request = graph.makeStatefulRule(
                 LazyScrollableTargetRequest(
@@ -12302,10 +12483,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             var collectionIndex = 0
             var collectionIDs: [_ViewList_ID.Canonical] = []
-            XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
-                collectionIDs.append(id)
-                stop = false
-            })
+            _AGGraph.withRuleContext(cache._placedSubviews.identifier) {
+                XCTAssertTrue(scrollable.applyCollectionViewIDs(from: &collectionIndex) { id, stop in
+                    collectionIDs.append(id)
+                    stop = false
+                })
+            }
 
             let request = graph.makeStatefulRule(
                 LazyScrollableTargetRequest(
