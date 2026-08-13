@@ -1668,12 +1668,12 @@ struct UnaryElements<Generator: UnaryViewGenerator>: _ViewList_Elements {
         let baseInputs = baseInputs
         return callback(inputs) { inputs in
             var inputs = inputs
-            var mergedInputs = baseInputs
+            var storedInputs = baseInputs
             if let indirectMap {
-                mergedInputs.makeReusable(indirectMap: indirectMap)
+                storedInputs.makeReusable(indirectMap: indirectMap)
             }
-            mergedInputs.merge(inputs.base, ignoringPhase: false)
-            inputs.base = mergedInputs
+            // Preserve caches already isolated for this materialization.
+            inputs.base.merge(storedInputs, ignoringPhase: false)
             return generator.makeView(
                 inputs: inputs,
                 indirectMap: indirectMap

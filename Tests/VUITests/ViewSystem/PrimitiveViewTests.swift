@@ -24,6 +24,10 @@ private struct UnaryIncomingInput: GraphInput {
     static var defaultValue: Int { 0 }
 }
 
+private struct UnaryOverrideInput: GraphInput {
+    static var defaultValue: Int { 0 }
+}
+
 private func makeViewListCountInputs(graph: _AGGraph) -> _ViewListCountInputs {
     _ViewListCountInputs(
         base: _GraphInputs(
@@ -182,21 +186,28 @@ final class PrimitiveViewTests: XCTestCase {
         }
     }
 
-    func testBodyUnaryElementsMergeStoredAndIncomingInputs() throws {
+    // ASSERTIONS lazyChildInputCacheOwnershipObserved
+    func testBodyUnaryElementsMergeStoredAndIncomingInputs() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
-        try ref.withCurrent {
+        ref.withCurrent {
             var listInputs = makeViewInputs(graph: graph).listInputs
             listInputs.base[UnaryStoredInput.self] = 11
+            listInputs.base[UnaryOverrideInput.self] = 31
+            let storedCache = ObjectIdentifier(listInputs.base.cachedEnvironment)
 
             var observedStored = 0
             var observedIncoming = 0
+            var observedOverride = 0
+            var observedCache: ObjectIdentifier?
             let outputs = _ViewListOutputs.unaryViewList(
                 viewType: UnaryBodyProbe.self,
                 inputs: listInputs
             ) { inputs in
                 observedStored = inputs.base[UnaryStoredInput.self]
                 observedIncoming = inputs.base[UnaryIncomingInput.self]
+                observedOverride = inputs.base[UnaryOverrideInput.self]
+                observedCache = ObjectIdentifier(inputs.base.cachedEnvironment)
                 return _ViewOutputs()
             }
             guard case .staticList(let list) = outputs.views,
@@ -205,7 +216,12 @@ final class PrimitiveViewTests: XCTestCase {
             }
 
             var incomingInputs = makeViewInputs(graph: graph)
+            incomingInputs.base = listInputs.base
+            incomingInputs.copyCaches()
             incomingInputs.base[UnaryIncomingInput.self] = 22
+            incomingInputs.base[UnaryOverrideInput.self] = 32
+            let incomingCache = ObjectIdentifier(incomingInputs.base.cachedEnvironment)
+            XCTAssertNotEqual(incomingCache, storedCache)
             XCTAssertNotNil(
                 elements.makeOneElement(
                     at: 0,
@@ -216,6 +232,9 @@ final class PrimitiveViewTests: XCTestCase {
             )
             XCTAssertEqual(observedStored, 11)
             XCTAssertEqual(observedIncoming, 22)
+            XCTAssertEqual(observedOverride, 32)
+            XCTAssertEqual(observedCache, incomingCache)
+            XCTAssertNotEqual(observedCache, storedCache)
 
             var from = 2
             let skipped = elements.makeElements(

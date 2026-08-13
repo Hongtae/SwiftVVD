@@ -2984,7 +2984,8 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             indirectMap: indirectMap
         ) { elementInputs, makeView in
             var elementInputs = elementInputs
-            elementInputs.base.merge(parentInputs.base, ignoringPhase: true)
+            // Cached attributes created below must stay owned by this item.
+            elementInputs.copyCaches()
 
             let state = graph.makeInput(
                 value: LazyLayoutCacheItem.State(
@@ -3021,10 +3022,8 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             // cannot observe different placement generations.
             elementInputs.position = geometry.origin()
             elementInputs.size = geometry.size()
+            elementInputs.base.merge(parentInputs.base, ignoringPhase: true)
             elementInputs.base.phase = phase
-            elementInputs.base[LazyLayoutReuseIdleInput.self] = Optional<Int>.none
-            elementInputs.base[_GraphInputs.LazyLayoutCacheParentKey.self] =
-                LazyLayoutCacheParent(cache: self, seed: parentSeed)
 
             let transaction: Attribute<Transaction> = graph.makeStatefulRule(
                 LazyTransaction(
@@ -3034,6 +3033,9 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
                 )
             )
             elementInputs.base.transaction = transaction
+            elementInputs.base[LazyLayoutReuseIdleInput.self] = Optional<Int>.none
+            elementInputs.base[_GraphInputs.LazyLayoutCacheParentKey.self] =
+                LazyLayoutCacheParent(cache: self, seed: parentSeed)
 
             var transitionAttribute: AGAttribute?
             var transitionType: Any.Type?
@@ -3093,11 +3095,9 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
 
         let subgraph = AGSubgraph()
         let release = data.elements.retain()
-        var childInputs = inputs
-        childInputs.copyCaches()
         let materialized = AGSubgraph.withCurrent(subgraph) {
             makeSubviewOutputs(
-                inputs: childInputs,
+                inputs: inputs,
                 indirectMap: nil,
                 data: data,
                 anyTransition: transition

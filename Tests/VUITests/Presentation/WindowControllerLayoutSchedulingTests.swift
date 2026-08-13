@@ -961,6 +961,86 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS lazyChildInputCacheOwnershipObserved
+    @MainActor
+    func testLazyScrollTerminalSettleKeepsRetainedInputsValid() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let itemCount = Int(
+            environment["VUI_LAZY_LIFETIME_ITEM_COUNT"] ?? "32"
+        ) ?? 32
+        let wheelSampleCount = Int(
+            environment["VUI_LAZY_LIFETIME_WHEEL_SAMPLES"] ?? "8"
+        ) ?? 8
+        let settleSampleCount = Int(
+            environment["VUI_LAZY_LIFETIME_SETTLE_SAMPLES"] ?? "40"
+        ) ?? 40
+        let probe = LayoutSchedulingLazyScrollObserverProbe()
+        let controller = WindowController(
+            content: LayoutSchedulingLazyScrollObserverRoot(
+                probe: probe,
+                itemCount: itemCount
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingLazyScrollObserverRoot.self)
+            )
+        )
+        let contentSize = CGSize(width: 820, height: 680)
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+        let startDate = controller.date
+
+        func updateHost(tick: Int, delta: Double = 1.0 / 60.0) {
+            controller.updateFrame(
+                tick: UInt64(tick),
+                delta: delta,
+                date: startDate.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: contentSize,
+                shouldDrawFrame: false,
+                withGC
+            )
+        }
+
+        for tick in 0...1 {
+            updateHost(tick: tick, delta: tick == 0 ? 0 : 1.0 / 60.0)
+        }
+
+        let root = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
+        let host = try XCTUnwrap(responder.hostContainer?.scrollView)
+        let wheelPoint = CGPoint(x: contentSize.width / 2, y: contentSize.height / 2)
+
+        for sample in 0..<wheelSampleCount {
+            controller.enqueueInputAction { [weak controller] in
+                _ = controller?.handleMouseWheel(
+                    at: wheelPoint,
+                    delta: CGPoint(x: 0, y: -688)
+                )
+            }
+            updateHost(tick: sample + 2)
+        }
+
+        let settleStartTick = wheelSampleCount + 2
+        for sample in 0..<settleSampleCount {
+            updateHost(tick: settleStartTick + sample)
+        }
+
+        let currentRoot = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager.rootResponder
+                as? MultiViewResponder
+        )
+        let currentResponder = try XCTUnwrap(firstHostingScrollViewResponder(in: currentRoot))
+        let currentHost = try XCTUnwrap(currentResponder.hostContainer?.scrollView)
+        XCTAssertTrue(currentHost === host)
+        XCTAssertEqual(
+            try XCTUnwrap(probe.geometryActions.last).contentOffset.y,
+            try XCTUnwrap(host.pendingContext).contentOffset.y,
+            accuracy: 0.001
+        )
+    }
+
     // ASSERTIONS systemScrollViewWheelOffsetSignObserved
     @MainActor
     func testScrollViewHostConsumesPhasedWheelWithoutPanThreshold() throws {
@@ -9441,6 +9521,7 @@ private final class LayoutSchedulingLazyScrollObserverProbe: @unchecked Sendable
 
 private struct LayoutSchedulingLazyScrollObserverRoot: View {
     let probe: LayoutSchedulingLazyScrollObserverProbe
+    var itemCount = 120
     @State private var geometry = LayoutSchedulingLazyScrollGeometry()
     @State private var phase = ScrollPhase.idle
 
@@ -9453,7 +9534,7 @@ private struct LayoutSchedulingLazyScrollObserverRoot: View {
             )
             ScrollView(.vertical) {
                 LazyVStack(spacing: 7) {
-                    ForEach(0..<120, id: \.self) { row in
+                    ForEach(0..<itemCount, id: \.self) { row in
                         VStack(spacing: 5) {
                             Text(verbatim: "row \(row)")
                             if row == 4 {
