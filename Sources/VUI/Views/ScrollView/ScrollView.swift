@@ -360,7 +360,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 _position: adjustedPosition,
                 _size: adjustedSize,
                 _transform: inputs.transform,
-                _state: layoutState,
+                _state: adjustedState,
                 _safeArea: animatedAdjustedSafeArea,
                 _childSafeArea: animatedChildSafeArea,
                 _childPosition: childPosition,

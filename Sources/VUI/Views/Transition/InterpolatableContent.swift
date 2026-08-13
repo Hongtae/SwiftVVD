@@ -967,7 +967,6 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         let targetContent = _content.value
         let targetSize = _size.value
         let environment = _environment.value
-        let transaction = _transaction.value
         let updateVersion = DisplayList.Version(forUpdate: ())
 
         var transitionState = environment.contentTransitionState
@@ -988,23 +987,25 @@ private struct InterpolatedDisplayList<Content: InterpolatableContent>: Stateful
         }
 
         if let previous = lastContent,
-           !transaction.disablesContentTransitions,
            contentChanged ||
             (sizeChanged && previous.appliesTransitionsForSizeChanges) {
-            previous.modifyTransition(
-                state: &transitionState,
-                to: targetContent
-            )
-            animation = transaction.animation ??
-                previous.defaultAnimation(to: targetContent)
-            if transitionState.transition.isIdentity {
-                animation = nil
+            let transaction = _transaction.value
+            if !transaction.disablesContentTransitions {
+                previous.modifyTransition(
+                    state: &transitionState,
+                    to: targetContent
+                )
+                animation = transaction.animation ??
+                    previous.defaultAnimation(to: targetContent)
+                if transitionState.transition.isIdentity {
+                    animation = nil
+                }
+                if previous.addsDrawingGroup ||
+                    environment.contentTransitionAddsDrawingGroup {
+                    transitionState.options.insert(.addsDrawingGroup)
+                }
+                listener = transaction.combinedAnimationListener
             }
-            if previous.addsDrawingGroup ||
-                environment.contentTransitionAddsDrawingGroup {
-                transitionState.options.insert(.addsDrawingGroup)
-            }
-            listener = transaction.combinedAnimationListener
         }
         transitionState.animation = animation
         transitionState.transition.applyEnvironmentValues(

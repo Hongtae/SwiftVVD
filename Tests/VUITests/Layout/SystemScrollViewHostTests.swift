@@ -485,6 +485,73 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(invalid.contentOffsetSeed.value, UInt32.max)
     }
 
+    func testSystemScrollLayoutStateLayoutComparisonRetainsLiveViewportOffset() {
+        // ASSERTIONS scrollUpdateRetainedDisplaySubtreeObserved
+        func valuesAreLayoutEqual(
+            _ lhs: inout SystemScrollLayoutState,
+            _ rhs: inout SystemScrollLayoutState
+        ) -> Bool {
+            withUnsafePointer(to: &lhs) { lhs in
+                withUnsafePointer(to: &rhs) { rhs in
+                    SystemScrollLayoutState._agTypeDescriptorValuesEqual(
+                        UnsafeRawPointer(lhs),
+                        UnsafeRawPointer(rhs)
+                    )
+                }
+            }
+        }
+
+        var baseline = SystemScrollLayoutState(
+            contentOffset: CGPoint(x: 10, y: 20),
+            contentInsets: EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4),
+            systemContentInsets: EdgeInsets(top: 5, leading: 6, bottom: 7, trailing: 8),
+            systemTranslation: CGSize(width: 9, height: 10),
+            contentRectToPrepare: CGRect(x: 11, y: 12, width: 13, height: 14),
+            contentOffsetMode: .system,
+            contentOffsetSeed: VersionSeed(value: 15)
+        )
+        var candidate = baseline
+
+        candidate.contentOffset = CGPoint(x: 100, y: 200)
+        XCTAssertTrue(valuesAreLayoutEqual(&baseline, &candidate))
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let rawState = graph.makeInput(value: baseline)
+            XCTAssertTrue(
+                graph.setValue(
+                    for: rawState,
+                    to: candidate,
+                    evaluateSideEffects: false
+                ),
+                "the external state input must still observe a live offset write"
+            )
+        }
+
+        candidate = baseline
+        candidate.contentInsets.top += 1
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+
+        candidate = baseline
+        candidate.systemContentInsets.leading += 1
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+
+        candidate = baseline
+        candidate.systemTranslation.width += 1
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+
+        candidate = baseline
+        candidate.contentRectToPrepare = nil
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+
+        candidate = baseline
+        candidate.contentOffsetMode = .adjustment(reason: .alignment)
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+
+        candidate = baseline
+        candidate.contentOffsetSeed = VersionSeed(value: 16)
+        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+    }
+
     func testScrollTargetConfigurationCopiesObservedTransactionValues() {
         var transaction = Transaction(animation: .linear(duration: 1))
         transaction.scrollToRequiresCompleteVisibility = true

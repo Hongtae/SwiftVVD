@@ -980,6 +980,11 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             4,
             accuracy: 0.001
         )
+        XCTAssertEqual(
+            phaseProbe.changes.map(\.new),
+            [.interacting],
+            "Changed samples in one direct-scroll phase must not republish phase velocity."
+        )
 
         controller.onMouseEvent(
             event: MouseEvent(
@@ -1024,6 +1029,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let firstMotionOffset = try XCTUnwrap(host.pendingContext).contentOffset.y
         XCTAssertNotEqual(firstMotionOffset, offsetBeforeMotion, accuracy: 0.001)
         XCTAssertTrue(controller.viewGraph.hasScheduledViewUpdate)
+        XCTAssertEqual(phaseProbe.changes.map(\.new), [.interacting, .decelerating])
+        XCTAssertEqual(phaseProbe.changes.last?.velocity, CGVector(dx: 0, dy: 40))
 
         redraw = false
         Update.ensure {
@@ -1040,6 +1047,11 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             try XCTUnwrap(host.pendingContext).contentOffset.y,
             firstMotionOffset,
             accuracy: 0.001
+        )
+        XCTAssertEqual(
+            phaseProbe.changes.map(\.new),
+            [.interacting, .decelerating],
+            "Motion samples in one deceleration phase must not republish phase velocity."
         )
     }
 
@@ -2288,6 +2300,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS scrollHostPresentationDoesNotRelayoutEagerContentObserved
+    // ASSERTIONS scrollUpdateRetainedDisplaySubtreeObserved
+    // ASSERTIONS interpolatedDisplayListConditionalTransactionReadObserved
     @MainActor
     func testSystemScrollHostOffsetDoesNotRelayoutEagerContent() throws {
         let counter = LayoutMeasurementCounter()
@@ -2298,9 +2312,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 sceneID: SceneID(LayoutMeasurementScrollRoot.self)
             )
         )
-        let withGC: WindowContext.WithGraphicsContext = { _, _ in
-            XCTFail("Scroll host layout test should not request graphics resources.")
-        }
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
         var redraw = false
         for tick in 0...1 {
             controller.updateView(
@@ -2320,6 +2332,34 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
         let host = try XCTUnwrap(responder.hostContainer?.scrollView)
         let settled = counter.snapshot()
+        let graph = controller.viewGraph.data.graph
+        let settledDisplayVersions = graph.slots.enumerated().reduce(
+            into: [UInt32: UInt64]()
+        ) { versions, element in
+            guard let node = element.element.node else { return }
+            let bodyType: Any.Type?
+            switch node.kind {
+            case .ruleBody(let box):
+                bodyType = box.bodyType
+            case .stateful(let box):
+                bodyType = box.bodyType
+            case .lowLevelBody(let box):
+                bodyType = box.bodyType
+            default:
+                bodyType = nil
+            }
+            guard let bodyType else { return }
+            let name = String(reflecting: bodyType)
+            if name.contains("ScrollViewDisplayList")
+                || name.contains("InterpolatedDisplayList<VUI.ResolvedStyledText>") {
+                versions[UInt32(element.offset)] = node.valueVersion
+            }
+        }
+        XCTAssertGreaterThan(
+            settledDisplayVersions.count,
+            1,
+            "expected the scroll display node and settled text interpolators"
+        )
 
         Update.ensure {
             host.publishSystemContentOffset(CGPoint(x: 0, y: 40))
@@ -2336,6 +2376,13 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
         XCTAssertEqual(host.host.bounds.origin, CGPoint(x: 0, y: 40))
         XCTAssertEqual(counter.snapshot() - settled, .zero)
+        for (id, version) in settledDisplayVersions {
+            XCTAssertEqual(
+                graph.slots[Int(id)].node?.valueVersion,
+                version,
+                "host-only viewport motion republished display node @\(id)"
+            )
+        }
     }
 
     @MainActor
@@ -9234,7 +9281,7 @@ private struct LayoutMeasurementScrollRoot: View {
                         counter: counter,
                         size: CGSize(width: 160, height: 30)
                     ) {
-                        Color.clear
+                        Text(verbatim: "Row")
                     }
                 }
             }
@@ -9534,7 +9581,7 @@ private struct LayoutSchedulingSiblingGridReaderRoot: View {
 }
 
 private final class LayoutSchedulingScrollPhaseProbe: @unchecked Sendable {
-    var changes: [(old: ScrollPhase, new: ScrollPhase)] = []
+    var changes: [(old: ScrollPhase, new: ScrollPhase, velocity: CGVector?)] = []
 }
 
 private struct LayoutSchedulingPhasedWheelRoot: View {
@@ -9549,8 +9596,8 @@ private struct LayoutSchedulingPhasedWheelRoot: View {
                 }
             }
         }
-        .onScrollPhaseChange { oldPhase, newPhase in
-            probe.changes.append((oldPhase, newPhase))
+        .onScrollPhaseChange { oldPhase, newPhase, context in
+            probe.changes.append((oldPhase, newPhase, context.velocity))
         }
         .frame(width: 100, height: 100)
     }

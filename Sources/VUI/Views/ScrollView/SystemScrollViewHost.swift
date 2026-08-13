@@ -299,6 +299,25 @@ struct SystemScrollLayoutState: Equatable {
     }
 }
 
+extension SystemScrollLayoutState: _AGTypeDescriptorEquatable {
+    static func _agTypeDescriptorValuesEqual(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer
+    ) -> Bool {
+        let lhs = lhs.assumingMemoryBound(to: Self.self).pointee
+        let rhs = rhs.assumingMemoryBound(to: Self.self).pointee
+        // The platform group presents live viewport motion directly. Keep the
+        // latest offset in the cached value without invalidating layout output
+        // consumers unless another layout-owned field also changes.
+        return lhs.contentInsets == rhs.contentInsets
+            && lhs.systemContentInsets == rhs.systemContentInsets
+            && lhs.systemTranslation == rhs.systemTranslation
+            && lhs.contentRectToPrepare == rhs.contentRectToPrepare
+            && lhs.contentOffsetMode == rhs.contentOffsetMode
+            && lhs.contentOffsetSeed.matches(rhs.contentOffsetSeed)
+    }
+}
+
 extension SystemScrollLayoutState.ContentOffsetMode: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         switch (lhs, rhs) {
@@ -748,7 +767,7 @@ class HostingScrollView {
             layoutState: (layoutStateValue, layoutState),
             phaseState: phaseStateValue,
             isPreferred: isPreferred,
-            transaction: Transaction.current
+            transaction: nil
         )
     }
 
@@ -1329,26 +1348,25 @@ class HostingScrollView {
         velocity: _Velocity<CGSize>
     ) {
         guard updateLiveContentOffset(offset) else { return }
-        currentPhaseState = ScrollPhaseState(
-            phase: phase,
-            velocity: CGVector(
-                dx: velocity.valuePerSecond.width,
-                dy: velocity.valuePerSecond.height
+        if currentPhaseState.phase != phase {
+            // Velocity belongs to the phase transition. Motion samples within
+            // that phase only publish the latest viewport geometry.
+            currentPhaseState = ScrollPhaseState(
+                phase: phase,
+                velocity: CGVector(
+                    dx: velocity.valuePerSecond.width,
+                    dy: velocity.valuePerSecond.height
+                )
             )
-        )
+        }
 
-        var transaction = Transaction.current
-        // Only direct manipulation is continuous. Inertial samples remain
-        // scroll-originated but form discrete frame updates.
-        transaction.isContinuous = phase == .tracking || phase == .interacting
-        transaction.fromScrollView = true
         ScrollViewCommitMutation.commit(
             layoutState: (makeLayoutState(), layoutState),
             phaseState: phaseState.isInvalid
                 ? nil
                 : (currentPhaseState, phaseState),
             isPreferred: false,
-            transaction: transaction
+            transaction: nil
         )
     }
 
@@ -1367,7 +1385,7 @@ class HostingScrollView {
         ScrollViewCommitMutation.commit(
             phaseState: (currentPhaseState, phaseState),
             isPreferred: false,
-            transaction: Transaction.current
+            transaction: nil
         )
     }
 }
