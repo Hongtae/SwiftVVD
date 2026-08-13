@@ -252,7 +252,6 @@ private struct ShapeStyledDisplayList<Content: ShapeStyledLeafView>:
             x: position.x - containerPosition.x,
             y: position.y - containerPosition.y
         )
-        _ = _transform.value
         _ = _safeAreaInsets.attribute?.value
 
         var layers = _ShapeStyle_RenderedLayers(group: group)

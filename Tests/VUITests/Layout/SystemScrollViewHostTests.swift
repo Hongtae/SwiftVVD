@@ -485,23 +485,20 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(invalid.contentOffsetSeed.value, UInt32.max)
     }
 
-    func testSystemScrollLayoutStateLayoutComparisonRetainsLiveViewportOffset() {
-        // ASSERTIONS scrollUpdateRetainedDisplaySubtreeObserved
+    func testSystemScrollLayoutStateLayoutComparisonIncludesLiveViewportOffset() {
+        // ASSERTIONS scrollAdjustedOutputChangedEdgeObserved
         func valuesAreLayoutEqual(
-            _ lhs: inout SystemScrollLayoutState,
-            _ rhs: inout SystemScrollLayoutState
+            _ lhs: SystemScrollLayoutState,
+            _ rhs: SystemScrollLayoutState
         ) -> Bool {
-            withUnsafePointer(to: &lhs) { lhs in
-                withUnsafePointer(to: &rhs) { rhs in
-                    SystemScrollLayoutState._agTypeDescriptorValuesEqual(
-                        UnsafeRawPointer(lhs),
-                        UnsafeRawPointer(rhs)
-                    )
-                }
-            }
+            _AGGraph.compareValues(
+                lhs,
+                rhs,
+                options: AGComparisonOptions(mode: .layout)
+            )
         }
 
-        var baseline = SystemScrollLayoutState(
+        let baseline = SystemScrollLayoutState(
             contentOffset: CGPoint(x: 10, y: 20),
             contentInsets: EdgeInsets(top: 1, leading: 2, bottom: 3, trailing: 4),
             systemContentInsets: EdgeInsets(top: 5, leading: 6, bottom: 7, trailing: 8),
@@ -511,9 +508,10 @@ final class SystemScrollViewHostTests: XCTestCase {
             contentOffsetSeed: VersionSeed(value: 15)
         )
         var candidate = baseline
+        XCTAssertTrue(valuesAreLayoutEqual(baseline, candidate))
 
         candidate.contentOffset = CGPoint(x: 100, y: 200)
-        XCTAssertTrue(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
             let rawState = graph.makeInput(value: baseline)
@@ -529,27 +527,27 @@ final class SystemScrollViewHostTests: XCTestCase {
 
         candidate = baseline
         candidate.contentInsets.top += 1
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
 
         candidate = baseline
         candidate.systemContentInsets.leading += 1
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
 
         candidate = baseline
         candidate.systemTranslation.width += 1
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
 
         candidate = baseline
         candidate.contentRectToPrepare = nil
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
 
         candidate = baseline
         candidate.contentOffsetMode = .adjustment(reason: .alignment)
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
 
         candidate = baseline
         candidate.contentOffsetSeed = VersionSeed(value: 16)
-        XCTAssertFalse(valuesAreLayoutEqual(&baseline, &candidate))
+        XCTAssertFalse(valuesAreLayoutEqual(baseline, candidate))
     }
 
     func testScrollTargetConfigurationCopiesObservedTransactionValues() {

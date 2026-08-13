@@ -299,25 +299,6 @@ struct SystemScrollLayoutState: Equatable {
     }
 }
 
-extension SystemScrollLayoutState: _AGTypeDescriptorEquatable {
-    static func _agTypeDescriptorValuesEqual(
-        _ lhs: UnsafeRawPointer,
-        _ rhs: UnsafeRawPointer
-    ) -> Bool {
-        let lhs = lhs.assumingMemoryBound(to: Self.self).pointee
-        let rhs = rhs.assumingMemoryBound(to: Self.self).pointee
-        // The platform group presents live viewport motion directly. Keep the
-        // latest offset in the cached value without invalidating layout output
-        // consumers unless another layout-owned field also changes.
-        return lhs.contentInsets == rhs.contentInsets
-            && lhs.systemContentInsets == rhs.systemContentInsets
-            && lhs.systemTranslation == rhs.systemTranslation
-            && lhs.contentRectToPrepare == rhs.contentRectToPrepare
-            && lhs.contentOffsetMode == rhs.contentOffsetMode
-            && lhs.contentOffsetSeed.matches(rhs.contentOffsetSeed)
-    }
-}
-
 extension SystemScrollLayoutState.ContentOffsetMode: Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         switch (lhs, rhs) {

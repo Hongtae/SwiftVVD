@@ -2302,11 +2302,18 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     // ASSERTIONS scrollHostPresentationDoesNotRelayoutEagerContentObserved
     // ASSERTIONS scrollUpdateRetainedDisplaySubtreeObserved
     // ASSERTIONS interpolatedDisplayListConditionalTransactionReadObserved
+    // ASSERTIONS scrollGeometryObserverPullPathObserved
+    // ASSERTIONS scrollShapeDisplayTransformCarrierUntrackedObserved
+    // ASSERTIONS scrollShapeDisplayRetainedAcrossHostUpdatesObserved
     @MainActor
     func testSystemScrollHostOffsetDoesNotRelayoutEagerContent() throws {
         let counter = LayoutMeasurementCounter()
+        let geometryProbe = LayoutMeasurementScrollGeometryProbe()
         let controller = WindowController(
-            content: LayoutMeasurementScrollRoot(counter: counter),
+            content: LayoutMeasurementScrollRoot(
+                counter: counter,
+                geometryProbe: geometryProbe
+            ),
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(LayoutMeasurementScrollRoot.self)
@@ -2360,29 +2367,68 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             1,
             "expected the scroll display node and settled text interpolators"
         )
-
-        Update.ensure {
-            host.publishSystemContentOffset(CGPoint(x: 0, y: 40))
+        var childTransformIDs = Set<UInt32>()
+        var styledTextShapeInputs: [UInt32: [UInt32]] = [:]
+        for (index, slot) in graph.slots.enumerated() {
+            guard let node = slot.node else { continue }
+            let bodyType: Any.Type?
+            switch node.kind {
+            case .ruleBody(let box):
+                bodyType = box.bodyType
+            case .stateful(let box):
+                bodyType = box.bodyType
+            case .lowLevelBody(let box):
+                bodyType = box.bodyType
+            default:
+                bodyType = nil
+            }
+            guard let bodyType else { continue }
+            let name = String(reflecting: bodyType)
+            if name.contains("ScrollViewChildTransform") {
+                childTransformIDs.insert(UInt32(index))
+            } else if name.contains(
+                "ShapeStyledDisplayList<VUI.StyledTextContentView>"
+            ) {
+                styledTextShapeInputs[UInt32(index)] = node.inputs.map(\.attribute)
+            }
         }
-        redraw = false
-        controller.updateView(
-            tick: 2,
-            delta: 1.0 / 60.0,
-            date: controller.date.addingTimeInterval(2.0 / 60.0),
-            contentSize: CGSize(width: 220, height: 180),
-            redraw: &redraw,
-            withGC
-        )
-
-        XCTAssertEqual(host.host.bounds.origin, CGPoint(x: 0, y: 40))
-        XCTAssertEqual(counter.snapshot() - settled, .zero)
-        for (id, version) in settledDisplayVersions {
-            XCTAssertEqual(
-                graph.slots[Int(id)].node?.valueVersion,
-                version,
-                "host-only viewport motion republished display node @\(id)"
+        XCTAssertFalse(childTransformIDs.isEmpty)
+        XCTAssertFalse(styledTextShapeInputs.isEmpty)
+        for (id, inputs) in styledTextShapeInputs {
+            XCTAssertTrue(
+                childTransformIDs.isDisjoint(with: inputs),
+                "styled-text display node @\(id) tracked a scroll child transform"
             )
         }
+        let offsets = [40.0, 80.0, 120.0].map {
+            CGPoint(x: 0, y: $0)
+        }
+        for (index, offset) in offsets.enumerated() {
+            Update.ensure {
+                host.publishSystemContentOffset(offset)
+            }
+            redraw = false
+            let tick = index + 2
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(Double(tick) / 60.0),
+                contentSize: CGSize(width: 220, height: 180),
+                redraw: &redraw,
+                withGC
+            )
+
+            XCTAssertEqual(host.host.bounds.origin, offset)
+            XCTAssertEqual(counter.snapshot() - settled, .zero)
+            for (id, version) in settledDisplayVersions {
+                XCTAssertEqual(
+                    graph.slots[Int(id)].node?.valueVersion,
+                    version,
+                    "host-only viewport motion republished display node @\(id)"
+                )
+            }
+        }
+        XCTAssertEqual(geometryProbe.offsets, offsets)
     }
 
     @MainActor
@@ -9153,6 +9199,10 @@ private final class LayoutMeasurementCounter: @unchecked Sendable {
     }
 }
 
+private final class LayoutMeasurementScrollGeometryProbe: @unchecked Sendable {
+    var offsets: [CGPoint] = []
+}
+
 private final class LayoutMeasurementProbe {
     var toggleVisual: (() -> Void)?
     var changeLayoutValue: (() -> Void)?
@@ -9272,6 +9322,7 @@ private struct LayoutMeasurementRoot: View {
 
 private struct LayoutMeasurementScrollRoot: View {
     let counter: LayoutMeasurementCounter
+    let geometryProbe: LayoutMeasurementScrollGeometryProbe
 
     var body: some View {
         ScrollView(.vertical) {
@@ -9287,6 +9338,11 @@ private struct LayoutMeasurementScrollRoot: View {
             }
         }
         .frame(width: 180, height: 140)
+        .onScrollGeometryChange(for: CGPoint.self) { geometry in
+            geometry.contentOffset
+        } action: { _, newValue in
+            geometryProbe.offsets.append(newValue)
+        }
     }
 }
 
