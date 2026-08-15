@@ -3,6 +3,107 @@ import XCTest
 @testable import VUI
 
 final class AGGraphCounterTests: XCTestCase {
+    func testComputedOutputReusesGraphOwnedStorageAcrossPublications() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var proposedValue = 1
+
+        ref.withCurrent {
+            let output = graph.makeRule { proposedValue }
+            XCTAssertEqual(output.value, 1)
+
+            let initialStorage = try! XCTUnwrap(
+                graph.slots[Int(output.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<Int>
+            )
+            let initialPointer = initialStorage.rawPointer
+
+            graph.invalidateAttribute(output.identifier)
+            XCTAssertEqual(output.value, 1)
+            let equalStorage = try! XCTUnwrap(
+                graph.slots[Int(output.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<Int>
+            )
+            XCTAssertTrue(initialStorage === equalStorage)
+            XCTAssertEqual(initialPointer, equalStorage.rawPointer)
+
+            proposedValue = 2
+            graph.invalidateAttribute(output.identifier)
+            XCTAssertEqual(output.value, 2)
+            let changedStorage = try! XCTUnwrap(
+                graph.slots[Int(output.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<Int>
+            )
+            XCTAssertTrue(initialStorage === changedStorage)
+            XCTAssertEqual(initialPointer, changedStorage.rawPointer)
+        }
+    }
+
+    func testStoredKeyPathProjectionUsesOffsetNodeAndReusesStorage() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(
+                value: StoredProjectionRoot(value: 1)
+            )
+            let projection = graph.subscriptNode(
+                parent: source,
+                keyPath: \.value
+            )
+            guard case .offset = graph.slots[
+                Int(projection.identifier.rawValue)
+            ].node?.kind else {
+                return XCTFail("Stored key paths must use an offset node.")
+            }
+            XCTAssertEqual(projection.value, 1)
+
+            let initialStorage = try! XCTUnwrap(
+                graph.slots[Int(projection.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<Int>
+            )
+            let initialPointer = initialStorage.rawPointer
+
+            source.value = StoredProjectionRoot(value: 2)
+            XCTAssertEqual(projection.value, 2)
+            let changedStorage = try! XCTUnwrap(
+                graph.slots[Int(projection.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<Int>
+            )
+            XCTAssertTrue(initialStorage === changedStorage)
+            XCTAssertEqual(initialPointer, changedStorage.rawPointer)
+        }
+    }
+
+    func testComputedKeyPathProjectionUsesTypedFocusRule() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(
+                value: ComputedProjectionRoot(storedValue: 1)
+            )
+            let projection = graph.subscriptNode(
+                parent: source,
+                keyPath: \.computedValue
+            )
+
+            XCTAssertTrue(
+                projection.identifier._bodyType
+                    == Focus<ComputedProjectionRoot, Int>.self
+            )
+            guard case .ruleBody = graph.slots[
+                Int(projection.identifier.rawValue)
+            ].node?.kind else {
+                return XCTFail("Computed key paths must use a Focus rule.")
+            }
+            XCTAssertEqual(projection.value, 2)
+
+            source.value = ComputedProjectionRoot(storedValue: 5)
+            XCTAssertEqual(projection.value, 6)
+        }
+    }
+
     func testGraphContextFacadeStoresOneContextPerGraph() {
         let graph = _AGGraph()
         let first = AGGraphContextToken()
@@ -1468,6 +1569,85 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testRemovedIndirectSourceRestoresFallbackBeforeSlotReuse() {
+        // ASSERTIONS attributeGraphIndirectTargetLifetimeObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let fallback = graph.makeInput(value: false)
+            let indirect = graph.makeIndirectAttribute(source: fallback)
+            let childSubgraph = AGSubgraph()
+            let childSource = AGSubgraph.withCurrent(childSubgraph) {
+                graph.makeInput(value: true)
+            }
+
+            graph.setIndirectTarget(indirect, to: childSource)
+            XCTAssertTrue(indirect.value)
+            XCTAssertEqual(
+                graph.indirectTarget(indirect.identifier),
+                childSource.identifier
+            )
+
+            let removedSlot = childSource.identifier.rawValue
+            childSubgraph.invalidate()
+
+            XCTAssertEqual(
+                graph.indirectTarget(indirect.identifier),
+                fallback.identifier
+            )
+            let replacement = graph.makeInput(value: 42)
+            XCTAssertEqual(replacement.identifier.rawValue, removedSlot)
+            XCTAssertFalse(indirect.value)
+        }
+    }
+
+    func testUnevaluatedIndirectTargetIsDetachedWhenItsSourceIsRemoved() {
+        // ASSERTIONS attributeGraphIndirectTargetLifetimeObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let fallback = graph.makeInput(value: false)
+            let indirect = graph.makeIndirectAttribute(source: fallback)
+            let childSubgraph = AGSubgraph()
+            let childSource = AGSubgraph.withCurrent(childSubgraph) {
+                graph.makeInput(value: true)
+            }
+
+            graph.setIndirectTarget(indirect, to: childSource)
+            childSubgraph.invalidate()
+
+            XCTAssertEqual(
+                graph.indirectTarget(indirect.identifier),
+                fallback.identifier
+            )
+            XCTAssertFalse(indirect.value)
+        }
+    }
+
+    func testNilIndirectRetargetRestoresItsOriginalSource() {
+        // ASSERTIONS attributeGraphIndirectTargetLifetimeObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let fallback = graph.makeInput(value: false)
+            let indirect = graph.makeIndirectAttribute(source: fallback)
+            let replacement = graph.makeInput(value: true)
+
+            graph.setIndirectTarget(indirect, to: replacement)
+            XCTAssertTrue(indirect.value)
+
+            graph.setIndirectTarget(indirect.identifier, to: nil)
+            XCTAssertEqual(
+                graph.indirectTarget(indirect.identifier),
+                fallback.identifier
+            )
+            XCTAssertFalse(indirect.value)
+        }
+    }
+
     func testHashableRuleCachedValueUsesAReusableUpdatingAttribute() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1495,6 +1675,46 @@ final class AGGraphCounterTests: XCTestCase {
             source.value = 4
             XCTAssertEqual(rule.cachedValueIfExists(options: options, owner: nil), 8)
             XCTAssertEqual(graph.cachedRuleEntries.count, 1)
+        }
+    }
+
+    func testCachedRuleSubgraphRemovalPreservesUnrelatedCacheEntries() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let retainedSubgraph = AGSubgraph()
+            let removedSubgraph = AGSubgraph()
+            let retainedSource = AGSubgraph.withCurrent(retainedSubgraph) {
+                graph.makeInput(value: 3)
+            }
+            let removedSource = AGSubgraph.withCurrent(removedSubgraph) {
+                graph.makeInput(value: 5)
+            }
+
+            let retainedRule = CachedDoublingRule(source: retainedSource)
+            let removedRule = CachedDoublingRule(source: removedSource)
+            XCTAssertEqual(
+                retainedRule.cachedValue(options: [], owner: retainedSource.identifier),
+                6
+            )
+            XCTAssertEqual(
+                removedRule.cachedValue(options: [], owner: removedSource.identifier),
+                10
+            )
+            XCTAssertEqual(graph.cachedRuleEntries.count, 2)
+            XCTAssertEqual(graph.cachedRuleKeysByAttribute.count, 2)
+
+            removedSubgraph.invalidate()
+
+            XCTAssertEqual(graph.cachedRuleEntries.count, 1)
+            XCTAssertEqual(graph.cachedRuleKeysByAttribute.count, 1)
+            XCTAssertEqual(
+                retainedRule.cachedValue(options: [], owner: retainedSource.identifier),
+                6
+            )
+            XCTAssertEqual(graph.cachedRuleEntries.count, 1)
+            XCTAssertEqual(graph.cachedRuleKeysByAttribute.count, 1)
         }
     }
 
@@ -1672,6 +1892,15 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(evaluations, ["second", "first"])
         }
     }
+}
+
+private struct StoredProjectionRoot {
+    var value: Int
+}
+
+private struct ComputedProjectionRoot {
+    var storedValue: Int
+    var computedValue: Int { storedValue + 1 }
 }
 
 private final class AGGraphContextToken {}

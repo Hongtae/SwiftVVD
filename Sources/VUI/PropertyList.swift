@@ -738,13 +738,17 @@ extension PropertyList {
         }
     }
 
-    // Merge `other`'s entries into `self` at lower priority.
-    // Self's existing entries remain at the head (higher priority);
-    // other's entries are appended at the tail as fallbacks.
+    // Merge disjoint entries with the receiver at higher priority. When one
+    // chain already contains the other as its after-tail, keep the extended
+    // chain directly.
     mutating func merge(_ other: PropertyList) {
         guard !other.isEmpty else { return }
         guard !self.isEmpty else { self = other; return }
         if elements!.containsIdenticalTail(other.elements) {
+            return
+        }
+        if other.elements!.containsIdenticalTail(elements) {
+            self = other
             return
         }
         elements = other.elements!.rebuilt(before: elements)

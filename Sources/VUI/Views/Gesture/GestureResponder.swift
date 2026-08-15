@@ -326,7 +326,7 @@ class ResponderNode {
     }
 
     func bindEvent(_ event: any EventType) -> ResponderNode? {
-        fatalError("ResponderNode.bindEvent(_:) must be overridden")
+        nil
     }
 
     func visit(
@@ -498,6 +498,16 @@ struct HitTestPassThroughFeature {
 
     static var isEnabled: Bool {
         overrideValue ?? isLinkedOnOrAfter(.v7)
+    }
+}
+
+struct GestureContainerFeature: Feature {
+    typealias Value = Bool
+
+    nonisolated(unsafe) static var isEnabledOverride: Bool?
+
+    static var isEnabled: Bool {
+        isEnabledOverride ?? isLinkedOnOrAfter(.v7)
     }
 }
 
@@ -1273,6 +1283,12 @@ final class GestureResponder<M: GestureViewModifier>:
         }
     }
 
+    override func resetGesture() {
+        childSubgraph = nil
+        childViewSubgraph = nil
+        super.resetGesture()
+    }
+
     override func containsGlobalPoints(
         _ points: [CGPoint],
         cacheKey: UInt32?,
@@ -1287,6 +1303,37 @@ final class GestureResponder<M: GestureViewModifier>:
             result.priority = Self.gestureContainmentPriority
         }
         return result
+    }
+
+    override func bindEvent(_ event: any EventType) -> ResponderNode? {
+        guard GestureContainerFeature.isEnabled else {
+            return super.bindEvent(event)
+        }
+        guard let event = event as? any HitTestableEventType else {
+            return nil
+        }
+        let options = event.customHitTestOptions ?? .platformDefault
+        let cacheKey = options.contains(.uncached)
+            ? nil
+            : ViewResponder.nextHitTestKey()
+        if options.contains(.disablePointCloudHitTesting) {
+            return singlePointHitTest(
+                globalPoint: event.hitTestLocation,
+                cacheKey: cacheKey,
+                options: options
+            )?.responder
+        }
+        let (points, weights) = hitPoints(
+            point: event.hitTestLocation,
+            radius: event.hitTestRadius
+        )
+        return hitTest(
+            globalPoints: points,
+            weights: weights,
+            mask: [],
+            cacheKey: cacheKey,
+            options: options
+        )?.responder
     }
 
     override var features: Features {

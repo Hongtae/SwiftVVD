@@ -55,7 +55,7 @@ struct MenuPresentationTrigger {
         viewGraph.data.withCurrent {
             guard let responder = hitResponder(at: event.location,
                                                rootResponder: rootResponder),
-                  responder.snapshotIsEnabled else {
+                  responder.isEnabled != false else {
                 return
             }
             if responder.menuIsOpen {

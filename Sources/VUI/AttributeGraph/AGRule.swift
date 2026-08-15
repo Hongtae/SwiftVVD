@@ -135,6 +135,15 @@ protocol _AnyAttributeBodyBox: AnyObject {
 
 protocol _AnyRuleBox: _AnyAttributeBodyBox {
     func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
+    func keyPathProjection() -> (
+        parent: AGAttribute,
+        keyPath: AnyKeyPath
+    )?
+}
+
+private protocol _AnyKeyPathProjectionRule {
+    var projectionParent: AGAttribute { get }
+    var projectionKeyPath: AnyKeyPath { get }
 }
 
 final class _RuleBox<R: Rule>: _AnyRuleBox {
@@ -152,6 +161,17 @@ final class _RuleBox<R: Rule>: _AnyRuleBox {
 
     func publishValue(to graph: _AGGraph, for attribute: AGAttribute) {
         graph.publishComputedValue(storage.pointee.value, for: attribute)
+    }
+
+    func keyPathProjection() -> (
+        parent: AGAttribute,
+        keyPath: AnyKeyPath
+    )? {
+        guard let projection = storage.pointee
+            as? any _AnyKeyPathProjectionRule else {
+            return nil
+        }
+        return (projection.projectionParent, projection.projectionKeyPath)
     }
 
     func mutateRule(_ body: (inout R) -> Void) {
@@ -571,6 +591,11 @@ struct Focus<Root, Value>: Rule, CustomStringConvertible {
     static var flags: AGAttributeTypeFlags { [] }
     var value: Value { root.value[keyPath: keyPath] }
     var description: String { "• \(String(describing: Value.self))" }
+}
+
+extension Focus: _AnyKeyPathProjectionRule {
+    var projectionParent: AGAttribute { root.identifier }
+    var projectionKeyPath: AnyKeyPath { keyPath }
 }
 
 struct Map<Input, Output>: Rule, CustomStringConvertible {

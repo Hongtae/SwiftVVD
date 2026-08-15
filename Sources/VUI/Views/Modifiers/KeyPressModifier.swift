@@ -154,14 +154,24 @@ final class KeyPressResponder: MultiViewResponder {
     }
 }
 
-final class KeyEventDispatcher {
+struct KeyEventDispatcher: ForwardedEventDispatcher {
+    static var eventType: any EventType.Type { KeyEvent.self }
+
     @discardableResult
-    func receiveEvents(
+    mutating func receiveEvents(
         _ events: [EventID: any EventType],
-        rootResponder: MultiViewResponder?,
-        enqueueAction: (@escaping () -> Void) -> Void
+        manager: EventBindingManager
     ) -> Set<EventID> {
+        let rootResponder = manager.rootResponder as? MultiViewResponder
         guard let rootResponder else { return [] }
+        let gestureGraph = manager.host as? GestureGraph
+        let enqueueAction: (@escaping () -> Void) -> Void = { action in
+            if let gestureGraph {
+                gestureGraph.enqueueAction(action)
+            } else {
+                action()
+            }
+        }
         var consumed: Set<EventID> = []
         for (eventID, event) in events {
             guard let keyEvent = event as? KeyEvent,

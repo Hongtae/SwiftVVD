@@ -38,12 +38,6 @@ public struct MenuStyleConfiguration {
 extension MenuStyleConfiguration.Label: PrimitiveView {}
 extension MenuStyleConfiguration.Content: PrimitiveView {}
 
-struct _MenuStyleKey: GraphInput {
-    static var defaultValue: (any MenuStyle)? { nil }
-    static func valuesEqual(_ a: (any MenuStyle)?, _ b: (any MenuStyle)?) -> Bool { false }
-    var description: String { "_MenuStyleKey" }
-}
-
 public struct DefaultMenuStyle: MenuStyle {
     public init() {}
 
@@ -106,10 +100,10 @@ private struct _DefaultMenuStyleBody: View {
                     .background(arrowBg, in: RoundedRectangle(cornerRadius: 5))
                     .modifier(MenuDropdownModifier(
                         content: configuration.content,
-                        onHoverChanged: { isArrowHovered = $0 },
                         onPressingChanged: { isArrowPressing = $0 },
                         onPresentationChanged: configuration._onPresentationChanged
                     ))
+                    .onHover { isArrowHovered = $0 }
             }
             .fixedSize()
             .background(Color(white: 0.95), in: RoundedRectangle(cornerRadius: 5))
@@ -131,10 +125,10 @@ private struct _DefaultMenuStyleBody: View {
                 }
                 .modifier(MenuDropdownModifier(
                     content: configuration.content,
-                    onHoverChanged: { isLabelHovered = $0 },
                     onPressingChanged: { isLabelPressing = $0 },
                     onPresentationChanged: configuration._onPresentationChanged
                 ))
+                .onHover { isLabelHovered = $0 }
         }
     }
 }
@@ -189,10 +183,10 @@ private struct _ButtonMenuStyleBody: View {
                     .background(menuBg, in: RoundedRectangle(cornerRadius: 7))
                     .modifier(MenuDropdownModifier(
                         content: configuration.content,
-                        onHoverChanged: { isMenuHovered = $0 },
                         onPressingChanged: { isMenuPressing = $0 },
                         onPresentationChanged: configuration._onPresentationChanged
                     ))
+                    .onHover { isMenuHovered = $0 }
             }
             .fixedSize()
             .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
@@ -214,10 +208,10 @@ private struct _ButtonMenuStyleBody: View {
                 }
                 .modifier(MenuDropdownModifier(
                     content: configuration.content,
-                    onHoverChanged: { isHovered = $0 },
                     onPressingChanged: { isPressing = $0 },
                     onPresentationChanged: configuration._onPresentationChanged
                 ))
+                .onHover { isHovered = $0 }
         }
     }
 }
@@ -249,76 +243,19 @@ struct PlatformItemListMenuStyle: MenuStyle {
     }
 }
 
-struct _MenuItemMenuStyle: MenuStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        _MenuItemMenuBody(configuration: configuration)
-    }
-}
-
-private struct _MenuItemMenuBody: View {
-    let configuration: MenuStyleConfiguration
-    @State private var isHovered = false
-    @State private var isMenuOpen = false
-
-    private struct TriangleRight: Shape {
-        func path(in rect: CGRect) -> Path {
-            var path = Path()
-            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-            path.closeSubpath()
-            return path
-        }
-    }
-
-    var body: some View {
-        let bgColor: Color = isHovered ? .blue : isMenuOpen ? Color.blue.opacity(0.8) : .clear
-        let fgColor: Color = (isHovered || isMenuOpen) ? .white : .black
-        let arrowColor: Color = (isHovered || isMenuOpen) ? .white : Color(white: 0.4)
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(bgColor)
-            HStack {
-                configuration.label
-                    .padding(.vertical, 4)
-                    .padding(.leading, 8)
-                Spacer()
-                TriangleRight()
-                    .fill(arrowColor)
-                    .frame(width: 4, height: 7)
-                    .padding(.trailing, 8)
-            }
-        }
-        .foregroundStyle(fgColor)
-        .modifier(MenuDropdownModifier(
-            content: configuration.content,
-            onHoverChanged: { isHovered = $0 },
-            onMenuOpenChanged: { isMenuOpen = $0 },
-            onPresentationChanged: configuration._onPresentationChanged
-        ))
-        ._onButtonGesture(pressing: { _ in }, perform: { configuration._primaryAction?() })
-        //.border(.red, width: 1)
-    }
-}
-
-struct MenuStyleModifier<Style>: ViewModifier where Style: MenuStyle {
-    let style: Style
+struct MenuStyleModifier<Style>: StyleModifier where Style: MenuStyle {
     typealias Body = Never
-}
+    typealias StyleConfiguration = MenuStyleConfiguration
+    typealias StyleBody = Style.Body
 
-extension MenuStyleModifier {
-    static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
-        var inputs = inputs
-        let styleExistential: (any MenuStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _MenuStyleKey.self)
-        return body(_Graph(), inputs)
+    var style: Style
+
+    init(style: Style) {
+        self.style = style
     }
 
-    static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
-        var inputs = inputs
-        let styleExistential: (any MenuStyle)? = modifier._attribute.value.style
-        inputs.base.customInputs.setValue(styleExistential, forKey: _MenuStyleKey.self)
-        return body(_Graph(), inputs)
+    func styleBody(configuration: MenuStyleConfiguration) -> Style.Body {
+        style.makeBody(configuration: configuration)
     }
 }
 

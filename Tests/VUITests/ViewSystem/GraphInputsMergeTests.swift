@@ -2,6 +2,21 @@ import XCTest
 @testable import VUI
 
 final class GraphInputsMergeTests: XCTestCase {
+    // ASSERTIONS propertyListBidirectionalTailMergeObserved
+    func testPropertyListMergeInstallsArgumentThatExtendsReceiverTail() {
+        var parent = PropertyList()
+        parent.setValue("parent", forKey: GraphInputsMergeTailKey.self)
+
+        var child = parent
+        child.setValue("child", forKey: GraphInputsMergeTailKey.self)
+
+        var merged = parent
+        merged.merge(child)
+
+        XCTAssertTrue(merged.isIdentical(to: child))
+        XCTAssertEqual(merged[GraphInputsMergeTailKey.self], "child")
+    }
+
     func testGraphPhaseUsesObservedValueStorageAndBitRoles() {
         var phase = _GraphInputs.Phase()
 
@@ -255,4 +270,8 @@ final class GraphInputsMergeTests: XCTestCase {
     private func assertBoolViewInput<T: ViewInput>(_ type: T.Type) where T.Value == Bool {
         XCTAssertFalse(T.defaultValue)
     }
+}
+
+private struct GraphInputsMergeTailKey: GraphInput {
+    static let defaultValue = "default"
 }

@@ -146,54 +146,31 @@ extension Menu where Label == MenuStyleConfiguration.Label, Content == MenuStyle
 }
 
 
-struct ResolvedMenuStyle: View {
-    var _menuItemStyle = _MenuItemMenuStyle()
-    var _style: any MenuStyle = DefaultMenuStyle.automatic
-    var _configuration = MenuStyleConfiguration()
-    var _primaryAction: (() -> Void)? = nil
-    var _onPresentationChanged: ((Bool) -> Void)? = nil
+struct ResolvedMenuStyle: StyleableView {
+    typealias Configuration = MenuStyleConfiguration
+    var configuration: MenuStyleConfiguration
 
     init(primaryAction: (() -> Void)? = nil,
          onPresentationChanged: ((Bool) -> Void)? = nil) {
-        self._primaryAction = primaryAction
-        self._onPresentationChanged = onPresentationChanged
+        self.configuration = MenuStyleConfiguration(
+            primaryAction: primaryAction,
+            onPresentationChanged: onPresentationChanged
+        )
     }
 
-    var _body: any View {
-        _style.makeBody(configuration: _configuration)
+    var body: some View {
+        Menu(configuration)
     }
 
-    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
-        guard let graph = _AGGraph.current else {
-            fatalError("\(self)._makeView called outside an active _AGGraph context.")
-        }
-        let style: any MenuStyle =
-            inputs.base.customInputs.value(forKey: _MenuStyleKey.self)
-            ?? DefaultMenuStyle.automatic
-
-        func wireBody(_ style: some MenuStyle) -> _ViewOutputs {
-            let bodyAttr = graph.makeRule {
-                let rs = view._attribute.value
-                let config = MenuStyleConfiguration(primaryAction: rs._primaryAction,
-                                                    onPresentationChanged: rs._onPresentationChanged)
-                return style.makeBody(configuration: config)
-            }
-            return makeView(view: _GraphValue(_attribute: bodyAttr), inputs: inputs)
-        }
-        return wireBody(style)
-    }
-
-    static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
-        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    typealias DefaultStyleModifier = MenuStyleModifier<DefaultMenuStyle>
+    static var defaultStyleModifier: MenuStyleModifier<DefaultMenuStyle> {
+        MenuStyleModifier(style: DefaultMenuStyle())
     }
 }
-
-extension ResolvedMenuStyle: PrimitiveView {}
 
 struct MenuDropdownModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
     typealias Body = Never
     let content: MenuContent
-    var onHoverChanged: ((Bool) -> Void)? = nil
     var onMenuOpenChanged: ((Bool) -> Void)? = nil
     var onPressingChanged: ((Bool) -> Void)? = nil
     var onPresentationChanged: ((Bool) -> Void)? = nil
@@ -242,39 +219,24 @@ extension MenuDropdownModifier {
             )
         )
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
-        // The update rule below owns live modifier, geometry, environment, and
-        // child-responder reads so dynamic child construction stays independent
-        // of parent layout evaluation.
-        let responder = MenuDropdownResponder(
-            itemList: itemListAttr,
-            environment: environmentAttr,
-            phase: inputs.base.phase,
-            transform: inputs.transform,
-            size: inputs.size,
-            onHoverChanged: nil,
-            onMenuOpenChanged: nil,
-            onPressingChanged: nil,
-            onPresentationChanged: nil,
-            innerResponders: []
+        let responderAttr: Attribute<[ViewResponder]> = graph.makeStatefulRule(
+            MenuDropdownResponderFilter(
+                _modifier: modifier._attribute,
+                _itemList: itemListAttr,
+                _environment: environmentAttr,
+                _phase: inputs.base.phase,
+                _position: inputs.position,
+                _size: inputs.size,
+                _transform: inputs.transform,
+                _children: innerRespondersAttr,
+                _responder: nil
+            )
         )
-        graph.makeSideEffectRule { [weak responder] in
-            guard let responder else { return }
-            let value = modifier._attribute.value
-            responder.snapshotTransform = inputs.transform.value
-            responder.snapshotSize = inputs.size.value
-            responder.snapshotIsEnabled = environmentAttr.value.isEnabled
-            responder.onHoverChanged = value.onHoverChanged
-            responder.onMenuOpenChanged = value.onMenuOpenChanged
-            responder.onPressingChanged = value.onPressingChanged
-            responder.onPresentationChanged = value.onPresentationChanged
-            responder.innerResponders = innerRespondersAttr.value
-        }
 
         // Standalone Menu installs a dropdown responder; nested Menu under
         // MenuStyleContext remains PlatformItemListMenuStyle collection.
         outputs.preferences.preferences.removeAll { $0.key == ViewRespondersKey.self }
-        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
-        outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
+        outputs.preferences.append(ViewRespondersKey.self, node: responderAttr.identifier)
         return outputs
     }
 
@@ -292,40 +254,89 @@ extension MenuDropdownModifier {
 
 private let _menuDropdownResponderNextKey = Mutex<UInt32>(0x91000000)
 
-final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
+struct MenuDropdownResponderFilter<MenuContent: View>: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _modifier: Attribute<MenuDropdownModifier<MenuContent>>
+    var _itemList: Attribute<PlatformItemList>
+    var _environment: Attribute<EnvironmentValues>
+    var _phase: Attribute<_GraphInputs.Phase>
+    var _position: Attribute<CGPoint>
+    var _size: Attribute<ViewSize>
+    var _transform: Attribute<ViewTransform>
+    var _children: Attribute<[ViewResponder]>
+    var _responder: MenuDropdownResponder?
+
+    mutating func updateValue() {
+        let isInitialValue = !context.hasValue
+        if _responder == nil {
+            _responder = MenuDropdownResponder(
+                itemList: _itemList,
+                environment: _environment,
+                phase: _phase
+            )
+        }
+        guard let responder = _responder else {
+            fatalError("MenuDropdownResponderFilter failed to create its responder")
+        }
+
+        let modifier = _modifier.value
+        let environment = _environment.value
+        responder.helper.update(
+            data: (
+                value: TrivialContentResponder(),
+                changed: false
+            ),
+            size: (
+                value: _size.value,
+                changed: _AGGraph.currentStatefulInputChanged(_size.identifier)
+            ),
+            position: (
+                value: _position.value,
+                changed: _AGGraph.currentStatefulInputChanged(_position.identifier)
+            ),
+            transform: (
+                value: _transform.value,
+                changed: _AGGraph.currentStatefulInputChanged(_transform.identifier)
+            ),
+            parent: responder
+        )
+        responder.isEnabled = environment.isEnabled
+        responder.onMenuOpenChanged = modifier.onMenuOpenChanged
+        responder.onPressingChanged = modifier.onPressingChanged
+        responder.onPresentationChanged = modifier.onPresentationChanged
+
+        let childrenChanged = isInitialValue
+            || _AGGraph.currentStatefulInputChanged(_children.identifier)
+        if childrenChanged {
+            responder.updateChildren((
+                value: _children.value,
+                changed: true
+            ))
+        }
+        _AGGraph.setStatefulOutput([responder])
+    }
+}
+
+final class MenuDropdownResponder: MultiViewResponder {
     let hitTestKey: UInt32
 
     let itemList: Attribute<PlatformItemList>
     let environment: Attribute<EnvironmentValues>
     let phase: Attribute<_GraphInputs.Phase>
-    let transform: Attribute<ViewTransform>
-    let size: Attribute<ViewSize>
 
-    var snapshotTransform: ViewTransform = .identity
-    var snapshotSize: ViewSize = .zero
-    var snapshotIsEnabled: Bool = true
-    var onHoverChanged: ((Bool) -> Void)?
+    var helper = ContentResponderHelper<TrivialContentResponder>()
+    var isEnabled: Bool?
     var onMenuOpenChanged: ((Bool) -> Void)?
     var onPressingChanged: ((Bool) -> Void)?
     var onPresentationChanged: ((Bool) -> Void)?
-    var innerResponders: [ViewResponder] {
-        didSet { children = innerResponders }
-    }
 
-    private var isHovered = false
     private var isMenuOpen = false
     private var activeSession: ContextMenuPresentationSession?
 
     init(itemList: Attribute<PlatformItemList>,
          environment: Attribute<EnvironmentValues>,
-         phase: Attribute<_GraphInputs.Phase>,
-         transform: Attribute<ViewTransform>,
-         size: Attribute<ViewSize>,
-         onHoverChanged: ((Bool) -> Void)?,
-         onMenuOpenChanged: ((Bool) -> Void)?,
-         onPressingChanged: ((Bool) -> Void)?,
-         onPresentationChanged: ((Bool) -> Void)?,
-         innerResponders: [ViewResponder]) {
+         phase: Attribute<_GraphInputs.Phase>) {
         self.hitTestKey = _menuDropdownResponderNextKey.withLock { key in
             defer { key &+= 1 }
             return key
@@ -333,44 +344,31 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
         self.itemList = itemList
         self.environment = environment
         self.phase = phase
-        self.transform = transform
-        self.size = size
-        self.onHoverChanged = onHoverChanged
-        self.onMenuOpenChanged = onMenuOpenChanged
-        self.onPressingChanged = onPressingChanged
-        self.onPresentationChanged = onPresentationChanged
-        self.innerResponders = innerResponders
         super.init()
-        children = innerResponders
     }
 
     override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
-        .include
+        isEnabled != false || options.contains(.allowDisabledViews)
+            ? .include
+            : .exclude
     }
 
     override func containsGlobalPoints(_ points: [CGPoint],
                                        cacheKey: UInt32?,
                                        options: ViewResponder.ContainsPointsOptions) -> ViewResponder.ContainsPointsResult {
-        guard snapshotIsEnabled else { return .stop }
-        var localPts = Array(points.prefix(64))
-        snapshotTransform.convertGlobal(to: .local, points: &localPts)
-        let bounds = CGRect(origin: .zero, size: snapshotSize.value)
-        var mask = BitVector64()
-        for (index, point) in localPts.enumerated() {
-            mask[index] = bounds.contains(point)
+        guard hitTestPolicy(options: options) != .exclude else {
+            return .stop
         }
-        guard !mask.isEmpty else { return .stop }
-        return ViewResponder.ContainsPointsResult(mask: mask,
-                                    priority: 16.0,
-                                    children: innerResponders)
+        return helper.containsGlobalPoints(
+            points,
+            cacheKey: cacheKey,
+            options: options,
+            children: children
+        )
     }
 
-    func updateHover(isActive newValue: Bool, point: CGPoint?) -> (() -> Void)? {
-        let active = snapshotIsEnabled && newValue
-        guard isHovered != active else { return nil }
-        isHovered = active
-        let callback = onHoverChanged
-        return { callback?(active) }
+    override var features: Features {
+        [.platformViews, .gestures]
     }
 
     var menuIsOpen: Bool {
@@ -387,7 +385,7 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
     }
 
     func present(from parent: WindowController) {
-        guard snapshotIsEnabled else { return }
+        guard isEnabled != false else { return }
         guard let graph = _AGGraph.current else {
             fatalError("MenuDropdownResponder.present called outside AG context")
         }
@@ -452,8 +450,8 @@ final class MenuDropdownResponder: MultiViewResponder, AnyHoverResponder {
     }
 
     private func presentationAnchor() -> CGPoint {
-        var points = [CGPoint(x: 0, y: snapshotSize.value.height)]
-        snapshotTransform.convertGlobal(from: .local, points: &points)
+        var points = [CGPoint(x: 0, y: helper.size.height)]
+        helper.transform.convertGlobal(from: .local, points: &points)
         return points[0]
     }
 

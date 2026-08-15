@@ -37,6 +37,36 @@ final class GraphHostDataSubgraphTests: XCTestCase {
         XCTAssertFalse(host.data.globalSubgraph.nodes.contains(identifier))
     }
 
+    // ASSERTIONS graphHostInternGlobalSubgraphObserved
+    func testInternCreatesConstantsInGlobalSubgraphAndReusesThemAfterRootRemoval() {
+        let host = GraphHost()
+        var first: Attribute<Bool>!
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                first = host.intern(true, for: Bool.self, id: .trueValue)
+            }
+        }
+
+        XCTAssertTrue(host.data.globalSubgraph.nodes.contains(first.identifier))
+        XCTAssertFalse(host.data.rootSubgraph.nodes.contains(first.identifier))
+
+        host.instantiate()
+        host.uninstantiate(immediately: true)
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let second: Attribute<Bool> = host.intern(
+                    true,
+                    for: Bool.self,
+                    id: .trueValue
+                )
+                XCTAssertEqual(second.identifier, first.identifier)
+                XCTAssertTrue(second.value)
+            }
+        }
+    }
+
     func testSubgraphUpdateSelectsDirtyNodesByAttributeFlags() {
         let host = GraphHost()
         var source: Attribute<Int>!

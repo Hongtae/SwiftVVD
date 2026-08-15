@@ -39,11 +39,10 @@ enum LocationInBounds: UInt8, Equatable, Hashable {
     case outOfBounds = 2  // outside all bounds
 }
 
-// MARK: - HoverCallback / ButtonPressingAction
+// MARK: - ButtonPressingAction
 
-// HoverCallback wraps the main action. It ignores the optional point.
+// The optional-point closure wraps the main action.
 // ButtonPressingAction wraps pressingAction and maps `.pressing` to true.
-typealias HoverCallback        = (CGPoint?) -> ()
 typealias ButtonPressingAction = (ButtonPressPhase) -> ()
 
 // MARK: - PrimitiveButtonGestureCore
@@ -143,7 +142,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
     typealias Value = PrimitiveButtonGestureCore.Value
     typealias StateType = ButtonPressPhase
 
-    var hoverCallback: HoverCallback?
+    var hoverCallback: ((CGPoint?) -> Void)?
     var buttonPressingAction: ButtonPressingAction?
 
     static var initialState: ButtonPressPhase { .idle }
@@ -234,7 +233,7 @@ struct PrimitiveButtonGestureCallbacks: GestureCallbacks {
 // attaches the button callbacks, and maps the resulting phase value to Void.
 struct PrimitiveButtonGesture: Gesture {
     // Closure wrappers produced by the public button gesture.
-    var hoverCallback: HoverCallback?
+    var hoverCallback: ((CGPoint?) -> Void)?
     var buttonPressingAction: ButtonPressingAction?
     var outset: CGFloat = 0.0     // fallback hit-test expansion
     var alwaysActive: Bool = false

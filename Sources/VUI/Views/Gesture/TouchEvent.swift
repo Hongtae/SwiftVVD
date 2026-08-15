@@ -18,7 +18,7 @@ protocol HitTestableEventType: EventType {
 
 extension HitTestableEventType where Self: SpatialEventType {
     var hitTestLocation: CGPoint {
-        location
+        globalLocation
     }
 
     var hitTestRadius: CGFloat {

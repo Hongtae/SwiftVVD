@@ -33,6 +33,18 @@ public struct _EnvironmentKeyTransformModifier<Value>: ViewModifier, _GraphInput
     }
 }
 
+private extension CachedEnvironment.ID {
+    static let isEnabled = CachedEnvironment.ID(base: UniqueID())
+}
+
+extension _ViewInputs {
+    var isEnabled: Attribute<Bool> {
+        base.cachedEnvironment.value.attribute(id: .isEnabled) {
+            $0.isEnabled
+        }
+    }
+}
+
 extension View {
     @inlinable nonisolated public func transformEnvironment<V>(_ keyPath: WritableKeyPath<EnvironmentValues, V>, transform: @escaping (inout V) -> Void) -> some View {
         return modifier(_EnvironmentKeyTransformModifier(keyPath: keyPath, transform: transform))

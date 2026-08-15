@@ -3,6 +3,7 @@ import XCTest
 @testable import VVD
 
 final class ButtonEventRoutingTests: XCTestCase {
+    // ASSERTIONS gestureResponderBindEventHitTestObserved
     @MainActor
     func testWindowMouseClickInvokesButtonAction() {
         let counter = ButtonActionCounter()
@@ -38,6 +39,335 @@ final class ButtonEventRoutingTests: XCTestCase {
             buttonID: 0,
             location: CGPoint(x: 210, y: 120),
             timestamp: 0
+        )))
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    // ASSERTIONS appKitPressedPointerHoverIsolationObserved
+    @MainActor
+    func testWindowMouseDragDoesNotCancelButtonActionWithHoverEvent() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+        let location = CGPoint(x: 210, y: 120)
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: 0
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: CGPoint(x: location.x + 1, y: location.y),
+            timestamp: 0.01
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: CGPoint(x: location.x + 1, y: location.y),
+            timestamp: 0.02
+        ))
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    // ASSERTIONS buttonPressedDragBoundaryBindingObserved
+    @MainActor
+    func testWindowMouseReleaseOutsideButtonDoesNotInvokeAction() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+        let inside = CGPoint(x: 210, y: 120)
+        let outside = CGPoint(x: 20, y: 20)
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: inside,
+            timestamp: 0
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.01
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.02
+        ))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 0)
+    }
+
+    // ASSERTIONS buttonPressedDragBoundaryBindingObserved
+    func testEventBindingManagerRetainsPointerResponderOutsideInitialHitRegion() {
+        let manager = EventBindingManager()
+        let target = ResponderNode()
+        let root = ButtonBindingRoot(target: target)
+        let host = ButtonBindingHost(manager: manager, responderNode: root)
+        manager.host = host
+        manager.rootResponder = root
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 41)
+
+        XCTAssertTrue(manager.sendDownstream(
+            [eventID: VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .began,
+                location: CGPoint(x: 10, y: 10),
+                globalLocation: CGPoint(x: 10, y: 10),
+                modifiers: []
+            )],
+            at: .zero
+        ).isActive)
+        XCTAssertTrue(manager.bindings[eventID]?.responder === target)
+        XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
+        XCTAssertEqual(root.bindCount, 1)
+
+        root.target = nil
+        XCTAssertTrue(manager.sendDownstream(
+            [eventID: VUI.MouseEvent(
+                timestamp: Time(seconds: 0.01),
+                binding: nil,
+                button: .primary,
+                phase: .active,
+                location: CGPoint(x: 200, y: 200),
+                globalLocation: CGPoint(x: 200, y: 200),
+                modifiers: []
+            )],
+            at: Time(seconds: 0.01)
+        ).isActive)
+        XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
+        XCTAssertEqual(root.bindCount, 1)
+
+        XCTAssertTrue(manager.sendDownstream(
+            [eventID: VUI.MouseEvent(
+                timestamp: Time(seconds: 0.02),
+                binding: nil,
+                button: .primary,
+                phase: .ended,
+                location: CGPoint(x: 200, y: 200),
+                globalLocation: CGPoint(x: 200, y: 200),
+                modifiers: []
+            )],
+            at: Time(seconds: 0.02)
+        ).isEnded)
+        XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
+        XCTAssertNil(manager.bindings[eventID])
+        XCTAssertEqual(root.bindCount, 1)
+    }
+
+    // ASSERTIONS buttonPressedDragBoundaryBindingObserved
+    func testPrimitiveButtonCallbacksClearPressOutsideAndRestoreOnReentry() {
+        var pressingValues: [Bool] = []
+        var actionCount = 0
+        let callbacks = PrimitiveButtonGestureCallbacks(
+            hoverCallback: { _ in actionCount += 1 },
+            buttonPressingAction: { phase in
+                pressingValues.append(phase == .pressing)
+            }
+        )
+        var state = PrimitiveButtonGestureCallbacks.initialState
+
+        callbacks.dispatch(
+            phase: .active(.init(
+                location: CGPoint(x: 10, y: 10),
+                timestamp: 0,
+                locationInBounds: .inBounds
+            )),
+            state: &state
+        )?()
+        XCTAssertEqual(state, .pressing)
+        XCTAssertEqual(pressingValues, [true])
+
+        callbacks.dispatch(
+            phase: .active(.init(
+                location: CGPoint(x: 200, y: 200),
+                timestamp: 0.01,
+                locationInBounds: .outOfBounds
+            )),
+            state: &state
+        )?()
+        XCTAssertEqual(state, .outside)
+        XCTAssertEqual(pressingValues, [true, false])
+        XCTAssertEqual(actionCount, 0)
+
+        callbacks.dispatch(
+            phase: .active(.init(
+                location: CGPoint(x: 10, y: 10),
+                timestamp: 0.02,
+                locationInBounds: .inBounds
+            )),
+            state: &state
+        )?()
+        XCTAssertEqual(state, .pressing)
+        XCTAssertEqual(pressingValues, [true, false, true])
+
+        callbacks.dispatch(
+            phase: .ended(.init(
+                location: CGPoint(x: 10, y: 10),
+                timestamp: 0.03,
+                locationInBounds: .inBounds
+            )),
+            state: &state
+        )?()
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(pressingValues, [true, false, true, false])
+        XCTAssertEqual(actionCount, 1)
+    }
+
+    // ASSERTIONS buttonPressedDragBoundaryBindingObserved
+    @MainActor
+    func testWindowMouseDragOutsidePublishesUnpressedBeforeRelease() {
+        let recorder = ButtonPressRecorder()
+        let controller = WindowController(
+            content: ButtonGestureRecordingRoot(recorder: recorder),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(ButtonGestureRecordingRoot.self)
+            )
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+
+        let inside = CGPoint(x: 210, y: 120)
+        let outside = CGPoint(x: 20, y: 20)
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: inside,
+            timestamp: 0
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        XCTAssertEqual(recorder.pressingValues, [true])
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .move,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.01
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        XCTAssertEqual(recorder.pressingValues, [true, false])
+        XCTAssertEqual(recorder.actionCount, 0)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.02
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        XCTAssertEqual(recorder.actionCount, 0)
+    }
+
+    // ASSERTIONS appKitPressedPointerHoverIsolationObserved
+    @MainActor
+    func testQueuedMouseDragPreservesPressStreamAndInvokesButtonAction() {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+        let location = CGPoint(x: 210, y: 120)
+
+        let samples: [(MouseEventType, CGPoint, Double)] = [
+            (.buttonDown, location, 0),
+            (.move, CGPoint(x: location.x + 1, y: location.y), 0.01),
+            (.move, CGPoint(x: location.x + 2, y: location.y), 0.02),
+            (.buttonUp, CGPoint(x: location.x + 2, y: location.y), 0.03),
+        ]
+        for (type, point, seconds) in samples {
+            controller.enqueueMouseInputEvent(
+                VVD.MouseEvent(
+                    type: type,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: point,
+                    timestamp: seconds
+                ),
+                at: Time(seconds: seconds)
+            )
+        }
+
+        var redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    // ASSERTIONS forwardedEventDispatcherRegistrationDispatchObserved
+    @MainActor
+    func testUnboundHoverEventDoesNotCancelActiveButtonPress() throws {
+        let counter = ButtonActionCounter()
+        let controller = makeButtonController(counter: counter)
+        let location = CGPoint(x: 210, y: 120)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: 0
+        )))
+
+        let manager = try XCTUnwrap(
+            controller.gestureGraph?.eventBindingManager
+        )
+        let hoverID = EventID(type: HoverEvent.self, serial: 91)
+        XCTAssertTrue(manager.send(
+            [hoverID: HoverEvent(
+                timestamp: .zero,
+                phase: .began,
+                binding: nil,
+                globalLocation: location
+            )],
+            at: .zero
+        ).isEmpty)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: 0.01
         )))
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
@@ -125,6 +455,7 @@ final class ButtonEventRoutingTests: XCTestCase {
         XCTAssertEqual(counter.value, 2)
     }
 
+    // ASSERTIONS gestureResponderResetSubgraphReferencesObserved
     @MainActor
     func testGestureMakeGestureRunsForEachClickSession() {
         let actionCounter = ButtonActionCounter()
@@ -393,6 +724,52 @@ private final class ButtonActionCounter: @unchecked Sendable {
     var value = 0
 }
 
+private final class ButtonPressRecorder: @unchecked Sendable {
+    var pressingValues: [Bool] = []
+    var actionCount = 0
+}
+
+private final class ButtonBindingRoot: ResponderNode {
+    var target: ResponderNode?
+    var bindCount = 0
+
+    init(target: ResponderNode?) {
+        self.target = target
+    }
+
+    override func bindEvent(_ event: any EventType) -> ResponderNode? {
+        bindCount += 1
+        return target
+    }
+}
+
+private final class ButtonBindingHost: EventGraphHost {
+    let eventBindingManager: EventBindingManager
+    var responderNode: ResponderNode?
+    var focusedResponder: ResponderNode?
+    var nextGestureUpdateTime: Time { .infinity }
+    var receivedEvents: [[EventID: any EventType]] = []
+
+    init(manager: EventBindingManager, responderNode: ResponderNode?) {
+        self.eventBindingManager = manager
+        self.responderNode = responderNode
+    }
+
+    func sendEvents(
+        _ events: [EventID: any EventType],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        receivedEvents.append(events)
+        return events.values.contains { $0.phase.isTerminal }
+            ? .ended(())
+            : .active(())
+    }
+
+    func resetEvents() {}
+    func gestureCategory() -> GestureCategory? { nil }
+}
+
 private struct ButtonEventRoutingRoot: View {
     let counter: ButtonActionCounter
 
@@ -401,6 +778,24 @@ private struct ButtonEventRoutingRoot: View {
             counter.value += 1
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct ButtonGestureRecordingRoot: View {
+    let recorder: ButtonPressRecorder
+
+    var body: some View {
+        Text("Action")
+            .padding(4)
+            .background {
+                RoundedRectangle(cornerRadius: 4).fill(Color.white)
+            }
+            .foregroundStyle(Color.black)
+            ._onButtonGesture(
+                pressing: { recorder.pressingValues.append($0) },
+                perform: { recorder.actionCount += 1 }
+            )
+            .frame(width: 420, height: 240)
     }
 }
 

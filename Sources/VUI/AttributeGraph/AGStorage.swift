@@ -8,6 +8,27 @@
 import Foundation
 import Synchronization
 
+private struct _OffsetProjection<Root, Value>: _AnyOffsetProjection {
+    var root: Attribute<Root>
+    var byteOffset: Int
+    var usesOffsetCache: Bool
+
+    var parent: AGAttribute { root.identifier }
+    var valueType: ObjectIdentifier { ObjectIdentifier(Value.self) }
+
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute) {
+        let rootPointer = graph.valuePointerForPermanentInput(
+            root.identifier,
+            evaluator: attribute,
+            as: Root.self
+        )
+        let valuePointer = UnsafeRawPointer(rootPointer)
+            .advanced(by: byteOffset)
+            .assumingMemoryBound(to: Value.self)
+        graph.publishComputedValue(valuePointer.pointee, for: attribute)
+    }
+}
+
 private struct _AGUpdateFrame {
     var id: UInt32
     var afterInputs: Bool
@@ -51,27 +72,18 @@ extension _AGGraph {
     private static func valueComparator<Value>(
         for type: Value.Type,
         mode: AGComparisonMode = .storedRepresentation
-    ) -> (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool {
+    ) -> (UnsafeRawPointer, UnsafeRawPointer) -> Bool {
         let options = AGComparisonOptions(mode: mode)
-        let descriptorEquality: (any _AGTypeDescriptorEquatable.Type)? = if mode.rawValue
-            <= AGComparisonMode.layout.rawValue {
-            Value.self as? any _AGTypeDescriptorEquatable.Type
-        } else {
-            nil
-        }
-        return { lhs, rhs in
-            guard let lhs = lhs as? _AGValueStorage<Value>,
-                  let rhs = rhs as? _AGValueStorage<Value> else {
-                return false
-            }
-            if let descriptorEquality {
+        if mode.rawValue <= AGComparisonMode.layout.rawValue,
+           let descriptorEquality = type as? any _AGTypeDescriptorEquatable.Type {
+            return { lhs, rhs in
                 return descriptorEquality._agTypeDescriptorValuesEqual(
-                    lhs.pointer,
-                    rhs.pointer
+                    lhs,
+                    rhs
                 )
             }
-            return compareStoredValues(lhs.pointer, rhs.pointer, options: options)
         }
+        return storedValueComparator(for: type, options: options)
     }
 
     private func makeValueStorage<Value>(
@@ -89,15 +101,46 @@ extension _AGGraph {
         return node.makeValueStorage(value)
     }
 
+    private func updateValueStorage<Value>(
+        _ value: Value,
+        for id: AGAttribute,
+        in node: Node
+    ) -> Bool {
+        if let storage = node.value as? _AGValueStorage<Value> {
+            return withUnsafePointer(to: value) { proposedValue in
+                let changed = !node.valuesEqual(
+                    storage.rawPointer,
+                    UnsafeRawPointer(proposedValue)
+                )
+                if changed {
+                    storage.mutablePointer.pointee = value
+                }
+                return changed
+            }
+        }
+
+        if let storage = node.value {
+            switch node.updateErasedValue(value, in: storage) {
+            case .unchanged:
+                return false
+            case .changed:
+                return true
+            case .typeMismatch:
+                fatalError("Attribute value type changed after node creation.")
+            }
+        }
+
+        node.value = makeValueStorage(value, for: id)
+        return true
+    }
+
     @discardableResult
     func publishComputedValue<Value>(_ value: Value, for id: AGAttribute) -> Bool {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else {
             fatalError("publishComputedValue called on AGAttribute @\(id.rawValue) that does not exist.")
         }
-        let newValue = makeValueStorage(value, for: id)
-        let changed = node.value.map { !node.valuesEqual($0, newValue) } ?? true
-        slots[index].node!.value = newValue
+        let changed = updateValueStorage(value, for: id, in: node)
         if changed {
             slots[index].node!.valueVersion &+= 1
             let transaction = slots[index].node!.transaction
@@ -341,14 +384,14 @@ extension _AGGraph {
 
         if options.contains(.withoutDependency) {
             let value = _AGGraph.withoutTracking {
-                self.value(for: input.identifier) as! Value
+                self.typedValue(for: input, dynamicInputFlags: 0)
             }
             return (value, [])
         }
 
         let result: (Value, Bool)
         if context == nil || _AGGraph.currentlyEvaluatingNode == context {
-            let value = self.value(for: input.identifier) as! Value
+            let value = self.typedValue(for: input, dynamicInputFlags: 0)
             let changed = context.map {
                 self.inputChanged(
                     input.identifier.rawValue,
@@ -358,7 +401,7 @@ extension _AGGraph {
             result = (value, changed)
         } else {
             result = _AGGraph.withRuleContext(context!) {
-                let value = self.value(for: input.identifier) as! Value
+                let value = self.typedValue(for: input, dynamicInputFlags: 0)
                 let changed = self.inputChanged(
                     input.identifier.rawValue,
                     forNodeAt: Int(context!.rawValue)
@@ -488,6 +531,11 @@ extension _AGGraph {
         if let entry = cachedRuleEntries[key] {
             if !entry.attribute.isValid(in: self) {
                 cachedRuleEntries.removeValue(forKey: key)
+                if cachedRuleKeysByAttribute[entry.attribute.identifier] == key {
+                    cachedRuleKeysByAttribute.removeValue(
+                        forKey: entry.attribute.identifier
+                    )
+                }
             } else {
                 guard let typedEntry = entry as? TypedCachedRuleEntry<R.Value> else {
                     fatalError("Cached Rule value type changed for an identical cache key.")
@@ -513,6 +561,7 @@ extension _AGGraph {
             value: value
         )
         cachedRuleEntries[key] = entry
+        cachedRuleKeysByAttribute[entry.attribute.identifier] = key
         return entry.pointer
     }
 
@@ -930,6 +979,39 @@ extension _AGGraph {
         var replacementSeed: UInt32
     }
 
+    private func resetIndirectOutputIfNeeded(
+        at outputIndex: UInt32,
+        removing source: AGWeakAttribute
+    ) {
+        let index = Int(outputIndex)
+        guard slots.indices.contains(index),
+              case let .indirect(current, defaultSource, defaultValue) =
+                slots[index].node?.kind,
+              current == source else {
+            return
+        }
+
+        let replacement: AGWeakAttribute
+        let defaultIndex = Int(defaultSource.identifier)
+        if defaultSource != source,
+           defaultSource.isValid(in: self),
+           slots.indices.contains(defaultIndex),
+           slots[defaultIndex].node?.isBeingRemoved == false {
+            replacement = defaultSource
+        } else {
+            replacement = .invalid
+        }
+
+        let indirect = AGAttribute(rawValue: outputIndex)
+        removeIndirectSourceDependency(from: indirect, to: current)
+        slots[index].node!.kind = .indirect(
+            source: replacement,
+            defaultSource: defaultSource,
+            defaultValue: defaultValue
+        )
+        addIndirectSourceDependency(from: indirect, to: replacement)
+    }
+
     /// Disconnects a node while retaining its body and value for the later
     /// destruction pass.
     func prepareNodeRemoval(_ id: AGAttribute) -> PreparedNodeRemoval {
@@ -957,7 +1039,15 @@ extension _AGGraph {
 
         // 2. Collect outputs and clean up their back-references.
         let outputs = Set(slots[index].node!.outputs)
+        let removedSource = AGWeakAttribute(id)
         for outputIndex in outputs {
+            resetIndirectOutputIfNeeded(
+                at: outputIndex,
+                removing: removedSource
+            )
+            if indirectDependencies[outputIndex]?.rawValue == id.rawValue {
+                indirectDependencies.removeValue(forKey: outputIndex)
+            }
             removeInputEdges(
                 fromNodeAt: Int(outputIndex),
                 matching: id.rawValue
@@ -966,11 +1056,11 @@ extension _AGGraph {
 
         // 3. Remove from offset caches / cross-graph observer registry if applicable
         switch slots[index].node?.kind {
-        case .offset(let parent, let byteOffset, let valueType, _):
+        case .offset(let projection) where projection.usesOffsetCache:
             offsetPathIDs.removeValue(forKey: RelativeOffsetPath(
-                parentID: parent.rawValue,
-                byteOffset: byteOffset,
-                valueType: valueType
+                parentID: projection.parent.rawValue,
+                byteOffset: projection.byteOffset,
+                valueType: projection.valueType
             ))
         case .rawOffset(let parent, let byteOffset):
             rawOffsetPathIDs.removeValue(forKey: RawOffsetPath(
@@ -984,7 +1074,6 @@ extension _AGGraph {
         default:
             break
         }
-        indirectDefaultSources.removeValue(forKey: id.rawValue)
         indirectDependencies.removeValue(forKey: id.rawValue)
         nodeSubgraphs.removeValue(forKey: id.rawValue)
         // Remove any cross-graph observers that were watching this node (it was a source).
@@ -1017,8 +1106,10 @@ extension _AGGraph {
 
         attributeInfos[id.rawValue]?.body?.callDestroy()
         attributeInfos.removeValue(forKey: id.rawValue)
-        cachedRuleEntries = cachedRuleEntries.filter {
-            $0.value.attribute.identifier != id.rawValue
+        if let cachedRuleKey = cachedRuleKeysByAttribute.removeValue(
+            forKey: id.rawValue
+        ) {
+            cachedRuleEntries.removeValue(forKey: cachedRuleKey)
         }
 
         // Invalidate all weak handles before making the slot available again.
@@ -1060,6 +1151,36 @@ extension _AGGraph {
             edgeIndex: preparedRead.edgeIndex
         )
         return cachedValueAfterRead(id)
+    }
+
+    private func typedValue<Value>(
+        for attribute: Attribute<Value>,
+        dynamicInputFlags: UInt8
+    ) -> Value {
+        let id = attribute.identifier
+        assert(_AGGraph.current === self)
+        let evaluator = _AGGraph.currentlyEvaluatingNode
+        let preparedRead = prepareValueRead(
+            id,
+            evaluator: evaluator,
+            recordsDynamicInput: true,
+            dynamicInputFlags: dynamicInputFlags
+        )
+        if preparedRead.needsUpdate {
+            updateValueForRead(id)
+        }
+        recordValueRead(
+            id,
+            evaluator: evaluator,
+            edgeIndex: preparedRead.edgeIndex
+        )
+        guard let storage = slots[Int(id.rawValue)].node?.value
+                as? _AGValueStorage<Value> else {
+            fatalError(
+                "AGAttribute @\(id.rawValue) does not contain \(Value.self)."
+            )
+        }
+        return storage.pointer.pointee
     }
 
     /// Yields the graph-owned payload without publishing a new node value.
@@ -1111,12 +1232,64 @@ extension _AGGraph {
         return cachedValueAfterRead(id)
     }
 
+    private func valueForIndirectSource(
+        _ id: AGAttribute,
+        evaluator: AGAttribute
+    ) -> Any {
+        let preparedRead = prepareValueRead(
+            id,
+            evaluator: evaluator,
+            recordsDynamicInput: false,
+            dynamicInputFlags: 0,
+            staticInputIdentityFlags:
+                InputEdge.permanent | InputEdge.indirectSource
+        )
+        if preparedRead.needsUpdate {
+            updateValueForRead(id)
+        }
+        recordValueRead(
+            id,
+            evaluator: evaluator,
+            edgeIndex: preparedRead.edgeIndex
+        )
+        return cachedValueAfterRead(id)
+    }
+
+    fileprivate func valuePointerForPermanentInput<Value>(
+        _ id: AGAttribute,
+        evaluator: AGAttribute,
+        as type: Value.Type
+    ) -> UnsafePointer<Value> {
+        let preparedRead = prepareValueRead(
+            id,
+            evaluator: evaluator,
+            recordsDynamicInput: false,
+            dynamicInputFlags: 0
+        )
+        if preparedRead.needsUpdate {
+            updateValueForRead(id)
+        }
+        recordValueRead(
+            id,
+            evaluator: evaluator,
+            edgeIndex: preparedRead.edgeIndex
+        )
+        guard let storage = slots[Int(id.rawValue)].node?.value
+                as? _AGValueStorage<Value> else {
+            fatalError(
+                "Permanent input @\(id.rawValue) does not contain \(Value.self)."
+            )
+        }
+        return storage.pointer
+    }
+
     @inline(never)
     private func prepareValueRead(
         _ id: AGAttribute,
         evaluator: AGAttribute?,
         recordsDynamicInput: Bool,
-        dynamicInputFlags: UInt8
+        dynamicInputFlags: UInt8,
+        staticInputIdentityFlags: UInt8 = InputEdge.permanent
     ) -> (needsUpdate: Bool, edgeIndex: Int?) {
         let index = Int(id.rawValue)
         guard slots.indices.contains(index), slots[index].node != nil else {
@@ -1139,7 +1312,7 @@ extension _AGGraph {
                 edgeIndex = matchingInputEdgeIndex(
                     inNodeAt: Int(evaluator.rawValue),
                     attribute: id.rawValue,
-                    identityFlags: InputEdge.permanent
+                    identityFlags: staticInputIdentityFlags
                 )
                 guard edgeIndex != nil else {
                     fatalError(
@@ -1221,12 +1394,13 @@ extension _AGGraph {
         guard slots[index].node != nil else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
-        let storedValue = makeValueStorage(newValue, for: attribute.identifier)
-        if let oldValue = slots[index].node!.value,
-           slots[index].node!.valuesEqual(oldValue, storedValue) {
+        if !updateValueStorage(
+            newValue,
+            for: attribute.identifier,
+            in: slots[index].node!
+        ) {
             return false
         }
-        slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
@@ -1262,12 +1436,13 @@ extension _AGGraph {
         guard let node = slots[index].node else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
-        let storedValue = makeValueStorage(newValue, for: attribute.identifier)
-        if let oldValue = node.value,
-           node.valuesEqual(oldValue, storedValue) {
+        if !updateValueStorage(
+            newValue,
+            for: attribute.identifier,
+            in: node
+        ) {
             return false
         }
-        slots[index].node!.value = storedValue
         slots[index].node!.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
         slots[index].node!.transaction = transactionToPropagate
@@ -1656,11 +1831,8 @@ extension _AGGraph {
         case .lowLevelBody(let box):
             evaluateLowLevelBodyNode(id, index: index, box: box)
 
-        case .keyPath(let parent, let kp):
-            evaluateKeyPathNode(id, index: index, parent: parent, keyPath: kp)
-
-        case .offset(let parent, _, _, let project):
-            evaluateOffsetNode(id, index: index, parent: parent, project: project)
+        case .offset(let projection):
+            evaluateOffsetNode(id, index: index, projection: projection)
 
         case .rawOffset(let parent, _):
             evaluateRawOffsetNode(id, index: index, parent: parent)
@@ -1679,11 +1851,11 @@ extension _AGGraph {
         case .rule(let box):
             evaluateRuleNode(id, index: index, box: box)
 
-        case .indirect(let target, let defaultValue):
+        case .indirect(let source, _, let defaultValue):
             evaluateIndirectNode(
                 id,
                 index: index,
-                target: target,
+                source: source,
                 defaultValue: defaultValue
             )
         }
@@ -1716,27 +1888,12 @@ extension _AGGraph {
     }
 
     @inline(never)
-    private func evaluateKeyPathNode(
-        _ id: AGAttribute,
-        index: Int,
-        parent: AGAttribute,
-        keyPath: AnyKeyPath
-    ) {
-        // The parent edge is fixed at construction and is not cleared here.
-        let parentValue = valueForPermanentInput(parent, evaluator: id)
-        publishComputedValue(parentValue[keyPath: keyPath], for: id)
-        finishNodeEvaluation(index: index)
-    }
-
-    @inline(never)
     private func evaluateOffsetNode(
         _ id: AGAttribute,
         index: Int,
-        parent: AGAttribute,
-        project: (Any) -> Any
+        projection: any _AnyOffsetProjection
     ) {
-        let parentValue = valueForPermanentInput(parent, evaluator: id)
-        publishComputedValue(project(parentValue), for: id)
+        projection.publishValue(to: self, for: id)
         finishNodeEvaluation(index: index)
     }
 
@@ -1789,11 +1946,14 @@ extension _AGGraph {
     private func evaluateIndirectNode(
         _ id: AGAttribute,
         index: Int,
-        target: AGAttribute?,
+        source: AGWeakAttribute,
         defaultValue: Any?
     ) {
-        if let target {
-            publishComputedValue(value(for: target), for: id)
+        if source.isValid(in: self) {
+            publishComputedValue(
+                valueForIndirectSource(source.toStrong(), evaluator: id),
+                for: id
+            )
         } else if let defaultValue {
             publishComputedValue(defaultValue, for: id)
         } else {
@@ -2368,7 +2528,33 @@ extension _AGGraph {
 
     // MARK: Indirect Attributes
     // Indirect attributes provide placeholder output slots that can later point
-    // at concrete attributes and retain permanent dependency edges.
+    // at concrete attributes. Both current and initial sources are weak handles:
+    // source removal can therefore restore the initial source without allowing a
+    // recycled slot to be mistaken for the removed node.
+
+    private func addIndirectSourceDependency(
+        from indirect: AGAttribute,
+        to source: AGWeakAttribute
+    ) {
+        guard source.isValid(in: self) else { return }
+        _ = insertInputEdge(
+            from: indirect,
+            dependsOn: source.toStrong(),
+            flags: InputEdge.permanent | InputEdge.indirectSource
+        )
+    }
+
+    private func removeIndirectSourceDependency(
+        from indirect: AGAttribute,
+        to source: AGWeakAttribute
+    ) {
+        guard !source.isInvalid else { return }
+        removeInputEdges(
+            fromNodeAt: Int(indirect.rawValue),
+            matching: source.identifier,
+            identityFlags: InputEdge.permanent | InputEdge.indirectSource
+        )
+    }
 
     /// Creates an indirect (pointer) node whose initial value is `defaultValue`.
     /// Use `setIndirectTarget` to wire it to a concrete attribute later.
@@ -2381,7 +2567,11 @@ extension _AGGraph {
             value: _AGValueStorage(defaultValue),
             makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
-            kind: .indirect(target: nil, defaultValue: defaultValue),
+            kind: .indirect(
+                source: .invalid,
+                defaultSource: .invalid,
+                defaultValue: defaultValue
+            ),
             needsEvaluation: false
         )
         registerAttributeInfo(at: index, valueType: V.self)
@@ -2396,17 +2586,25 @@ extension _AGGraph {
     ) -> Attribute<V> {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
+        let weakSource = AGWeakAttribute(source.identifier)
         slots[Int(index)].node = Node(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
-            kind: .indirect(target: source.identifier, defaultValue: nil)
+            kind: .indirect(
+                source: weakSource,
+                defaultSource: weakSource,
+                defaultValue: nil
+            )
         )
         // Local indirect edges always use ordinary invalidation.
         _ = withoutInvalidation
         registerAttributeInfo(at: index, valueType: V.self)
         let attribute = Attribute<V>(AGAttribute(rawValue: index))
-        indirectDefaultSources[attribute.identifier.rawValue] = source.identifier
+        addIndirectSourceDependency(
+            from: attribute.identifier,
+            to: weakSource
+        )
         AGSubgraph.current?.register(attribute.identifier)
         return attribute
     }
@@ -2420,14 +2618,33 @@ extension _AGGraph {
     ) {
         assert(_AGGraph.current === self)
         let index = Int(indirect.rawValue)
-        guard case let .indirect(_, defaultValue) =
+        guard slots.indices.contains(index),
+              case let .indirect(source, defaultSource, defaultValue) =
                 slots[index].node?.kind else {
             fatalError("setIndirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
+        let replacement: AGWeakAttribute
+        if let concrete {
+            guard let weakConcrete = weakAttributeIfValid(for: concrete) else {
+                fatalError(
+                    "setIndirectTarget: source @\(concrete.rawValue) does not exist."
+                )
+            }
+            replacement = weakConcrete
+        } else if defaultSource.isValid(in: self) {
+            replacement = defaultSource
+        } else {
+            replacement = .invalid
+        }
+        guard replacement != source else { return }
+
+        removeIndirectSourceDependency(from: indirect, to: source)
         slots[index].node!.kind = .indirect(
-            target: concrete,
+            source: replacement,
+            defaultSource: defaultSource,
             defaultValue: defaultValue
         )
+        addIndirectSourceDependency(from: indirect, to: replacement)
         // Retargeting always invalidates the local indirect value.
         _ = withoutInvalidation
         markNeedsEvaluation(indirect)
@@ -2439,15 +2656,16 @@ extension _AGGraph {
     }
 
     func indirectTarget(_ indirect: AGAttribute) -> AGAttribute? {
-        guard case let .indirect(target, _) =
+        guard case let .indirect(source, _, _) =
                 slots[Int(indirect.rawValue)].node?.kind else {
             fatalError("indirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
-        return target
+        guard source.isValid(in: self) else { return nil }
+        return source.toStrong()
     }
 
     func resetIndirectTarget(_ indirect: AGAttribute) {
-        setIndirectTarget(indirect, to: indirectDefaultSources[indirect.rawValue])
+        setIndirectTarget(indirect, to: nil)
     }
 
     /// Registers a permanent dependency: when `dep` changes, `indirect` is invalidated.
@@ -2487,24 +2705,15 @@ extension _AGGraph {
     /// Creates a child node representing a property accessed via KeyPath.
     func subscriptNode<T, U>(parent: Attribute<T>, keyPath: KeyPath<T, U>) -> Attribute<U> {
         assert(_AGGraph.current === self)
-        let index = allocateSlot()
-        slots[Int(index)].node = Node(
-            value: nil,
-            makeValueStorage: Self.valueStorageFactory(for: U.self),
-            valuesEqual: Self.valueComparator(
-                for: U.self,
-                mode: Focus<T, U>.comparisonMode
-            ),
-            kind: .keyPath(parent: parent.identifier, kp: keyPath)
+        guard let byteOffset = MemoryLayout<T>.offset(of: keyPath) else {
+            return makeRule(Focus(root: parent, keyPath: keyPath))
+        }
+        return makeOffsetNode(
+            parent: parent,
+            byteOffset: byteOffset,
+            comparisonMode: Focus<T, U>.comparisonMode,
+            usesOffsetCache: false
         )
-        registerAttributeInfo(at: index, valueType: U.self)
-        addPermanentDependency(
-            from: AGAttribute(rawValue: index),
-            dependsOn: parent.identifier
-        )
-        let attr = Attribute<U>(AGAttribute(rawValue: index))
-        AGSubgraph.current?.register(attr.identifier)
-        return attr
     }
 
     func subscriptNode<T, U>(
@@ -2521,25 +2730,38 @@ extension _AGGraph {
             return Attribute(AGAttribute(rawValue: existingIndex))
         }
 
+        let attribute: Attribute<U> = makeOffsetNode(
+            parent: parent,
+            byteOffset: offset.byteOffset,
+            comparisonMode: .storedRepresentation,
+            usesOffsetCache: true
+        )
+        offsetPathIDs[path] = attribute.identifier.rawValue
+        return attribute
+    }
+
+    private func makeOffsetNode<T, U>(
+        parent: Attribute<T>,
+        byteOffset: Int,
+        comparisonMode: AGComparisonMode,
+        usesOffsetCache: Bool
+    ) -> Attribute<U> {
         let index = allocateSlot()
+        let projection = _OffsetProjection<T, U>(
+            root: parent,
+            byteOffset: byteOffset,
+            usesOffsetCache: usesOffsetCache
+        )
         slots[Int(index)].node = Node(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: U.self),
-            valuesEqual: Self.valueComparator(for: U.self),
-            kind: .offset(
-                parent: parent.identifier,
-                byteOffset: offset.byteOffset,
-                valueType: ObjectIdentifier(U.self),
-                project: { parentValue in
-                    var value = parentValue as! T
-                    return withUnsafePointer(to: &value) { pointer in
-                        (pointer + offset).pointee
-                    }
-                }
-            )
+            valuesEqual: Self.valueComparator(
+                for: U.self,
+                mode: comparisonMode
+            ),
+            kind: .offset(projection)
         )
         registerAttributeInfo(at: index, valueType: U.self)
-        offsetPathIDs[path] = index
         addPermanentDependency(
             from: AGAttribute(rawValue: index),
             dependsOn: parent.identifier
@@ -2579,13 +2801,22 @@ extension _AGGraph {
     }
 
     func parent(of id: AGAttribute) -> AGAttribute? {
-        if case .keyPath(let parent, _) = slots[Int(id.rawValue)].node?.kind { return parent }
-        return nil
+        switch slots[Int(id.rawValue)].node?.kind {
+        case .offset(let projection):
+            return projection.parent
+        case .ruleBody(let box):
+            return box.keyPathProjection()?.parent
+        default:
+            return nil
+        }
     }
 
     func keyPath(of id: AGAttribute) -> AnyKeyPath? {
-        if case .keyPath(_, let kp) = slots[Int(id.rawValue)].node?.kind { return kp }
-        return nil
+        guard case .ruleBody(let box) =
+                slots[Int(id.rawValue)].node?.kind else {
+            return nil
+        }
+        return box.keyPathProjection()?.keyPath
     }
 
     // MARK: Action Queue
@@ -2632,26 +2863,16 @@ extension _AGGraph {
             return "@\(id.rawValue)(invalid)"
         }
         switch node.kind {
-        case .keyPath:
-            var parts: [String] = []
-            var currentIndex: Int? = index
-            while let i = currentIndex, let n = slots[i].node {
-                if case .keyPath(let parent, let kp) = n.kind {
-                    parts.append("\(kp)")
-                    currentIndex = Int(parent.rawValue)
-                } else {
-                    break
-                }
-            }
-            let path = parts.reversed().joined(separator: " -> ")
-            return "@\(id.rawValue)(path: \(path))"
-        case .offset(let parent, let byteOffset, _, _):
-            return "@\(id.rawValue)(offset: @\(parent.rawValue) + \(byteOffset))"
+        case .offset(let projection):
+            return "@\(id.rawValue)(offset: @\(projection.parent.rawValue) + \(projection.byteOffset))"
         case .rawOffset(let parent, let byteOffset):
             return "@\(id.rawValue)(rawOffset: @\(parent.rawValue) + \(byteOffset))"
         case .rule(let box):
             return "@\(id.rawValue)(\(box.isSideEffect ? "sideEffect" : "rule"))"
-        case .ruleBody:
+        case .ruleBody(let box):
+            if let projection = box.keyPathProjection() {
+                return "@\(id.rawValue)(focus: @\(projection.parent.rawValue) -> \(projection.keyPath))"
+            }
             return "@\(id.rawValue)(ruleBody)"
         case .stateful:
             return "@\(id.rawValue)(stateful)"
@@ -2662,9 +2883,9 @@ extension _AGGraph {
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             let srcDesc = sourceGraphRef.value != nil ? "@\(sourceAttr.rawValue)" : "@\(sourceAttr.rawValue)(dead)"
             return "@\(id.rawValue)(crossRef->\(srcDesc))"
-        case .indirect(let target, _):
-            if let target {
-                return "@\(id.rawValue)(indirect->@\(target.rawValue))"
+        case .indirect(let source, _, _):
+            if source.isValid(in: self) {
+                return "@\(id.rawValue)(indirect->@\(source.identifier))"
             }
             return "@\(id.rawValue)(indirect->nil)"
         }
@@ -2769,16 +2990,14 @@ extension _AGGraph {
             return "stateful(\(String(describing: type(of: box))))"
         case .lowLevelBody(let box):
             return "lowLevelBody(\(String(describing: type(of: box))))"
-        case .keyPath(let parent, let keyPath):
-            return "keyPath(parent: @\(parent.rawValue), keyPath: \(keyPath))"
-        case .offset(let parent, let byteOffset, _, _):
-            return "offset(parent: @\(parent.rawValue), byteOffset: \(byteOffset))"
+        case .offset(let projection):
+            return "offset(parent: @\(projection.parent.rawValue), byteOffset: \(projection.byteOffset))"
         case .rawOffset(let parent, let byteOffset):
             return "rawOffset(parent: @\(parent.rawValue), byteOffset: \(byteOffset))"
         case .crossGraphRef(let sourceAttr, let sourceGraphRef):
             return "crossGraphRef(source: @\(sourceAttr.rawValue), sourceGraphAlive: \(sourceGraphRef.value != nil))"
-        case .indirect(let target, _):
-            return "indirect(target: \(debugAttributeDescription(target)))"
+        case .indirect(let source, let defaultSource, _):
+            return "indirect(source: \(debugAttributeDescription(source)), defaultSource: \(debugAttributeDescription(defaultSource)))"
         }
     }
 
@@ -2787,9 +3006,9 @@ extension _AGGraph {
         return String(describing: type(of: value))
     }
 
-    private func debugAttributeDescription(_ id: AGAttribute?) -> String {
-        if let id { return "@\(id.rawValue)" }
-        return "nil"
+    private func debugAttributeDescription(_ attribute: AGWeakAttribute) -> String {
+        guard !attribute.isInvalid else { return "nil" }
+        return "@\(attribute.identifier)#\(attribute.seed)"
     }
 }
 #endif

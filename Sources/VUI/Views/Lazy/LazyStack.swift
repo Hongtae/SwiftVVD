@@ -2356,7 +2356,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         item.cache = self
         item.insertionTransactionSeed = lru.transactionSeed
         item.removedSeed = .max
-        let transaction = Transaction.current
+        let transaction = inputs.base.transaction.value
         var state = item._state.value
         if reset {
             state.resetDelta &+= 1

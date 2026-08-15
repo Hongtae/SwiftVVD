@@ -528,7 +528,9 @@ class GraphHost: CustomReflectable {
             return Attribute<Value>(attribute)
         }
         let attribute = data.withCurrent {
-            graph.makeInput(value: value)
+            AGSubgraph.withCurrent(data.globalSubgraph) {
+                graph.makeInput(value: value)
+            }
         }
         constants[key] = attribute.identifier
         return attribute

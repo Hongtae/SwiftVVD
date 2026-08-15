@@ -695,7 +695,11 @@ class HostingScrollView {
             contentInsets: context.safeInsets,
             containerSize: context.containingSize
         )
-        guard let target = targetProvider(geometry, layoutDirection) else {
+        // The retained provider may evaluate attributes after the host update
+        // that installed it has left its graph evaluation scope.
+        guard let target = graphRef.withCurrent({
+            targetProvider(geometry, layoutDirection)
+        }) else {
             return
         }
         let offset = platformAlignedContentOffset(
@@ -1757,9 +1761,6 @@ struct ScrollViewDisplayList: Rule {
         result.numericValue = contents.numericValue
         return result
     }
-}
-
-private struct TrivialContentResponder: ContentResponder {
 }
 
 /// Responder mounted at the same logical platform-group boundary as display output.

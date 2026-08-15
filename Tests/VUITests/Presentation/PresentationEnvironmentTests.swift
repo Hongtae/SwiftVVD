@@ -73,14 +73,22 @@ final class PresentationEnvironmentTests: XCTestCase {
             initial.presentationEnvironmentProbeValue = "popup-initial"
             initial.presentationChildUsingPlatformWindow = false
             let environment = graph.makeInput(value: initial)
-            let responder = ContextMenuResponder(
-                itemList: graph.makeInput(value: PlatformItemList()),
-                isPresented: nil,
-                environment: environment,
-                phase: try XCTUnwrap(parent.viewGraph.phaseAttr),
-                transform: graph.makeInput(value: ViewTransform.identity),
-                size: graph.makeInput(value: ViewSize(CGSize(width: 100, height: 40)))
-            )
+            let phase = try XCTUnwrap(parent.viewGraph.phaseAttr)
+            let itemList = graph.makeInput(value: PlatformItemList())
+            let responder = AGSubgraph.withCurrent(
+                parent.viewGraph.data.rootSubgraph
+            ) {
+                ContextMenuResponder(
+                    inputs: makeContextMenuViewInputs(
+                        graph: graph,
+                        environment: environment,
+                        phase: phase
+                    ),
+                    itemList: itemList.asWeak(),
+                    environment: environment,
+                    phase: phase
+                )
+            }
 
             responder.present(from: parent, at: .zero)
             XCTAssertEqual(
@@ -331,3 +339,32 @@ private struct SheetEnvironmentReader: View {
 private final class ContextMenuEnvironmentProbe {}
 private final class NestedPopupEnvironmentProbe {}
 private final class ConcurrentPresentationEnvironmentProbe {}
+
+private func makeContextMenuViewInputs(
+    graph: _AGGraph,
+    environment: Attribute<EnvironmentValues>,
+    phase: Attribute<_GraphInputs.Phase>
+) -> _ViewInputs {
+    _ViewInputs(
+        base: _GraphInputs(
+            time: graph.makeInput(value: Time.zero),
+            phase: phase,
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
+        ),
+        customInputs: PropertyList(),
+        preferences: PreferencesInputs(
+            keys: PreferenceKeys(),
+            hostKeys: graph.makeInput(value: PreferenceKeys())
+        ),
+        transform: graph.makeInput(value: ViewTransform.identity),
+        position: graph.makeInput(value: CGPoint.zero),
+        containerPosition: graph.makeInput(value: CGPoint.zero),
+        size: graph.makeInput(
+            value: ViewSize(CGSize(width: 100, height: 40))
+        ),
+        safeAreaInsets: OptionalAttribute(),
+        containerSize: OptionalAttribute(),
+        stackOrientation: nil
+    )
+}

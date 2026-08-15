@@ -428,3 +428,21 @@ extension CachedEnvironment {
         return result
     }
 }
+
+extension _ViewInputs {
+    func animatedPosition() -> Attribute<CGPoint> {
+        let cachedEnvironmentAttribute = base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let position = cachedEnvironment.animatedPosition(for: self)
+        cachedEnvironmentAttribute.value = cachedEnvironment
+        return position
+    }
+
+    func animatedSize() -> Attribute<ViewSize> {
+        let cachedEnvironmentAttribute = base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let size = cachedEnvironment.animatedSize(for: self)
+        cachedEnvironmentAttribute.value = cachedEnvironment
+        return size
+    }
+}

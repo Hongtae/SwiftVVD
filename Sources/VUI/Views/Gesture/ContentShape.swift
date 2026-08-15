@@ -43,6 +43,9 @@ protocol ContentResponder {
     func contentPath(size: CGSize, kind: ContentShapeKinds) -> Path
 }
 
+struct TrivialContentResponder: ContentResponder {
+}
+
 extension ContentResponder {
     func contentPath(size: CGSize) -> Path {
         Path(CGRect(origin: .zero, size: size))

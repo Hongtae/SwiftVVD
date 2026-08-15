@@ -11581,7 +11581,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheAddItemNonScrollUsesViewListEditForTransitionState() {
+    func testLazyLayoutViewCacheAddItemUsesGraphInputTransactionForNonScrollTransitionState() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -11601,7 +11601,9 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 )
             )
 
-            cache.addItem(item)
+            withTransaction(\.fromScrollView, true) {
+                cache.addItem(item)
+            }
 
             XCTAssertEqual(item.insertionTransactionSeed, 13)
             XCTAssertEqual(recorder.ids, [item.id])
@@ -11618,7 +11620,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheAddItemFromScrollViewPublishesIdentityStateWithoutReset() {
+    func testLazyLayoutViewCacheAddItemUsesGraphInputScrollTransactionWithoutReset() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -11638,9 +11640,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 )
             )
 
-            withTransaction(\.fromScrollView, true) {
-                cache.addItem(item)
-            }
+            var transaction = Transaction()
+            transaction.fromScrollView = true
+            cache.inputs.base.transaction.setValue(transaction)
+            cache.addItem(item)
 
             XCTAssertEqual(item.insertionTransactionSeed, 11)
             XCTAssertEqual(
@@ -11660,7 +11663,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheAddItemFromScrollViewResetRefreshesStateAndSeeds() {
+    func testLazyLayoutViewCacheAddItemUsesGraphInputScrollTransactionForReset() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -11680,9 +11683,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 )
             )
 
-            withTransaction(\.fromScrollView, true) {
-                cache.addItem(item, reset: true)
-            }
+            var transaction = Transaction()
+            transaction.fromScrollView = true
+            cache.inputs.base.transaction.setValue(transaction)
+            cache.addItem(item, reset: true)
 
             XCTAssertEqual(item.insertionTransactionSeed, 12)
             XCTAssertEqual(

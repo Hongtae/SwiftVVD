@@ -110,23 +110,72 @@ struct EventBinding: Equatable {
     }
 }
 
+protocol ForwardedEventDispatcher {
+    static var eventType: any EventType.Type { get }
+    var isActive: Bool { get }
+
+    func wantsEvent(
+        _ event: any EventType,
+        manager: EventBindingManager
+    ) -> Bool
+
+    mutating func receiveEvents(
+        _ events: [EventID: any EventType],
+        manager: EventBindingManager
+    ) -> Set<EventID>
+
+    mutating func reset()
+}
+
+extension ForwardedEventDispatcher {
+    var isActive: Bool { false }
+
+    func wantsEvent(
+        _ event: any EventType,
+        manager: EventBindingManager
+    ) -> Bool {
+        true
+    }
+
+    mutating func reset() {}
+}
+
 /// Manages the mapping from EventID to EventBinding (which responder owns which event stream).
 /// When a new touch/click begins, `rebindEvent` routes subsequent events for that ID
 /// to the responder that won the hit test.
-///
-/// This local manager currently stores bindings plus root/focused responders. Host/delegate
-/// forwarding is represented by the explicit host argument to sendDownstream.
 class EventBindingManager {
+    private var forwardedEventDispatchers:
+        [ObjectIdentifier: any ForwardedEventDispatcher] = [:]
     var bindings: [EventID: EventBinding] = [:]
     weak var host: (any EventGraphHost)?
     weak var delegate: (any EventBindingManagerDelegate)?
     var rootResponder: ResponderNode?
     var focusedResponder: ResponderNode?
-    private(set) var lastDirectConsumedEventIDs: Set<EventID> = []
+    private var isActive = false
     private var hoverUpdatePending = false
     private let lock = Mutex(())
 
+    static var current: EventBindingManager? {
+        guard let viewGraph = GraphHost.currentHost as? ViewGraph,
+              let rendererHost = viewGraph.rendererHost else {
+            return nil
+        }
+        if let eventGraphHost = rendererHost as? any EventGraphHost {
+            return eventGraphHost.eventBindingManager
+        }
+        return (rendererHost as? WindowController)?
+            .gestureGraph?
+            .eventBindingManager
+    }
+
     init() {}
+
+    func addForwardedEventDispatcher(
+        _ dispatcher: any ForwardedEventDispatcher
+    ) {
+        let eventType = type(of: dispatcher).eventType
+        forwardedEventDispatchers[ObjectIdentifier(eventType)] = dispatcher
+    }
 
     /// Routes `eventID` to `responder`. Returns the old and new bindings.
     @discardableResult
@@ -152,13 +201,47 @@ class EventBindingManager {
     func send(
         _ events: [EventID: any EventType],
         at time: Time
-    ) -> GesturePhase<Void> {
+    ) -> Set<EventID> {
         withDispatchScope {
-            lastDirectConsumedEventIDs =
-                (delegate as? any DirectEventBindingManagerDelegate)?
-                .receiveDirectEvents(events, in: self) ?? []
-            return sendDownstreamBody(events, bridge: nil, at: time)
+            var consumed = dispatchNonGestureEvents(events)
+            let downstreamEvents = events.filter {
+                forwardedEventDispatchers[
+                    ObjectIdentifier(type(of: $0.value))
+                ] == nil
+            }
+            let phase = sendDownstreamBody(
+                downstreamEvents,
+                bridge: nil,
+                at: time
+            )
+            if phase.isActive || phase.isEnded {
+                consumed.formUnion(downstreamEvents.keys)
+            }
+            return consumed
         }
+    }
+
+    private func dispatchNonGestureEvents(
+        _ events: [EventID: any EventType]
+    ) -> Set<EventID> {
+        var consumed: Set<EventID> = []
+        for key in Array(forwardedEventDispatchers.keys) {
+            guard var dispatcher = forwardedEventDispatchers[key] else {
+                continue
+            }
+            let eventType = type(of: dispatcher).eventType
+            let forwardedEvents = events.filter {
+                ObjectIdentifier(type(of: $0.value)) ==
+                    ObjectIdentifier(eventType)
+            }
+            guard !forwardedEvents.isEmpty else { continue }
+            consumed.formUnion(dispatcher.receiveEvents(
+                forwardedEvents,
+                manager: self
+            ))
+            forwardedEventDispatchers[key] = dispatcher
+        }
+        return consumed
     }
 
     /// Routes a pre-computed event dictionary downstream to the appropriate EventGraphHost.
@@ -200,17 +283,50 @@ class EventBindingManager {
     ) -> GesturePhase<Void> {
         guard let host else { return .possible(nil) }
         guard let rootNode = rootResponder ?? host.responderNode else { return .possible(nil) }
-        guard !events.isEmpty else { return .possible(nil) }
-        let phase = host.sendEvents(events, rootNode: rootNode, at: time)
         let callback: (any EventBindingManagerDelegate)? = bridge ?? delegate
-        for eventID in events.keys {
-            if let binding = bindings[eventID] {
+        var boundEvents: [EventID: any EventType] = [:]
+        var terminalEventIDs: [EventID] = []
+
+        for (eventID, sourceEvent) in events {
+            var event = sourceEvent
+            let binding: EventBinding
+            if let existingBinding = bindings[eventID] {
+                binding = existingBinding
+            } else {
+                let responder: ResponderNode?
+                if event.isFocusEvent,
+                   let focusedResponder = focusedResponder ?? host.focusedResponder {
+                    responder = focusedResponder.bindEvent(event)
+                } else {
+                    responder = rootNode.bindEvent(event)
+                }
+                guard let responder else { continue }
+                binding = EventBinding(responder: responder)
+                bindings[eventID] = binding
+                isActive = true
                 callback?.didBind(to: binding, id: eventID)
             }
+
+            event.binding = binding
+            bindings[eventID] = binding
+            boundEvents[eventID] = event
+            if event.phase.isTerminal {
+                terminalEventIDs.append(eventID)
+            }
         }
+
+        guard isActive else { return .possible(nil) }
+        let phase = host.sendEvents(boundEvents, rootNode: rootNode, at: time)
         callback?.didUpdate(phase: phase, in: self)
         if let category = host.gestureCategory() {
             callback?.didUpdate(gestureCategory: category, in: self)
+        }
+
+        for eventID in terminalEventIDs {
+            bindings.removeValue(forKey: eventID)
+        }
+        if bindings.isEmpty {
+            isActive = false
         }
         return phase
     }
@@ -238,8 +354,18 @@ class EventBindingManager {
     }
 
     func reset(resetForwardedEventDispatchers: Bool = false) {
+        if resetForwardedEventDispatchers {
+            for key in Array(forwardedEventDispatchers.keys) {
+                guard var dispatcher = forwardedEventDispatchers[key] else {
+                    continue
+                }
+                dispatcher.reset()
+                forwardedEventDispatchers[key] = dispatcher
+            }
+        }
         bindings.removeAll()
-        lastDirectConsumedEventIDs.removeAll()
+        isActive = false
+        hoverUpdatePending = false
         // Tear down outputs after the current event callbacks have drained.
         Update.enqueueAction { [weak host] in
             host?.resetEvents()
@@ -295,22 +421,6 @@ extension EventBindingManagerDelegate {
     func didBind(to binding: EventBinding, id: EventID) {}
     func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager) {}
     func requestHoverUpdate(in manager: EventBindingManager) {}
-}
-
-protocol DirectEventBindingManagerDelegate: AnyObject {
-    func receiveDirectEvents(
-        _ events: [EventID: any EventType],
-        in manager: EventBindingManager
-    ) -> Set<EventID>
-}
-
-extension DirectEventBindingManagerDelegate {
-    func receiveDirectEvents(
-        _ events: [EventID: any EventType],
-        in manager: EventBindingManager
-    ) -> Set<EventID> {
-        []
-    }
 }
 
 private final class WeakEventBindingSource {
@@ -612,6 +722,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
     var _autoScrollEnabledAttr: OptionalAttribute<Bool>
     var _gesturePreferenceKeys: Attribute<PreferenceKeys>
     var nextUpdateTime: Time
+    private var activeGestureResponders: [Int: [any AnyGestureResponder]]
     private var cancelledGestureResponders: [Int: Set<ObjectIdentifier>]
 
     var responderNode: ResponderNode? {
@@ -675,6 +786,7 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
         self._autoScrollEnabledAttr = OptionalAttribute()
         self._gesturePreferenceKeys = gesturePreferenceKeys
         self.nextUpdateTime = .infinity
+        self.activeGestureResponders = [:]
         self.cancelledGestureResponders = [:]
         super.init(data: data)
         gestureGraphRuntimeStates.withLock { states in
@@ -716,6 +828,27 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
 
     // MARK: - EventGraphHost
 
+    func sendRecognizerEvents(
+        _ events: [EventID: any EventType],
+        source: any EventBindingSource,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        guard rootResponder == nil,
+              eventBindingManager.rootResponder != nil else {
+            return .possible(nil)
+        }
+        // Keep responder callbacks and platform-consumer commits in one event
+        // turn so queued actions drain only after every recipient has observed
+        // the sample.
+        return Update.ensure {
+            sendRootEvents(
+                events,
+                source: source,
+                at: time
+            )
+        }
+    }
+
     @discardableResult
     func sendEvents(
         _ events: [EventID: any EventType],
@@ -732,81 +865,11 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
         }
 
         if rootResponder == nil {
-            for (eventID, event) in events where event.phase == .began {
-                cancelledGestureResponders.removeValue(forKey: eventID.serial)
-            }
-            let eventSerials = Set(events.keys.map(\.serial))
-            let candidates: [any AnyGestureResponder]
-            if let bound = events.values.compactMap({ event -> AnyGestureResponder? in
-                (event as? any ResponderBoundEvent)?.binding?.responder
-                    as? any AnyGestureResponder
-            }).first {
-                candidates = [bound]
-            } else if let location = events.values.compactMap({ event in
-                (event as? any HitTestableEventType)?.hitTestLocation
-            }).first {
-                let hasArbitratingPlatformHost = events.values.contains { event in
-                    guard let hitTestable = event as? any HitTestableEventType else {
-                        return false
-                    }
-                    return hitTestEventConsumer(
-                        at: hitTestable.hitTestLocation,
-                        accepting: type(of: event)
-                    ) is any GestureArbitratingEventConsumer
-                }
-                if hasArbitratingPlatformHost {
-                    // A platform host exposes every hit descendant gesture
-                    // container; activation relationships arbitrate them later.
-                    candidates = hitTestCandidateResponders(at: location)
-                } else {
-                    candidates = hitTestResponders(at: location)
-                }
-            } else {
-                candidates = []
-            }
-            let activeCandidates = candidates.filter { responder in
-                let identifier = ObjectIdentifier(responder as AnyObject)
-                return !eventSerials.contains { serial in
-                    cancelledGestureResponders[serial]?.contains(identifier) == true
-                }
-            }
-            let gestureDispatches = activeCandidates.map { responder in
-                let manager = responder.gestureGraph.eventBindingManager
-                let phase = manager.sendDownstream(events, at: time)
-                return GestureResponderDispatch(
-                    responder: responder,
-                    manager: manager,
-                    phase: phase
-                )
-            }
-            let consumerResult = dispatchToEventConsumers(
+            return sendRootEvents(
                 events,
-                at: time,
-                gestureDispatches: gestureDispatches
+                source: nil,
+                at: time
             )
-            var resetManagerIDs = consumerResult.cancelledManagerIDs
-            for dispatch in gestureDispatches where dispatch.phase.isTerminal {
-                let identifier = ObjectIdentifier(dispatch.manager)
-                guard resetManagerIDs.insert(identifier).inserted else { continue }
-                // The raw event host owns the terminal boundary of each session.
-                dispatch.manager.reset()
-            }
-            var phases = gestureDispatches.map(\.phase)
-            phases.append(contentsOf: consumerResult.phases)
-
-            var phasesBySerial: [Int: [EventPhase]] = [:]
-            for (eventID, event) in events {
-                phasesBySerial[eventID.serial, default: []].append(event.phase)
-            }
-            for (serial, eventPhases) in phasesBySerial
-            where eventPhases.allSatisfy(\.isTerminal) {
-                cancelledGestureResponders.removeValue(forKey: serial)
-            }
-
-            if phases.contains(where: { $0.isActive }) { return .active(()) }
-            if phases.contains(where: { $0.isEnded }) { return .ended(()) }
-            if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
-            return .possible(nil)
         }
 
         return data.withCurrent {
@@ -823,6 +886,139 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             }
             return phase
         }
+    }
+
+    private func sendRootEvents(
+        _ events: [EventID: any EventType],
+        source: (any EventBindingSource)?,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        let eventSerials = Set(events.keys.map(\.serial))
+        let candidates = gestureCandidates(for: events)
+        let activeCandidates = candidates.filter { responder in
+            let identifier = ObjectIdentifier(responder as AnyObject)
+            return !eventSerials.contains { serial in
+                cancelledGestureResponders[serial]?.contains(identifier) == true
+            }
+        }
+        let gestureDispatches = activeCandidates.map { responder in
+            let graph = responder.gestureGraph
+            let manager = graph.eventBindingManager
+            let phase: GesturePhase<Void>
+            if let source {
+                _ = responder.eventSources
+                if let bridge = graph.delegate as? EventBindingBridge {
+                    _ = bridge.send(events, source: source, at: time)
+                    phase = bridge.lastPhase
+                } else {
+                    phase = manager.sendDownstream(events, at: time)
+                }
+            } else {
+                phase = manager.sendDownstream(events, at: time)
+            }
+            return GestureResponderDispatch(
+                responder: responder,
+                manager: manager,
+                phase: phase
+            )
+        }
+        let consumerResult = dispatchToEventConsumers(
+            events,
+            at: time,
+            gestureDispatches: gestureDispatches
+        )
+        var resetManagerIDs = consumerResult.cancelledManagerIDs
+        for dispatch in gestureDispatches where dispatch.phase.isTerminal {
+            let identifier = ObjectIdentifier(dispatch.manager)
+            guard resetManagerIDs.insert(identifier).inserted else { continue }
+            dispatch.manager.reset()
+        }
+        var phases = gestureDispatches.map(\.phase)
+        phases.append(contentsOf: consumerResult.phases)
+
+        var phasesBySerial: [Int: [EventPhase]] = [:]
+        for (eventID, event) in events {
+            phasesBySerial[eventID.serial, default: []].append(event.phase)
+        }
+        for (serial, eventPhases) in phasesBySerial
+        where eventPhases.allSatisfy(\.isTerminal) {
+            activeGestureResponders.removeValue(forKey: serial)
+            cancelledGestureResponders.removeValue(forKey: serial)
+        }
+
+        if phases.contains(where: { $0.isActive }) { return .active(()) }
+        if phases.contains(where: { $0.isEnded }) { return .ended(()) }
+        if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
+        return .possible(nil)
+    }
+
+    private func gestureCandidates(
+        for events: [EventID: any EventType]
+    ) -> [any AnyGestureResponder] {
+        var result: [any AnyGestureResponder] = []
+        var seen: Set<ObjectIdentifier> = []
+
+        for serial in Set(events.keys.map(\.serial)).sorted() {
+            let serialEvents = events.filter { $0.key.serial == serial }
+            let candidates: [any AnyGestureResponder]
+            if serialEvents.values.contains(where: { $0.phase == .began }) {
+                cancelledGestureResponders.removeValue(forKey: serial)
+                candidates = initialGestureCandidates(for: serialEvents)
+                activeGestureResponders[serial] = candidates
+            } else if let active = activeGestureResponders[serial] {
+                candidates = active
+            } else {
+                candidates = initialGestureCandidates(for: serialEvents)
+            }
+
+            for candidate in candidates {
+                let identifier = ObjectIdentifier(candidate as AnyObject)
+                if seen.insert(identifier).inserted {
+                    result.append(candidate)
+                }
+            }
+        }
+        return result
+    }
+
+    private func initialGestureCandidates(
+        for events: [EventID: any EventType]
+    ) -> [any AnyGestureResponder] {
+        var boundResponders: [any AnyGestureResponder] = []
+        var seen: Set<ObjectIdentifier> = []
+        for event in events.values {
+            guard let boundNode = event.binding?.responder else { continue }
+            for responder in boundNode.sequence.compactMap({
+                $0 as? any AnyGestureResponder
+            }) where responder.mask.contains(.gesture) {
+                let identifier = ObjectIdentifier(responder as AnyObject)
+                if seen.insert(identifier).inserted {
+                    boundResponders.append(responder)
+                }
+            }
+        }
+        if !boundResponders.isEmpty {
+            return selectHitResponders(from: boundResponders)
+        }
+
+        guard let location = events.values.compactMap({ event in
+            (event as? any HitTestableEventType)?.hitTestLocation
+        }).first else {
+            return []
+        }
+        let hasArbitratingPlatformHost = events.values.contains { event in
+            guard let hitTestable = event as? any HitTestableEventType else {
+                return false
+            }
+            return hitTestEventConsumer(
+                at: hitTestable.hitTestLocation,
+                accepting: type(of: event)
+            ) is any GestureArbitratingEventConsumer
+        }
+        if hasArbitratingPlatformHost {
+            return hitTestCandidateResponders(at: location)
+        }
+        return hitTestResponders(at: location)
     }
 
     private struct GestureResponderDispatch {
@@ -943,6 +1139,9 @@ class GestureGraph: GraphHost, EventGraphHost, CustomStringConvertible,
             in responders: [ViewResponder]
         ) -> (any ResponderEventConsumer)? {
             for responder in responders.reversed() {
+                guard responder.features.isSuperset(of: .platformViews) else {
+                    continue
+                }
                 let options = ViewResponder.ContainsPointsOptions.platformDefault
                 guard responder.hitTestPolicy(options: options) != .exclude else {
                     continue

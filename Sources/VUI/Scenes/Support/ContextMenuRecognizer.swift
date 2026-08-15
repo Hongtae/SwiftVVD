@@ -8,8 +8,27 @@
 import Foundation
 import VVD
 
-private let contextMenuLongPressDelay: TimeInterval = 0.5
-private let contextMenuLongPressMovementTolerance: CGFloat = 10
+private struct ContextMenuLongPressConfiguration {
+    var minimumDuration: TimeInterval
+    var allowableMovement: CGFloat
+}
+
+private func contextMenuLongPressConfiguration(
+    for device: MouseEventDevice
+) -> ContextMenuLongPressConfiguration {
+    switch device {
+    case .touch, .stylus:
+        ContextMenuLongPressConfiguration(
+            minimumDuration: 0.15,
+            allowableMovement: 10
+        )
+    case .genericMouse, .unknown:
+        ContextMenuLongPressConfiguration(
+            minimumDuration: 0.15,
+            allowableMovement: 3
+        )
+    }
+}
 
 struct ContextMenuRecognizer {
     private struct PendingSession {
@@ -18,8 +37,10 @@ struct ContextMenuRecognizer {
         var buttonID: Int
         var startLocation: CGPoint
         var currentLocation: CGPoint
+        var currentTimestamp: Time
         var responder: ContextMenuResponder
         var policy: ContextMenuTriggerPolicy
+        var allowableMovement: CGFloat
         var didOpen: Bool = false
     }
 
@@ -69,6 +90,7 @@ struct ContextMenuRecognizer {
         var consumed = false
         viewGraph.data.withCurrent {
             guard let responder = hitResponder(at: event.location,
+                                               timestamp: Time(seconds: event.timestamp),
                                                rootResponder: rootResponder) else {
                 return
             }
@@ -89,15 +111,23 @@ struct ContextMenuRecognizer {
 
             case .secondaryUpInside, .longPress:
                 let sessionID = makeSessionID()
+                let longPressConfiguration = contextMenuLongPressConfiguration(
+                    for: event.device
+                )
                 pending = PendingSession(id: sessionID,
                                          deviceID: event.deviceID,
                                          buttonID: event.buttonID,
                                          startLocation: event.location,
                                          currentLocation: event.location,
+                                         currentTimestamp: Time(seconds: event.timestamp),
                                          responder: responder,
-                                         policy: policy)
+                                         policy: policy,
+                                         allowableMovement: longPressConfiguration.allowableMovement)
                 if policy == .longPress {
-                    scheduleLongPress(sessionID, contextMenuLongPressDelay)
+                    scheduleLongPress(
+                        sessionID,
+                        longPressConfiguration.minimumDuration
+                    )
                 }
                 consumed = true
             }
@@ -120,6 +150,7 @@ struct ContextMenuRecognizer {
         var opened = false
         viewGraph.data.withCurrent {
             guard hitResponder(at: session.currentLocation,
+                               timestamp: session.currentTimestamp,
                                rootResponder: rootResponder) === session.responder else {
                 pending = nil
                 return
@@ -145,9 +176,11 @@ struct ContextMenuRecognizer {
         switch event.type {
         case .move, .pointing:
             session.currentLocation = event.location
+            session.currentTimestamp = Time(seconds: event.timestamp)
             if session.policy == .longPress,
                movedBeyondLongPressTolerance(from: session.startLocation,
-                                             to: event.location) {
+                                             to: event.location,
+                                             allowableMovement: session.allowableMovement) {
                 pending = nil
                 return true
             }
@@ -164,6 +197,7 @@ struct ContextMenuRecognizer {
             var shouldOpen = false
             viewGraph.data.withCurrent {
                 shouldOpen = hitResponder(at: event.location,
+                                          timestamp: Time(seconds: event.timestamp),
                                           rootResponder: rootResponder) === session.responder
                 if shouldOpen {
                     open(session.responder, event.location)
@@ -187,14 +221,15 @@ struct ContextMenuRecognizer {
         return id
     }
 
-    private func movedBeyondLongPressTolerance(from start: CGPoint, to current: CGPoint) -> Bool {
-        // Refine the long-press movement tolerance if touch/stylus behavior
-        // becomes visually mismatched.
+    private func movedBeyondLongPressTolerance(
+        from start: CGPoint,
+        to current: CGPoint,
+        allowableMovement: CGFloat
+    ) -> Bool {
         let dx = current.x - start.x
         let dy = current.y - start.y
         let squaredDistance = dx * dx + dy * dy
-        let tolerance = contextMenuLongPressMovementTolerance
-        return squaredDistance > tolerance * tolerance
+        return squaredDistance > allowableMovement * allowableMovement
     }
 
     private func canStartContextMenuSession(_ event: PlatformMouseEvent,
@@ -232,9 +267,16 @@ struct ContextMenuRecognizer {
     }
 
     private func hitResponder(at location: CGPoint,
+                              timestamp: Time,
                               rootResponder: MultiViewResponder) -> ContextMenuResponder? {
-        let hits = rootResponder.respondersContaining(point: location)
-        let contextHits = hits.compactMap { $0 as? ContextMenuResponder }
-        return contextHits.first
+        let event = ContextMenuEvent(
+            timestamp: timestamp,
+            binding: nil,
+            location: .zero,
+            globalLocation: location
+        )
+        return rootResponder
+            .bindEvent(event)?
+            .firstAncestor(ofType: ContextMenuResponder.self)
     }
 }

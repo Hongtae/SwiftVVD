@@ -224,16 +224,23 @@ final class TouchEventRoutingTests: XCTestCase {
 
         try controller.viewGraph.data.withCurrent {
             let graph = controller.viewGraph.data.graph
-            let responder = ContextMenuResponder(
-                itemList: graph.makeInput(value: PlatformItemList()),
-                isPresented: nil,
-                environment: graph.makeInput(value: EnvironmentValues()),
-                phase: try XCTUnwrap(controller.viewGraph.phaseAttr),
-                transform: graph.makeInput(value: ViewTransform.identity),
-                size: graph.makeInput(
-                    value: ViewSize(CGSize(width: 100, height: 40))
+            let environment = graph.makeInput(value: EnvironmentValues())
+            let phase = try XCTUnwrap(controller.viewGraph.phaseAttr)
+            let itemList = graph.makeInput(value: PlatformItemList())
+            let responder = AGSubgraph.withCurrent(
+                controller.viewGraph.data.rootSubgraph
+            ) {
+                ContextMenuResponder(
+                    inputs: makeContextMenuViewInputs(
+                        graph: graph,
+                        environment: environment,
+                        phase: phase
+                    ),
+                    itemList: itemList.asWeak(),
+                    environment: environment,
+                    phase: phase
                 )
-            )
+            }
 
             XCTAssertEqual(
                 responder.resolvedTriggerPolicy(for: .stylus, buttonID: 0),
@@ -292,4 +299,33 @@ private struct HoverRoutingRoot: View {
             .frame(width: 420, height: 240)
             .onHover { recorder.states.append($0) }
     }
+}
+
+private func makeContextMenuViewInputs(
+    graph: _AGGraph,
+    environment: Attribute<EnvironmentValues>,
+    phase: Attribute<_GraphInputs.Phase>
+) -> _ViewInputs {
+    _ViewInputs(
+        base: _GraphInputs(
+            time: graph.makeInput(value: Time.zero),
+            phase: phase,
+            environment: environment,
+            transaction: graph.makeInput(value: Transaction())
+        ),
+        customInputs: PropertyList(),
+        preferences: PreferencesInputs(
+            keys: PreferenceKeys(),
+            hostKeys: graph.makeInput(value: PreferenceKeys())
+        ),
+        transform: graph.makeInput(value: ViewTransform.identity),
+        position: graph.makeInput(value: CGPoint.zero),
+        containerPosition: graph.makeInput(value: CGPoint.zero),
+        size: graph.makeInput(
+            value: ViewSize(CGSize(width: 100, height: 40))
+        ),
+        safeAreaInsets: OptionalAttribute(),
+        containerSize: OptionalAttribute(),
+        stackOrientation: nil
+    )
 }

@@ -24,11 +24,35 @@ extension _AGTypeDescriptorEquatable where Self: Equatable {
     }
 }
 
-private struct _AGComparisonField {
-    var offset: Int
-    var type: Any.Type
-    var kind: _MetadataKind
-    var isStrong: Bool
+private enum _AGPreparedComparisonOperation: @unchecked Sendable {
+    case bytes(offset: Int, count: Int)
+    case string(offset: Int)
+    case enumValue(offset: Int, type: Any.Type)
+    case opaqueExistential(offset: Int, type: Any.Type)
+    case alwaysUnequal(offset: Int)
+
+    func offset(by delta: Int) -> Self {
+        switch self {
+        case let .bytes(offset, count):
+            .bytes(offset: offset + delta, count: count)
+        case let .string(offset):
+            .string(offset: offset + delta)
+        case let .enumValue(offset, type):
+            .enumValue(offset: offset + delta, type: type)
+        case let .opaqueExistential(offset, type):
+            .opaqueExistential(offset: offset + delta, type: type)
+        case let .alwaysUnequal(offset):
+            .alwaysUnequal(offset: offset + delta)
+        }
+    }
+}
+
+private final class _AGPreparedComparisonProgram: @unchecked Sendable {
+    let operations: [_AGPreparedComparisonOperation]
+
+    init(operations: [_AGPreparedComparisonOperation]) {
+        self.operations = operations
+    }
 }
 
 private extension _MetadataKind {
@@ -80,6 +104,18 @@ private func _isOpaqueExistentialContainer(
 
 protocol _AnyAGValueStorage: AnyObject {
     var anyValue: Any { get }
+    var rawPointer: UnsafeRawPointer { get }
+
+    func updateErasedValue(
+        _ value: Any,
+        valuesEqual: (UnsafeRawPointer, UnsafeRawPointer) -> Bool
+    ) -> _AGValueStorageUpdateResult
+}
+
+enum _AGValueStorageUpdateResult {
+    case unchanged
+    case changed
+    case typeMismatch
 }
 
 final class _AGValueStorage<Value>: _AnyAGValueStorage {
@@ -104,52 +140,178 @@ final class _AGValueStorage<Value>: _AnyAGValueStorage {
         storage
     }
 
+    var rawPointer: UnsafeRawPointer {
+        UnsafeRawPointer(storage)
+    }
+
+    func updateErasedValue(
+        _ value: Any,
+        valuesEqual: (UnsafeRawPointer, UnsafeRawPointer) -> Bool
+    ) -> _AGValueStorageUpdateResult {
+        guard let value = value as? Value else {
+            return .typeMismatch
+        }
+        return withUnsafePointer(to: value) { proposedValue in
+            if valuesEqual(rawPointer, UnsafeRawPointer(proposedValue)) {
+                return .unchanged
+            }
+            storage.pointee = value
+            return .changed
+        }
+    }
+
     var anyValue: Any {
         storage.pointee
     }
 }
 
 private enum _AGComparisonLayout {
-    private static let cache = Mutex<[ObjectIdentifier: [_AGComparisonField]]>([:])
+    private static let cache = Mutex<
+        [ObjectIdentifier: _AGPreparedComparisonProgram]
+    >([:])
 
-    // Field offsets are metadata-owned and remain stable for the lifetime of
-    // the corresponding type metadata.
-    static func fields(
+    // The completed program is immutable and keyed by concrete type metadata.
+    // Runtime field discovery therefore occurs once per participating type.
+    static func program(
         of type: Any.Type,
         kind: _MetadataKind
-    ) -> [_AGComparisonField] {
-        guard kind.supportsStoredFieldTraversal else {
-            return []
-        }
+    ) -> _AGPreparedComparisonProgram {
         let identifier = ObjectIdentifier(type)
         if let cached = cache.withLock({ $0[identifier] }) {
             return cached
         }
 
-        var fields: [_AGComparisonField] = []
-        let collect: (
-            UnsafePointer<CChar>,
-            Int,
-            Any.Type,
-            _EachFieldMetadata
-        ) -> Bool = { _, offset, fieldType, metadata in
-            fields.append(
-                _AGComparisonField(
-                    offset: offset,
-                    type: fieldType,
-                    kind: metadata.kind,
-                    isStrong: metadata.isStrong
-                )
-            )
-            return true
-        }
-        _forEachFieldWithMetadata(of: type, body: collect)
+        var operations: [_AGPreparedComparisonOperation] = []
+        appendOperations(
+            of: type,
+            kind: kind,
+            isStrong: true,
+            at: 0,
+            to: &operations
+        )
+        let program = _AGPreparedComparisonProgram(operations: operations)
         return cache.withLock { cache in
             if let cached = cache[identifier] {
                 return cached
             }
-            cache[identifier] = fields
-            return fields
+            cache[identifier] = program
+            return program
+        }
+    }
+
+    private static func appendOperations(
+        of type: Any.Type,
+        kind: _MetadataKind,
+        isStrong: Bool,
+        at offset: Int,
+        to operations: inout [_AGPreparedComparisonOperation]
+    ) {
+        guard isStrong else {
+            appendBytes(
+                offset: offset,
+                count: _AGGraph.valueSize(of: type),
+                to: &operations
+            )
+            return
+        }
+        if type == String.self {
+            operations.append(.string(offset: offset))
+            return
+        }
+        if type is AnyClass {
+            appendBytes(
+                offset: offset,
+                count: _AGGraph.valueSize(of: type),
+                to: &operations
+            )
+            return
+        }
+        if _isErrorExistentialContainer(type, kind: kind) {
+            operations.append(.alwaysUnequal(offset: offset))
+            return
+        }
+        if _isOpaqueExistentialContainer(type, kind: kind) {
+            operations.append(
+                .opaqueExistential(offset: offset, type: type)
+            )
+            return
+        }
+        if kind == .enum || kind == .optional {
+            operations.append(.enumValue(offset: offset, type: type))
+            return
+        }
+        guard kind.supportsStoredFieldTraversal else {
+            appendBytes(
+                offset: offset,
+                count: _AGGraph.valueSize(of: type),
+                to: &operations
+            )
+            return
+        }
+
+        var fields: [(
+            offset: Int,
+            type: Any.Type,
+            metadata: _EachFieldMetadata
+        )] = []
+        _forEachFieldWithMetadata(of: type) {
+            _, fieldOffset, fieldType, metadata in
+            fields.append((fieldOffset, fieldType, metadata))
+            return true
+        }
+        guard !fields.isEmpty else {
+            appendBytes(
+                offset: offset,
+                count: _AGGraph.valueSize(of: type),
+                to: &operations
+            )
+            return
+        }
+
+        for field in fields {
+            if field.metadata.isStrong {
+                let fieldProgram = program(
+                    of: field.type,
+                    kind: field.metadata.kind
+                )
+                for operation in fieldProgram.operations {
+                    append(
+                        operation.offset(by: offset + field.offset),
+                        to: &operations
+                    )
+                }
+            } else {
+                appendBytes(
+                    offset: offset + field.offset,
+                    count: _AGGraph.valueSize(of: field.type),
+                    to: &operations
+                )
+            }
+        }
+    }
+
+    private static func appendBytes(
+        offset: Int,
+        count: Int,
+        to operations: inout [_AGPreparedComparisonOperation]
+    ) {
+        guard count > 0 else { return }
+        append(.bytes(offset: offset, count: count), to: &operations)
+    }
+
+    private static func append(
+        _ operation: _AGPreparedComparisonOperation,
+        to operations: inout [_AGPreparedComparisonOperation]
+    ) {
+        if case let .bytes(offset, count) = operation,
+           case let .bytes(previousOffset, previousCount)? = operations.last,
+           previousOffset + previousCount == offset {
+            operations[operations.count - 1] = .bytes(
+                offset: previousOffset,
+                count: previousCount + count
+            )
+        } else {
+            operations.append(operation)
         }
     }
 }
@@ -172,72 +334,71 @@ extension _AGGraph {
         _ rhs: UnsafePointer<Value>,
         options: AGComparisonOptions
     ) -> Bool {
-        if Value.self == String.self {
-            return lhs.pointee as! String == rhs.pointee as! String
-        }
-        if options.comparisonMode.rawValue <= AGComparisonMode.layout.rawValue {
-            return compareLayoutValues(
-                lhs,
-                rhs,
-                type: Value.self,
-                kind: _MetadataKind(Value.self)
-            )
-        }
-        return compareRawValues(lhs, rhs, type: Value.self)
+        storedValueComparator(for: Value.self, options: options)(lhs, rhs)
     }
 
-    private static func compareLayoutValues(
+    static func storedValueComparator<Value>(
+        for type: Value.Type,
+        options: AGComparisonOptions
+    ) -> (UnsafeRawPointer, UnsafeRawPointer) -> Bool {
+        if type == String.self {
+            return { lhs, rhs in
+                lhs.assumingMemoryBound(to: String.self).pointee
+                    == rhs.assumingMemoryBound(to: String.self).pointee
+            }
+        }
+        if options.comparisonMode.rawValue <= AGComparisonMode.layout.rawValue {
+            let program = _AGComparisonLayout.program(
+                of: type,
+                kind: _MetadataKind(type)
+            )
+            return { lhs, rhs in
+                comparePreparedLayoutValues(lhs, rhs, program: program)
+            }
+        }
+        let count = valueSize(of: type)
+        return { lhs, rhs in
+            compareRawRange(lhs, rhs, offset: 0, count: count)
+        }
+    }
+
+    private static func comparePreparedLayoutValues(
         _ lhs: UnsafeRawPointer,
         _ rhs: UnsafeRawPointer,
-        type: Any.Type,
-        kind: _MetadataKind
+        program: _AGPreparedComparisonProgram
     ) -> Bool {
         if lhs == rhs {
             return true
         }
-        if type == String.self {
-            return lhs.assumingMemoryBound(to: String.self).pointee
-                == rhs.assumingMemoryBound(to: String.self).pointee
-        }
-        if type is AnyClass {
-            // Class storage is the reference itself. Instance fields belong to
-            // the referenced object and do not participate in value equality.
-            return compareRawValues(lhs, rhs, type: type)
-        }
-        if _isErrorExistentialContainer(type, kind: kind) {
-            // Boxed error values do not provide an equality path to layout
-            // comparison modes, including when both boxes are identical.
-            return false
-        }
-        if _isOpaqueExistentialContainer(type, kind: kind) {
-            return compareOpaqueExistentialValues(
-                lhs,
-                rhs,
-                type: type
-            )
-        }
-        if kind == .enum || kind == .optional {
-            return compareEnumValues(lhs, rhs, type: type)
-        }
-
-        let fields = _AGComparisonLayout.fields(of: type, kind: kind)
-        if fields.isEmpty {
-            return compareRawValues(lhs, rhs, type: type)
-        }
-        for field in fields {
-            let lhsField = lhs.advanced(by: field.offset)
-            let rhsField = rhs.advanced(by: field.offset)
-            let isEqual = if field.isStrong {
-                compareLayoutValues(
-                    lhsField,
-                    rhsField,
-                    type: field.type,
-                    kind: field.kind
+        for operation in program.operations {
+            let isEqual: Bool
+            switch operation {
+            case let .bytes(offset, count):
+                isEqual = compareRawRange(
+                    lhs,
+                    rhs,
+                    offset: offset,
+                    count: count
                 )
-            } else {
-                // Non-strong references use runtime-managed storage and cannot
-                // be interpreted as ordinary values of the reported type.
-                compareRawValues(lhsField, rhsField, type: field.type)
+            case let .string(offset):
+                isEqual = lhs.advanced(by: offset)
+                    .assumingMemoryBound(to: String.self).pointee
+                    == rhs.advanced(by: offset)
+                    .assumingMemoryBound(to: String.self).pointee
+            case let .enumValue(offset, type):
+                isEqual = compareEnumValues(
+                    lhs.advanced(by: offset),
+                    rhs.advanced(by: offset),
+                    type: type
+                )
+            case let .opaqueExistential(offset, type):
+                isEqual = compareOpaqueExistentialValues(
+                    lhs.advanced(by: offset),
+                    rhs.advanced(by: offset),
+                    type: type
+                )
+            case .alwaysUnequal:
+                isEqual = false
             }
             if !isEqual {
                 return false
@@ -290,25 +451,18 @@ extension _AGGraph {
             }
             return withUnsafePointer(to: lhs) { lhsPointer in
                 withUnsafePointer(to: rhs) { rhsPointer in
-                    compareLayoutValues(
+                    comparePreparedLayoutValues(
                         lhsPointer,
                         rhsPointer,
-                        type: Payload.self,
-                        kind: _MetadataKind(Payload.self)
+                        program: _AGComparisonLayout.program(
+                            of: Payload.self,
+                            kind: _MetadataKind(Payload.self)
+                        )
                     )
                 }
             }
         }
         return _openExistential(lhsPayload, do: compare)
-    }
-
-    private static func compareRawValues(
-        _ lhs: UnsafeRawPointer,
-        _ rhs: UnsafeRawPointer,
-        type: Any.Type
-    ) -> Bool {
-        let count = valueSize(of: type)
-        return compareRawRange(lhs, rhs, offset: 0, count: count)
     }
 
     private static func compareOpaqueExistentialValues(
@@ -349,11 +503,13 @@ extension _AGGraph {
         else {
             return false
         }
-        return compareLayoutValues(
+        return comparePreparedLayoutValues(
             lhsValue,
             rhsValue,
-            type: dynamicType,
-            kind: _MetadataKind(dynamicType)
+            program: _AGComparisonLayout.program(
+                of: dynamicType,
+                kind: _MetadataKind(dynamicType)
+            )
         )
     }
 

@@ -1639,14 +1639,16 @@ final class SystemScrollViewHostTests: XCTestCase {
     }
 
     // ASSERTIONS systemScrollViewDeferredTargetInvocationContextObserved
+    // ASSERTIONS attributeGraphStrongAttributeOwnerLookupObserved
     func testHostingScrollViewReappliesTargetThroughGraphActionOutbox() {
         let graph = _AGGraph()
         let graphRef = _AGGraphContext(graph: graph)
         var host: HostingScrollView!
-        var targetY: CGFloat = 100
+        var targetY: Attribute<CGFloat>!
         var providerGraphBindings: [Bool] = []
 
         graphRef.withCurrent {
+            targetY = graph.makeInput(value: 100)
             host = HostingScrollView(
                 graphRef: graphRef,
                 layoutState: graph.makeInput(
@@ -1664,7 +1666,12 @@ final class SystemScrollViewHostTests: XCTestCase {
                     { _, _ in
                         providerGraphBindings.append(_AGGraph.current != nil)
                         return ScrollTarget(
-                            rect: CGRect(x: 0, y: targetY, width: 200, height: 40),
+                            rect: CGRect(
+                                x: 0,
+                                y: targetY.value,
+                                width: 200,
+                                height: 40
+                            ),
                             anchor: .top
                         )
                     },
@@ -1678,13 +1685,15 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(host.pendingContext?.contentOffset.y, 100)
         XCTAssertEqual(graph.actionOutbox.count, 1)
 
-        targetY = 400
+        graphRef.withCurrent {
+            targetY.value = 400
+        }
         let actions = graph.actionOutbox
         graph.actionOutbox.removeAll()
         XCTAssertNil(_AGGraph.current)
         actions.forEach { $0() }
 
-        XCTAssertEqual(providerGraphBindings, [true, false])
+        XCTAssertEqual(providerGraphBindings, [true, true])
         XCTAssertNil(_AGGraph.current)
         XCTAssertEqual(host.pendingContext?.contentOffset.y, 400)
         XCTAssertFalse(Update.isActive)

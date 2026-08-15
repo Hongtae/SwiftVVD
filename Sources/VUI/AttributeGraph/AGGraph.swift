@@ -18,6 +18,15 @@ final class _AGUpdateContext {
     }
 }
 
+protocol _AnyOffsetProjection {
+    var parent: AGAttribute { get }
+    var byteOffset: Int { get }
+    var valueType: ObjectIdentifier { get }
+    var usesOffsetCache: Bool { get }
+
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
+}
+
 // Single-threaded design: no internal synchronization.
 // The caller is responsible for ensuring that all operations on a given
 // _AGGraph instance occur on a single thread (or equivalent serial context).
@@ -52,6 +61,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         static let identityMask: UInt8 = 0x0d
         static let deferredUpdate: UInt8 = 0x01
         static let permanent: UInt8 = 0x04
+        static let indirectSource: UInt8 = 0x08
         static let changed: UInt8 = 0x10
         static let readThisEvaluation: UInt8 = 0x20
 
@@ -88,18 +98,9 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // update function when the node is evaluated.
         case lowLevelBody(any _AnyLowLevelAttributeBox)
 
-        // KeyPath-derived node. Value is projected from a parent node via a key path.
-        // The dependency on parent is fixed at creation time and never changes.
-        case keyPath(parent: AGAttribute, kp: AnyKeyPath)
-
         // Byte-offset-derived node. PointerOffset is the stored-property
         // counterpart to a key-path projection.
-        case offset(
-            parent: AGAttribute,
-            byteOffset: Int,
-            valueType: ObjectIdentifier,
-            project: (Any) -> Any
-        )
+        case offset(any _AnyOffsetProjection)
 
         // Untyped body-offset handle returned by raw AGAttribute.unsafeOffset.
         // It participates in dependency invalidation but has no readable value
@@ -113,11 +114,17 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         // inbox before its next relevant update.
         case crossGraphRef(sourceAttr: AGAttribute, sourceGraph: WeakObject<_AGGraph>)
 
-        // Indirect (pointer) node. It forwards reads to `target` when set and returns
-        // the stored default value when target is nil.
+        // Indirect (pointer) node. Source handles retain their slot generation so a
+        // removed source cannot resolve to a replacement node that reuses its slot.
+        // A nil retarget restores `defaultSource`, or `defaultValue` when the node
+        // was created from a value rather than an attribute.
         // Used for placeholder view outputs (_ViewOutputs), preference placeholders, and
         // per-child posAttr/sizeAttr in the static layout path.
-        case indirect(target: AGAttribute?, defaultValue: Any?)
+        case indirect(
+            source: AGWeakAttribute,
+            defaultSource: AGWeakAttribute,
+            defaultValue: Any?
+        )
 
         var isSideEffect: Bool {
             if case .rule(let box) = self { return box.isSideEffect }
@@ -128,7 +135,10 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     final class Node {
         var value: (any _AnyAGValueStorage)?
         var makeValueStorage: (Any) -> any _AnyAGValueStorage
-        var valuesEqual: (any _AnyAGValueStorage, any _AnyAGValueStorage) -> Bool
+        private var valueComparator: (
+            UnsafeRawPointer,
+            UnsafeRawPointer
+        ) -> Bool
         var flags: AGAttributeFlags = []
         var transaction: Transaction? = nil
         var kind: NodeKind
@@ -164,8 +174,8 @@ final class _AGGraph: Equatable, @unchecked Sendable {
             value: (any _AnyAGValueStorage)?,
             makeValueStorage: @escaping (Any) -> any _AnyAGValueStorage,
             valuesEqual: @escaping (
-                any _AnyAGValueStorage,
-                any _AnyAGValueStorage
+                UnsafeRawPointer,
+                UnsafeRawPointer
             ) -> Bool,
             kind: NodeKind,
             needsEvaluation: Bool = true,
@@ -173,10 +183,34 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         ) {
             self.value = value
             self.makeValueStorage = makeValueStorage
-            self.valuesEqual = valuesEqual
+            self.valueComparator = valuesEqual
             self.kind = kind
             self.needsEvaluation = needsEvaluation
             self.forceEvaluation = forceEvaluation
+        }
+
+        @inline(__always)
+        func valuesEqual(
+            _ lhs: any _AnyAGValueStorage,
+            _ rhs: any _AnyAGValueStorage
+        ) -> Bool {
+            valueComparator(lhs.rawPointer, rhs.rawPointer)
+        }
+
+        @inline(__always)
+        func valuesEqual(
+            _ lhs: UnsafeRawPointer,
+            _ rhs: UnsafeRawPointer
+        ) -> Bool {
+            valueComparator(lhs, rhs)
+        }
+
+        @inline(__always)
+        func updateErasedValue(
+            _ value: Any,
+            in storage: any _AnyAGValueStorage
+        ) -> _AGValueStorageUpdateResult {
+            storage.updateErasedValue(value, valuesEqual: valueComparator)
         }
     }
 
@@ -245,13 +279,15 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     // Hashable Rule cache entries are graph-owned storage. The key keeps
     // the selected subgraph and concrete rule identity separate.
     var cachedRuleEntries: [CachedRuleKey: any CachedRuleEntry] = [:]
+    // Each cached rule owns one node. Keep the inverse association so
+    // subgraph teardown can remove that entry without rebuilding the entire
+    // cache table for every node in the subgraph.
+    var cachedRuleKeysByAttribute: [UInt32: CachedRuleKey] = [:]
     // Cache for PointerOffset-derived child nodes
     var offsetPathIDs: [RelativeOffsetPath: UInt32] = [:]
     // Cache for untyped raw body-offset handles.
     var rawOffsetPathIDs: [RawOffsetPath: UInt32] = [:]
-    // Initial sources and optional permanent dependency slots for typed
-    // IndirectAttribute values.
-    var indirectDefaultSources: [UInt32: AGAttribute] = [:]
+    // Optional permanent dependency slots for typed IndirectAttribute values.
     var indirectDependencies: [UInt32: AGAttribute] = [:]
     var nodeSubgraphs: [UInt32: WeakObject<AGSubgraphRef>] = [:]
 #if DEBUG

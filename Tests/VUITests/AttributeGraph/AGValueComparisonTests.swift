@@ -83,7 +83,45 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testLayoutComparisonDetectsChangedHeapBackedArrayElement() {
+        let lhs = [
+            ScrollGeometryState(
+                geometry: ScrollGeometry(
+                    contentOffset: .zero,
+                    contentSize: CGSize(width: 100, height: 1_000),
+                    contentInsets: EdgeInsets(),
+                    containerSize: CGSize(width: 100, height: 100)
+                ),
+                scrollableAxes: .vertical,
+                transform: WeakAttribute()
+            )
+        ]
+        let rhs = [
+            ScrollGeometryState(
+                geometry: ScrollGeometry(
+                    contentOffset: CGPoint(x: 0, y: 40),
+                    contentSize: CGSize(width: 100, height: 1_000),
+                    contentInsets: EdgeInsets(),
+                    containerSize: CGSize(width: 100, height: 100)
+                ),
+                scrollableAxes: .vertical,
+                transform: WeakAttribute()
+            )
+        ]
+
+        for rawValue: UInt32 in [2, 0x102] {
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    lhs,
+                    rhs,
+                    options: AGComparisonOptions(rawValue: rawValue)
+                )
+            )
+        }
+    }
+
     func testModeTwoLayoutComparisonIgnoresPaddingBytes() {
+        // ASSERTIONS attributeGraphPreparedComparisonProgramObserved
         let lhs = makePaddedComparisonPointer(fill: 0x11, byte: 7, word: 42)
         let differentPadding = makePaddedComparisonPointer(
             fill: 0xee,
@@ -222,6 +260,7 @@ final class AGValueComparisonTests: XCTestCase {
     }
 
     func testLayoutComparisonProjectsActiveEnumPayloads() {
+        // ASSERTIONS attributeGraphPreparedComparisonProgramObserved
         let firstLongString = String(repeating: "a", count: 64)
         let secondLongString = Array(repeating: "a", count: 64).joined()
 

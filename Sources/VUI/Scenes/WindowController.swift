@@ -24,7 +24,6 @@ class WindowController: WindowDelegate,
                         ViewGraphDelegate,
                         GraphDelegate,
                         EventBindingSource, EventBindingManagerDelegate,
-                        DirectEventBindingManagerDelegate,
                         @unchecked Sendable {
 
     // MARK: - Types
@@ -102,8 +101,6 @@ class WindowController: WindowDelegate,
     private var _activeEvents: [EventID: any EventType] = [:]  // current live event dict
     private var _hostTrackedEventIDs: Set<EventID> = []
     private var _hostForwardedEventIDs: Set<EventID> = []
-    private let hoverEventDispatcher = HoverEventDispatcher()
-    private let keyEventDispatcher = KeyEventDispatcher()
     private var _lastHoverRefresh: (location: CGPoint, deviceID: Int, isTopMost: Bool)?
 
     private func nextEventSerial() -> Int {
@@ -119,6 +116,12 @@ class WindowController: WindowDelegate,
         gestureGraph.delegate = eventBridge
     }
 
+    private func configureForwardedEventDispatchers() {
+        guard let manager = gestureGraph?.eventBindingManager else { return }
+        manager.addForwardedEventDispatcher(HoverEventDispatcher())
+        manager.addForwardedEventDispatcher(KeyEventDispatcher())
+    }
+
     func attach(to bridge: EventBindingBridge) {
         bridge.addEventSource(self)
     }
@@ -128,8 +131,12 @@ class WindowController: WindowDelegate,
         at time: Time
     ) -> GesturePhase<Void> {
         configureGestureEventBridge()
-        _ = eventBridge.send(events, source: self, at: time)
-        return eventBridge.lastPhase
+        guard let gestureGraph else { return .possible(nil) }
+        return gestureGraph.sendRecognizerEvents(
+            events,
+            source: self,
+            at: time
+        )
     }
 
     private func sendHostEvents(
@@ -140,17 +147,7 @@ class WindowController: WindowDelegate,
         configureGestureEventBridge()
         guard let manager = gestureGraph?.eventBindingManager else { return [] }
         guard track else {
-            let phase = manager.send(events, at: time)
-            let directConsumed = manager.lastDirectConsumedEventIDs
-            if !directConsumed.isEmpty {
-                return directConsumed
-            }
-            switch phase {
-            case .active, .ended:
-                return Set(events.keys)
-            case .possible, .failed:
-                return []
-            }
+            return manager.send(events, at: time)
         }
 
         var outbound: [EventID: any EventType] = [:]
@@ -404,31 +401,6 @@ class WindowController: WindowDelegate,
         eventBridge.didUpdate(gestureCategory: gestureCategory, in: manager)
     }
 
-    func receiveDirectEvents(
-        _ events: [EventID: any EventType],
-        in manager: EventBindingManager
-    ) -> Set<EventID> {
-        let rootResponder = gestureGraph?.eventBindingManager.rootResponder as? MultiViewResponder
-        let enqueueAction = { [weak self] action in
-            if let gestureGraph = self?.gestureGraph {
-                gestureGraph.enqueueAction(action)
-            } else {
-                action()
-            }
-        }
-        var consumed = hoverEventDispatcher.receiveEvents(
-            events,
-            rootResponder: rootResponder,
-            enqueueAction: enqueueAction
-        )
-        consumed.formUnion(keyEventDispatcher.receiveEvents(
-            events,
-            rootResponder: rootResponder,
-            enqueueAction: enqueueAction
-        ))
-        return consumed
-    }
-
     // MARK: - View Graph State
 
     // Owns the view-tree _AGGraph and root output attributes.
@@ -533,7 +505,11 @@ class WindowController: WindowDelegate,
         case gesture(GestureEvent, Time)
         case action(@Sendable () -> Void)
     }
-    private let inputEvents = Mutex<[InputEvent]>([])
+    private struct InputEventStorage {
+        var events: [InputEvent] = []
+        var pressedMouseButtons: Set<Int> = []
+    }
+    private let inputEvents = Mutex(InputEventStorage())
     private struct InputTimeReference {
         var source: TimeInterval
         var local: Time
@@ -568,8 +544,56 @@ class WindowController: WindowDelegate,
     }
 
     func enqueueInputAction(_ action: @escaping @Sendable () -> Void) {
-        inputEvents.withLock { events in
-            events.append(.action(action))
+        inputEvents.withLock { storage in
+            storage.events.append(.action(action))
+        }
+    }
+
+    func enqueueMouseInputEvent(
+        _ event: PlatformMouseEvent,
+        at time: Time? = nil
+    ) {
+        let time = time ?? inputTimestamp(for: event)
+        inputEvents.withLock { storage in
+            // Preserve host event-loop cadence at the render-queue handoff.
+            // Press streams and every non-move boundary remain lossless.
+            let isUnpressedMouseMove = event.type == .move &&
+                event.device == .genericMouse &&
+                storage.pressedMouseButtons.isEmpty
+
+            if isUnpressedMouseMove,
+               let index = storage.events.indices.last,
+               case .mouse(let previous, _) = storage.events[index] {
+                let sameWindow: Bool
+                switch (previous.window, event.window) {
+                case (nil, nil):
+                    sameWindow = true
+                case let (lhs?, rhs?):
+                    sameWindow = lhs === rhs
+                default:
+                    sameWindow = false
+                }
+                if previous.type == .move &&
+                    previous.device == event.device &&
+                    previous.deviceID == event.deviceID &&
+                    previous.buttonID == event.buttonID &&
+                    sameWindow {
+                    storage.events[index] = .mouse(event, time)
+                    return
+                }
+            }
+
+            storage.events.append(.mouse(event, time))
+            switch event.type {
+            case .buttonDown:
+                storage.pressedMouseButtons.insert(event.buttonID)
+            case .buttonUp:
+                storage.pressedMouseButtons.remove(event.buttonID)
+            case .cancelled:
+                storage.pressedMouseButtons.removeAll()
+            default:
+                break
+            }
         }
     }
 
@@ -639,6 +663,7 @@ class WindowController: WindowDelegate,
         // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
         // The graph must be connected before root view construction.
         connectGestureGraph(self.gestureGraph!, rendererHost: self)
+        configureForwardedEventDispatchers()
         configureGestureEventBridge()
 
         // Create ViewGraph with full AG wiring, including _makeView responder construction.
@@ -682,6 +707,7 @@ class WindowController: WindowDelegate,
 
         self.gestureGraph = GestureGraph()
         connectGestureGraph(self.gestureGraph!, rendererHost: self)
+        configureForwardedEventDispatchers()
         configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
@@ -723,6 +749,7 @@ class WindowController: WindowDelegate,
 
         self.gestureGraph = GestureGraph()
         connectGestureGraph(self.gestureGraph!, rendererHost: self)
+        configureForwardedEventDispatchers()
         configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
@@ -786,22 +813,19 @@ class WindowController: WindowDelegate,
             window.addEventObserver(self) { [weak self] (event: KeyboardEvent) in
                 guard let self else { return }
                 let time = self.inputTimestamp
-                self.inputEvents.withLock { events in
-                    events.append(.keyboard(event, time))
+                self.inputEvents.withLock { storage in
+                    storage.events.append(.keyboard(event, time))
                 }
             }
             window.addEventObserver(self) { [weak self] (event: PlatformMouseEvent) in
                 guard let self else { return }
-                let time = self.inputTimestamp(for: event)
-                self.inputEvents.withLock { events in
-                    events.append(.mouse(event, time))
-                }
+                self.enqueueMouseInputEvent(event)
             }
             window.addEventObserver(self) { [weak self] (event: GestureEvent) in
                 guard let self else { return }
                 let time = self.inputTimestamp
-                self.inputEvents.withLock { events in
-                    events.append(.gesture(event, time))
+                self.inputEvents.withLock { storage in
+                    storage.events.append(.gesture(event, time))
                 }
             }
             self.onWindowCreated(window)
@@ -936,9 +960,9 @@ class WindowController: WindowDelegate,
             viewGraph.setContainerSize(ViewSize(layoutContentSize))
         }
 
-        let events = self.inputEvents.withLock { events in
-            defer { events.removeAll() }
-            return events
+        let events = self.inputEvents.withLock { storage in
+            defer { storage.events.removeAll() }
+            return storage.events
         }
         let hadRootValueUpdates = !viewGraph.valuesNeedingUpdate.isEmpty
         let hadScheduledViewUpdate = viewGraph.hasScheduledViewUpdate
@@ -1460,18 +1484,30 @@ class WindowController: WindowDelegate,
         if event.type == .wheel {
             self.handleMouseWheel(event: event, time: time ?? currentTimestamp)
         } else {
-            self.handleMouseEvent(event: event, at: time ?? currentTimestamp)
+            self.handleMouseEvent(
+                event: event,
+                at: time ?? currentTimestamp
+            )
             // Direct touch has no hover phase independent of contact.
             if event.device != .touch {
-                if event.type == .move || event.type == .pointing ||
-                    event.type == .buttonUp {
-                    self.handleMouseHover(at: event.location,
-                                          deviceID: event.deviceID,
-                                          isTopMost: true)
+                let hasActivePointerGesture = event.device == .stylus
+                    ? _touchEventIDs[event.deviceID] != nil
+                    : _mouseEventID != nil
+                // Movement owned by an active press is a drag sample. Keep it
+                // on the recognizer stream; release publishes the final hover.
+                if event.type == .pointing || event.type == .buttonUp ||
+                    (event.type == .move && !hasActivePointerGesture) {
+                    self.handleMouseHover(
+                        at: event.location,
+                        deviceID: event.deviceID,
+                        isTopMost: true
+                    )
                 } else if event.type == .cancelled {
-                    self.handleMouseHover(at: event.location,
-                                          deviceID: event.deviceID,
-                                          isTopMost: false)
+                    self.handleMouseHover(
+                        at: event.location,
+                        deviceID: event.deviceID,
+                        isTopMost: false
+                    )
                 }
             }
         }
@@ -2178,16 +2214,9 @@ class WindowController: WindowDelegate,
     private func sendHoverEvent(at location: CGPoint,
                                 deviceID: Int,
                                 isTopMost: Bool) -> Bool {
-        let responderRoot = gestureGraph?.eventBindingManager.rootResponder as? MultiViewResponder
-        let hasHit = isTopMost &&
-            !(responderRoot?.hoverResponders(containing: location).isEmpty ?? true)
-        let wasActive = _hoverEventIDs[deviceID].map {
-            hoverEventDispatcher.hasActiveResponders(deviceID: $0.serial)
-        } ?? false
-
         let eventID: EventID
         let phase: EventPhase
-        if hasHit {
+        if isTopMost {
             if let currentID = _hoverEventIDs[deviceID] {
                 eventID = currentID
                 phase = .active
@@ -2198,9 +2227,6 @@ class WindowController: WindowDelegate,
             }
         } else if let currentID = _hoverEventIDs[deviceID] {
             eventID = currentID
-            phase = .ended
-        } else if wasActive {
-            eventID = EventID(type: HoverEvent.self, serial: nextEventSerial())
             phase = .ended
         } else {
             return false
@@ -2219,23 +2245,14 @@ class WindowController: WindowDelegate,
         return consumed.contains(eventID)
     }
 
-    private func endAllHoverResponders() {
-        hoverEventDispatcher.reset { [weak self] action in
-            if let gestureGraph = self?.gestureGraph {
-                gestureGraph.enqueueAction(action)
-            } else {
-                action()
-            }
-        }
-    }
-
     func resetGestureHandlers() {
         resetGestureHandlers(reason: "unspecified")
     }
 
     private func resetGestureHandlers(reason: String) {
-        endAllHoverResponders()
-        gestureGraph?.resetEvents()
+        gestureGraph?.eventBindingManager.reset(
+            resetForwardedEventDispatchers: true
+        )
         contextMenuRecognizer.reset()
         menuPresentationTrigger.reset()
         _touchEventIDs.removeAll()

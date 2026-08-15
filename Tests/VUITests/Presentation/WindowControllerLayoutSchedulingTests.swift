@@ -348,6 +348,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertTrue(refreshedHost === host)
     }
 
+    // ASSERTIONS appKitEventActionUpdateBoundaryObserved buttonPressedDragBoundaryBindingObserved
     @MainActor
     func testScrollViewReaderButtonActionResolvesOwningGraph() throws {
         let probe = LayoutSchedulingButtonScrollViewReaderProbe()
@@ -1779,6 +1780,26 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             0,
             accuracy: 0.001
         )
+    }
+
+    // ASSERTIONS platformViewResponderFeatureHitTestPruningObserved
+    func testPlatformEventConsumerHitTestSkipsBranchesWithoutPlatformViews() throws {
+        let ignored = LayoutSchedulingNonPlatformHitTestProbe()
+        let consumer = LayoutSchedulingPlatformEventConsumerProbe()
+        consumer.children = [ignored]
+        let root = MultiViewResponder()
+        root.children = [consumer]
+        let graph = GestureGraph()
+        graph.eventBindingManager.rootResponder = root
+
+        let binding = try XCTUnwrap(graph.eventBinding(
+            at: CGPoint(x: 10, y: 10),
+            accepting: SystemWheelEvent.self
+        ))
+
+        XCTAssertTrue(binding.responder === consumer)
+        XCTAssertEqual(consumer.containsCallCount, 1)
+        XCTAssertEqual(ignored.containsCallCount, 0)
     }
 
     @MainActor
@@ -10021,6 +10042,57 @@ private func firstHostingScrollViewResponder(
         }
     }
     return nil
+}
+
+private final class LayoutSchedulingNonPlatformHitTestProbe: ViewResponder {
+    private(set) var containsCallCount = 0
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        containsCallCount += 1
+        return .stop
+    }
+}
+
+private final class LayoutSchedulingPlatformEventConsumerProbe:
+    MultiViewResponder,
+    ResponderEventConsumer {
+    private(set) var containsCallCount = 0
+
+    override var features: ViewResponder.Features {
+        super.features.union(.platformViews)
+    }
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        containsCallCount += 1
+        var mask = BitVector64()
+        if !points.isEmpty {
+            mask[0] = true
+        }
+        return ViewResponder.ContainsPointsResult(
+            mask: mask,
+            priority: 1,
+            children: children
+        )
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == SystemWheelEvent.self
+    }
+
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> GesturePhase<Void> {
+        .possible(nil)
+    }
 }
 
 private func allHostingScrollViewResponders(

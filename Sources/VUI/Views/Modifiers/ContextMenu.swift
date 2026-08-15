@@ -5,16 +5,30 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-import Synchronization
 import VVD
 
-struct ContextMenuModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
-    typealias Body = Never
-    
+struct ContextMenuModifier<MenuContent>: ViewModifier where MenuContent: View {
     let menuView: MenuContent
     var isPresented: Binding<Bool>? = nil
-    var _keyboardPresentationDisabled: Environment<Bool> =
-        Environment(\.contextMenuKeyboardPresentationDisabled)
+    @Environment(\.contextMenuKeyboardPresentationDisabled)
+    private var keyboardPresentationDisabled
+
+    func body(content: Content) -> some View {
+        content.modifier(ContextMenuModifierCore(
+            menuView: menuView,
+            isPresented: isPresented,
+            keyboardPresentationDisabled: keyboardPresentationDisabled
+        ))
+    }
+}
+
+struct ContextMenuModifierCore<MenuContent>: ViewModifier, MultiViewModifier
+where MenuContent: View {
+    typealias Body = Never
+
+    let menuView: MenuContent
+    var isPresented: Binding<Bool>?
+    var keyboardPresentationDisabled: Bool
 }
 
 public enum ContextMenuTriggerPolicy: Equatable, Sendable {
@@ -22,6 +36,20 @@ public enum ContextMenuTriggerPolicy: Equatable, Sendable {
     case secondaryDown
     case secondaryUpInside
     case longPress
+}
+
+struct ContextMenuEvent: EventType,
+                         SpatialEventType,
+                         HitTestableEventType,
+                         Equatable {
+    var timestamp: Time
+    var binding: EventBinding?
+    var location: CGPoint
+    var globalLocation: CGPoint
+
+    var phase: EventPhase { .ended }
+    var radius: CGFloat { 0 }
+    var kind: SpatialEvent.Kind? { nil }
 }
 
 extension View {
@@ -40,7 +68,7 @@ extension View {
     }
 }
 
-extension ContextMenuModifier {
+extension ContextMenuModifierCore {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("ContextMenuModifier._makeView called outside AG context")
@@ -61,23 +89,48 @@ extension ContextMenuModifier {
                 inputsIncludeGeometry: true
             )
         )
-        let responder = ContextMenuResponder(
-            itemList: itemListAttr,
-            isPresented: modifier[\.isPresented]._attribute.value,
-            environment: inputs.base.cachedEnvironment.value.environment,
-            phase: inputs.base.phase,
-            transform: inputs.transform,
-            size: inputs.size
-        )
-        let isPresentedAttr = modifier[\.isPresented]._attribute
-        graph.makeSideEffectRule { [weak responder] in
-            responder?.snapshotTransform = inputs.transform.value
-            responder?.snapshotSize = inputs.size.value
-            responder?.updatePresentation(isPresentedAttr.value)
+        let innerResponderNodes = outputs.preferences.preferences
+            .filter { $0.key == ViewRespondersKey.self }
+            .map { $0.value }
+        let innerRespondersAttr: Attribute<[ViewResponder]>
+        if innerResponderNodes.isEmpty {
+            innerRespondersAttr = graph.makeInput(value: [])
+        } else if innerResponderNodes.count == 1 {
+            innerRespondersAttr = Attribute(innerResponderNodes[0])
+        } else {
+            innerRespondersAttr = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for nodeID in innerResponderNodes {
+                    let value = Attribute<[ViewResponder]>(nodeID).value
+                    ViewRespondersKey.reduce(value: &combined) { value }
+                }
+                return combined
+            }
         }
 
-        let respondersAttr: Attribute<[ViewResponder]> = graph.makeInput(value: [responder])
-        outputs.preferences.append(ViewRespondersKey.self, node: respondersAttr.identifier)
+        let responder = ContextMenuResponder(
+            inputs: inputs,
+            itemList: itemListAttr.asWeak(),
+            environment: inputs.base.cachedEnvironment.value.environment,
+            phase: inputs.base.phase
+        )
+        let respondersAttr: Attribute<[ViewResponder]> = graph.makeStatefulRule(
+            ContextMenuFilter(
+                _isPresented: modifier[\.isPresented]._attribute,
+                _keyboardPresentationDisabled:
+                    modifier[\.keyboardPresentationDisabled]._attribute,
+                _children: innerRespondersAttr,
+                responder: responder
+            )
+        )
+
+        outputs.preferences.preferences.removeAll {
+            $0.key == ViewRespondersKey.self
+        }
+        outputs.preferences.append(
+            ViewRespondersKey.self,
+            node: respondersAttr.identifier
+        )
         return outputs
     }
 
@@ -85,7 +138,7 @@ extension ContextMenuModifier {
     // contextMenu disappears when applied to children inside HStack/VStack/etc.
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         guard _AGGraph.current != nil else {
-            fatalError("ContextMenuModifier._makeViewList called outside AG context")
+            fatalError("ContextMenuModifierCore._makeViewList called outside AG context")
         }
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
@@ -93,64 +146,44 @@ extension ContextMenuModifier {
     }
 }
 
-extension ContextMenuModifier {
-    fileprivate var _scene: some Scene {
-        _EmptyScene()
+struct ContextMenuFilter: StatefulRule {
+    typealias Value = [ViewResponder]
+
+    var _isPresented: Attribute<Binding<Bool>?>
+    var _keyboardPresentationDisabled: Attribute<Bool>
+    var _children: Attribute<[ViewResponder]>
+    var responder: ContextMenuResponder
+
+    mutating func updateValue() {
+        responder.updateChildren((
+            value: _children.value,
+            changed: _AGGraph.currentStatefulInputChanged(_children.identifier)
+        ))
+        responder.updatePresentation(_isPresented.value)
+        responder.keyboardPresentationDisabled =
+            _keyboardPresentationDisabled.value
+        if !context.hasValue {
+            _AGGraph.setStatefulOutput([responder])
+        }
     }
 }
 
-private let _contextMenuResponderNextKey = Mutex<UInt32>(0x90000000)
-
-final class ContextMenuResponder: ViewResponder {
-    let hitTestKey: UInt32
-
-    let itemList: Attribute<PlatformItemList>
+final class ContextMenuResponder: DefaultLayoutViewResponder {
+    let itemList: WeakAttribute<PlatformItemList>
     private var isPresented: Binding<Bool>?
     private var activeSession: ContextMenuPresentationSession?
     let environment: Attribute<EnvironmentValues>
     let phase: Attribute<_GraphInputs.Phase>
-    let transform: Attribute<ViewTransform>
-    let size: Attribute<ViewSize>
+    var keyboardPresentationDisabled = false
 
-    var snapshotTransform: ViewTransform = .identity
-    var snapshotSize: ViewSize = ViewSize(.zero)
-
-    init(itemList: Attribute<PlatformItemList>,
-         isPresented: Binding<Bool>?,
+    init(inputs: _ViewInputs,
+         itemList: WeakAttribute<PlatformItemList>,
          environment: Attribute<EnvironmentValues>,
-         phase: Attribute<_GraphInputs.Phase>,
-         transform: Attribute<ViewTransform>,
-         size: Attribute<ViewSize>) {
-        self.hitTestKey = _contextMenuResponderNextKey.withLock { key in
-            defer { key &+= 1 }
-            return key
-        }
+         phase: Attribute<_GraphInputs.Phase>) {
         self.itemList = itemList
-        self.isPresented = isPresented
         self.environment = environment
         self.phase = phase
-        self.transform = transform
-        self.size = size
-        super.init()
-    }
-
-    override func hitTestPolicy(options: ViewResponder.ContainsPointsOptions) -> ViewResponder.HitTestPolicy {
-        .include
-    }
-
-    override func containsGlobalPoints(_ points: [CGPoint],
-                                       cacheKey: UInt32?,
-                                       options: ViewResponder.ContainsPointsOptions) -> ViewResponder.ContainsPointsResult {
-        let sz = snapshotSize.value
-        var localPts = Array(points.prefix(64))
-        snapshotTransform.convertGlobal(to: .local, points: &localPts)
-        let bounds = CGRect(origin: .zero, size: sz)
-        var mask = BitVector64()
-        for (i, point) in localPts.enumerated() {
-            mask[i] = bounds.contains(point)
-        }
-        guard !mask.isEmpty else { return .stop }
-        return ViewResponder.ContainsPointsResult(mask: mask, priority: 16.0, children: [])
+        super.init(inputs: inputs)
     }
 
     func updatePresentation(_ isPresented: Binding<Bool>?) {
@@ -165,6 +198,7 @@ final class ContextMenuResponder: ViewResponder {
         guard let graph = _AGGraph.current else {
             fatalError("ContextMenuResponder.present called outside AG context")
         }
+        guard let initialItemList = itemList.value else { return }
         let viewPhase = ViewGraphHost.Phase(base: phase.value)
         // Flush pending item-list mutations before taking the initial popup
         // snapshot. The open menu should start from the same source state that
@@ -175,7 +209,7 @@ final class ContextMenuResponder: ViewResponder {
         let session = ContextMenuPresentationSession()
         let actions = ContextMenuPopupActions()
         let initialItems = contextMenuPresentationItems(
-            self.itemList.value.menuItems
+            initialItemList.menuItems
         )
         let liveContentSubgraph = AGSubgraph()
         AGSubgraph.withCurrent(liveContentSubgraph) {
@@ -183,8 +217,12 @@ final class ContextMenuResponder: ViewResponder {
             // item-list source invalidates. The session owns this subgraph so
             // dismissing the menu also stops the source-graph side effect.
             graph.makeSideEffectRule { [weak session] in
+                guard let itemList = self.itemList.value else {
+                    session?.dismissAll()
+                    return
+                }
                 let items = contextMenuPresentationItems(
-                    self.itemList.value.menuItems
+                    itemList.menuItems
                 )
                 let environment = self.environment.value.untrackedCopy()
                 let viewPhase = ViewGraphHost.Phase(base: self.phase.value)
