@@ -438,6 +438,25 @@ private final class ScrollViewTestResponder: ViewResponder {
     }
 }
 
+private final class ScrollableGestureGraphTestResponder:
+    ResponderNode,
+    AnyGestureResponder
+{
+    var relatedAttribute: AGAttribute { .invalid }
+    var inputs: _ViewInputs { fatalError("unused test responder input") }
+    var childSubgraph: AGSubgraph?
+    var childViewSubgraph: AGSubgraph?
+    var viewSubgraph: AGSubgraph { gestureGraph.rootSubgraph }
+    var eventSources: [any EventBindingSource] { [] }
+    var gestureType: Any.Type { Self.self }
+    var isValid: Bool { true }
+    lazy var gestureGraph = GestureGraph(rootResponder: self)
+
+    override var nextResponder: ResponderNode? { nil }
+
+    func detachContainer() {}
+}
+
 private struct RecordingLayoutGestureEventBindingCall: Equatable {
     var eventCount: Int
     var proxyCount: Int
@@ -1938,7 +1957,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         RecordingLayoutGestureEventBindingStore.reset()
         defer { RecordingLayoutGestureEventBindingStore.reset() }
 
-        let gestureGraph = GestureGraph()
+        let gestureResponder = ScrollableGestureGraphTestResponder()
+        let gestureGraph = gestureResponder.gestureGraph
         let child = ScrollViewTestResponder()
         let root = testResponderGroup([child])
         let eventID = EventID(type: VUI.MouseEvent.self, serial: 31)
@@ -1986,7 +2006,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                     firstChildContainsEventLocation: true
                 )
             ])
-            XCTAssertTrue(gestureGraph.eventBindingManager.bindings[eventID]?.responder === child)
+            XCTAssertTrue(gestureGraph.eventBindingManager.eventBindings[eventID]?.responder === child)
 
             assertPossibleNil(outputs.phase.value)
             XCTAssertEqual(RecordingLayoutGestureEventBindingStore.calls.count, 1)
@@ -2000,7 +2020,8 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
     }
 
     func testLayoutGestureCombinesChildGesturePreferences() throws {
-        let gestureGraph = GestureGraph()
+        let gestureResponder = ScrollableGestureGraphTestResponder()
+        let gestureGraph = gestureResponder.gestureGraph
         let first = LayoutGesturePreferenceResponder(hitTestKey: 91, value: "first")
         let second = LayoutGesturePreferenceResponder(hitTestKey: 92, value: "second")
         let root = testResponderGroup([first, second])
@@ -2078,7 +2099,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         XCTAssertNil(result?.from)
         XCTAssertTrue(result?.to?.responder === child)
-        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === child)
+        XCTAssertTrue(eventBindingManager.eventBindings[eventID]?.responder === child)
         XCTAssertNil(LayoutGestureChildProxy(responder: root).bindChild(
             index: 0,
             event: layoutTestEvent(location: CGPoint(x: 4, y: 5), phase: .began),
@@ -2112,7 +2133,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
                 firstChildContainsEventLocation: true
             )
         ])
-        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === child)
+        XCTAssertTrue(eventBindingManager.eventBindings[eventID]?.responder === child)
         XCTAssertEqual(Set(box.childEvents(at: 0).keys), [eventID])
         XCTAssertEqual(box.childSeed(at: 0), initialSeed)
         XCTAssertGreaterThan(box.generation, initialGeneration)
@@ -2142,7 +2163,7 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
         XCTAssertTrue(movement?.from?.responder === first)
         XCTAssertTrue(movement?.to?.responder === second)
-        XCTAssertTrue(eventBindingManager.bindings[eventID]?.responder === second)
+        XCTAssertTrue(eventBindingManager.eventBindings[eventID]?.responder === second)
         XCTAssertGreaterThan(box.childSeed(at: 0), firstSeed)
         XCTAssertEqual(box.childSeed(at: 1), secondSeed)
         XCTAssertGreaterThan(box.generation, generation)

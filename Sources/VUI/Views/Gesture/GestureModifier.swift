@@ -29,15 +29,15 @@ protocol GestureModifier {
 /// Applies a GestureModifier to a Gesture, producing a combined gesture whose Value
 /// is the modifier's output type.
 ///
-/// Stores the modifier and wrapped body.
+/// Stores the wrapped content and modifier.
 /// _makeGesture dispatches to Modifier._makeGesture(modifier:inputs:body:), passing a
 /// closure that calls Body._makeGesture for the inner gesture.
 struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture,
     PrimitiveGesture, PrimitiveDebuggableGesture
     where Modifier.BodyValue == Body.Value
 {
+    var content: Body
     var modifier: Modifier
-    var body: Body
 
     typealias Value = Modifier.Value
 
@@ -49,7 +49,10 @@ struct ModifierGesture<Modifier: GestureModifier, Body: Gesture>: Gesture,
             modifier: gesture[\.modifier],
             inputs: inputs,
             body: { modifiedInputs in
-                Body._makeGesture(gesture: gesture[\.body], inputs: modifiedInputs)
+                Body._makeGesture(
+                    gesture: gesture[\.content],
+                    inputs: modifiedInputs
+                )
             }
         )
     }

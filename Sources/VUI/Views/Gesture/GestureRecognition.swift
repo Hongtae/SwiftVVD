@@ -87,7 +87,7 @@ struct DependentPhase<E>: Rule {
 }
 
 extension GesturePhase {
-    fileprivate func paused() -> GesturePhase<V> {
+    func paused() -> GesturePhase<V> {
         switch self {
         case .active(let value), .ended(let value):
             return .possible(value)
@@ -121,8 +121,8 @@ extension Gesture {
         _ dependency: GestureDependency
     ) -> ModifierGesture<DependentGesture<Value>, Self> {
         ModifierGesture(
-            modifier: DependentGesture(dependency: dependency),
-            body: self
+            content: self,
+            modifier: DependentGesture(dependency: dependency)
         )
     }
 }
@@ -162,8 +162,8 @@ extension Gesture {
     ) -> ModifierGesture<TruePreferenceWritingGestureModifier<K, Value>, Self>
     where K.Value == Bool {
         ModifierGesture(
-            modifier: TruePreferenceWritingGestureModifier<K, Value>(),
-            body: self
+            content: self,
+            modifier: TruePreferenceWritingGestureModifier<K, Value>()
         )
     }
 
@@ -246,13 +246,13 @@ extension Gesture {
         _ predicate: @escaping (E) -> Bool
     ) -> ModifierGesture<EventFilter<Value>, Self> {
         ModifierGesture(
+            content: self,
             modifier: EventFilter { event in
                 guard let typedEvent = E(event) else {
                     return allowOtherTypes
                 }
                 return predicate(typedEvent)
-            },
-            body: self
+            }
         )
     }
 
@@ -328,11 +328,11 @@ extension Gesture {
         includeChildren: Bool = false
     ) -> ModifierGesture<CategoryGesture<Value>, Self> {
         ModifierGesture(
+            content: self,
             modifier: CategoryGesture(
                 category: cat,
                 includeChildren: includeChildren
-            ),
-            body: self
+            )
         )
     }
 }
@@ -364,133 +364,125 @@ struct RepeatGesture<E: EventType>: GestureModifier {
         guard let graph = _AGGraph.current else {
             fatalError("RepeatGesture.makeGesture requires AG context")
         }
-        let bodyOutputs = body(inputs)
-        let self_ = modifier._attribute.value
-
-        // RepeatResetSeed combines the global reset seed with the local tap-count attr.
-        let tapCountAttr: Attribute<UInt32> = graph.makeInput(value: 0)
-        let repeatResetSeed = RepeatResetSeed(
-            globalSeedAttr: inputs.resetSeed,
-            localCountAttr: tapCountAttr
-        )
-        let seedAttr = graph.makeRule(repeatResetSeed)
-
-        let repeatPhase = RepeatPhase<E>(
-            childPhaseAttr: bodyOutputs.phase,
-            timeAttr: inputs.time,
-            resetSeedAttr: seedAttr,
-            tapCountAttr: tapCountAttr,
-            requiredCount: self_.count,
-            maximumDelay: self_.maximumDelay
-        )
-        let resultAttr = graph.makeStatefulRule(repeatPhase)
-        return bodyOutputs.withPhase(resultAttr)
+        let resetDelta: Attribute<UInt32> = graph.makeInput(value: 0)
+        let childResetSeed = graph.makeRule(RepeatResetSeed(
+            _resetSeed: inputs.resetSeed,
+            _delta: resetDelta
+        ))
+        var childInputs = inputs
+        childInputs._resetSeed = childResetSeed
+        var outputs = body(childInputs)
+        outputs.phase = graph.makeStatefulRule(RepeatPhase<E>(
+            _modifier: modifier._attribute,
+            _phase: outputs.phase,
+            _time: inputs.time,
+            _resetSeed: inputs.resetSeed,
+            _resetDelta: resetDelta,
+            useGestureGraph: inputs.options.contains(.gestureGraph),
+            deadline: nil,
+            index: 0,
+            lastResetSeed: 0
+        ))
+        return outputs
     }
 }
 
-// RepeatResetSeed value is globalSeed + localCount.
 struct RepeatResetSeed: Rule {
     typealias Value = UInt32
 
-    var globalSeedAttr: Attribute<UInt32>
-    var localCountAttr: Attribute<UInt32>
+    var _resetSeed: Attribute<UInt32>
+    var _delta: Attribute<UInt32>
 
     var value: UInt32 {
-        globalSeedAttr.value &+ localCountAttr.value
+        _resetSeed.value &+ _delta.value
     }
 }
 
-// RepeatPhase<E>: StatefulRule, ResettableGestureRule.
+struct RepeatMutation: GraphMutation {
+    var _resetDelta: Attribute<UInt32>
+    var index: UInt32
+
+    func apply() {
+        _resetDelta.setValue(index)
+    }
+
+    mutating func combine<M>(with mutation: M) -> Bool where M: GraphMutation {
+        guard let mutation = mutation as? RepeatMutation,
+              _resetDelta == mutation._resetDelta else {
+            return false
+        }
+        index = mutation.index
+        return true
+    }
+}
+
 struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<E>
 
-    let childPhaseAttr: Attribute<GesturePhase<E>>
-    let timeAttr: Attribute<Time>
-    let resetSeedAttr: Attribute<UInt32>
-    var tapCountAttr: Attribute<UInt32>
+    var _modifier: Attribute<RepeatGesture<E>>
+    var _phase: Attribute<GesturePhase<E>>
+    var _time: Attribute<Time>
+    var _resetSeed: Attribute<UInt32>
+    var _resetDelta: Attribute<UInt32>
+    var useGestureGraph: Bool
+    var deadline: Time?
+    var index: UInt32
+    var lastResetSeed: UInt32
 
-    let requiredCount: Int
-    let maximumDelay: Double
-
-    var lastResetSeed: UInt32 = 0
-    var lastTapTime: Double = 0        // deadline for the pending inter-tap interval
-    var isFirstTap: Bool = true        // true when no inter-tap deadline is pending
-    var completedTaps: Int = 0
-    var lastActivePhase: GesturePhase<E> = .possible(nil)
-
-    // ResettableGestureRule conformance
     typealias PhaseValue = E
-    var resetSeed: UInt32 { resetSeedAttr.value }
-    // Value == GesturePhase<E> == GesturePhase<PhaseValue>, so default phaseValue applies.
+    var resetSeed: UInt32 { _resetSeed.value }
 
     mutating func resetPhase() {
-        lastTapTime = 0
-        isFirstTap = true
-        completedTaps = 0
-        _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+        index = 0
+        deadline = nil
     }
 
     mutating func updateValue() {
         guard resetIfNeeded() else { return }
 
-        let now = timeAttr.value.seconds
-        let childPhase = childPhaseAttr.value
-
-        // A repeat stores an absolute deadline so graph time can wake it without
-        // replaying the previous terminal input as another tap.
-        if !isFirstTap && lastTapTime > 0 && now > lastTapTime {
+        let time = _time.value
+        if let deadline, deadline < time {
             _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
             return
         }
 
+        let childPhase = _phase.value
         switch childPhase {
         case .possible:
-            if completedTaps == 0 {
-                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
-            }
-            // Keep possible while a tap sequence is in progress.
-        case .active(let v):
-            lastActivePhase = childPhase
-            lastTapTime = 0
-            isFirstTap = true
-            // A later tap becomes active once the preceding completed taps make
-            // this input capable of satisfying the configured count.
-            if completedTaps >= requiredCount - 1 {
-                _AGGraph.setStatefulOutput(GesturePhase<E>.active(v))
+            _AGGraph.setStatefulOutput(childPhase)
+        case .active(let value):
+            deadline = nil
+            if _modifier.value.count - 1 > Int(index) {
+                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(value))
             } else {
-                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+                _AGGraph.setStatefulOutput(childPhase)
             }
-        case .ended(let v):
-            completedTaps += 1
-            lastTapTime = now
-
-            if completedTaps >= requiredCount {
-                // Required tap count reached, completing the sequence.
-                completedTaps = 0
-                isFirstTap = true
-                lastTapTime = 0
-                // Increment tapCountAttr to signal RepeatResetSeed.
-                let newCount = tapCountAttr.value &+ 1
-                tapCountAttr.setValue(newCount)
-                _AGGraph.setStatefulOutput(GesturePhase<E>.ended(v))
+        case .ended(let value):
+            index &+= 1
+            let modifier = _modifier.value
+            if modifier.count > Int(index) {
+                deadline = time + modifier.maximumDelay
+                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(value))
+                GraphHost.currentHost.continueTransaction(RepeatMutation(
+                    _resetDelta: _resetDelta,
+                    index: index
+                ))
             } else {
-                // More taps are needed. Keep the gesture possible and publish
-                // the absolute wake-up deadline to the owning gesture host.
-                lastTapTime = now + maximumDelay
-                isFirstTap = false
-                _AGGraph.setStatefulOutput(GesturePhase<E>.possible(nil))
+                deadline = nil
+                _AGGraph.setStatefulOutput(childPhase)
             }
         case .failed:
-            completedTaps = 0
-            isFirstTap = true
-            _AGGraph.setStatefulOutput(GesturePhase<E>.failed)
+            _AGGraph.setStatefulOutput(childPhase)
         }
 
-        if !isFirstTap,
-           let context = _AGGraphContext.current,
-           let gestureGraph = context.context as? GestureGraph {
-            let deadline = Time(seconds: lastTapTime)
-            gestureGraph.scheduleGestureUpdate(at: deadline)
+        if let deadline {
+            if useGestureGraph {
+                let graph = GraphHost.currentHost as! GestureGraph
+                graph.scheduleGestureUpdate(at: deadline)
+            } else {
+                let graph = GraphHost.currentHost as! ViewGraph
+                graph.nextUpdate.gestures.at(deadline)
+            }
         }
     }
 }
@@ -501,8 +493,23 @@ struct RepeatPhase<E: EventType>: StatefulRule, ResettableGestureRule {
 enum RequiredTapCountKey: PreferenceKey {
     typealias Value = Int?
     static var defaultValue: Int? { nil }
+
     static func reduce(value: inout Int?, nextValue: () -> Int?) {
-        value = value ?? nextValue()
+        guard let current = value else {
+            value = nextValue()
+            return
+        }
+        guard let next = nextValue() else { return }
+
+        let prefersMinimum: Bool
+#if os(iOS)
+        prefersMinimum = GestureContainerFeature.isEnabled
+#else
+        prefersMinimum = isLinkedOnOrAfter(.v6)
+#endif
+        value = prefersMinimum
+            ? min(current, next)
+            : max(current, next)
     }
 }
 
@@ -512,7 +519,20 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
     typealias Value = E
     typealias Body = Never
 
-    var count: Int
+    var count: Int?
+
+    struct Child: Rule {
+        typealias Value = (inout Int?) -> Void
+
+        var _modifier: Attribute<RequiredTapCountWriter<E>>
+
+        var value: Value {
+            let count = _modifier.value.count
+            return { value in
+                value = count
+            }
+        }
+    }
 
     static func _makeGesture(
         modifier: _GraphValue<Self>,
@@ -522,11 +542,14 @@ struct RequiredTapCountWriter<E: EventType>: GestureModifier {
         guard let graph = _AGGraph.current else {
             fatalError("RequiredTapCountWriter.makeGesture requires AG context")
         }
-        var bodyOutputs = body(inputs)
-
-        let countAttr: Attribute<Int?> = graph.makeInput(value: modifier._attribute.value.count)
-        bodyOutputs.appendPreference(key: RequiredTapCountKey.self, value: countAttr)
-        return bodyOutputs
+        var outputs = body(inputs)
+        let child = graph.makeRule(Child(_modifier: modifier._attribute))
+        outputs.preferences.makePreferenceTransformer(
+            inputs: inputs.preferences,
+            key: RequiredTapCountKey.self,
+            transform: child
+        )
+        return outputs
     }
 }
 

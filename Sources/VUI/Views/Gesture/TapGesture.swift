@@ -7,52 +7,67 @@
 
 import Foundation
 
+private let tapMovementThreshold: CGFloat = {
+#if os(iOS)
+    45
+#else
+    5
+#endif
+}()
+
 // MARK: - SingleTapGesture
 
-/// Internal gesture type used by TapGesture.
-/// Implements single/multi-tap recognition via an AG modifier chain.
-///
-/// body chain (inner to outer):
-///   EventListener<E>
-///   -> CategoryGesture<E>         (GestureCategory.select)
-///   -> RepeatGesture<E>           (requires count taps)
-///   -> RequiredTapCountWriter<E>  (writes RequiredTapCountKey preference)
 struct SingleTapGesture<E: TappableEventType>: Gesture {
-    var count: Int
-
     typealias Value = E
 
-    typealias Body = ModifierGesture<
-        RequiredTapCountWriter<E>,
+    typealias Listener = ModifierGesture<
+        DependentGesture<E>,
         ModifierGesture<
-            RepeatGesture<E>,
-            ModifierGesture<
-                CategoryGesture<E>,
-                EventListener<E>
-            >
+            MapGesture<E, E>,
+            EventListener<E>
         >
     >
 
+    typealias DurationGate = ModifierGesture<
+        Map2Gesture<
+            E,
+            ModifierGesture<DurationGesture<E>, EventListener<E>>,
+            E
+        >,
+        Listener
+    >
+
+    typealias DistanceGate = ModifierGesture<
+        Map2Gesture<
+            E,
+            ModifierGesture<CoordinateSpaceGesture<CGFloat>, DistanceGesture>,
+            E
+        >,
+        DurationGate
+    >
+
+    typealias Body = ModifierGesture<EventFilter<E>, DistanceGate>
+
     var body: Body {
-        ModifierGesture(
-            modifier: RequiredTapCountWriter(count: count),
-            body: ModifierGesture(
-                modifier: RepeatGesture(count: count),
-                body: ModifierGesture(
-                    modifier: CategoryGesture(
-                        category: .select,
-                        includeChildren: false
-                    ),
-                    body: EventListener<E>()
-                )
-            )
-        )
+        EventListener<E>()
+            .discrete(true)
+            .dependency(.failIfActive)
+            .gated(by: EventListener<E>().modifier(DurationGesture(
+                minimumDuration: 0,
+                maximumDuration: 0.75,
+                trackFromEventStart: false
+            )))
+            .gated(by: DistanceGesture(
+                minimumDistance: 0,
+                maximumDistance: tapMovementThreshold
+            ).coordinateSpace(.local))
+            .eventFilter(forType: MouseEvent.self) { event in
+                event.button == .primary
+            }
     }
 }
 
 // MARK: - TapGesture
-
-// TapGesture builds SingleTapGesture<TappableEvent> and maps TappableEvent to Void.
 
 public struct TapGesture: Gesture, PrimitiveGesture {
     public var count: Int
@@ -63,6 +78,52 @@ public struct TapGesture: Gesture, PrimitiveGesture {
     public typealias Body = Never
     public typealias Value = Void
 
+    struct Child: Rule {
+        typealias Value = ModifierGesture<
+            RequiredTapCountWriter<TappableEvent>,
+            ModifierGesture<
+                CategoryGesture<TappableEvent>,
+                ModifierGesture<
+                    RepeatGesture<TappableEvent>,
+                    SingleTapGesture<TappableEvent>
+                >
+            >
+        >
+
+        var _gesture: Attribute<TapGesture>
+
+        var value: Value {
+            let count = _gesture.value.count
+            guard count > 0 else {
+                fatalError("count must be positive")
+            }
+            return ModifierGesture(
+                content: ModifierGesture(
+                    content: ModifierGesture(
+                        content: SingleTapGesture(),
+                        modifier: RepeatGesture(
+                            count: count,
+                            maximumDelay: 0.35
+                        )
+                    ),
+                    modifier: CategoryGesture(
+                        category: .select,
+                        includeChildren: true
+                    )
+                ),
+                modifier: RequiredTapCountWriter(count: count)
+            )
+        }
+    }
+
+    struct Phase: Rule {
+        var _phase: Attribute<GesturePhase<TappableEvent>>
+
+        var value: GesturePhase<Void> {
+            _phase.value.withValue(())
+        }
+    }
+
     public static func _makeGesture(
         gesture: _GraphValue<TapGesture>,
         inputs: _GestureInputs
@@ -70,18 +131,13 @@ public struct TapGesture: Gesture, PrimitiveGesture {
         guard let graph = _AGGraph.current else {
             fatalError("TapGesture._makeGesture requires AG context")
         }
-        let count = gesture._attribute.value.count
-        let singleTap = SingleTapGesture<TappableEvent>(count: count)
-        let singleTapAttr: Attribute<SingleTapGesture<TappableEvent>> = graph.makeInput(value: singleTap)
-        let rawOutputs = SingleTapGesture<TappableEvent>._makeGesture(
-            gesture: _GraphValue(_attribute: singleTapAttr),
+        let child = graph.makeRule(Child(_gesture: gesture._attribute))
+        let outputs = Child.Value._makeGesture(
+            gesture: _GraphValue(_attribute: child),
             inputs: inputs
         )
-        // Map TappableEvent to Void (TapGesture.Value = Void).
-        let mappedPhase: Attribute<GesturePhase<Void>> = graph.makeRule {
-            rawOutputs.phase.value.map { _ in () }
-        }
-        return rawOutputs.withPhase(mappedPhase)
+        let phase = graph.makeRule(Phase(_phase: outputs.phase))
+        return outputs.withPhase(phase)
     }
 }
 

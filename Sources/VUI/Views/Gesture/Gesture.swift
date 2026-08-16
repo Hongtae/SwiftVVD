@@ -782,7 +782,7 @@ final class LayoutGestureBox {
         let child = children[index]
         var filtered: [EventID: any EventType] = [:]
         for (eventID, event) in events {
-            guard let binding = eventBindingManager.bindings[eventID],
+            guard let binding = eventBindingManager.eventBindings[eventID],
                   child.binds(binding) else {
                 continue
             }
@@ -954,14 +954,11 @@ private func currentLayoutGestureEventBindingManager() -> EventBindingManager? {
         return eventGraphHost.eventBindingManager
     }
     if let viewGraph = context as? ViewGraph {
-        return (viewGraph.rendererHost as? WindowController)?
-            .gestureGraph?
+        return (viewGraph.rendererHost as? any EventGraphHost)?
             .eventBindingManager
     }
     if let rendererHost = context as? any ViewRendererHost {
-        return (rendererHost as? WindowController)?
-            .gestureGraph?
-            .eventBindingManager
+        return (rendererHost as? any EventGraphHost)?.eventBindingManager
     }
     return nil
 }

@@ -23,7 +23,7 @@ class WindowController: WindowDelegate,
                         ViewGraphRenderDelegate,
                         ViewGraphDelegate,
                         GraphDelegate,
-                        EventBindingSource, EventBindingManagerDelegate,
+                        EventGraphHost, EventBindingManagerDelegate,
                         @unchecked Sendable {
 
     // MARK: - Types
@@ -35,6 +35,16 @@ class WindowController: WindowDelegate,
     // The complete carrier uses the same path for initial attachment and later updates.
     struct InheritedValues {
         var configurationOverride = WindowConfiguration.Override()
+    }
+
+    private struct HostViewGraph: ViewGraphFeature {
+        func modifyViewInputs(
+            inputs: inout _ViewInputs,
+            graph: ViewGraph
+        ) {
+            inputs[EventBindingBridgeFactoryInput.self] =
+                WindowEventBindingBridge.self
+        }
     }
 
     // MARK: - Core State
@@ -60,9 +70,9 @@ class WindowController: WindowDelegate,
     }
     let sceneResources: SceneResources
 
-    // Window-level gesture coordinator owned by the platform host.
-    var gestureGraph: GestureGraph?
-    private let eventBridge = EventBindingBridge()
+    let eventBindingManager = EventBindingManager()
+    private(set) lazy var gestureEnvironment =
+        WindowGestureEnvironment(host: self)
     private var contextMenuRecognizer = ContextMenuRecognizer()
     private var menuPresentationTrigger = MenuPresentationTrigger()
 
@@ -115,36 +125,18 @@ class WindowController: WindowDelegate,
         _nextEventSerial.wrappingAdd(1, ordering: .relaxed).oldValue
     }
 
-    private func configureGestureEventBridge() {
-        guard let gestureGraph else { return }
-        gestureGraph.eventBindingManager.host = gestureGraph
-        gestureGraph.eventBindingManager.delegate = self
-        eventBridge.manager = gestureGraph.eventBindingManager
-        attach(to: eventBridge)
-        gestureGraph.delegate = eventBridge
-    }
-
     private func configureForwardedEventDispatchers() {
-        guard let manager = gestureGraph?.eventBindingManager else { return }
-        manager.addForwardedEventDispatcher(HoverEventDispatcher())
-        manager.addForwardedEventDispatcher(KeyEventDispatcher())
-    }
-
-    func attach(to bridge: EventBindingBridge) {
-        bridge.addEventSource(self)
+        eventBindingManager.host = self
+        eventBindingManager.delegate = self
+        eventBindingManager.addForwardedEventDispatcher(HoverEventDispatcher())
+        eventBindingManager.addForwardedEventDispatcher(KeyEventDispatcher())
     }
 
     private func sendRecognizerOwnedEvents(
         _ events: [EventID: any EventType],
         at time: Time
-    ) -> GesturePhase<Void> {
-        configureGestureEventBridge()
-        guard let gestureGraph else { return .possible(nil) }
-        return gestureGraph.sendRecognizerEvents(
-            events,
-            source: self,
-            at: time
-        )
+    ) -> WindowGestureDispatchResult {
+        gestureEnvironment.send(events, at: time)
     }
 
     private func sendHostEvents(
@@ -152,10 +144,8 @@ class WindowController: WindowDelegate,
         track: Bool,
         at time: Time
     ) -> Set<EventID> {
-        configureGestureEventBridge()
-        guard let manager = gestureGraph?.eventBindingManager else { return [] }
         guard track else {
-            return manager.send(events, at: time)
+            return eventBindingManager.send(events)
         }
 
         var outbound: [EventID: any EventType] = [:]
@@ -185,7 +175,7 @@ class WindowController: WindowDelegate,
             }
         }
         if !outbound.isEmpty {
-            _ = manager.send(outbound, at: time)
+            _ = eventBindingManager.send(outbound)
         }
         return consumed
     }
@@ -387,33 +377,40 @@ class WindowController: WindowDelegate,
     }
 
     func requestHoverUpdate(in manager: EventBindingManager) {
-        manager.clearHoverUpdatePending()
-        eventBridge.requestHoverUpdate(in: manager)
         if let hover = _lastHoverRefresh {
             _ = sendHoverEvent(at: hover.location,
                                deviceID: hover.deviceID,
-                               isTopMost: hover.isTopMost)
-            eventBridge.flushActions()
+                               isTopMost: hover.isTopMost,
+                               at: currentTimestamp)
         }
     }
 
-    func didBind(to binding: EventBinding, id: EventID) {
-        eventBridge.didBind(to: binding, id: id)
+    func didUpdate(
+        phase: GesturePhase<Void>,
+        in manager: EventBindingManager
+    ) {}
+
+    @discardableResult
+    func sendEvents(
+        _ events: [EventID: any EventType],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        viewGraph.sendEvents(events, rootNode: rootNode, at: time)
     }
 
-    func didUpdate(phase: GesturePhase<Void>, in manager: EventBindingManager) {
-        eventBridge.didUpdate(phase: phase, in: manager)
+    func resetEvents() {
+        viewGraph.resetEvents()
     }
 
-    func didUpdate(gestureCategory: GestureCategory, in manager: EventBindingManager) {
-        eventBridge.didUpdate(gestureCategory: gestureCategory, in: manager)
+    func gestureCategory() -> GestureCategory? {
+        viewGraph.gestureCategory()
     }
 
     // MARK: - View Graph State
 
     // Owns the view-tree _AGGraph and root output attributes.
-    // _viewGraph is an implicitly unwrapped optional because GestureGraph must be
-    // created and wired before ViewGraph.init runs _makeView.
+    // _viewGraph is installed after stored host state is initialized.
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
     private weak var crossGraphSourceGraph: _AGGraph?
@@ -638,7 +635,18 @@ class WindowController: WindowDelegate,
     var externalUpdateCount: Int = 0
 
     // ViewRendererHost
-    var responderNode: ResponderNode? { gestureGraph?.responderNode }
+    var responderNode: ResponderNode? { viewGraph.responderNode }
+    var focusedResponder: ResponderNode? {
+        nil
+    }
+    var nextGestureUpdateTime: Time {
+        viewGraph.nextUpdate.gestures.time
+    }
+    private var nextGestureEventUpdateTime: Time {
+        let direct = eventBindingManager.scheduledEventUpdateTime
+        let responder = gestureEnvironment.nextGestureUpdateTime
+        return responder < direct ? responder : direct
+    }
 
     // MARK: - Initialization
 
@@ -666,21 +674,14 @@ class WindowController: WindowDelegate,
         }
         self.date = .now
 
-        // Create GestureGraph first. It owns an independent AG from ViewGraph.
-        self.gestureGraph = GestureGraph()
-        // Wire rendererHost back-reference before ViewGraph.init. GestureResponder.init
-        // The graph must be connected before root view construction.
-        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureForwardedEventDispatchers()
-        configureGestureEventBridge()
 
-        // Create ViewGraph with full AG wiring, including _makeView responder construction.
-        // rendererHost: self must be set on GestureGraph before this call.
         self._viewGraph = ViewGraph(
             rootViewType: Content.self,
             content: contentValue,
             rendererHost: self,
-            initialEnvironment: environment
+            initialEnvironment: environment,
+            features: [HostViewGraph()]
         )
         self.crossGraphSourceGraph = nil
         
@@ -713,15 +714,13 @@ class WindowController: WindowDelegate,
         self.scene = scene
         self.date = .now
 
-        self.gestureGraph = GestureGraph()
-        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureForwardedEventDispatchers()
-        configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
             replaceableContent: content,
             rendererHost: self,
-            initialEnvironment: self.environment
+            initialEnvironment: self.environment,
+            features: [HostViewGraph()]
         )
         self.crossGraphSourceGraph = nil
         self.viewGraph.renderDelegate = self
@@ -755,16 +754,14 @@ class WindowController: WindowDelegate,
         self.scene = scene
         self.date = .now
 
-        self.gestureGraph = GestureGraph()
-        connectGestureGraph(self.gestureGraph!, rendererHost: self)
         configureForwardedEventDispatchers()
-        configureGestureEventBridge()
 
         self._viewGraph = ViewGraph(
             crossGraphContentAttr: contentAttr,
             sourceGraph: sourceGraph,
             rendererHost: self,
-            initialEnvironment: self.environment
+            initialEnvironment: self.environment,
+            features: [HostViewGraph()]
         )
         self.crossGraphSourceGraph = sourceGraph
         self.viewGraph.renderDelegate = self
@@ -1007,14 +1004,9 @@ class WindowController: WindowDelegate,
         } else {
             hadCrossGraphWork = false
         }
-        let gestureDeadlineReached = gestureGraph.map {
-            !(currentTimestamp < $0.nextGestureUpdateTime)
-        } ?? false
-        let hadGestureGraphWork = gestureGraph.map {
-            $0.data.graph.inbox.hasPendingWork ||
-            !$0.data.graph.pendingActions.isEmpty ||
-            !$0.data.graph.actionOutbox.isEmpty
-        } ?? false
+        let gestureDeadlineReached =
+            !(currentTimestamp < nextGestureEventUpdateTime)
+        let hadGestureGraphWork = gestureEnvironment.hasPendingGraphWork
 
         var needsLayoutPass = !hasDeliveredViewLayoutUpdate ||
             sizeChanged ||
@@ -1164,21 +1156,18 @@ class WindowController: WindowDelegate,
             // Gesture deadlines are evaluated on unscaled event time. This
             // wakes recognizers that remain possible between input IDs, such as
             // the single-tap fallback beside a double tap.
-            if let gestureGraph,
-               gestureGraph.updateTimedGestures(at: currentTimestamp) {
+            let sentDirectTimedEvents =
+                eventBindingManager.sendScheduledEventUpdate(
+                    at: currentTimestamp
+                )
+            let sentResponderTimedEvents =
+                gestureEnvironment.updateTimedGestures(at: currentTimestamp)
+            if sentDirectTimedEvents || sentResponderTimedEvents {
                 drainedGestureOutbox = true
             }
 
-            // Drain GestureGraph's action outbox - closures deferred from within GestureGraph
-            // AG evaluation (enqueueAction fallback). Run here, outside any AG context,
-            // after gesture events are fully processed.
-            if let gg = self.gestureGraph {
-                let actions = gg.data.graph.actionOutbox
-                if !actions.isEmpty {
-                    drainedGestureOutbox = true
-                    gg.data.graph.actionOutbox.removeAll()
-                    actions.forEach { $0() }
-                }
+            if gestureEnvironment.drainGestureActions() {
+                drainedGestureOutbox = true
             }
 
             // updateOutputs flushes dirty bits, async changes, then evaluates AG.
@@ -1202,8 +1191,6 @@ class WindowController: WindowDelegate,
             viewGraph.data.withCurrent {
                 _ = viewGraph.rootDisplayList?.value
             }
-            gestureGraph?.eventBindingManager.rootResponder =
-                viewGraph.responderNode
             drainedViewOutbox = drainDeferredViewActions() || drainedViewOutbox
 
             // Resource loading: requires GraphicsContext, handled separately after updateOutputs.
@@ -1448,7 +1435,7 @@ class WindowController: WindowDelegate,
             }
         case .hidden:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
-                self?.gestureGraph!.resetEvents()
+                self?.resetGestureHandlers(reason: "window hidden")
             }
         case .activated:
             enqueueInputAction { [weak self] in
@@ -1456,14 +1443,14 @@ class WindowController: WindowDelegate,
             }
         case .inactivated:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
-                self?.gestureGraph!.resetEvents()
+                self?.resetGestureHandlers(reason: "window inactivated")
             }
             enqueueInputAction { [weak self] in
                 self?.forEachPresentationChild { $0.onParentWindowInactivated() }
             }
         case .minimized:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
-                self?.gestureGraph!.resetEvents()
+                self?.resetGestureHandlers(reason: "window minimized")
             }
         case .geometryInvalidated, .resizeBegan:
             enqueueInputAction { [weak self] in
@@ -1526,13 +1513,15 @@ class WindowController: WindowDelegate,
                     self.handleMouseHover(
                         at: event.location,
                         deviceID: event.deviceID,
-                        isTopMost: true
+                        isTopMost: true,
+                        at: time ?? currentTimestamp
                     )
                 } else if event.type == .cancelled {
                     self.handleMouseHover(
                         at: event.location,
                         deviceID: event.deviceID,
-                        isTopMost: false
+                        isTopMost: false,
+                        at: time ?? currentTimestamp
                     )
                 }
             }
@@ -1603,7 +1592,7 @@ class WindowController: WindowDelegate,
         let handleEvent = { (event: PlatformMouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
-            guard let rootResponder = self.gestureGraph?.eventBindingManager.rootResponder
+            guard let rootResponder = self.responderNode
                 as? MultiViewResponder else {
                 return false
             }
@@ -1646,7 +1635,7 @@ class WindowController: WindowDelegate,
                 deviceID: hasIndependentPointerIdentity ? event.deviceID : 0
             )
 
-            let phase: GesturePhase<Void>
+            let dispatchResult: WindowGestureDispatchResult
             switch event.type {
             case .buttonDown:
                 let serial = self.nextEventSerial()
@@ -1682,7 +1671,10 @@ class WindowController: WindowDelegate,
                         hitTestLocation: event.location
                     )
                 }
-                phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
+                dispatchResult = self.sendRecognizerOwnedEvents(
+                    self._activeEvents,
+                    at: time
+                )
 
             case .move:
                 let pointerEventID = hasIndependentPointerIdentity
@@ -1714,7 +1706,10 @@ class WindowController: WindowDelegate,
                         hitTestLocation: event.location
                     )
                 }
-                phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
+                dispatchResult = self.sendRecognizerOwnedEvents(
+                    self._activeEvents,
+                    at: time
+                )
 
             case .buttonUp, .cancelled:
                 let terminalPhase: EventPhase = event.type == .cancelled
@@ -1752,19 +1747,17 @@ class WindowController: WindowDelegate,
                         hitTestLocation: event.location
                     )
                 }
-                phase = self.sendRecognizerOwnedEvents(self._activeEvents, at: time)
+                dispatchResult = self.sendRecognizerOwnedEvents(
+                    self._activeEvents,
+                    at: time
+                )
                 self._activeEvents.removeValue(forKey: pointerEventID)
                 if let scrollState { self._activeEvents.removeValue(forKey: scrollState.eventID) }
 
             default:
                 return false
             }
-            switch phase {
-            case .active, .ended:
-                return true
-            default:
-                return false
-            }
+            return dispatchResult.handlesPlatformEvent
         }
 
         // Build handler list: presentation children (reversed = top-first) then self.
@@ -1829,8 +1822,7 @@ class WindowController: WindowDelegate,
             try? await Task.sleep(nanoseconds: nanoseconds)
             self?.enqueueInputAction { [weak self] in
                 guard let self,
-                      let gg = self.gestureGraph,
-                      let rootResponder = gg.eventBindingManager.rootResponder
+                      let rootResponder = self.responderNode
                         as? MultiViewResponder else {
                     return
                 }
@@ -1917,7 +1909,7 @@ class WindowController: WindowDelegate,
         if scrollData.nativeMomentumPhase != nil {
             // The host already owns one deceleration model. Native inertial
             // samples are acknowledged but never applied a second time.
-            handled = (gestureGraph?.eventBinding(
+            handled = (gestureEnvironment.eventBinding(
                 at: event.location,
                 accepting: SystemWheelEvent.self
             ) != nil) || handled
@@ -1930,14 +1922,13 @@ class WindowController: WindowDelegate,
         delta: CGPoint,
         time: Time
     ) -> Bool {
-        guard let gestureGraph else { return false }
-        guard let binding = gestureGraph.eventBinding(
+        guard let binding = gestureEnvironment.eventBinding(
             at: location,
             accepting: SystemWheelEvent.self
         ) else {
             // Preserve the scalar wheel carrier for the single-axis scroll route.
             guard delta.x == 0,
-                  let legacyBinding = gestureGraph.eventBinding(
+                  let legacyBinding = gestureEnvironment.eventBinding(
                     at: location,
                     accepting: WheelEvent.self
                   ) else { return false }
@@ -1948,20 +1939,16 @@ class WindowController: WindowDelegate,
                 binding: legacyBinding,
                 offset: Double(delta.y)
             )
-            let beganPhase = sendRecognizerOwnedEvents([eventID: began], at: time)
+            let beganResult = sendRecognizerOwnedEvents([eventID: began], at: time)
             let ended = WheelEvent(
                 timestamp: time,
                 phase: .ended,
                 binding: legacyBinding,
                 offset: Double(delta.y)
             )
-            let endedPhase = sendRecognizerOwnedEvents([eventID: ended], at: time)
-            switch (beganPhase, endedPhase) {
-            case (.active, _), (.ended, _), (_, .active), (_, .ended):
-                return true
-            default:
-                return false
-            }
+            let endedResult = sendRecognizerOwnedEvents([eventID: ended], at: time)
+            return beganResult.handlesPlatformEvent ||
+                endedResult.handlesPlatformEvent
         }
 
         let eventID = EventID(type: SystemWheelEvent.self, serial: nextEventSerial())
@@ -1971,20 +1958,16 @@ class WindowController: WindowDelegate,
             binding: binding,
             scrollingDelta: CGSize(width: delta.x, height: delta.y)
         )
-        let beganPhase = sendRecognizerOwnedEvents([eventID: began], at: time)
+        let beganResult = sendRecognizerOwnedEvents([eventID: began], at: time)
         let ended = SystemWheelEvent(
             timestamp: time,
             phase: .ended,
             binding: binding,
             scrollingDelta: CGSize(width: delta.x, height: delta.y)
         )
-        let endedPhase = sendRecognizerOwnedEvents([eventID: ended], at: time)
-        switch (beganPhase, endedPhase) {
-        case (.active, _), (.ended, _), (_, .active), (_, .ended):
-            return true
-        default:
-            return false
-        }
+        let endedResult = sendRecognizerOwnedEvents([eventID: ended], at: time)
+        return beganResult.handlesPlatformEvent ||
+            endedResult.handlesPlatformEvent
     }
 
     private func dispatchContinuousWheel(
@@ -1994,7 +1977,7 @@ class WindowController: WindowDelegate,
         time: Time
     ) -> Bool {
         if phase == .mayBegin {
-            return gestureGraph?.eventBinding(
+            return gestureEnvironment.eventBinding(
                 at: location,
                 accepting: SystemWheelEvent.self
             ) != nil
@@ -2006,7 +1989,7 @@ class WindowController: WindowDelegate,
         let binding: EventBinding
         switch phase {
         case .began:
-            guard let resolvedBinding = gestureGraph?.eventBinding(
+            guard let resolvedBinding = gestureEnvironment.eventBinding(
                 at: location,
                 accepting: SystemWheelEvent.self
             ) else { return false }
@@ -2024,7 +2007,7 @@ class WindowController: WindowDelegate,
                 eventID = activeID
                 binding = activeBinding
             } else {
-                guard let resolvedBinding = gestureGraph?.eventBinding(
+                guard let resolvedBinding = gestureEnvironment.eventBinding(
                     at: location,
                     accepting: SystemWheelEvent.self
                 ) else { return false }
@@ -2086,12 +2069,7 @@ class WindowController: WindowDelegate,
             _wheelScrollLastTime = nil
             _wheelScrollVelocity = _Velocity(valuePerSecond: .zero)
         }
-        switch result {
-        case .active, .ended:
-            return true
-        case .possible, .failed:
-            return false
-        }
+        return result.handlesPlatformEvent
     }
 
     @discardableResult
@@ -2102,7 +2080,7 @@ class WindowController: WindowDelegate,
     @discardableResult
     func handleGestureEvent(event: GestureEvent, at time: Time) -> Bool {
         if let window = self.window, window !== event.window { return false }
-        guard self.gestureGraph?.rootResponder != nil else { return false }
+        guard responderNode != nil else { return false }
 
         switch event.type {
         case .pan:
@@ -2132,17 +2110,12 @@ class WindowController: WindowDelegate,
             // Platform pan input is already classified, but it still needs a
             // recognizer-owned session; direct-host tracking may suppress later
             // values after forwarding ownership to another host path.
-            let phase = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
+            let result = sendRecognizerOwnedEvents([eventID: scrollEvent], at: time)
             if eventPhase.isTerminal {
                 _scrollEventID = nil
                 _scrollTranslation = .zero
             }
-            switch phase {
-            case .active, .ended:
-                return true
-            case .possible, .failed:
-                return false
-            }
+            return result.handlesPlatformEvent
 
         case .magnify:
             let eventPhase = eventPhase(from: event.phase)
@@ -2165,16 +2138,13 @@ class WindowController: WindowDelegate,
                 scaleDelta: event.magnification,
                 initialScale: initialScale
             )
-            let phase = sendRecognizerOwnedEvents([eventID: magnifyEvent], at: time)
+            let result = sendRecognizerOwnedEvents([eventID: magnifyEvent], at: time)
             _magnification = initialScale + event.magnification
             if eventPhase.isTerminal {
                 _magnifyEventID = nil
                 _magnification = 1.0
             }
-            switch phase {
-            case .active, .ended: return true
-            case .possible, .failed: return false
-            }
+            return result.handlesPlatformEvent
 
         case .rotate:
             let eventPhase = eventPhase(from: event.phase)
@@ -2198,21 +2168,21 @@ class WindowController: WindowDelegate,
                 angleDelta: angleDelta,
                 initialAngle: initialAngle
             )
-            let phase = sendRecognizerOwnedEvents([eventID: rotateEvent], at: time)
+            let result = sendRecognizerOwnedEvents([eventID: rotateEvent], at: time)
             _rotation = initialAngle + angleDelta
             if eventPhase.isTerminal {
                 _rotateEventID = nil
                 _rotation = .zero
             }
-            switch phase {
-            case .active, .ended: return true
-            case .possible, .failed: return false
-            }
+            return result.handlesPlatformEvent
         }
     }
 
     @discardableResult
-    func handleMouseHover(at location: CGPoint, deviceID: Int, isTopMost: Bool) -> Bool {
+    func handleMouseHover(at location: CGPoint,
+                          deviceID: Int,
+                          isTopMost: Bool,
+                          at time: Time) -> Bool {
         _lastHoverRefresh = (location: location, deviceID: deviceID, isTopMost: isTopMost)
         var topMost = isTopMost
         self.presentationChildren.withLock({ $0.reversed() }).forEach { entry in
@@ -2220,7 +2190,10 @@ class WindowController: WindowDelegate,
             let child = entry.controller
             if entry.frame != nil {
                 let loc = child.presentationPointInLocal(fromParentPoint: location)
-                if child.handleMouseHover(at: loc, deviceID: deviceID, isTopMost: topMost) {
+                if child.handleMouseHover(at: loc,
+                                          deviceID: deviceID,
+                                          isTopMost: topMost,
+                                          at: time) {
                     topMost = false
                 }
             }
@@ -2230,7 +2203,10 @@ class WindowController: WindowDelegate,
                 topMost = false
             }
         }
-        if sendHoverEvent(at: location, deviceID: deviceID, isTopMost: topMost) {
+        if sendHoverEvent(at: location,
+                          deviceID: deviceID,
+                          isTopMost: topMost,
+                          at: time) {
             topMost = false
         }
         return isTopMost != topMost
@@ -2239,7 +2215,8 @@ class WindowController: WindowDelegate,
     @discardableResult
     private func sendHoverEvent(at location: CGPoint,
                                 deviceID: Int,
-                                isTopMost: Bool) -> Bool {
+                                isTopMost: Bool,
+                                at time: Time) -> Bool {
         let eventID: EventID
         let phase: EventPhase
         if isTopMost {
@@ -2259,12 +2236,16 @@ class WindowController: WindowDelegate,
         }
 
         let hoverEvent = HoverEvent(
-            timestamp: currentTimestamp,
+            timestamp: time,
             phase: phase,
             binding: nil,
             globalLocation: location
         )
-        let consumed = sendHostEvents([eventID: hoverEvent], track: false, at: currentTimestamp)
+        let consumed = sendHostEvents(
+            [eventID: hoverEvent],
+            track: false,
+            at: time
+        )
         if phase.isTerminal {
             _hoverEventIDs.removeValue(forKey: deviceID)
         }
@@ -2276,7 +2257,8 @@ class WindowController: WindowDelegate,
     }
 
     private func resetGestureHandlers(reason: String) {
-        gestureGraph?.eventBindingManager.reset(
+        gestureEnvironment.reset()
+        eventBindingManager.reset(
             resetForwardedEventDispatchers: true
         )
         contextMenuRecognizer.reset()
@@ -2709,7 +2691,10 @@ class WindowController: WindowDelegate,
                 }
                 if result.initiated {
                     self.resetGestureHandlers(reason: "modal session initiated")
-                    self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+                    self.handleMouseHover(at: .zero,
+                                          deviceID: 0,
+                                          isTopMost: false,
+                                          at: self.currentTimestamp)
                 }
             }
         } else {
@@ -2723,7 +2708,10 @@ class WindowController: WindowDelegate,
             }
             child.onModalSessionInitiated(transaction: entry.presentationTransaction)
             self.resetGestureHandlers(reason: "modal overlay initiated")
-            self.handleMouseHover(at: .zero, deviceID: 0, isTopMost: false)
+            self.handleMouseHover(at: .zero,
+                                  deviceID: 0,
+                                  isTopMost: false,
+                                  at: self.currentTimestamp)
         }
     }
 

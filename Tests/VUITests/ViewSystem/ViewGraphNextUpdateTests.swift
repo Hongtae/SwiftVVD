@@ -1,6 +1,19 @@
 import XCTest
 @testable import VUI
 
+private final class DirectEventGestureResponder: ResponderNode {
+    private(set) var makeGestureCount = 0
+
+    override var nextResponder: ResponderNode? { nil }
+
+    override func makeGesture(
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Void> {
+        makeGestureCount += 1
+        return inputs.makeDefaultOutputs()
+    }
+}
+
 final class ViewGraphNextUpdateTests: XCTestCase {
     func testNextUpdateIntervalCombinesViewAndGestureLanes() {
         let rendererHost = TestViewRendererHost()
@@ -117,5 +130,53 @@ final class ViewGraphNextUpdateTests: XCTestCase {
             2,
             accuracy: 0.000_001
         )
+    }
+
+    func testDirectGestureEventsAdvanceHostSeedsAndResetGestureLaneOnTimeChange() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        let responder = DirectEventGestureResponder()
+
+        viewGraph.data.updateSeed = 10
+        viewGraph.data.transactionSeed = 20
+        viewGraph.nextUpdate.gestures.interval(0.25, reason: 91)
+
+        _ = viewGraph.sendEvents(
+            [:],
+            rootNode: responder,
+            at: Time(seconds: 3)
+        )
+
+        XCTAssertEqual(viewGraph.data.transactionSeed, 21)
+        XCTAssertEqual(viewGraph.data.updateSeed, 11)
+        XCTAssertTrue(viewGraph.nextUpdate.gestures.interval.isInfinite)
+        XCTAssertTrue(viewGraph.nextUpdate.gestures.reasons.isEmpty)
+        XCTAssertEqual(responder.makeGestureCount, 1)
+
+        _ = viewGraph.sendEvents(
+            [:],
+            rootNode: responder,
+            at: Time(seconds: 3)
+        )
+
+        XCTAssertEqual(viewGraph.data.transactionSeed, 22)
+        XCTAssertEqual(viewGraph.data.updateSeed, 11)
+        XCTAssertEqual(responder.makeGestureCount, 1)
+
+        viewGraph.resetEvents()
+        _ = viewGraph.sendEvents(
+            [:],
+            rootNode: responder,
+            at: Time(seconds: 3)
+        )
+
+        XCTAssertEqual(viewGraph.data.transactionSeed, 23)
+        XCTAssertEqual(viewGraph.data.updateSeed, 11)
+        XCTAssertEqual(responder.makeGestureCount, 2)
     }
 }

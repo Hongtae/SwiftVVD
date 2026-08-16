@@ -61,17 +61,39 @@ struct MapPhase<A, B>: StatefulRule, ResettableGestureRule,
     var description: String { "Map → \(B.self)" }
 }
 
+extension Gesture {
+    func discrete(
+        _ isDiscrete: Bool = true
+    ) -> ModifierGesture<MapGesture<Value, Value>, Self> {
+        modifier(MapGesture { phase in
+            guard isDiscrete, case .active(let value) = phase else {
+                return phase
+            }
+            return .possible(value)
+        })
+    }
+}
+
 // MARK: - DurationGesture / DurationPhase
 
-// DurationGesture<E> creates DurationPhase<E>.
-// Output type is GesturePhase<Double> (Double, not E!)
-// No E: EventType constraint is required, so DurationGesture<Void> is valid.
 struct DurationGesture<E>: GestureModifier {
     typealias BodyValue = E
     typealias Value = Double
     typealias Body = Never
 
     var minimumDuration: Double
+    var maximumDuration: Double
+    var trackFromEventStart: Bool
+
+    init(
+        minimumDuration: Double = 0,
+        maximumDuration: Double = .infinity,
+        trackFromEventStart: Bool = false
+    ) {
+        self.minimumDuration = minimumDuration
+        self.maximumDuration = maximumDuration
+        self.trackFromEventStart = trackFromEventStart
+    }
 
     static func _makeGesture(
         modifier: _GraphValue<Self>,
@@ -81,74 +103,169 @@ struct DurationGesture<E>: GestureModifier {
         guard let graph = _AGGraph.current else {
             fatalError("DurationGesture.makeGesture requires AG context")
         }
-        let bodyOutputs = body(inputs)
-
-        let durationPhase = DurationPhase<E>(
-            source: bodyOutputs.phase,
-            timeAttr: inputs.time,
-            minimumDuration: modifier._attribute.value.minimumDuration
-        )
-        let resultAttr = graph.makeStatefulRule(durationPhase)
-        return bodyOutputs.withPhase(resultAttr)
+        let outputs = body(inputs)
+        let phase = graph.makeStatefulRule(DurationPhase<E>(
+            _modifier: modifier._attribute,
+            _childPhase: outputs.phase,
+            _time: inputs.time,
+            _resetSeed: inputs.resetSeed,
+            useGestureGraph: inputs.options.contains(.gestureGraph),
+            start: nil,
+            lastResetSeed: 0
+        ))
+        return outputs.withPhase(phase)
     }
 }
 
-// DurationPhase<E>: StatefulRule that outputs GesturePhase<Double>.
-// No E: EventType constraint is required, so DurationPhase<Void> is valid.
 struct DurationPhase<E>: StatefulRule, ResettableGestureRule {
     typealias Value = GesturePhase<Double>
-
-    var source: Attribute<GesturePhase<E>>
-    var timeAttr: Attribute<Time>
-    var minimumDuration: Double
-    // DurationPhase does not use seed-based reset because seed never changes.
-    var resetSeed: UInt32 { 0 }
-    var lastResetSeed: UInt32 = 0
-    var startTime: Double = 0
-    var isTracking: Bool = false
-
-    // ResettableGestureRule: Value == GesturePhase<Double> == GesturePhase<PhaseValue>
     typealias PhaseValue = Double
-    // phaseValue default impl applies via the extension where Value == GesturePhase<PhaseValue>
+
+    var _modifier: Attribute<DurationGesture<E>>
+    var _childPhase: Attribute<GesturePhase<E>>
+    var _time: Attribute<Time>
+    var _resetSeed: Attribute<UInt32>
+    var useGestureGraph: Bool
+    var start: Time?
+    var lastResetSeed: UInt32
+
+    var resetSeed: UInt32 { _resetSeed.value }
 
     mutating func resetPhase() {
-        startTime = 0
-        isTracking = false
-        _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
+        start = nil
     }
 
     mutating func updateValue() {
-        let phase = source.value
-        let now = timeAttr.value.seconds
+        guard resetIfNeeded() else { return }
 
-        switch phase {
-        case .possible:
-            isTracking = false
-            startTime = 0
-            _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
-        case .active:
-            if !isTracking {
-                isTracking = true
-                startTime = now
-            }
-            let elapsed = now - startTime
-            if elapsed >= minimumDuration {
-                _AGGraph.setStatefulOutput(GesturePhase<Double>.active(elapsed))
+        let childPhase = _childPhase.value
+        let modifier = _modifier.value
+        let time = _time.value
+
+        if start == nil &&
+            (childPhase.isActive || modifier.trackFromEventStart) {
+            start = time
+        }
+
+        let elapsed = start.map { time.seconds - $0.seconds } ?? 0
+        let output: GesturePhase<Double>
+        switch childPhase {
+        case .possible, .active:
+            if elapsed < modifier.minimumDuration {
+                output = .possible(elapsed)
+            } else if elapsed < modifier.maximumDuration {
+                output = .active(elapsed)
             } else {
-                _AGGraph.setStatefulOutput(GesturePhase<Double>.possible(nil))
+                output = .failed
             }
         case .ended:
-            let elapsed = now - startTime
-            if elapsed >= minimumDuration {
-                _AGGraph.setStatefulOutput(GesturePhase<Double>.ended(elapsed))
+            if elapsed >= modifier.minimumDuration &&
+                elapsed < modifier.maximumDuration {
+                output = .ended(elapsed)
             } else {
-                _AGGraph.setStatefulOutput(GesturePhase<Double>.failed)
+                output = .failed
             }
-            isTracking = false
         case .failed:
-            isTracking = false
-            _AGGraph.setStatefulOutput(GesturePhase<Double>.failed)
+            output = .failed
         }
+        _AGGraph.setStatefulOutput(output)
+
+        guard !output.isTerminal, let start else { return }
+        let boundary = elapsed < modifier.minimumDuration
+            ? modifier.minimumDuration
+            : modifier.maximumDuration
+        let deadline = start + boundary
+        if useGestureGraph {
+            let graph = GraphHost.currentHost as! GestureGraph
+            graph.scheduleGestureUpdate(at: deadline)
+        } else {
+            let graph = GraphHost.currentHost as! ViewGraph
+            graph.nextUpdate.gestures.at(deadline)
+        }
+    }
+}
+
+// MARK: - DistanceGesture
+
+struct DistanceGesture: Gesture {
+    var minimumDistance: CGFloat
+    var maximumDistance: CGFloat
+
+    init(
+        minimumDistance: CGFloat = 0,
+        maximumDistance: CGFloat = .infinity
+    ) {
+        self.minimumDistance = minimumDistance
+        self.maximumDistance = maximumDistance
+    }
+
+    struct StateType: GestureStateProtocol {
+        var start: CGPoint?
+        var maxDistance: CGFloat
+
+        init() {
+            start = nil
+            maxDistance = 0
+        }
+    }
+
+    typealias Body = ModifierGesture<
+        StateContainerGesture<StateType, SpatialEvent, CGFloat>,
+        EventListener<SpatialEvent>
+    >
+
+    var body: Body {
+        let minimumDistance = minimumDistance
+        let maximumDistance = maximumDistance
+        return EventListener<SpatialEvent>().modifier(
+            StateContainerGesture { state, phase in
+                let event: SpatialEvent
+                switch phase {
+                case .possible(let value):
+                    guard let value else { return .possible(nil) }
+                    event = value
+                case .active(let value), .ended(let value):
+                    event = value
+                case .failed:
+                    return .failed
+                }
+
+                if let start = state.start {
+                    state.maxDistance = max(
+                        state.maxDistance,
+                        hypot(
+                            start.x - event.location.x,
+                            start.y - event.location.y
+                        )
+                    )
+                } else {
+                    state.start = event.location
+                    state.maxDistance = 0
+                }
+
+                let distance = state.maxDistance
+                switch phase {
+                case .possible:
+                    return .possible(distance)
+                case .active:
+                    guard distance <= maximumDistance else {
+                        return .failed
+                    }
+                    if distance >= minimumDistance {
+                        return .active(distance)
+                    }
+                    return .possible(distance)
+                case .ended:
+                    guard distance >= minimumDistance,
+                          distance < maximumDistance else {
+                        return .failed
+                    }
+                    return .ended(distance)
+                case .failed:
+                    return .failed
+                }
+            }
+        )
     }
 }
 
@@ -212,8 +329,8 @@ extension Gesture {
         _ coordinateSpace: CoordinateSpace
     ) -> ModifierGesture<CoordinateSpaceGesture<Value>, Self> {
         ModifierGesture(
-            modifier: CoordinateSpaceGesture(coordinateSpace: coordinateSpace),
-            body: self
+            content: self,
+            modifier: CoordinateSpaceGesture(coordinateSpace: coordinateSpace)
         )
     }
 }
@@ -250,7 +367,12 @@ struct Map2Gesture<A, B: Gesture, C>: GestureModifier {
             lastResetSeed: 0
         )
         let resultAttr = graph.makeStatefulRule(map2Phase)
-        return body1Outputs.withPhase(resultAttr)
+        var outputs = _GestureOutputs<C>(phase: resultAttr)
+        outputs.preferences = PreferencesOutputs.merge(
+            [body1Outputs.preferences, body2Outputs.preferences],
+            in: graph
+        )
+        return outputs
     }
 }
 
@@ -342,20 +464,32 @@ struct StateContainerPhase<S: GestureStateProtocol, E, V>: StatefulRule,
     var description: String { "State → \(V.self)" }
 }
 
-// MARK: - EndedByWrapper / EndedByWrapperPhase
+// MARK: - EndedByWrapper
 
-// EndedByWrapper forces .failed when condition(event, startLocation) is true
-// while the base gesture is active.
-// Used by SingleLongPressGesture for _maximumDistance: when the pointer/touch moves
-// more than maximumDistance from the initial press location, the gesture is cancelled.
-struct EndedByWrapper<Base: Gesture>: Gesture {
+struct EndedByWrapper<Base: Gesture, Condition: Gesture>: PrimitiveGesture {
     typealias Value = Base.Value
     typealias Body = Never
 
     var base: Base
-    // condition: (currentEvent, startLocation) -> Bool
-    // startLocation is tracked by EndedByWrapperPhase across AG evaluations.
-    var condition: (MouseEvent, CGPoint?) -> Bool
+    var condition: Condition
+
+    struct Child: Rule {
+        typealias Value = ModifierGesture<
+            Map2Gesture<Base.Value, Condition, Base.Value>,
+            Base
+        >
+
+        var _wrapper: Attribute<EndedByWrapper>
+        var hasChangedCallbacks: Bool
+
+        var value: Value {
+            let wrapper = _wrapper.value
+            return wrapper.base.ended(
+                by: wrapper.condition,
+                advanceImmediately: hasChangedCallbacks
+            )
+        }
+    }
 
     static func _makeGesture(
         gesture: _GraphValue<Self>,
@@ -364,113 +498,56 @@ struct EndedByWrapper<Base: Gesture>: Gesture {
         guard let graph = _AGGraph.current else {
             fatalError("EndedByWrapper._makeGesture requires AG context")
         }
-        let baseOutputs = Base._makeGesture(gesture: gesture[\.base], inputs: inputs)
-        let phase = EndedByWrapperPhase<Base.Value>(
-            basePhaseAttr: baseOutputs.phase,
-            eventsAttr: inputs.events,
-            condition: gesture._attribute.value.condition
+        let child = graph.makeRule(Child(
+            _wrapper: gesture._attribute,
+            hasChangedCallbacks: inputs.options.contains(.hasChangedCallbacks)
+        ))
+        return Child.Value._makeGesture(
+            gesture: _GraphValue(_attribute: child),
+            inputs: inputs
         )
-        let resultAttr = graph.makeStatefulRule(phase)
-        return baseOutputs.withPhase(resultAttr)
-    }
-}
-
-// EndedByWrapperPhase monitors base gesture phase and applies condition.
-// Tracks startLocation internally so the condition can compare against initial press position.
-struct EndedByWrapperPhase<V>: StatefulRule {
-    typealias Value = GesturePhase<V>
-
-    var basePhaseAttr: Attribute<GesturePhase<V>>
-    var eventsAttr: Attribute<[EventID: any EventType]>
-    var condition: (MouseEvent, CGPoint?) -> Bool
-    var startLocation: CGPoint? = nil
-
-    mutating func updateValue() {
-        let base = basePhaseAttr.value
-        switch base {
-        case .possible:
-            startLocation = nil
-            _AGGraph.setStatefulOutput(base)
-        case .failed, .ended:
-            startLocation = nil
-            _AGGraph.setStatefulOutput(base)
-        case .active:
-            let events = eventsAttr.value
-            for (_, event) in events {
-                guard let e = event as? MouseEvent else { continue }
-                if startLocation == nil { startLocation = e.location }
-                if condition(e, startLocation) {
-                    startLocation = nil
-                    _AGGraph.setStatefulOutput(GesturePhase<V>.failed)
-                    return
-                }
-            }
-            _AGGraph.setStatefulOutput(base)
-        }
     }
 }
 
 extension Gesture {
-    // Convenience wrapper to build EndedByWrapper with a (event, startLocation) condition.
-    func endedBy(
-        condition: @escaping (MouseEvent, CGPoint?) -> Bool
-    ) -> EndedByWrapper<Self> {
-        EndedByWrapper(base: self, condition: condition)
-    }
-}
-
-// MARK: - CombineGesture / CombinePhase
-
-// CombineGesture<A,B,C>: phase-level combiner for two gestures.
-// Uses a direct phase closure (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
-// so gated(by:) can combine phases without conflating value-level combining.
-struct CombineGesture<A, B, C>: GestureModifier {
-    typealias BodyValue = A
-    typealias Value = C
-    typealias Body = Never
-
-    // Factory for the secondary gesture outputs (captures the secondary gesture value).
-    var secondaryMakeGesture: (_GestureInputs) -> _GestureOutputs<B>
-    // Phase-level combine closure: decides output phase from both inputs.
-    var combine: (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
-
-    static func _makeGesture(
-        modifier: _GraphValue<Self>,
-        inputs: _GestureInputs,
-        body: (_GestureInputs) -> _GestureOutputs<A>
-    ) -> _GestureOutputs<C> {
-        guard let graph = _AGGraph.current else {
-            fatalError("CombineGesture.makeGesture requires AG context")
+    func ended<Condition: Gesture>(
+        by condition: Condition,
+        advanceImmediately: Bool = false
+    ) -> ModifierGesture<Map2Gesture<Value, Condition, Value>, Self> {
+        combined(with: condition) { phase, conditionPhase in
+            switch conditionPhase {
+            case .active, .ended:
+                return phase
+            case .failed:
+                return .failed
+            case .possible:
+                let pausesWhileConditionIsPossible: Bool
+#if os(iOS)
+                pausesWhileConditionIsPossible = GestureContainerFeature.isEnabled
+#else
+                pausesWhileConditionIsPossible = isLinkedOnOrAfter(.v6)
+#endif
+                if !advanceImmediately && pausesWhileConditionIsPossible {
+                    return phase.paused()
+                }
+                if case .ended(let value) = phase {
+                    return .active(value)
+                }
+                return .failed
+            }
         }
-        let primaryOutputs = body(inputs)
-        let self_ = modifier._attribute.value
-        let secondaryOutputs = self_.secondaryMakeGesture(inputs)
-
-        let phase = CombinePhase<A, B, C>(
-            source1: primaryOutputs.phase,
-            source2: secondaryOutputs.phase,
-            combine: self_.combine
-        )
-        let resultAttr = graph.makeStatefulRule(phase)
-        return primaryOutputs.withPhase(resultAttr)
-    }
-}
-
-struct CombinePhase<A, B, C>: StatefulRule {
-    typealias Value = GesturePhase<C>
-
-    var source1: Attribute<GesturePhase<A>>
-    var source2: Attribute<GesturePhase<B>>
-    var combine: (GesturePhase<A>, GesturePhase<B>) -> GesturePhase<C>
-
-    mutating func updateValue() {
-        _AGGraph.setStatefulOutput(combine(source1.value, source2.value))
     }
 }
 
 // MARK: - Gesture builder extensions (4-7)
 
 extension Gesture {
+
+    func modifier<M: GestureModifier>(
+        _ modifier: M
+    ) -> ModifierGesture<M, Self> where M.BodyValue == Value {
+        ModifierGesture(content: self, modifier: modifier)
+    }
 
     // 4. Gesture.duration(minimum:maximum:)
     // Gesture.duration(minimum:maximum:) -> ModifierGesture<DurationGesture<Self.Value>, Self>
@@ -479,7 +556,13 @@ extension Gesture {
         minimum: Double,
         maximum: Double = .infinity
     ) -> ModifierGesture<DurationGesture<Value>, Self> {
-        ModifierGesture(modifier: DurationGesture(minimumDuration: minimum), body: self)
+        ModifierGesture(
+            content: self,
+            modifier: DurationGesture(
+                minimumDuration: minimum,
+                maximumDuration: maximum
+            )
+        )
     }
 
     // 5. Gesture.longPressPhase()
@@ -487,46 +570,34 @@ extension Gesture {
     // .active(e) and .ended(e) become .active(true) and .ended(true).
     // .possible and .failed pass through.
     func longPressPhase() -> ModifierGesture<MapGesture<Value, Bool>, Self> {
-        ModifierGesture(modifier: MapGesture(body: { phase in
-            phase.map { _ in true }
-        }), body: self)
-    }
-
-    // 6. Gesture.combined(with:body:)
-    // Backed by CombineGesture with a phase-level closure.
-    func combined<G: Gesture, V>(
-        with other: G,
-        body combineFn: @escaping (GesturePhase<Value>, GesturePhase<G.Value>) -> GesturePhase<V>
-    ) -> ModifierGesture<CombineGesture<Value, G.Value, V>, Self> {
-        let capturedOther = other
-        let secondary: (_GestureInputs) -> _GestureOutputs<G.Value> = { inputs in
-            guard let graph = _AGGraph.current else {
-                fatalError("Gesture.combined secondary requires AG context")
-            }
-            let attr = graph.makeInput(value: capturedOther)
-            return G._makeGesture(gesture: _GraphValue(_attribute: attr), inputs: inputs)
-        }
-        return ModifierGesture(
-            modifier: CombineGesture(secondaryMakeGesture: secondary, combine: combineFn),
-            body: self
+        ModifierGesture(
+            content: self,
+            modifier: MapGesture(body: { phase in
+                phase.map { _ in true }
+            })
         )
     }
 
-    // 7. Gesture.gated(by:)
-    // gated(by:) -> combined(with:body:) with enabler-gate semantics.
-    // Output type = Self.Value (primary gesture value, not the enabler's).
-    // Enabler active/ended pass self phase through. possible becomes .possible(nil)
-    // and failed becomes .failed.
+    func combined<G: Gesture, V>(
+        with other: G,
+        body: @escaping (
+            GesturePhase<Value>,
+            GesturePhase<G.Value>
+        ) -> GesturePhase<V>
+    ) -> ModifierGesture<Map2Gesture<Value, G, V>, Self> {
+        modifier(
+            Map2Gesture(content: other, body: body)
+        )
+    }
+
     func gated<G: Gesture>(
         by enabler: G
-    ) -> ModifierGesture<CombineGesture<Value, G.Value, Value>, Self> {
-        combined(with: enabler) { selfPhase, enablerPhase in
-            switch enablerPhase {
-            case .active:   return selfPhase
-            case .ended:    return selfPhase
-            case .possible: return .possible(nil)
-            case .failed:   return .failed
+    ) -> ModifierGesture<Map2Gesture<Value, G, Value>, Self> {
+        combined(with: enabler) { phase, enablerPhase in
+            if case .failed = enablerPhase {
+                return .failed
             }
+            return phase
         }
     }
 }

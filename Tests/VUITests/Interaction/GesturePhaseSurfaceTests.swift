@@ -35,6 +35,649 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         XCTAssertEqual(GesturePhase<Int>.defaultValue, .failed)
     }
 
+    // ASSERTIONS gestureModifierProtocolSurfaceObserved
+    // ASSERTIONS modifierGestureFieldOwnershipObserved
+    func testModifierGestureStoresContentBeforeModifier() {
+        let gesture = ModifierGesture(
+            content: PhaseTestGesture(phase: GesturePhase<Int>.active(3)),
+            modifier: MapGesture<Int, Int>(body: { $0 })
+        )
+
+        XCTAssertEqual(
+            Mirror(reflecting: gesture).children.compactMap(\.label),
+            ["content", "modifier"]
+        )
+    }
+
+    // ASSERTIONS gestureCombinedMap2ControlFlowObserved
+    // ASSERTIONS map2GesturePreferenceMergeObserved
+    func testCombinedUsesMap2AndReducesBothPreferenceOutputs() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let primary = PhaseTestGesture(
+                phase: GesturePhase<Int>.active(4)
+            )
+            let secondary = PreferencePhaseTestGesture(
+                phase: .active(6),
+                preference: [2]
+            )
+            let combined = primary.combined(with: secondary) { first, second in
+                switch (first, second) {
+                case (.active(let first), .active(let second)):
+                    return .active(first + second)
+                default:
+                    return .failed
+                }
+            }
+
+            XCTAssertEqual(
+                Mirror(reflecting: combined.modifier).children.compactMap(\.label),
+                ["content", "body"]
+            )
+
+            let combinedAttribute = graph.makeInput(value: combined)
+            let inputs = makeGestureInputs(graph: graph)
+            let outputs = type(of: combined)._makeGesture(
+                gesture: _GraphValue(_attribute: combinedAttribute),
+                inputs: inputs
+            )
+
+            XCTAssertEqual(outputs.phase.value, .active(10))
+            let preference = try XCTUnwrap(
+                outputs.preferences.reducedValue(
+                    for: PairwiseGesturePreferenceKey.self,
+                    in: graph
+                )
+            )
+            XCTAssertEqual(preference.value, [1, 2])
+            XCTAssertEqual(
+                outputs.preferences.values(
+                    for: PairwiseGesturePreferenceKey.self
+                ).count,
+                1
+            )
+        }
+    }
+
+    // ASSERTIONS gestureGateFailureControlFlowObserved
+    func testGatedCopiesPrimaryPhaseUnlessEnablerFails() {
+        let gated = PhaseTestGesture(
+            phase: GesturePhase<Int>.possible(7)
+        ).gated(by: PhaseTestGesture(
+            phase: GesturePhase<String>.possible("waiting")
+        ))
+        let gate = gated.modifier.body
+        let primary = GesturePhase<Int>.possible(7)
+
+        XCTAssertEqual(gate(primary, .possible("waiting")), primary)
+        XCTAssertEqual(gate(primary, .active("active")), primary)
+        XCTAssertEqual(gate(primary, .ended("ended")), primary)
+        XCTAssertEqual(gate(primary, GesturePhase<String>.failed), .failed)
+    }
+
+    // ASSERTIONS endedByWrapperFieldOwnershipObserved
+    // ASSERTIONS endedByWrapperControlFlowObserved
+    // ASSERTIONS longPressPlatformBehaviorSelectionObserved
+    func testEndedByWrapperOwnsGestureConditionAndUsesExactPhaseTransitions() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let wrapper = EndedByWrapper(
+                base: PhaseTestGesture(
+                    phase: GesturePhase<Int>.ended(7)
+                ),
+                condition: PhaseTestGesture(
+                    phase: GesturePhase<String>.possible("waiting")
+                )
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: wrapper).children.compactMap(\.label),
+                ["base", "condition"]
+            )
+
+            let wrapperAttribute = graph.makeInput(value: wrapper)
+            let child = EndedByWrapper<
+                PhaseTestGesture<Int>,
+                PhaseTestGesture<String>
+            >.Child(
+                _wrapper: wrapperAttribute,
+                hasChangedCallbacks: false
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: child).children.compactMap(\.label),
+                ["_wrapper", "hasChangedCallbacks"]
+            )
+
+            let transition = child.value.modifier.body
+            XCTAssertEqual(
+                transition(.active(1), .active("condition")),
+                .active(1)
+            )
+            XCTAssertEqual(
+                transition(.ended(2), .ended("condition")),
+                .ended(2)
+            )
+            XCTAssertEqual(
+                transition(.active(3), .failed),
+                .failed
+            )
+            XCTAssertEqual(
+                transition(.active(4), .possible("waiting")),
+                .possible(4)
+            )
+            XCTAssertEqual(
+                transition(.ended(5), .possible("waiting")),
+                .possible(5)
+            )
+
+            let immediate = EndedByWrapper<
+                PhaseTestGesture<Int>,
+                PhaseTestGesture<String>
+            >.Child(
+                _wrapper: wrapperAttribute,
+                hasChangedCallbacks: true
+            ).value.modifier.body
+            XCTAssertEqual(
+                immediate(.ended(6), .possible("waiting")),
+                .active(6)
+            )
+            XCTAssertEqual(
+                immediate(.active(6), .possible("waiting")),
+                .failed
+            )
+            XCTAssertEqual(
+                immediate(.possible(6), .possible("waiting")),
+                .failed
+            )
+        }
+    }
+
+    // ASSERTIONS singleLongPressGestureFieldOwnershipObserved
+    // ASSERTIONS singleLongPressGestureControlFlowObserved
+    func testSingleLongPressBuildsDurationDistanceFilterAndDependencyChain() {
+        let base = EventListener<TappableEvent>().longPressPhase()
+        let gesture = SingleLongPressGesture(
+            base: base,
+            minimumDuration: 0.6,
+            maximumDistance: 12
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: gesture).children.compactMap(\.label),
+            ["base", "minimumDuration", "maximumDistance"]
+        )
+
+        let body = gesture.body
+        XCTAssertEqual(body.modifier.dependency, .pausedUntilFailed)
+
+        let filter = body.content.modifier
+        let primary = MouseEvent(
+            timestamp: .zero,
+            binding: nil,
+            button: .primary,
+            phase: .active,
+            location: .zero,
+            globalLocation: .zero,
+            modifiers: []
+        )
+        let secondary = MouseEvent(
+            timestamp: .zero,
+            binding: nil,
+            button: .secondary,
+            phase: .active,
+            location: .zero,
+            globalLocation: .zero,
+            modifiers: []
+        )
+        XCTAssertTrue(filter.predicate(primary))
+        XCTAssertFalse(filter.predicate(secondary))
+
+        let gated = body.content.content
+        let enabler = gated.modifier.content
+        XCTAssertEqual(
+            Mirror(reflecting: enabler).children.compactMap(\.label),
+            ["base", "condition"]
+        )
+        XCTAssertEqual(enabler.base.modifier.minimumDuration, 0.6)
+        XCTAssertEqual(enabler.base.modifier.maximumDuration, .infinity)
+        XCTAssertFalse(enabler.base.modifier.trackFromEventStart)
+        XCTAssertFalse(enabler.base.content.ignoresOtherEvents)
+
+        XCTAssertEqual(enabler.condition.modifier.coordinateSpace, .local)
+        XCTAssertEqual(enabler.condition.content.minimumDistance, 0)
+        XCTAssertEqual(enabler.condition.content.maximumDistance, 12)
+    }
+
+    // ASSERTIONS gestureDiscretePhaseControlFlowObserved
+    func testDiscreteDemotesOnlyActivePhasesWhenEnabled() {
+        let transform = PhaseTestGesture(
+            phase: GesturePhase<Int>.active(1)
+        ).discrete(true).modifier.body
+
+        XCTAssertEqual(transform(.possible(2)), .possible(2))
+        XCTAssertEqual(transform(.active(3)), .possible(3))
+        XCTAssertEqual(transform(.ended(4)), .ended(4))
+        XCTAssertEqual(transform(.failed), .failed)
+
+        let disabled = PhaseTestGesture(
+            phase: GesturePhase<Int>.active(1)
+        ).discrete(false).modifier.body
+        XCTAssertEqual(disabled(.active(5)), .active(5))
+    }
+
+    // ASSERTIONS singleTapGestureRecognitionChainObserved
+    // ASSERTIONS tapMovementPlatformThresholdObserved
+    func testSingleTapIsFieldlessAndBuildsTheCommonRecognitionChain() {
+        let gesture = SingleTapGesture<TappableEvent>()
+        XCTAssertTrue(Mirror(reflecting: gesture).children.isEmpty)
+
+        let body: SingleTapGesture<TappableEvent>.Body = gesture.body
+        XCTAssertEqual(body.content.modifier.content.modifier.coordinateSpace, .local)
+        XCTAssertEqual(
+            body.content.modifier.content.content.minimumDistance,
+            0
+        )
+#if os(iOS)
+        XCTAssertEqual(body.content.modifier.content.content.maximumDistance, 45)
+#else
+        XCTAssertEqual(body.content.modifier.content.content.maximumDistance, 5)
+#endif
+
+        let duration = body.content.content.modifier.content.modifier
+        XCTAssertEqual(duration.minimumDuration, 0)
+        XCTAssertEqual(duration.maximumDuration, 0.75)
+        XCTAssertFalse(duration.trackFromEventStart)
+
+        let listener = body.content.content.content
+        XCTAssertEqual(listener.modifier.dependency, .failIfActive)
+        XCTAssertFalse(listener.content.content.ignoresOtherEvents)
+
+        let primary = MouseEvent(
+            timestamp: .zero,
+            binding: nil,
+            button: .primary,
+            phase: .active,
+            location: .zero,
+            globalLocation: .zero,
+            modifiers: []
+        )
+        let secondary = MouseEvent(
+            timestamp: .zero,
+            binding: nil,
+            button: .secondary,
+            phase: .active,
+            location: .zero,
+            globalLocation: .zero,
+            modifiers: []
+        )
+        XCTAssertTrue(body.modifier.predicate(primary))
+        XCTAssertFalse(body.modifier.predicate(secondary))
+    }
+
+    // ASSERTIONS tapGestureLegacyControlFlowObserved
+    // ASSERTIONS tapGestureLegacyFieldOwnershipObserved
+    func testTapChildOwnsRepeatCategoryAndOptionalCountWriter() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let tap = graph.makeInput(value: TapGesture(count: 2))
+            let child = TapGesture.Child(_gesture: tap)
+            XCTAssertEqual(
+                Mirror(reflecting: child).children.compactMap(\.label),
+                ["_gesture"]
+            )
+
+            let value = child.value
+            XCTAssertEqual(value.modifier.count, 2)
+            XCTAssertEqual(value.content.modifier.category, .select)
+            XCTAssertTrue(value.content.modifier.includeChildren)
+            XCTAssertEqual(value.content.content.modifier.count, 2)
+            XCTAssertEqual(value.content.content.modifier.maximumDelay, 0.35)
+            XCTAssertTrue(
+                Mirror(reflecting: value.content.content.content)
+                    .children.isEmpty
+            )
+
+            let source = graph.makeInput(
+                value: GesturePhase<TappableEvent>.active(
+                    makeTappableEvent(phase: .active, time: 1)
+                )
+            )
+            let phase = TapGesture.Phase(_phase: source)
+            guard case .active = phase.value else {
+                return XCTFail("Tap phase did not preserve the active case")
+            }
+        }
+    }
+
+    // ASSERTIONS tapGestureLegacyFieldOwnershipObserved
+    func testRequiredTapCountWriterUsesAnOptionalPreferenceTransform() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeGestureInputs(graph: graph)
+            inputs.preferences.add(RequiredTapCountKey.self)
+            let writer = RequiredTapCountWriter<TappableEvent>(count: 3)
+            XCTAssertEqual(
+                Mirror(reflecting: writer).children.compactMap(\.label),
+                ["count"]
+            )
+            XCTAssertEqual(writer.count, 3)
+
+            let modifier = graph.makeInput(value: writer)
+            let childPhase = graph.makeInput(
+                value: GesturePhase<TappableEvent>.possible(nil)
+            )
+            let outputs = RequiredTapCountWriter<TappableEvent>._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _ in
+                _GestureOutputs(phase: childPhase)
+            }
+            let count = try XCTUnwrap(outputs.preferences.reducedValue(
+                for: RequiredTapCountKey.self,
+                in: graph
+            ))
+            XCTAssertEqual(count.value, 3)
+        }
+    }
+
+    // ASSERTIONS requiredTapCountReductionControlFlowObserved
+    func testRequiredTapCountReductionUsesCurrentCompatibilitySelection() {
+        var empty: Int?
+        RequiredTapCountKey.reduce(value: &empty) { 3 }
+        XCTAssertEqual(empty, 3)
+        RequiredTapCountKey.reduce(value: &empty) { nil }
+        XCTAssertEqual(empty, 3)
+
+#if os(iOS)
+        let previousOverride = GestureContainerFeature.isEnabledOverride
+        defer {
+            GestureContainerFeature.isEnabledOverride = previousOverride
+        }
+
+        GestureContainerFeature.isEnabledOverride = true
+        var minimum: Int? = 3
+        RequiredTapCountKey.reduce(value: &minimum) { 1 }
+        XCTAssertEqual(minimum, 1)
+
+        GestureContainerFeature.isEnabledOverride = false
+        var maximum: Int? = 3
+        RequiredTapCountKey.reduce(value: &maximum) { 1 }
+        XCTAssertEqual(maximum, 3)
+#else
+        var reduced: Int? = 3
+        RequiredTapCountKey.reduce(value: &reduced) { 1 }
+        XCTAssertEqual(
+            reduced,
+            isLinkedOnOrAfter(.v6) ? 1 : 3
+        )
+#endif
+    }
+
+    // ASSERTIONS categoryGesturePreferenceOwnershipObserved
+    func testCategoryGestureReplacesOrUnionsChildPreference() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            var inputs = makeGestureInputs(graph: graph)
+            inputs.preferences.add(GestureCategory.Key.self)
+
+            func category(includeChildren: Bool) throws -> GestureCategory {
+                let modifier = graph.makeInput(value: CategoryGesture<Int>(
+                    category: .select,
+                    includeChildren: includeChildren
+                ))
+                let childPhase = graph.makeInput(
+                    value: GesturePhase<Int>.possible(nil)
+                )
+                let childCategory = graph.makeInput(
+                    value: GestureCategory.drag
+                )
+                let outputs = CategoryGesture<Int>._makeGesture(
+                    modifier: _GraphValue(_attribute: modifier),
+                    inputs: inputs
+                ) { _ in
+                    var outputs = _GestureOutputs(phase: childPhase)
+                    outputs.preferences.setValue(
+                        childCategory.identifier,
+                        for: GestureCategory.Key.self
+                    )
+                    return outputs
+                }
+                return try XCTUnwrap(outputs.preferences.reducedValue(
+                    for: GestureCategory.Key.self,
+                    in: graph
+                )).value
+            }
+
+            XCTAssertEqual(try category(includeChildren: false), .select)
+            XCTAssertEqual(
+                try category(includeChildren: true),
+                GestureCategory.select.union(.drag)
+            )
+        }
+    }
+
+    // ASSERTIONS windowDragGesturePreferenceObserved
+    func testWindowDragGesturePreferenceDefaultsFalseAndReducesWithOr() {
+        XCTAssertFalse(WindowDragGestureIsActiveKey.defaultValue)
+
+        var inactive = false
+        WindowDragGestureIsActiveKey.reduce(value: &inactive) { false }
+        XCTAssertFalse(inactive)
+        WindowDragGestureIsActiveKey.reduce(value: &inactive) { true }
+        XCTAssertTrue(inactive)
+
+        var active = true
+        WindowDragGestureIsActiveKey.reduce(value: &active) { false }
+        XCTAssertTrue(active)
+    }
+
+    // ASSERTIONS durationGestureFieldOwnershipObserved
+    func testDurationGestureAndPhaseStoreCompleteTimingState() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let modifier = DurationGesture<Int>(
+                minimumDuration: 1,
+                maximumDuration: 3,
+                trackFromEventStart: true
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: modifier).children.compactMap(\.label),
+                [
+                    "minimumDuration",
+                    "maximumDuration",
+                    "trackFromEventStart",
+                ]
+            )
+
+            let phase = DurationPhase<Int>(
+                _modifier: graph.makeInput(value: modifier),
+                _childPhase: graph.makeInput(value: .possible(nil)),
+                _time: graph.makeInput(value: .zero),
+                _resetSeed: graph.makeInput(value: 0),
+                useGestureGraph: false,
+                start: nil,
+                lastResetSeed: 0
+            )
+            XCTAssertEqual(
+                Mirror(reflecting: phase).children.compactMap(\.label),
+                [
+                    "_modifier",
+                    "_childPhase",
+                    "_time",
+                    "_resetSeed",
+                    "useGestureGraph",
+                    "start",
+                    "lastResetSeed",
+                ]
+            )
+        }
+    }
+
+    // ASSERTIONS durationGestureControlFlowObserved
+    func testDurationPhaseUsesExclusiveMaximumAndSchedulesNextBoundary() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let modifier = graph.makeInput(value: DurationGesture<Int>(
+                minimumDuration: 1,
+                maximumDuration: 3
+            ))
+            let childPhase = graph.makeInput(
+                value: GesturePhase<Int>.possible(9)
+            )
+            let inputs = makeGestureInputs(graph: graph)
+            inputs._time.setValue(Time(seconds: 10))
+            let outputs = DurationGesture<Int>._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _ in
+                _GestureOutputs(phase: childPhase)
+            }
+
+            XCTAssertEqual(outputs.phase.value, .possible(0))
+            XCTAssertEqual(viewGraph.nextUpdate.gestures.time, .infinity)
+
+            childPhase.setValue(.active(9))
+            XCTAssertEqual(outputs.phase.value, .possible(0))
+            XCTAssertEqual(
+                viewGraph.nextUpdate.gestures.time,
+                Time(seconds: 11)
+            )
+
+            viewGraph.nextUpdate.gestures = ViewGraph.NextUpdate()
+            inputs._time.setValue(Time(seconds: 11))
+            XCTAssertEqual(outputs.phase.value, .active(1))
+            XCTAssertEqual(
+                viewGraph.nextUpdate.gestures.time,
+                Time(seconds: 13)
+            )
+
+            viewGraph.nextUpdate.gestures = ViewGraph.NextUpdate()
+            inputs._time.setValue(Time(seconds: 13))
+            XCTAssertEqual(outputs.phase.value, .failed)
+            XCTAssertEqual(viewGraph.nextUpdate.gestures.time, .infinity)
+
+            inputs._resetSeed.setValue(1)
+            inputs._time.setValue(Time(seconds: 20))
+            childPhase.setValue(.active(9))
+            XCTAssertEqual(outputs.phase.value, .possible(0))
+            inputs._time.setValue(Time(seconds: 21))
+            childPhase.setValue(.ended(9))
+            XCTAssertEqual(outputs.phase.value, .ended(1))
+        }
+    }
+
+    // ASSERTIONS durationGestureControlFlowObserved
+    func testDurationPhaseCanStartWhileChildIsPossible() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let modifier = graph.makeInput(value: DurationGesture<Int>(
+                minimumDuration: 1,
+                maximumDuration: 3,
+                trackFromEventStart: true
+            ))
+            let childPhase = graph.makeInput(
+                value: GesturePhase<Int>.possible(nil)
+            )
+            let inputs = makeGestureInputs(graph: graph)
+            inputs._time.setValue(Time(seconds: 30))
+            let outputs = DurationGesture<Int>._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _ in
+                _GestureOutputs(phase: childPhase)
+            }
+
+            XCTAssertEqual(outputs.phase.value, .possible(0))
+            XCTAssertEqual(
+                viewGraph.nextUpdate.gestures.time,
+                Time(seconds: 31)
+            )
+        }
+    }
+
+    // ASSERTIONS distanceGestureFieldOwnershipObserved
+    // ASSERTIONS distanceGestureControlFlowObserved
+    func testDistanceGestureTracksMaximumEuclideanDistanceAndBounds() {
+        let distance = DistanceGesture(
+            minimumDistance: 2,
+            maximumDistance: 5
+        )
+        XCTAssertEqual(
+            Mirror(reflecting: distance).children.compactMap(\.label),
+            ["minimumDistance", "maximumDistance"]
+        )
+
+        let transform = distance.body.modifier.body
+        var state = DistanceGesture.StateType()
+        XCTAssertEqual(
+            Mirror(reflecting: state).children.compactMap(\.label),
+            ["start", "maxDistance"]
+        )
+
+        XCTAssertEqual(
+            transform(&state, .possible(spatialEvent(at: .zero))),
+            .possible(0)
+        )
+        XCTAssertEqual(
+            transform(
+                &state,
+                .active(spatialEvent(at: CGPoint(x: 1, y: 0)))
+            ),
+            .possible(1)
+        )
+        XCTAssertEqual(
+            transform(
+                &state,
+                .active(spatialEvent(at: CGPoint(x: 3, y: 4)))
+            ),
+            .active(5)
+        )
+        XCTAssertEqual(
+            transform(&state, .active(spatialEvent(at: .zero))),
+            .active(5)
+        )
+
+        var endedState = DistanceGesture.StateType()
+        _ = transform(
+            &endedState,
+            .possible(spatialEvent(at: .zero))
+        )
+        XCTAssertEqual(
+            transform(
+                &endedState,
+                .ended(spatialEvent(at: CGPoint(x: 3, y: 4)))
+            ),
+            .failed
+        )
+
+        var successfulState = DistanceGesture.StateType()
+        _ = transform(
+            &successfulState,
+            .possible(spatialEvent(at: .zero))
+        )
+        XCTAssertEqual(
+            transform(
+                &successfulState,
+                .ended(spatialEvent(at: CGPoint(x: 0, y: 4)))
+            ),
+            .ended(4)
+        )
+    }
+
     func testGestureDependencyCasesAndReductionMatchSwiftUISurface() {
         XCTAssertEqual(MemoryLayout<GestureDependency>.size, 1)
         XCTAssertEqual(GestureDependency.none.rawValue, 0)
@@ -234,10 +877,15 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS viewResponderDescendantTraversalObserved
     func testResponderArbitrationMatchesPriorityDependencyAndTapCountRules() {
         let defaultParent = ArbitrationTestResponder(exclusionPolicy: .default)
         let defaultChild = ArbitrationTestResponder(exclusionPolicy: .default)
         defaultChild.parent = defaultParent
+
+        XCTAssertFalse(defaultParent.isDescendant(of: defaultParent))
+        XCTAssertTrue(defaultChild.isDescendant(of: defaultParent))
+        XCTAssertFalse(defaultParent.isDescendant(of: defaultChild))
 
         XCTAssertTrue(defaultChild.isPrioritized(
             over: defaultParent,
@@ -319,14 +967,10 @@ final class GesturePhaseSurfaceTests: XCTestCase {
 
     func testGestureResponderPreferenceGettersInstantiateInsideUpdateScope() {
         func makeResponder() -> (ArbitrationTestResponder, UpdateScopeGestureGraph) {
-            let graph = UpdateScopeGestureGraph()
-            return (
-                ArbitrationTestResponder(
-                    exclusionPolicy: .default,
-                    gestureGraph: graph
-                ),
-                graph
-            )
+            let responder = ArbitrationTestResponder(exclusionPolicy: .default)
+            let graph = UpdateScopeGestureGraph(rootResponder: responder)
+            responder.installGestureGraph(graph)
+            return (responder, graph)
         }
 
         let (cancellableResponder, cancellableGraph) = makeResponder()
@@ -364,6 +1008,173 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         let previous = ViewResponder.hitTestKey
         XCTAssertEqual(ViewResponder.nextHitTestKey(), previous &+ 1)
         XCTAssertEqual(ViewResponder.hitTestKey, previous &+ 1)
+    }
+
+    func testResponderGestureEventsAdvanceHostSeedsWithoutChangingResetSeed() {
+        let responder = ArbitrationTestResponder(exclusionPolicy: .default)
+        let gestureGraph = responder.gestureGraph
+
+        gestureGraph.data.updateSeed = 30
+        gestureGraph.data.transactionSeed = 40
+        gestureGraph.data.withCurrent {
+            gestureGraph._gestureResetSeed.setValue(9)
+        }
+
+        _ = gestureGraph.sendEvents(
+            [:],
+            rootNode: responder,
+            at: Time(seconds: 5)
+        )
+
+        XCTAssertEqual(gestureGraph.data.transactionSeed, 41)
+        XCTAssertEqual(gestureGraph.data.updateSeed, 31)
+        gestureGraph.data.withCurrent {
+            XCTAssertEqual(gestureGraph._gestureResetSeed.value, 9)
+        }
+
+        _ = gestureGraph.sendEvents(
+            [:],
+            rootNode: responder,
+            at: Time(seconds: 5)
+        )
+
+        XCTAssertEqual(gestureGraph.data.transactionSeed, 42)
+        XCTAssertEqual(gestureGraph.data.updateSeed, 31)
+        gestureGraph.data.withCurrent {
+            XCTAssertEqual(gestureGraph._gestureResetSeed.value, 9)
+        }
+    }
+
+    // ASSERTIONS repeatGesturePhaseFieldOwnershipObserved
+    // ASSERTIONS repeatGesturePhaseControlFlowObserved
+    func testRepeatGestureRearmsChildAndPreservesPossiblePayloads() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let modifier = graph.makeInput(value: RepeatGesture<TappableEvent>(
+                count: 2,
+                maximumDelay: 0.5
+            ))
+            let first = makeTappableEvent(phase: .began, time: 1)
+            let second = makeTappableEvent(phase: .active, time: 1.1)
+            let third = makeTappableEvent(phase: .ended, time: 1.2)
+            let childPhase = graph.makeInput(
+                value: GesturePhase<TappableEvent>.possible(first)
+            )
+            let inputs = makeGestureInputs(graph: graph)
+            inputs._time.setValue(Time(seconds: 1))
+            var childResetSeed: Attribute<UInt32>?
+
+            let outputs = RepeatGesture<TappableEvent>._makeGesture(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { childInputs in
+                childResetSeed = childInputs.resetSeed
+                return _GestureOutputs(phase: childPhase)
+            }
+            let resetSeed = try XCTUnwrap(childResetSeed)
+
+            XCTAssertEqual(outputs.phase.value, .possible(first))
+            XCTAssertEqual(resetSeed.value, 0)
+
+            childPhase.setValue(.active(second))
+            XCTAssertEqual(outputs.phase.value, .possible(second))
+
+            childPhase.setValue(.ended(third))
+            XCTAssertEqual(outputs.phase.value, .possible(third))
+            XCTAssertEqual(
+                viewGraph.nextUpdate.gestures.time,
+                Time(seconds: 1.5)
+            )
+            XCTAssertTrue(viewGraph.hasPendingTransactions)
+
+            viewGraph.flushTransactions()
+            XCTAssertEqual(resetSeed.value, 1)
+
+            childPhase.setValue(.active(second))
+            XCTAssertEqual(outputs.phase.value, .active(second))
+            childPhase.setValue(.ended(third))
+            XCTAssertEqual(outputs.phase.value, .ended(third))
+        }
+    }
+
+    // ASSERTIONS repeatGesturePhaseControlFlowObserved
+    func testRepeatGestureDeadlineAllowsEqualityAndFailsAfterward() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let modifier = graph.makeInput(value: RepeatGesture<TappableEvent>(
+                count: 2,
+                maximumDelay: 0.5
+            ))
+            let ended = makeTappableEvent(phase: .ended, time: 2)
+            let possible = makeTappableEvent(phase: .began, time: 2.5)
+            let childPhase = graph.makeInput(
+                value: GesturePhase<TappableEvent>.ended(ended)
+            )
+            let time = graph.makeInput(value: Time(seconds: 2))
+            let resetSeed = graph.makeInput(value: UInt32(0))
+            let resetDelta = graph.makeInput(value: UInt32(0))
+            let output = graph.makeStatefulRule(RepeatPhase<TappableEvent>(
+                _modifier: modifier,
+                _phase: childPhase,
+                _time: time,
+                _resetSeed: resetSeed,
+                _resetDelta: resetDelta,
+                useGestureGraph: false,
+                deadline: nil,
+                index: 0,
+                lastResetSeed: 0
+            ))
+
+            XCTAssertEqual(output.value, .possible(ended))
+            childPhase.setValue(.possible(possible))
+            time.setValue(Time(seconds: 2.5))
+            XCTAssertEqual(output.value, .possible(possible))
+
+            time.setValue(Time(seconds: 2.500_001))
+            XCTAssertEqual(output.value, .failed)
+        }
+    }
+
+    // ASSERTIONS repeatGestureMutationFieldOwnershipObserved
+    // ASSERTIONS repeatGestureMutationControlFlowObserved
+    func testRepeatMutationCombinesLatestIndexForOneResetDelta() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let resetDelta = graph.makeInput(value: UInt32(0))
+            let otherDelta = graph.makeInput(value: UInt32(0))
+            var mutation = RepeatMutation(
+                _resetDelta: resetDelta,
+                index: 1
+            )
+
+            XCTAssertTrue(mutation.combine(with: RepeatMutation(
+                _resetDelta: resetDelta,
+                index: 3
+            )))
+            XCTAssertFalse(mutation.combine(with: RepeatMutation(
+                _resetDelta: otherDelta,
+                index: 4
+            )))
+            mutation.apply()
+            XCTAssertEqual(resetDelta.value, 3)
+            XCTAssertEqual(otherDelta.value, 0)
+        }
     }
 
     func testContainsPointsCacheOnlyReusesMatchingNonnilKeys() {
@@ -560,6 +1371,35 @@ final class GesturePhaseSurfaceTests: XCTestCase {
         )
     }
 
+    private func makeTappableEvent(
+        phase: EventPhase,
+        time: Double
+    ) -> TappableEvent {
+        let source: any EventType = VUI.MouseEvent(
+            timestamp: Time(seconds: time),
+            binding: nil,
+            button: .primary,
+            phase: phase,
+            location: .zero,
+            globalLocation: .zero,
+            modifiers: []
+        )
+        return TappableEvent(source)!
+    }
+
+    private func spatialEvent(at location: CGPoint) -> SpatialEvent {
+        let event: any SpatialEventType = MouseEvent(
+            timestamp: .zero,
+            binding: nil,
+            button: .primary,
+            phase: .active,
+            location: location,
+            globalLocation: location,
+            modifiers: []
+        )
+        return SpatialEvent(event)
+    }
+
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
@@ -584,6 +1424,69 @@ final class GesturePhaseSurfaceTests: XCTestCase {
     }
 }
 
+private enum PairwiseGesturePreferenceKey: PreferenceKey {
+    static var defaultValue: [Int] { [] }
+
+    static func reduce(value: inout [Int], nextValue: () -> [Int]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct PhaseTestGesture<Value>: Gesture, PrimitiveGesture {
+    let phase: GesturePhase<Value>
+
+    static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Value> {
+        guard let graph = _AGGraph.current else {
+            fatalError("PhaseTestGesture._makeGesture requires AG context")
+        }
+        let phase = graph.makeRule {
+            gesture._attribute.value.phase
+        }
+        var outputs = _GestureOutputs<Value>(phase: phase)
+        let preference = graph.makeInput(value: [1])
+        outputs.appendPreference(
+            key: PairwiseGesturePreferenceKey.self,
+            value: preference
+        )
+        return outputs
+    }
+
+    typealias Body = Never
+}
+
+private struct PreferencePhaseTestGesture: Gesture, PrimitiveGesture {
+    let phase: GesturePhase<Int>
+    let preference: [Int]
+
+    static func _makeGesture(
+        gesture: _GraphValue<Self>,
+        inputs: _GestureInputs
+    ) -> _GestureOutputs<Int> {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "PreferencePhaseTestGesture._makeGesture requires AG context"
+            )
+        }
+        let phase = graph.makeRule {
+            gesture._attribute.value.phase
+        }
+        let preference = graph.makeRule {
+            gesture._attribute.value.preference
+        }
+        var outputs = _GestureOutputs<Int>(phase: phase)
+        outputs.appendPreference(
+            key: PairwiseGesturePreferenceKey.self,
+            value: preference
+        )
+        return outputs
+    }
+
+    typealias Body = Never
+}
+
 private final class ArbitrationTestResponder: ViewResponder, AnyGestureResponder {
     var relatedAttribute: AGAttribute { .invalid }
     var inputs: _ViewInputs { fatalError("unused test responder input") }
@@ -592,8 +1495,17 @@ private final class ArbitrationTestResponder: ViewResponder, AnyGestureResponder
     let exclusionPolicy: GestureResponderExclusionPolicy
     var label: String? { nil }
     var mask: GestureMask = .all
-    let gestureGraph: GestureGraph
-    let viewSubgraph: AGSubgraph
+    private var gestureGraphStorage: GestureGraph?
+    var gestureGraph: GestureGraph {
+        if let gestureGraphStorage {
+            return gestureGraphStorage
+        }
+        let graph = ArbitrationGestureGraph(rootResponder: self)
+        configureGestureGraph(graph)
+        gestureGraphStorage = graph
+        return graph
+    }
+    var viewSubgraph: AGSubgraph { gestureGraph.rootSubgraph }
     var eventSources: [any EventBindingSource] { [] }
     var gestureType: Any.Type { Self.self }
     var isValid: Bool { true }
@@ -602,26 +1514,33 @@ private final class ArbitrationTestResponder: ViewResponder, AnyGestureResponder
         exclusionPolicy: GestureResponderExclusionPolicy,
         dependency: GestureDependency = .none,
         requiredTapCount: Int? = nil,
-        hitTestKey: UInt32 = 1,
-        gestureGraph suppliedGestureGraph: GestureGraph? = nil
+        hitTestKey: UInt32 = 1
     ) {
         _ = hitTestKey
         self.exclusionPolicy = exclusionPolicy
-        let gestureGraph = suppliedGestureGraph ?? GestureGraph()
-        self.gestureGraph = gestureGraph
-        self.viewSubgraph = gestureGraph.data.withCurrent {
-            AGSubgraph()
-        }
+        self.testDependency = dependency
+        self.testRequiredTapCount = requiredTapCount
         super.init()
+    }
 
+    private let testDependency: GestureDependency
+    private let testRequiredTapCount: Int?
+
+    func installGestureGraph(_ graph: GestureGraph) {
+        precondition(gestureGraphStorage == nil)
+        configureGestureGraph(graph)
+        gestureGraphStorage = graph
+    }
+
+    private func configureGestureGraph(_ gestureGraph: GestureGraph) {
         gestureGraph.data.withCurrent {
             let graph = gestureGraph.data.graph
             gestureGraph._gestureDependencyAttr = OptionalAttribute(
-                graph.makeInput(value: dependency)
+                graph.makeInput(value: testDependency)
             )
-            if let requiredTapCount {
+            if let testRequiredTapCount {
                 gestureGraph._requiredTapCountAttr = OptionalAttribute(
-                    graph.makeInput(value: Optional(requiredTapCount))
+                    graph.makeInput(value: Optional(testRequiredTapCount))
                 )
             }
         }
@@ -630,11 +1549,17 @@ private final class ArbitrationTestResponder: ViewResponder, AnyGestureResponder
     func detachContainer() {}
 }
 
-private final class UpdateScopeGestureGraph: GestureGraph, @unchecked Sendable {
+private class ArbitrationGestureGraph: GestureGraph, @unchecked Sendable {
+    override func instantiateOutputs() {}
+}
+
+private final class UpdateScopeGestureGraph:
+    ArbitrationGestureGraph,
+    @unchecked Sendable
+{
     private(set) var observedUpdateActive = false
 
     override func instantiateOutputs() {
         observedUpdateActive = Update.isActive
-        super.instantiateOutputs()
     }
 }

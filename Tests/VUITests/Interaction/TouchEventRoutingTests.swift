@@ -85,6 +85,7 @@ final class TouchEventRoutingTests: XCTestCase {
     }
 
     @MainActor
+    // ASSERTIONS appKitRecognizerAdmittedFailureCancellationObserved
     func testCancelledTouchTerminatesTheActiveEventAsFailed() throws {
         let recorder = TouchEventRecorder()
         let controller = WindowController(
@@ -271,6 +272,7 @@ private struct TouchEventRoutingRoot: View {
             .frame(width: 420, height: 240)
             .gesture(
                 ModifierGesture(
+                    content: EventListener<TouchEvent>(),
                     modifier: CallbacksGesture(callbacks: FullGestureCallbacks<TouchEvent>(
                         possible: nil,
                         changed: { event in
@@ -284,8 +286,7 @@ private struct TouchEventRoutingRoot: View {
                         failed: {
                             recorder.phases.append(.failed)
                         }
-                    )),
-                    body: EventListener<TouchEvent>()
+                    ))
                 )
             )
     }

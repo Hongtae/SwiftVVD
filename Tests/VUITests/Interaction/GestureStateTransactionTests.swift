@@ -17,9 +17,26 @@ private final class GestureActionQueue: GestureGraphDelegate {
     }
 }
 
+private final class GestureStateTestResponder: ResponderNode, AnyGestureResponder {
+    var relatedAttribute: AGAttribute { .invalid }
+    var inputs: _ViewInputs { fatalError("unused test responder input") }
+    var childSubgraph: AGSubgraph?
+    var childViewSubgraph: AGSubgraph?
+    var viewSubgraph: AGSubgraph { gestureGraph.rootSubgraph }
+    var eventSources: [any EventBindingSource] { [] }
+    var gestureType: Any.Type { Self.self }
+    var isValid: Bool { true }
+    lazy var gestureGraph = GestureGraph(rootResponder: self)
+
+    override var nextResponder: ResponderNode? { nil }
+
+    func detachContainer() {}
+}
+
 final class GestureStateTransactionTests: XCTestCase {
     func testUpdatingThenOnEndedDrainsGestureStateResetBeforeEndedCallback() {
-        let gestureGraph = GestureGraph()
+        let responder = GestureStateTestResponder()
+        let gestureGraph = responder.gestureGraph
         let actionQueue = GestureActionQueue()
         gestureGraph.delegate = actionQueue
         let graph = gestureGraph.data.graph
@@ -62,7 +79,8 @@ final class GestureStateTransactionTests: XCTestCase {
     }
 
     func testUpdatingThenOnChangedDrainsThroughGestureActionQueue() {
-        let gestureGraph = GestureGraph()
+        let responder = GestureStateTestResponder()
+        let gestureGraph = responder.gestureGraph
         let actionQueue = GestureActionQueue()
         gestureGraph.delegate = actionQueue
         let graph = gestureGraph.data.graph

@@ -4,6 +4,93 @@ import XCTest
 @testable import VVD
 
 final class HoverEventDispatcherTests: XCTestCase {
+    // ASSERTIONS eventBindingManagerCurrentOwnerObserved
+    @MainActor
+    func testCurrentBindingManagerComesFromCurrentViewRendererHost() {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Self.self)
+            )
+        )
+
+        controller.viewGraph.data.withCurrent {
+            XCTAssertTrue(
+                EventBindingManager.current === controller.eventBindingManager
+            )
+        }
+
+        let nonViewHost = GraphHost()
+        nonViewHost.data.withCurrent {
+            XCTAssertNil(EventBindingManager.current)
+        }
+    }
+
+    // ASSERTIONS hoverMakeViewIndependentBranchesObserved hoverPlatformItemBehaviorObserved
+    func testPlatformItemHoverTransformDoesNotRequireEventHost() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        var hoverEvents: [Bool] = []
+        var replacedEvents: [Bool] = []
+
+        try host.data.withCurrent {
+            var keys = PreferenceKeys()
+            keys.add(PlatformItemList.Key.self)
+            var inputs = makeHoverViewInputs(graph: graph)
+            inputs.preferences = PreferencesInputs(
+                keys: keys,
+                hostKeys: graph.makeInput(value: keys)
+            )
+            inputs[PlatformItemListFlagsInput.self] =
+                SelectionPlatformItemListFlags.flags
+
+            let modifier = graph.makeInput(
+                value: _HoverRegionModifier { hovering in
+                    hoverEvents.append(hovering)
+                }
+            )
+            var first = PlatformItemList.Item()
+            first.text = NSAttributedString(string: "Primary")
+            first.onHover = { hovering in
+                replacedEvents.append(hovering)
+            }
+            var second = PlatformItemList.Item()
+            second.text = NSAttributedString(string: "Secondary")
+            second.tooltip = "details"
+            let source = graph.makeInput(
+                value: PlatformItemList(items: [first, second])
+            )
+
+            let outputs = _HoverRegionModifier._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, _ in
+                var outputs = _ViewOutputs()
+                outputs.preferences.append(
+                    PlatformItemList.Key.self,
+                    node: source.identifier
+                )
+                return outputs
+            }
+
+            let output = try XCTUnwrap(
+                outputs.preferences.value(for: PlatformItemList.Key.self)
+            )
+            let list = Attribute<PlatformItemList>(output).value
+            XCTAssertEqual(list.items.count, 1)
+            XCTAssertEqual(list.items[0].text?.string, "Primary")
+            XCTAssertEqual(list.items[0].secondaryText?.string, "Secondary")
+            XCTAssertEqual(list.items[0].tooltip, "details")
+
+            list.items[0].onHover?(true)
+            list.items[0].onHover?(false)
+        }
+
+        XCTAssertEqual(hoverEvents, [true, false])
+        XCTAssertTrue(replacedEvents.isEmpty)
+    }
+
     // ASSERTIONS hoverResponderChildRemovalEndsPhaseObserved
     func testRemovingHoverResponderChildEndsItsActivePhase() {
         let recorder = HoverEventRecorder()
@@ -66,8 +153,7 @@ final class HoverEventDispatcherTests: XCTestCase {
 
         XCTAssertEqual(
             harness.manager.send(
-                [eventID: hoverEvent(phase: .began)],
-                at: .zero
+                [eventID: hoverEvent(phase: .began)]
             ),
             Set([eventID])
         )
@@ -80,8 +166,7 @@ final class HoverEventDispatcherTests: XCTestCase {
                 [eventID: hoverEvent(
                     phase: .active,
                     point: CGPoint(x: 12, y: 14)
-                )],
-                at: .zero
+                )]
             ),
             Set([eventID])
         )
@@ -91,8 +176,7 @@ final class HoverEventDispatcherTests: XCTestCase {
 
         XCTAssertEqual(
             harness.manager.send(
-                [eventID: hoverEvent(phase: .ended)],
-                at: .zero
+                [eventID: hoverEvent(phase: .ended)]
             ),
             Set([eventID])
         )
@@ -110,8 +194,7 @@ final class HoverEventDispatcherTests: XCTestCase {
         let eventID = EventID(type: HoverEvent.self, serial: 11)
 
         XCTAssertTrue(harness.manager.send(
-            [eventID: hoverEvent(phase: .began)],
-            at: .zero
+            [eventID: hoverEvent(phase: .began)]
         ).isEmpty)
         XCTAssertEqual(harness.root.bindCount, 1)
         XCTAssertEqual(harness.host.downstreamSendCount, 0)
@@ -119,8 +202,7 @@ final class HoverEventDispatcherTests: XCTestCase {
         harness.root.target = responder
         XCTAssertEqual(
             harness.manager.send(
-                [eventID: hoverEvent(phase: .active)],
-                at: .zero
+                [eventID: hoverEvent(phase: .active)]
             ),
             Set([eventID])
         )
@@ -130,8 +212,7 @@ final class HoverEventDispatcherTests: XCTestCase {
         harness.root.target = nil
         XCTAssertEqual(
             harness.manager.send(
-                [eventID: hoverEvent(phase: .active)],
-                at: .zero
+                [eventID: hoverEvent(phase: .active)]
             ),
             Set([eventID])
         )
@@ -153,16 +234,14 @@ final class HoverEventDispatcherTests: XCTestCase {
         let eventID = EventID(type: HoverEvent.self, serial: 13)
 
         _ = harness.manager.send(
-            [eventID: hoverEvent(phase: .began)],
-            at: .zero
+            [eventID: hoverEvent(phase: .began)]
         )
         XCTAssertEqual(recorder.events, ["hover:true"])
 
         harness.manager.reset(resetForwardedEventDispatchers: true)
         harness.root.target = nil
         XCTAssertTrue(harness.manager.send(
-            [eventID: hoverEvent(phase: .ended)],
-            at: .zero
+            [eventID: hoverEvent(phase: .ended)]
         ).isEmpty)
         XCTAssertEqual(recorder.events, ["hover:true"])
         XCTAssertEqual(harness.host.downstreamSendCount, 0)
@@ -190,18 +269,15 @@ final class HoverEventDispatcherTests: XCTestCase {
         let eventID = EventID(type: HoverEvent.self, serial: 17)
 
         _ = harness.manager.send(
-            [eventID: hoverEvent(phase: .began)],
-            at: .zero
+            [eventID: hoverEvent(phase: .began)]
         )
         harness.root.target = inner
         _ = harness.manager.send(
-            [eventID: hoverEvent(phase: .active)],
-            at: .zero
+            [eventID: hoverEvent(phase: .active)]
         )
         harness.root.target = outer
         _ = harness.manager.send(
-            [eventID: hoverEvent(phase: .active)],
-            at: .zero
+            [eventID: hoverEvent(phase: .active)]
         )
 
         XCTAssertEqual(recorder.events, [
@@ -211,6 +287,30 @@ final class HoverEventDispatcherTests: XCTestCase {
         ])
         XCTAssertEqual(outer.currentPhase, .active(CGPoint(x: 10, y: 10)))
         XCTAssertEqual(inner.currentPhase, .ended)
+    }
+
+    // ASSERTIONS hoverNamedCoordinateSpaceObserved
+    func testContinuousHoverUsesEachResponderCoordinateSpace() {
+        let recorder = HoverCoordinateRecorder()
+        let fixture = HoverCoordinateFixture(recorder: recorder)
+        let harness = HoverDispatchHarness(
+            target: fixture.local,
+            retaining: [fixture]
+        )
+        let eventID = EventID(type: HoverEvent.self, serial: 19)
+
+        XCTAssertEqual(
+            harness.manager.send([
+                eventID: hoverEvent(
+                    phase: .began,
+                    point: CGPoint(x: 120, y: 100)
+                )
+            ]),
+            Set([eventID])
+        )
+        XCTAssertEqual(recorder.points["local"], CGPoint(x: 30, y: 30))
+        XCTAssertEqual(recorder.points["named"], CGPoint(x: 100, y: 80))
+        XCTAssertEqual(recorder.points["global"], CGPoint(x: 120, y: 100))
     }
 
     // ASSERTIONS hoverEventBindingAncestorDispatchObserved
@@ -251,10 +351,36 @@ final class HoverEventDispatcherTests: XCTestCase {
         XCTAssertTrue(controller.handleMouseHover(
             at: points[0],
             deviceID: 0,
-            isTopMost: true
+            isTopMost: true,
+            at: .zero
         ))
         XCTAssertEqual(ViewResponder.hitTestKey, keyBefore &+ 1)
         XCTAssertEqual(recorder.events, ["row:true"])
+    }
+
+    // ASSERTIONS hoverPlatformOccurrenceTimeObserved
+    @MainActor
+    func testRawHoverForwardsItsOccurrenceTime() {
+        let recorder = HoverTimestampRecorder()
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(HoverTimestampRecorder.self)
+            )
+        )
+        controller.eventBindingManager.addForwardedEventDispatcher(
+            TimestampRecordingHoverDispatcher(recorder: recorder)
+        )
+
+        let occurrenceTime = Time(seconds: 12.5)
+        XCTAssertTrue(controller.handleMouseHover(
+            at: CGPoint(x: 10, y: 20),
+            deviceID: 0,
+            isTopMost: true,
+            at: occurrenceTime
+        ))
+        XCTAssertEqual(recorder.timestamps, [occurrenceTime])
     }
 
     // ASSERTIONS appKitBlockedMouseMoveCoalescingObserved
@@ -318,8 +444,7 @@ final class HoverEventDispatcherTests: XCTestCase {
                 timestamp: seconds
             )
             controller.enqueueMouseInputEvent(
-                event,
-                at: Time(seconds: seconds)
+                event
             )
         }
 
@@ -335,10 +460,72 @@ final class HoverEventDispatcherTests: XCTestCase {
         XCTAssertEqual(ViewResponder.hitTestKey, keyBefore &+ 1)
         XCTAssertEqual(recorder.events, ["row:true"])
     }
+
+    // ASSERTIONS eventBindingManagerActiveLifetimeObserved
+    func testHoverUpdatePendingStateSurvivesResetUntilQueuedCallback() {
+        let manager = EventBindingManager()
+        let delegate = HoverUpdateRequestRecorder()
+        manager.delegate = delegate
+
+        Update.ensure {
+            manager.enqueueHoverUpdateIfNeeded()
+            manager.enqueueHoverUpdateIfNeeded()
+            manager.reset()
+            manager.enqueueHoverUpdateIfNeeded()
+            XCTAssertEqual(delegate.requestCount, 0)
+        }
+
+        XCTAssertEqual(delegate.requestCount, 1)
+
+        Update.ensure {
+            manager.enqueueHoverUpdateIfNeeded()
+        }
+        XCTAssertEqual(delegate.requestCount, 2)
+    }
 }
 
 private final class HoverEventRecorder {
     var events: [String] = []
+}
+
+private final class HoverTimestampRecorder {
+    var timestamps: [Time] = []
+}
+
+private final class HoverCoordinateRecorder {
+    var points: [String: CGPoint] = [:]
+}
+
+private struct TimestampRecordingHoverDispatcher: ForwardedEventDispatcher {
+    static var eventType: any EventType.Type { HoverEvent.self }
+
+    let recorder: HoverTimestampRecorder
+
+    mutating func receiveEvents(
+        _ events: [EventID: any EventType],
+        manager: EventBindingManager
+    ) -> Set<EventID> {
+        var consumed: Set<EventID> = []
+        for (eventID, event) in events {
+            guard let event = event as? HoverEvent else { continue }
+            recorder.timestamps.append(event.timestamp)
+            consumed.insert(eventID)
+        }
+        return consumed
+    }
+}
+
+private final class HoverUpdateRequestRecorder: EventBindingManagerDelegate {
+    private(set) var requestCount = 0
+
+    func didUpdate(
+        phase: GesturePhase<Void>,
+        in manager: EventBindingManager
+    ) {}
+
+    func requestHoverUpdate(in manager: EventBindingManager) {
+        requestCount += 1
+    }
 }
 
 private final class CountingBindingRoot: ResponderNode {
@@ -366,7 +553,6 @@ private final class HoverTestEventGraphHost: EventGraphHost {
     init(root: ResponderNode) {
         self.root = root
         eventBindingManager.host = self
-        eventBindingManager.rootResponder = root
     }
 
     var responderNode: ResponderNode? { root }
@@ -423,6 +609,59 @@ private final class HoverResponderFixture {
         }
         self.data = data
         self.responder = responder
+    }
+}
+
+private final class HoverCoordinateFixture {
+    let data: GraphHost.Data
+    let local: HoverResponder
+    let named: HoverResponder
+    let global: HoverResponder
+
+    init(recorder: HoverCoordinateRecorder) {
+        let data = GraphHost.Data()
+        var local: HoverResponder!
+        var named: HoverResponder!
+        var global: HoverResponder!
+        data.withCurrent {
+            AGSubgraph.withCurrent(data.rootSubgraph) {
+                var transform = ViewTransform.identity
+                transform.appendPosition(CGPoint(x: 20, y: 20))
+                transform.appendCoordinateSpace(name: AnyHashable("hover-named"))
+                transform.appendPosition(CGPoint(x: 90, y: 70))
+
+                func makeResponder(
+                    name: String,
+                    coordinateSpace: CoordinateSpace
+                ) -> HoverResponder {
+                    let responder = HoverResponder(
+                        inputs: makeHoverViewInputs(graph: data.graph)
+                    )
+                    responder.callback = .spatial { phase in
+                        guard case .active(let point) = phase else { return }
+                        recorder.points[name] = point
+                    }
+                    responder.transform = transform
+                    responder.size = CGSize(width: 120, height: 80)
+                    responder.coordinateSpace = coordinateSpace
+                    responder.isEnabled = true
+                    return responder
+                }
+
+                local = makeResponder(name: "local", coordinateSpace: .local)
+                named = makeResponder(
+                    name: "named",
+                    coordinateSpace: .named(AnyHashable("hover-named"))
+                )
+                global = makeResponder(name: "global", coordinateSpace: .global)
+                global.children = [named]
+                named.children = [local]
+            }
+        }
+        self.data = data
+        self.local = local
+        self.named = named
+        self.global = global
     }
 }
 

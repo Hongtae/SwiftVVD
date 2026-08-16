@@ -710,12 +710,14 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
 
     override func handleMouseHover(at location: CGPoint,
                                    deviceID: Int,
-                                   isTopMost: Bool) -> Bool {
+                                   isTopMost: Bool,
+                                   at time: Time) -> Bool {
         presentationContext.prepareForInput(controller: self)
         if presentationContext.isAnimating { return true }
         return super.handleMouseHover(at: location,
                                       deviceID: deviceID,
-                                      isTopMost: isTopMost)
+                                      isTopMost: isTopMost,
+                                      at: time)
     }
 
     override func presentationPointInParent(forLocalPoint point: CGPoint) -> CGPoint {

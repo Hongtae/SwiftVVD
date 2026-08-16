@@ -144,7 +144,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -183,7 +183,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             accuracy: 0.001
         )
         let refreshedRoot = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let refreshedHost = try XCTUnwrap(
@@ -248,7 +248,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -338,7 +338,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             "offsets: \(observedOffsets)"
         )
         let refreshedRoot = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let refreshedHost = try XCTUnwrap(
@@ -377,7 +377,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -504,7 +504,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            child.gestureGraph?.eventBindingManager.rootResponder
+            child.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -658,7 +658,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responders = allHostingScrollViewResponders(in: root)
@@ -787,7 +787,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responders = allHostingScrollViewResponders(in: root)
@@ -852,7 +852,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(
@@ -866,7 +866,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             options: .platformDefault
         )
         XCTAssertTrue(responderHit.mask[0])
-        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+        let binding = try XCTUnwrap(controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 110, y: 110),
             accepting: SystemWheelEvent.self
         ))
@@ -925,7 +925,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -947,7 +947,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             publishedOffsets.append(try XCTUnwrap(host.pendingContext).contentOffset)
             observedOffsets.append(try XCTUnwrap(probe.geometryActions.last).contentOffset)
             let currentRoot = try XCTUnwrap(
-                controller.gestureGraph?.eventBindingManager.rootResponder
+                controller.responderNode
                     as? MultiViewResponder
             )
             let currentResponder = try XCTUnwrap(
@@ -1006,7 +1006,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1029,7 +1029,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let currentRoot = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let currentResponder = try XCTUnwrap(firstHostingScrollViewResponder(in: currentRoot))
@@ -1067,7 +1067,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1229,12 +1229,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
         let host = try XCTUnwrap(responder.hostContainer?.scrollView)
-        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+        let binding = try XCTUnwrap(controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 110, y: 110),
             accepting: ScrollEvent.self
         ))
@@ -1313,8 +1313,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             at: Time(seconds: 0.03)
         ))
         XCTAssertFalse(
-            controller.gestureGraph?.eventBindingManager.bindings.values
-                .contains { $0.responder === responder } ?? true
+            controller.eventBindingManager.eventBindings.values
+                .contains { $0.responder === responder }
         )
         XCTAssertTrue(host.isDecelerating)
         let offsetBeforeMotion = try XCTUnwrap(host.pendingContext).contentOffset.y
@@ -1376,7 +1376,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1471,7 +1471,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1565,7 +1565,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1670,7 +1670,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let baselineRoot = try XCTUnwrap(
-            baselineController.gestureGraph?.eventBindingManager.rootResponder
+            baselineController.responderNode
                 as? MultiViewResponder
         )
         let baselineResponder = try XCTUnwrap(
@@ -1681,7 +1681,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             in: CGSize(width: 220, height: 220)
         ))
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -1697,7 +1697,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             excluding: baselineResponder,
             size: CGSize(width: 220, height: 220)
         ))
-        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+        let binding = try XCTUnwrap(controller.gestureEnvironment.eventBinding(
             at: location,
             accepting: SystemWheelEvent.self
         ))
@@ -1727,7 +1727,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responders = allHostingScrollViewResponders(in: root)
@@ -1750,7 +1750,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             for: [outer, inner],
             in: CGSize(width: 260, height: 260)
         ))
-        let binding = try XCTUnwrap(controller.gestureGraph?.eventBinding(
+        let binding = try XCTUnwrap(controller.gestureEnvironment.eventBinding(
             at: location,
             accepting: SystemWheelEvent.self
         ))
@@ -1789,10 +1789,13 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         consumer.children = [ignored]
         let root = MultiViewResponder()
         root.children = [consumer]
-        let graph = GestureGraph()
-        graph.eventBindingManager.rootResponder = root
+        let manager = EventBindingManager()
+        let environment = WindowGestureEnvironment(
+            rootResponder: root,
+            eventBindingManager: manager
+        )
 
-        let binding = try XCTUnwrap(graph.eventBinding(
+        let binding = try XCTUnwrap(environment.eventBinding(
             at: CGPoint(x: 10, y: 10),
             accepting: SystemWheelEvent.self
         ))
@@ -1832,7 +1835,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         update()
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responders = allHostingScrollViewResponders(in: root)
@@ -2504,7 +2507,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let root = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager.rootResponder
+            controller.responderNode
                 as? MultiViewResponder
         )
         let responder = try XCTUnwrap(firstHostingScrollViewResponder(in: root))
@@ -2808,7 +2811,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
         let runSpringMove = try XCTUnwrap(probe.toggle)
 
-        try XCTUnwrap(child.gestureGraph).data.withCurrent {
+        child.viewGraph.data.withCurrent {
             runSpringMove()
         }
         redraw = false
@@ -7462,7 +7465,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
 
         let run = try XCTUnwrap(probe.toggle)
-        try XCTUnwrap(child.gestureGraph).data.withCurrent {
+        child.viewGraph.data.withCurrent {
             run()
         }
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))

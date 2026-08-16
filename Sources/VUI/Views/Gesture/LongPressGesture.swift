@@ -9,36 +9,42 @@ import Foundation
 
 // MARK: - SingleLongPressGesture
 
-/// Internal gesture type used by LongPressGesture.
-/// Implements long-press recognition via an AG modifier chain.
-///
-/// body chain:
-///   storedBody (B, outputs V=Bool) .gated(by: enabler)
-///   enabler = EventListener<TappableEvent>().duration(minimum:).endedBy(maximumDistance)
-///             -> GesturePhase<Double>
-///   result  -> GesturePhase<V=Bool>
 struct SingleLongPressGesture<V, B: Gesture>: Gesture where B.Value == V {
+    var base: B
     var minimumDuration: Double
     var maximumDistance: CGFloat
-    var storedBody: B   // created by LongPressGesture._makeGesture via longPressPhase()
 
     typealias Value = V
 
-    // Enabler chain: EventListener<TappableEvent>.duration(min:).endedBy(maxDist) -> GesturePhase<Double>
-    typealias EnablerBase = ModifierGesture<DurationGesture<MouseEvent>, EventListener<MouseEvent>>
-    typealias Enabler     = EndedByWrapper<EnablerBase>
-    typealias Body        = ModifierGesture<CombineGesture<V, Double, V>, B>
+    typealias Duration = ModifierGesture<
+        DurationGesture<TappableEvent>,
+        EventListener<TappableEvent>
+    >
+    typealias Distance = ModifierGesture<
+        CoordinateSpaceGesture<CGFloat>,
+        DistanceGesture
+    >
+    typealias Enabler = EndedByWrapper<Duration, Distance>
+    typealias Gated = ModifierGesture<Map2Gesture<V, Enabler, V>, B>
+    typealias Filtered = ModifierGesture<EventFilter<V>, Gated>
+    typealias Body = ModifierGesture<DependentGesture<V>, Filtered>
 
     var body: Body {
-        let maxDist = maximumDistance
-        let enabler = EventListener<MouseEvent>()
-            .duration(minimum: minimumDuration)
-            .endedBy { event, startLoc in
-                guard let start = startLoc else { return false }
-                let loc = event.location
-                return hypot(loc.x - start.x, loc.y - start.y) > maxDist
+        let enabler = EndedByWrapper(
+            base: EventListener<TappableEvent>().duration(
+                minimum: minimumDuration,
+                maximum: .infinity
+            ),
+            condition: DistanceGesture(
+                maximumDistance: maximumDistance
+            ).coordinateSpace(.local)
+        )
+        return base
+            .gated(by: enabler)
+            .eventFilter(forType: MouseEvent.self) { event in
+                event.button == .primary
             }
-        return storedBody.gated(by: enabler)
+            .dependency(.pausedUntilFailed)
     }
 }
 
@@ -72,9 +78,9 @@ public struct LongPressGesture: Gesture, PubliclyPrimitiveGesture {
     var internalBody: InternalBody {
         let gate: Gate = EventListener<TappableEvent>().longPressPhase()
         return SingleLongPressGesture(
+            base: gate,
             minimumDuration: minimumDuration,
-            maximumDistance: _maximumDistance,
-            storedBody: gate
+            maximumDistance: _maximumDistance
         )
         .category(.longPress, includeChildren: false)
     }
@@ -96,12 +102,12 @@ extension View {
     ) -> some View {
         self.gesture(
             ModifierGesture(
+                content: LongPressGesture(minimumDuration: minimumDuration,
+                                          maximumDistance: maximumDistance),
                 modifier: CallbacksGesture(
                     callbacks: PressableGestureCallbacks(pressing: onPressingChanged,
                                                          pressed: action)
-                ),
-                body: LongPressGesture(minimumDuration: minimumDuration,
-                                       maximumDistance: maximumDistance)
+                )
             )
         )
     }

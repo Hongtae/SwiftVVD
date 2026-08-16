@@ -7,11 +7,7 @@
 
 import Foundation
 
-protocol ResponderBoundEvent: EventType {
-    var binding: EventBinding? { get set }
-}
-
-struct WheelEvent: ResponderBoundEvent, Equatable {
+struct WheelEvent: EventType, Equatable {
     var timestamp: Time
     var phase: EventPhase
     var binding: EventBinding?
@@ -35,7 +31,7 @@ struct WheelEvent: ResponderBoundEvent, Equatable {
 /// Cross-platform wheel carrier used by the logical hosting scroll view.
 /// The separate carrier preserves both axes and phased host input while the
 /// scalar event remains available to single-axis gesture chains.
-struct SystemWheelEvent: ResponderBoundEvent, Equatable {
+struct SystemWheelEvent: EventType, Equatable {
     enum Kind: Equatable {
         case discrete
         case continuous

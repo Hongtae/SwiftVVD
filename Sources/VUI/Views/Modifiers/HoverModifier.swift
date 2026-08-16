@@ -336,6 +336,19 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier, PrimitiveVi
         }
     }
 
+    struct HoverBehavior: Rule {
+        var _modifier: Attribute<_HoverRegionModifier>
+
+        var value: (inout PlatformItemList) -> Void {
+            let callback = _modifier.value.callback
+            return { list in
+                var item = list.mergedContentItem
+                item.onHover = callback
+                list = PlatformItemList(items: [item])
+            }
+        }
+    }
+
     public static func _makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
@@ -346,66 +359,78 @@ public struct _HoverRegionModifier: ViewModifier, MultiViewModifier, PrimitiveVi
         }
 
         var outputs = body(_Graph(), inputs)
-        guard let eventBindingManager = EventBindingManager.current,
-              inputs.preferences.keys.contains(ViewRespondersKey.self) else {
-            return outputs
-        }
-
-        let innerResponderNodes = outputs.preferences.values(
-            for: ViewRespondersKey.self
-        )
-        let innerRespondersAttr: Attribute<[ViewResponder]>
-        if innerResponderNodes.isEmpty {
-            innerRespondersAttr = graph.makeInput(value: [])
-        } else if innerResponderNodes.count == 1 {
-            innerRespondersAttr = Attribute<[ViewResponder]>(innerResponderNodes[0])
-        } else {
-            innerRespondersAttr = graph.makeRule {
-                var combined = ViewRespondersKey.defaultValue
-                for nodeID in innerResponderNodes {
-                    let val = Attribute<[ViewResponder]>(nodeID).value
-                    ViewRespondersKey.reduce(value: &combined) { val }
+        if let eventBindingManager = EventBindingManager.current,
+           inputs.preferences.keys.contains(ViewRespondersKey.self) {
+            let innerResponderNodes = outputs.preferences.values(
+                for: ViewRespondersKey.self
+            )
+            let innerRespondersAttr: Attribute<[ViewResponder]>
+            if innerResponderNodes.isEmpty {
+                innerRespondersAttr = graph.makeInput(value: [])
+            } else if innerResponderNodes.count == 1 {
+                innerRespondersAttr = Attribute<[ViewResponder]>(
+                    innerResponderNodes[0]
+                )
+            } else {
+                innerRespondersAttr = graph.makeRule {
+                    var combined = ViewRespondersKey.defaultValue
+                    for nodeID in innerResponderNodes {
+                        let val = Attribute<[ViewResponder]>(nodeID).value
+                        ViewRespondersKey.reduce(value: &combined) { val }
+                    }
+                    return combined
                 }
-                return combined
             }
+
+            let responder = HoverResponder(inputs: inputs)
+            let callback: Attribute<HoverCallback> = graph.makeRule(
+                Callback(_modifier: modifier._attribute)
+            )
+            let position = inputs.animatedPosition()
+            let transform = inputs.transform
+            let size = inputs.animatedSize()
+            let isEnabled = inputs.isEnabled
+            let updateBindingManager: Attribute<Void> = graph.makeStatefulRule(
+                HoverResponderChild.UpdateBindingManagerChild(
+                    eventBindingManager: eventBindingManager,
+                    _position: position,
+                    _transform: transform,
+                    _size: size
+                )
+            )
+            updateBindingManager.flags = .transactional
+
+            let respondersAttr: Attribute<[ViewResponder]> =
+                graph.makeStatefulRule(
+                    HoverResponderChild(
+                        responder: responder,
+                        coordinateSpace: .eager(.local),
+                        _callback: callback,
+                        _children: innerRespondersAttr,
+                        _position: position,
+                        _transform: transform,
+                        _size: size,
+                        _isEnabled: isEnabled,
+                        _updateBindingManager: updateBindingManager
+                    )
+                )
+            respondersAttr.setFlags(.removable, mask: .removable)
+            outputs.preferences.setValue(
+                respondersAttr.identifier,
+                for: ViewRespondersKey.self
+            )
         }
 
-        let responder = HoverResponder(inputs: inputs)
-        let callback: Attribute<HoverCallback> = graph.makeRule(
-            Callback(_modifier: modifier._attribute)
-        )
-        let position = inputs.animatedPosition()
-        let transform = inputs.transform
-        let size = inputs.animatedSize()
-        let isEnabled = inputs.isEnabled
-        let updateBindingManager: Attribute<Void> = graph.makeStatefulRule(
-            HoverResponderChild.UpdateBindingManagerChild(
-                eventBindingManager: eventBindingManager,
-                _position: position,
-                _transform: transform,
-                _size: size
+        if inputs[PlatformItemListFlagsInput.self]
+            .contains(SelectionPlatformItemListFlags.flags) {
+            outputs.preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
+                key: PlatformItemList.Key.self,
+                transform: graph.makeRule(
+                    HoverBehavior(_modifier: modifier._attribute)
+                )
             )
-        )
-        updateBindingManager.flags = .transactional
-
-        let respondersAttr: Attribute<[ViewResponder]> = graph.makeStatefulRule(
-            HoverResponderChild(
-                responder: responder,
-                coordinateSpace: .eager(.local),
-                _callback: callback,
-                _children: innerRespondersAttr,
-                _position: position,
-                _transform: transform,
-                _size: size,
-                _isEnabled: isEnabled,
-                _updateBindingManager: updateBindingManager
-            )
-        )
-        respondersAttr.setFlags(.removable, mask: .removable)
-        outputs.preferences.setValue(
-            respondersAttr.identifier,
-            for: ViewRespondersKey.self
-        )
+        }
         return outputs
     }
 }

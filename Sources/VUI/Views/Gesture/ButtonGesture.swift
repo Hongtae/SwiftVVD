@@ -115,11 +115,11 @@ struct PrimitiveButtonGestureCore: Gesture {
                 )
             }
             return ModifierGesture(
-                modifier: MapGesture(body: { $0.map(transform) }),
-                body: ModifierGesture(
-                    modifier: DelayedGesture<SpatialEvent>(),  // duration=0
-                    body: EventListener<SpatialEvent>()
-                )
+                content: ModifierGesture(
+                    content: EventListener<SpatialEvent>(),
+                    modifier: DelayedGesture<SpatialEvent>()  // duration=0
+                ),
+                modifier: MapGesture(body: { $0.map(transform) })
             )
         }
         .dependency(.failIfActive)
@@ -269,14 +269,14 @@ struct PrimitiveButtonGesture: Gesture {
             let pbg = gestureAttr.value
             let outset = outsetAttr.value
             return ModifierGesture(
+                content: PrimitiveButtonGestureCore(
+                    outset: outset,
+                    alwaysActive: pbg.alwaysActive
+                ),
                 modifier: CallbacksGesture(callbacks: PrimitiveButtonGestureCallbacks(
                     hoverCallback: pbg.hoverCallback,
                     buttonPressingAction: pbg.buttonPressingAction
-                )),
-                body: PrimitiveButtonGestureCore(
-                    outset: outset,
-                    alwaysActive: pbg.alwaysActive
-                )
+                ))
             )
         }
 

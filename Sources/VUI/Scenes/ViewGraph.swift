@@ -534,6 +534,23 @@ class ViewGraph: ViewGraphHost {
     private(set) var rootViewResponders: Attribute<[ViewResponder]>?
     // Captures root output construction until the host instantiates outputs.
     private var rootOutputsBuilder: (() -> Void)?
+    private var rootViewInputs: _ViewInputs?
+
+    private var gestureTime: Attribute<Time>?
+    private var gestureEvents: Attribute<[EventID: any EventType]>?
+    private var gestureResetSeed: Attribute<UInt32>?
+    private var gestureInheritedPhase:
+        Attribute<_GestureInputs.InheritedPhase>?
+    private var gesturePreferenceKeys: Attribute<PreferenceKeys>?
+    private var gestureSubgraph: AGSubgraph?
+    private var gesturePhase: OptionalAttribute<GesturePhase<Void>> =
+        OptionalAttribute()
+    private var gestureCategoryAttribute:
+        OptionalAttribute<GestureCategory> = OptionalAttribute()
+    private var windowDragGestureIsActiveAttribute:
+        OptionalAttribute<Bool> = OptionalAttribute()
+    private var gestureAutoScrollAttribute:
+        OptionalAttribute<Bool> = OptionalAttribute()
 
     override var isValid: Bool { rootLayoutComputer != nil }
 
@@ -958,6 +975,16 @@ class ViewGraph: ViewGraphHost {
                 viewInputs.needsGeometry = true
                 featureBuffer.modifyViewInputs(inputs: &viewInputs, graph: self)
                 viewInputs.makeRootMatchedGeometryScope()
+                self.rootViewInputs = viewInputs
+                self.gestureTime = g.makeInput(value: .zero)
+                self.gestureEvents = g.makeInput(value: [:])
+                self.gestureResetSeed = g.makeInput(value: 0)
+                self.gestureInheritedPhase = g.makeInput(
+                    value: _GestureInputs.InheritedPhase.defaultValue
+                )
+                self.gesturePreferenceKeys = g.makeInput(
+                    value: PreferenceKeys()
+                )
 
                 self.rootOutputsBuilder = { [unowned self] in
                     let layoutDirection = viewInputs.base.cachedEnvironment.value.attribute(
@@ -1171,6 +1198,111 @@ class ViewGraph: ViewGraphHost {
             }
             let nextUpdateSeed = data._updateSeed.value &+ 1
             data._updateSeed.setValue(nextUpdateSeed)
+        }
+    }
+
+    @discardableResult
+    func sendEvents(
+        _ events: [EventID: any EventType],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        data.withCurrent {
+            guard let rootViewInputs,
+                  let gestureTime,
+                  let gestureEvents,
+                  let gestureResetSeed,
+                  let gestureInheritedPhase,
+                  let gesturePreferenceKeys else {
+                fatalError("ViewGraph gesture inputs are not initialized")
+            }
+
+            startTransactionUpdate()
+            if gestureTime.value != time {
+                gestureTime.setValue(time)
+                data._updateSeed.setValue(data._updateSeed.value &+ 1)
+                nextUpdate.gestures = NextUpdate()
+            }
+            gestureEvents.setValue(events)
+
+            if gestureSubgraph == nil {
+                let subgraph = AGSubgraph.withCurrent(rootSubgraph) {
+                    AGSubgraph()
+                }
+                gestureSubgraph = subgraph
+                AGSubgraph.withCurrent(subgraph) {
+                    var inputs = _GestureInputs(
+                        rootViewInputs,
+                        viewSubgraph: nil,
+                        events: gestureEvents,
+                        time: gestureTime,
+                        resetSeed: gestureResetSeed,
+                        inheritedPhase: gestureInheritedPhase,
+                        gesturePreferenceKeys: gesturePreferenceKeys
+                    )
+                    inputs.preferences.add(GestureCategory.Key.self)
+                    inputs.preferences.add(
+                        WindowDragGestureIsActiveKey.self
+                    )
+                    inputs.preferences.add(ScrollViewDragAutoScrollKey.self)
+                    let outputs = rootNode.makeGesture(inputs: inputs)
+                    gesturePhase = OptionalAttribute(outputs.phase)
+                    gestureCategoryAttribute = outputs.preferences.value(
+                        for: GestureCategory.Key.self
+                    ).map {
+                        OptionalAttribute(Attribute<GestureCategory>($0))
+                    } ?? OptionalAttribute()
+                    windowDragGestureIsActiveAttribute = outputs.preferences
+                        .value(for: WindowDragGestureIsActiveKey.self)
+                        .map {
+                            OptionalAttribute(Attribute<Bool>($0))
+                        } ?? OptionalAttribute()
+                    gestureAutoScrollAttribute = outputs.preferences.value(
+                        for: ScrollViewDragAutoScrollKey.self
+                    ).map {
+                        OptionalAttribute(Attribute<Bool>($0))
+                    } ?? OptionalAttribute()
+                }
+            }
+
+            guard let gestureSubgraph else {
+                fatalError("ViewGraph gesture subgraph was not created")
+            }
+            finishTransactionUpdate(
+                in: gestureSubgraph,
+                postUpdate: { needsFollowUp in
+                    if needsFollowUp && !events.isEmpty {
+                        gestureEvents.setValue([:])
+                    }
+                },
+                id: nil
+            )
+            return gesturePhase.attribute?.value ?? .possible(nil)
+        }
+    }
+
+    func resetEvents() {
+        data.withCurrent {
+            resetEventsBody()
+        }
+    }
+
+    private func resetEventsBody() {
+        guard let activeGestureSubgraph = gestureSubgraph else { return }
+        self.gestureSubgraph = nil
+        gesturePhase = OptionalAttribute()
+        gestureInheritedPhase?.setValue(.defaultValue)
+        if activeGestureSubgraph.isValid {
+            activeGestureSubgraph.invalidate()
+        }
+        rootViewResponders?.value.forEach { responder in
+            responder.resetGesture()
+        }
+    }
+
+    func gestureCategory() -> GestureCategory? {
+        data.withCurrent {
+            gestureCategoryAttribute.attribute?.value
         }
     }
 

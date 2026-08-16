@@ -341,17 +341,6 @@ class ResponderNode {
 
     func resetGesture() {}
 
-    func isDescendant(of ancestor: ResponderNode) -> Bool {
-        var node: ResponderNode? = self
-        while let current = node {
-            if current === ancestor {
-                return true
-            }
-            node = current.nextResponder
-        }
-        return false
-    }
-
     var sequence: UnfoldSequence<ResponderNode, (ResponderNode?, Bool)> {
         Swift.sequence(first: self) { $0.nextResponder }
     }
@@ -612,6 +601,23 @@ class ViewResponder: ResponderNode, CustomStringConvertible {
 
     override var nextResponder: ResponderNode? {
         parent
+    }
+
+    func isDescendant(of ancestor: ResponderNode) -> Bool {
+        guard self !== ancestor else {
+            return false
+        }
+        var current = nextResponder
+        while let node = current {
+            if node === ancestor {
+                return true
+            }
+            guard let responder = node as? ViewResponder else {
+                return false
+            }
+            current = responder.nextResponder
+        }
+        return false
     }
 
     init(host: (any ViewGraphDelegate)?) {
@@ -1203,7 +1209,7 @@ final class GestureResponder<M: GestureViewModifier>:
     var childSubgraph: AGSubgraph?
     var childViewSubgraph: AGSubgraph?
     lazy var gestureGraph = GestureGraph(rootResponder: self)
-    lazy var bindingBridge: EventBindingBridge = {
+    lazy var bindingBridge: EventBindingBridge & GestureGraphDelegate = {
         let bridge = inputs.makeEventBindingBridge(
             bindingManager: gestureGraph.eventBindingManager,
             responder: self

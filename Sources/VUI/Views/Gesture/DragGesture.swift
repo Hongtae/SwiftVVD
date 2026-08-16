@@ -148,19 +148,19 @@ struct SpatialDragGesture: Gesture {
             SpatialDragGesture.applyPhase(minimumDistance: minDist, allowedDirections: allowed, state: &$0, phase: $1)
         }
         let recognitionBody = RecognitionBody(
-            modifier: StateContainerGesture(body: transform),
-            body: ModifierGesture(
-                modifier: CoordinateSpaceGesture(coordinateSpace: cs),
-                body: ModifierGesture(
+            content: ModifierGesture(
+                content: ModifierGesture(
+                    content: EventListener<MouseEvent>(),
                     modifier: EventFilter<MouseEvent> { event in
                         guard let mouseEvent = MouseEvent(event) else {
                             return true
                         }
                         return mouseEvent.button == .primary
-                    },
-                    body: EventListener<MouseEvent>()
-                )
-            )
+                    }
+                ),
+                modifier: CoordinateSpaceGesture(coordinateSpace: cs)
+            ),
+            modifier: StateContainerGesture(body: transform)
         )
         return recognitionBody.dependency(.pausedUntilFailed)
     }

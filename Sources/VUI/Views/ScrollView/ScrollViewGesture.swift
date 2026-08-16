@@ -17,7 +17,7 @@ struct ScrollGesture: Gesture {
     var allowedDirections: _EventDirections
 
     typealias Body = ModifierGesture<
-        CombineGesture<PanGesture.Value, WheelEvent, Value>,
+        Map2Gesture<PanGesture.Value, EventListener<WheelEvent>, Value>,
         PanGesture
     >
 
@@ -90,14 +90,14 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
         let node = proxy.node
         let scrollGesture = proxy.config.gestureProvider.gesture(proxy: proxy)
         let chain = CallbackGesture(
-            modifier: CallbacksGesture(callbacks: self),
-            body: scrollGesture
+            content: scrollGesture,
+            modifier: CallbacksGesture(callbacks: self)
         )
         return ContentGesture(
+            content: chain,
             modifier: CoordinateSpaceGesture(
                 coordinateSpace: .named(AnyHashable(ObjectIdentifier(node)))
-            ),
-            body: chain
+            )
         )
     }
 
@@ -126,11 +126,6 @@ struct ScrollViewGesture: GestureViewModifier, GestureCallbacks {
         guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
             return outputs
         }
-        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
-              (viewGraph.rendererHost as? WindowController)?.gestureGraph != nil else {
-            return outputs
-        }
-
         let responderNodes = outputs.preferences.preferences
             .filter { $0.key == ViewRespondersKey.self }
             .map(\.value)

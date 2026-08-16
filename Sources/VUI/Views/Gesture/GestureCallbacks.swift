@@ -370,15 +370,15 @@ where Content.Value: Equatable {
 extension Gesture {
     public func onEnded(_ action: @escaping (Self.Value) -> Void) -> _EndedGesture<Self> {
         _EndedGesture(_body: ModifierGesture(
-            modifier: CallbacksGesture(callbacks: EndedCallbacks(ended: action)),
-            body: self))
+            content: self,
+            modifier: CallbacksGesture(callbacks: EndedCallbacks(ended: action))))
     }
 }
 
 extension Gesture where Self.Value: Equatable {
     public func onChanged(_ action: @escaping (Self.Value) -> Void) -> _ChangedGesture<Self> {
         _ChangedGesture(_body: ModifierGesture(
-            modifier: CallbacksGesture(callbacks: ChangedCallbacks(changed: action)),
-            body: self))
+            content: self,
+            modifier: CallbacksGesture(callbacks: ChangedCallbacks(changed: action))))
     }
 }

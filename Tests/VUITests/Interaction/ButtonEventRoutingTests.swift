@@ -45,6 +45,45 @@ final class ButtonEventRoutingTests: XCTestCase {
         XCTAssertEqual(counter.value, 1)
     }
 
+    // ASSERTIONS eventBindingManagerNonFailedConsumptionObserved
+    @MainActor
+    func testWindowRecognizerConsumesBoundPossibleGesturePhase() {
+        let controller = WindowController(
+            content: PossibleGestureRoutingRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PossibleGestureRoutingRoot.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0
+        )))
+
+        _ = controller.handleMouseEvent(event: MouseEvent(
+            type: .cancelled,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 0.01
+        ))
+    }
+
     // ASSERTIONS appKitPressedPointerHoverIsolationObserved
     @MainActor
     func testWindowMouseDragDoesNotCancelButtonActionWithHoverEvent() {
@@ -123,7 +162,6 @@ final class ButtonEventRoutingTests: XCTestCase {
         let root = ButtonBindingRoot(target: target)
         let host = ButtonBindingHost(manager: manager, responderNode: root)
         manager.host = host
-        manager.rootResponder = root
         let eventID = EventID(type: VUI.MouseEvent.self, serial: 41)
 
         XCTAssertTrue(manager.sendDownstream(
@@ -135,10 +173,10 @@ final class ButtonEventRoutingTests: XCTestCase {
                 location: CGPoint(x: 10, y: 10),
                 globalLocation: CGPoint(x: 10, y: 10),
                 modifiers: []
-            )],
-            at: .zero
-        ).isActive)
-        XCTAssertTrue(manager.bindings[eventID]?.responder === target)
+            )]
+        ).contains(eventID))
+        XCTAssertTrue(host.receivedPhases.last?.isActive == true)
+        XCTAssertTrue(manager.eventBindings[eventID]?.responder === target)
         XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
         XCTAssertEqual(root.bindCount, 1)
 
@@ -152,9 +190,9 @@ final class ButtonEventRoutingTests: XCTestCase {
                 location: CGPoint(x: 200, y: 200),
                 globalLocation: CGPoint(x: 200, y: 200),
                 modifiers: []
-            )],
-            at: Time(seconds: 0.01)
-        ).isActive)
+            )]
+        ).contains(eventID))
+        XCTAssertTrue(host.receivedPhases.last?.isActive == true)
         XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
         XCTAssertEqual(root.bindCount, 1)
 
@@ -167,12 +205,179 @@ final class ButtonEventRoutingTests: XCTestCase {
                 location: CGPoint(x: 200, y: 200),
                 globalLocation: CGPoint(x: 200, y: 200),
                 modifiers: []
-            )],
-            at: Time(seconds: 0.02)
-        ).isEnded)
+            )]
+        ).contains(eventID))
+        XCTAssertTrue(host.receivedPhases.last?.isEnded == true)
         XCTAssertTrue(host.receivedEvents.last?[eventID]?.binding?.responder === target)
-        XCTAssertNil(manager.bindings[eventID])
+        XCTAssertNil(manager.eventBindings[eventID])
         XCTAssertEqual(root.bindCount, 1)
+        XCTAssertTrue(manager.isActive)
+    }
+
+    // ASSERTIONS eventBindingManagerDeadlineRedispatchObserved
+    func testEventBindingManagerKeepsTerminalSessionActiveForTimedRedispatch() {
+        let manager = EventBindingManager()
+        let target = ResponderNode()
+        let root = ButtonBindingRoot(target: target)
+        let host = ButtonBindingHost(manager: manager, responderNode: root)
+        manager.host = host
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 43)
+        let deadline = Time(seconds: Time.systemUptime.seconds + 10)
+        host.nextGestureUpdateTimeStorage = deadline
+
+        _ = manager.sendDownstream([
+            eventID: VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .ended,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )
+        ])
+
+        XCTAssertTrue(manager.eventBindings.isEmpty)
+        XCTAssertTrue(manager.isActive)
+        XCTAssertEqual(manager.scheduledEventUpdateTime, deadline)
+
+        host.nextGestureUpdateTimeStorage = .infinity
+        XCTAssertFalse(manager.sendScheduledEventUpdate(
+            at: Time(seconds: deadline.seconds - 0.001)
+        ))
+        XCTAssertTrue(manager.sendScheduledEventUpdate(at: deadline))
+        XCTAssertTrue(host.receivedEvents.last?.isEmpty == true)
+        XCTAssertEqual(manager.scheduledEventUpdateTime, .infinity)
+        XCTAssertTrue(manager.isActive)
+
+        manager.reset()
+        XCTAssertFalse(manager.isActive)
+        XCTAssertEqual(manager.scheduledEventUpdateTime, .infinity)
+    }
+
+    // ASSERTIONS eventBindingManagerCurrentTimeObserved
+    func testEventBindingManagerUsesCurrentMonotonicTimeForGraphDispatch() {
+        let manager = EventBindingManager()
+        let target = ResponderNode()
+        let root = ButtonBindingRoot(target: target)
+        let host = ButtonBindingHost(manager: manager, responderNode: root)
+        manager.host = host
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 42)
+        let before = Time.systemUptime
+
+        _ = manager.sendDownstream([
+            eventID: VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .began,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )
+        ])
+
+        let after = Time.systemUptime
+        let dispatched = host.receivedTimes.last
+        XCTAssertNotNil(dispatched)
+        if let dispatched {
+            XCTAssertGreaterThanOrEqual(dispatched, before)
+            XCTAssertLessThanOrEqual(dispatched, after)
+        }
+    }
+
+    // ASSERTIONS eventBindingBridgeTrackedStateLifecycleObserved
+    func testEventBindingBridgeTracksActiveButNotBeganSourcesForReset() {
+        let manager = EventBindingManager()
+        let target = ResponderNode()
+        let root = ButtonBindingRoot(target: target)
+        let host = ButtonBindingHost(manager: manager, responderNode: root)
+        manager.host = host
+        let bridge = EventBindingBridge(eventBindingManager: manager)
+        let beganSource = ButtonBindingEventSource()
+        let activeSource = ButtonBindingEventSource()
+        let beganID = EventID(type: VUI.MouseEvent.self, serial: 51)
+        let activeID = EventID(type: VUI.MouseEvent.self, serial: 52)
+
+        XCTAssertNil(manager.delegate)
+        XCTAssertTrue(bridge.send(
+            [beganID: VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .began,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )],
+            source: beganSource
+        ).contains(beganID))
+        XCTAssertTrue(bridge.send(
+            [activeID: VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: .active,
+                location: .zero,
+                globalLocation: .zero,
+                modifiers: []
+            )],
+            source: activeSource
+        ).contains(activeID))
+        XCTAssertTrue(manager.isActive)
+
+        bridge.reset(eventSource: activeSource)
+
+        XCTAssertFalse(manager.isActive)
+        XCTAssertEqual(beganSource.attachCount, 0)
+        XCTAssertEqual(activeSource.attachCount, 0)
+    }
+
+    // ASSERTIONS eventSourceTypeCaseOrderObserved
+    // ASSERTIONS eventSourceTypeAllCasesObserved
+    // ASSERTIONS eventBindingBridgeSourceOwnerObserved
+    func testEventBindingBridgeSourceLookupUsesTheBaseNilSurface() {
+        XCTAssertTrue(EventSourceType.allCases.isEmpty)
+
+        let bridge = EventBindingBridge()
+        XCTAssertNil(bridge.source(for: .platformGestureRecognizer))
+        XCTAssertNil(bridge.source(for: .hoverGestureRecognizer))
+        XCTAssertNil(bridge.source(for: .selectGestureRecognizer))
+    }
+
+    // ASSERTIONS eventBindingBridgeTrackedStateLifecycleObserved
+    func testEventBindingBridgeResetWaitsForEveryUnresetActiveSource() {
+        let manager = EventBindingManager()
+        let target = ResponderNode()
+        let root = ButtonBindingRoot(target: target)
+        let host = ButtonBindingHost(manager: manager, responderNode: root)
+        manager.host = host
+        let bridge = EventBindingBridge(eventBindingManager: manager)
+        let firstSource = ButtonBindingEventSource()
+        let secondSource = ButtonBindingEventSource()
+
+        for (serial, source) in [(61, firstSource), (62, secondSource)] {
+            let eventID = EventID(type: VUI.MouseEvent.self, serial: serial)
+            _ = bridge.send(
+                [eventID: VUI.MouseEvent(
+                    timestamp: .zero,
+                    binding: nil,
+                    button: .primary,
+                    phase: .active,
+                    location: .zero,
+                    globalLocation: .zero,
+                    modifiers: []
+                )],
+                source: source
+            )
+        }
+
+        bridge.reset(eventSource: secondSource)
+        XCTAssertTrue(manager.isActive)
+
+        bridge.resetEvents()
+        bridge.reset(eventSource: secondSource)
+        XCTAssertFalse(manager.isActive)
     }
 
     // ASSERTIONS buttonPressedDragBoundaryBindingObserved
@@ -313,8 +518,7 @@ final class ButtonEventRoutingTests: XCTestCase {
                     buttonID: 0,
                     location: point,
                     timestamp: seconds
-                ),
-                at: Time(seconds: seconds)
+                )
             )
         }
 
@@ -347,9 +551,7 @@ final class ButtonEventRoutingTests: XCTestCase {
             timestamp: 0
         )))
 
-        let manager = try XCTUnwrap(
-            controller.gestureGraph?.eventBindingManager
-        )
+        let manager = controller.eventBindingManager
         let hoverID = EventID(type: HoverEvent.self, serial: 91)
         XCTAssertTrue(manager.send(
             [hoverID: HoverEvent(
@@ -357,8 +559,7 @@ final class ButtonEventRoutingTests: XCTestCase {
                 phase: .began,
                 binding: nil,
                 globalLocation: location
-            )],
-            at: .zero
+            )]
         ).isEmpty)
 
         XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
@@ -408,6 +609,120 @@ final class ButtonEventRoutingTests: XCTestCase {
         XCTAssertTrue(consumed.down)
         XCTAssertTrue(consumed.up)
         XCTAssertEqual(counter.value, 1)
+    }
+
+    // ASSERTIONS gestureResponderArbitrationRuntimeObserved
+    @MainActor
+    func testWindowRecognizerDeliversOnlyHighPriorityTapActions() {
+        let recorder = GestureArbitrationRecorder()
+        let controller = makeGestureController(
+            PriorityTapEventRoutingRoot(recorder: recorder)
+        )
+
+        click(controller, at: CGPoint(x: 210, y: 120))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        XCTAssertEqual(recorder.defaultEnded, 0)
+        XCTAssertEqual(recorder.preferredEnded, 1)
+    }
+
+    // ASSERTIONS gestureResponderArbitrationRuntimeObserved
+    @MainActor
+    func testWindowRecognizerDeliversBothSimultaneousTapActions() {
+        let recorder = GestureArbitrationRecorder()
+        let controller = makeGestureController(
+            SimultaneousTapEventRoutingRoot(recorder: recorder)
+        )
+
+        click(controller, at: CGPoint(x: 210, y: 120))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        XCTAssertEqual(recorder.defaultEnded, 1)
+        XCTAssertEqual(recorder.preferredEnded, 1)
+    }
+
+    // ASSERTIONS gestureResponderArbitrationRuntimeObserved
+    @MainActor
+    func testWindowRecognizerReleasesBufferedDefaultDragAfterPreferredFailure() {
+        let recorder = GestureArbitrationRecorder()
+        let controller = makeGestureController(
+            DeferredDragEventRoutingRoot(recorder: recorder)
+        )
+        let start = CGPoint(x: 180, y: 120)
+        let moved = CGPoint(x: 185, y: 120)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .move,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: moved,
+            timestamp: 0.05
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: moved,
+            timestamp: 0.1
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        XCTAssertEqual(recorder.defaultChanged, 2)
+        XCTAssertEqual(recorder.defaultEnded, 1)
+        XCTAssertEqual(recorder.preferredChanged, 0)
+        XCTAssertEqual(recorder.preferredEnded, 0)
+    }
+
+    // ASSERTIONS gestureResponderArbitrationRuntimeObserved
+    @MainActor
+    func testWindowRecognizerDiscardsBufferedDefaultDragAfterPreferredSuccess() {
+        let recorder = GestureArbitrationRecorder()
+        let controller = makeGestureController(
+            DeferredDragEventRoutingRoot(recorder: recorder)
+        )
+        let start = CGPoint(x: 160, y: 120)
+        let moved = CGPoint(x: 208, y: 120)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .move,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: moved,
+            timestamp: 0.05
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: moved,
+            timestamp: 0.1
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        XCTAssertEqual(recorder.defaultChanged, 0)
+        XCTAssertEqual(recorder.defaultEnded, 0)
+        XCTAssertGreaterThan(recorder.preferredChanged, 0)
+        XCTAssertEqual(recorder.preferredEnded, 1)
     }
 
     @MainActor
@@ -514,11 +829,11 @@ final class ButtonEventRoutingTests: XCTestCase {
             redraw: &redraw
         ) { _, _ in }
 
-        let firstBinding = controller.gestureGraph?.eventBinding(
+        let firstBinding = controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 130, y: 120),
             accepting: MouseEvent.self
         )
-        let secondBinding = controller.gestureGraph?.eventBinding(
+        let secondBinding = controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 290, y: 120),
             accepting: MouseEvent.self
         )
@@ -554,7 +869,7 @@ final class ButtonEventRoutingTests: XCTestCase {
             redraw: &redraw
         ) { _, _ in }
 
-        XCTAssertNotNil(controller.gestureGraph?.eventBinding(
+        XCTAssertNotNil(controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 210, y: 120),
             accepting: MouseEvent.self
         ))
@@ -593,7 +908,7 @@ final class ButtonEventRoutingTests: XCTestCase {
             ) { _, _ in }
         }
 
-        let root = controller.gestureGraph?.responderNode as? MultiViewResponder
+        let root = controller.responderNode as? MultiViewResponder
         XCTAssertEqual(
             root?.children.compactMap { $0 as? any AnyGestureResponder }.count,
             2
@@ -619,7 +934,7 @@ final class ButtonEventRoutingTests: XCTestCase {
             redraw: &redraw
         ) { _, _ in }
 
-        let root = controller.gestureGraph?.responderNode as? MultiViewResponder
+        let root = controller.responderNode as? MultiViewResponder
         XCTAssertEqual(
             root?.children.compactMap { $0 as? any AnyGestureResponder }.count,
             14
@@ -650,7 +965,7 @@ final class ButtonEventRoutingTests: XCTestCase {
             redraw: &redraw
         ) { _, _ in }
 
-        let root = controller.gestureGraph?.responderNode as? MultiViewResponder
+        let root = controller.responderNode as? MultiViewResponder
         XCTAssertEqual(
             root?.children.compactMap { $0 as? any AnyGestureResponder }.count,
             14
@@ -679,6 +994,28 @@ final class ButtonEventRoutingTests: XCTestCase {
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(ButtonEventRoutingRoot.self)
+            )
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        return controller
+    }
+
+    @MainActor
+    private func makeGestureController<Content: View>(
+        _ content: Content
+    ) -> WindowController {
+        let controller = WindowController(
+            content: content,
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Content.self)
             )
         )
         var redraw = false
@@ -729,6 +1066,65 @@ private final class ButtonPressRecorder: @unchecked Sendable {
     var actionCount = 0
 }
 
+private final class GestureArbitrationRecorder: @unchecked Sendable {
+    var defaultChanged = 0
+    var defaultEnded = 0
+    var preferredChanged = 0
+    var preferredEnded = 0
+}
+
+private struct PriorityTapEventRoutingRoot: View {
+    let recorder: GestureArbitrationRecorder
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded {
+                recorder.defaultEnded += 1
+            })
+            .highPriorityGesture(TapGesture().onEnded {
+                recorder.preferredEnded += 1
+            })
+            .frame(width: 420, height: 240)
+    }
+}
+
+private struct SimultaneousTapEventRoutingRoot: View {
+    let recorder: GestureArbitrationRecorder
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(TapGesture().onEnded {
+                recorder.defaultEnded += 1
+            })
+            .simultaneousGesture(TapGesture().onEnded {
+                recorder.preferredEnded += 1
+            })
+            .frame(width: 420, height: 240)
+    }
+}
+
+private struct DeferredDragEventRoutingRoot: View {
+    let recorder: GestureArbitrationRecorder
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in recorder.defaultChanged += 1 }
+                    .onEnded { _ in recorder.defaultEnded += 1 }
+            )
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 20)
+                    .onChanged { _ in recorder.preferredChanged += 1 }
+                    .onEnded { _ in recorder.preferredEnded += 1 }
+            )
+            .frame(width: 420, height: 240)
+    }
+}
+
 private final class ButtonBindingRoot: ResponderNode {
     var target: ResponderNode?
     var bindCount = 0
@@ -743,12 +1139,23 @@ private final class ButtonBindingRoot: ResponderNode {
     }
 }
 
+private final class ButtonBindingEventSource: EventBindingSource {
+    private(set) var attachCount = 0
+
+    func attach(to bridge: EventBindingBridge) {
+        attachCount += 1
+    }
+}
+
 private final class ButtonBindingHost: EventGraphHost {
     let eventBindingManager: EventBindingManager
     var responderNode: ResponderNode?
     var focusedResponder: ResponderNode?
-    var nextGestureUpdateTime: Time { .infinity }
+    var nextGestureUpdateTimeStorage: Time = .infinity
+    var nextGestureUpdateTime: Time { nextGestureUpdateTimeStorage }
     var receivedEvents: [[EventID: any EventType]] = []
+    var receivedTimes: [Time] = []
+    var receivedPhases: [GesturePhase<Void>] = []
 
     init(manager: EventBindingManager, responderNode: ResponderNode?) {
         self.eventBindingManager = manager
@@ -761,9 +1168,14 @@ private final class ButtonBindingHost: EventGraphHost {
         at time: Time
     ) -> GesturePhase<Void> {
         receivedEvents.append(events)
-        return events.values.contains { $0.phase.isTerminal }
+        receivedTimes.append(time)
+        let phase: GesturePhase<Void> = events.values.contains {
+            $0.phase.isTerminal
+        }
             ? .ended(())
             : .active(())
+        receivedPhases.append(phase)
+        return phase
     }
 
     func resetEvents() {}
@@ -778,6 +1190,18 @@ private struct ButtonEventRoutingRoot: View {
             counter.value += 1
         }
         .frame(width: 420, height: 240)
+    }
+}
+
+private struct PossibleGestureRoutingRoot: View {
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1_000)
+                    .onEnded { _ in }
+            )
+            .frame(width: 420, height: 240)
     }
 }
 
