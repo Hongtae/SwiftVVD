@@ -305,6 +305,8 @@ final class ContextMenuPresentationSession {
     private var isPresented: Binding<Bool>?
     private var didFinish = false
 
+    var isActive: Bool { !didFinish }
+
     func installLiveContent(sourceGraph: _AGGraph, subgraph: AGSubgraph) {
         self.sourceGraph = sourceGraph
         self.liveContentSubgraph = subgraph
@@ -555,12 +557,31 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         _ item: ContextMenuPresentationItem,
         at origin: CGPoint
     ) {
+        // Hover callbacks are queued Update actions. A primary row action ends
+        // tracking before invoking its closure, but a hover action from the
+        // submenu's final frame may already be queued. Finished-session input
+        // is inert; the ID/controller invariant below applies only while the
+        // menu tree is still tracking.
+        guard menuSession.isActive else { return }
         guard item.item.isEnabled,
               item.isMenu,
               !item.children.isEmpty else {
             return
         }
-        guard openedSubmenuID != item.id else { return }
+        if openedSubmenuID == item.id {
+            guard let submenu = openedSubmenu,
+                  submenu.parentWindow === self else {
+                fatalError("ContextMenuWindowController.openSubmenu lost its active submenu")
+            }
+            // The platform finishes ordering the clicked parent after this
+            // callback. Reassert the existing submenu on the next main-actor
+            // turn so that ordering cannot put its parent above it. Overlay
+            // children already render above their parent and have no window.
+            Task { @MainActor [weak submenu] in
+                submenu?.window?.activate()
+            }
+            return
+        }
         let viewPhase = viewGraph.data.withCurrent {
             guard let phase = viewGraph.phaseAttr else {
                 fatalError("ContextMenuWindowController.openSubmenu requires an instantiated ViewGraph")
@@ -702,6 +723,13 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     }
 
     override func onPresentationChildWindowInactivated() {
+        // A menu and its submenus participate in one tracking session. Moving
+        // activation back to an ancestor in that session must not dismiss the
+        // child; the root still handles activation outside the menu tree.
+        if let parent = parentWindow as? ContextMenuWindowController,
+           parent.menuSession === menuSession {
+            return
+        }
         dismiss()
     }
 }
@@ -1298,6 +1326,9 @@ private struct ContextMenuPopupRow: View {
             }
             .foregroundStyle(rowForeground)
             .background(rowBackground, in: RoundedRectangle(cornerRadius: 4))
+            // The rounded highlight is visual only. Menu selection covers the
+            // complete row rectangle, including its transparent corner pixels.
+            .contentShape(Rectangle())
             ._onButtonGesture(pressing: { pressing in
                 guard !isSectionHeader else {
                     isPressed = false
@@ -1312,8 +1343,15 @@ private struct ContextMenuPopupRow: View {
                     return
                 }
                 if hasSubmenu {
-                    openSubmenu(item, submenuOrigin)
-                    // Submenu primary-action split is not wired yet.
+                    // Plain submenu rows keep the current menu tree open. A
+                    // collected parent selection is momentary: close the whole
+                    // tree before invoking its primary action.
+                    guard let action =
+                        item.item.selectionBehavior?.onSelect else {
+                        return
+                    }
+                    dismiss()
+                    action()
                     return
                 }
                 clearSubmenus()

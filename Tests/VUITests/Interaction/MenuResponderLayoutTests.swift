@@ -220,6 +220,112 @@ final class MenuResponderLayoutTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS nestedMenuPrimaryActionDispatchObserved nestedMenuPopupFrontOrderingObserved
+    @MainActor
+    func testPlainSubmenuParentClickLeavesCompleteMenuTreeOpen() throws {
+        let harness = try makeSubmenuPopupHarness(primaryAction: nil)
+        openSubmenuBeforeParentClick(harness)
+        let parentPoint = harness.popup.presentationPointInParent(
+            forLocalPoint: harness.rowCenter
+        )
+
+        try pressPopupRow(in: harness.parent, at: parentPoint)
+        XCTAssertEqual(presentationChildCount(in: harness.parent), 1)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
+
+        try releasePopupRow(in: harness.parent, at: parentPoint)
+        XCTAssertEqual(presentationChildCount(in: harness.parent), 1)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
+
+        harness.parent.dismissAllPresentationChildren()
+    }
+
+    // ASSERTIONS nestedMenuPrimaryActionDispatchObserved
+    @MainActor
+    func testPrimaryActionSubmenuParentClickDismissesTreeBeforeAction() throws {
+        let recorder = SubmenuPrimaryActionRecorder()
+        let harness = try makeSubmenuPopupHarness {
+            recorder.recordAction()
+        }
+        recorder.parent = harness.parent
+        recorder.popup = harness.popup
+        openSubmenuBeforeParentClick(harness)
+        let parentPoint = harness.popup.presentationPointInParent(
+            forLocalPoint: harness.rowCenter
+        )
+
+        try pressPopupRow(in: harness.parent, at: parentPoint)
+        XCTAssertEqual(presentationChildCount(in: harness.parent), 1)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
+
+        try releasePopupRow(in: harness.parent, at: parentPoint)
+        XCTAssertEqual(recorder.actionCount, 1)
+        XCTAssertEqual(recorder.parentChildCountAtAction, 0)
+        XCTAssertEqual(recorder.popupChildCountAtAction, 0)
+        XCTAssertEqual(presentationChildCount(in: harness.parent), 0)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 0)
+
+        // A platform submenu can finish one last frame after the primary action
+        // ends tracking. Its already-queued hover callback must not reactivate
+        // the closed tree or reinterpret the stale ID as a live-session fault.
+        harness.popup.openSubmenu(
+            harness.item,
+            at: CGPoint(x: 200, y: 0)
+        )
+        XCTAssertEqual(presentationChildCount(in: harness.parent), 0)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 0)
+    }
+
+    // ASSERTIONS nestedMenuParentRowHitRegionObserved
+    @MainActor
+    func testSubmenuParentButtonHitRegionCoversHoverRowCorners() throws {
+        let harness = try makeSubmenuPopupHarness(primaryAction: {})
+        let rootResponder = try XCTUnwrap(
+            harness.popup.viewGraph.responderNode as? MultiViewResponder
+        )
+        let hover = try XCTUnwrap(
+            responderTree(rootResponder).compactMap {
+                $0 as? HoverResponder
+            }.first
+        )
+        let gesture = try XCTUnwrap(
+            responderTree(rootResponder).first {
+                $0 is any AnyGestureResponder
+            }
+        )
+        let inset: CGFloat = 0.25
+        var points = [
+            CGPoint(x: inset, y: inset),
+            CGPoint(x: hover.size.width - inset, y: inset),
+            CGPoint(x: inset, y: hover.size.height - inset),
+            CGPoint(
+                x: hover.size.width - inset,
+                y: hover.size.height - inset
+            ),
+        ]
+        hover.transform.convertGlobal(from: .local, points: &points)
+
+        let hoverHits = hover.containsGlobalPoints(
+            points,
+            cacheKey: nil,
+            options: [.includeHoverResponders, .uncached]
+        )
+        let gestureHits = gesture.containsGlobalPoints(
+            points,
+            cacheKey: nil,
+            options: [.uncached]
+        )
+        for index in points.indices {
+            XCTAssertTrue(hoverHits.mask[index])
+            XCTAssertTrue(
+                gestureHits.mask[index],
+                "The parent-row gesture must cover hover corner \(index)"
+            )
+        }
+
+        harness.parent.dismissAllPresentationChildren()
+    }
+
     // ASSERTIONS resolvedMenuStyleReentryObserved nestedMenuSourcePrecedenceObserved propertyListBidirectionalTailMergeObserved
     func testCompositeContextMenuRetainsNestedMenuRolesAndChildren() throws {
         let controller = WindowController(
@@ -591,6 +697,200 @@ final class MenuResponderLayoutTests: XCTestCase {
         [responder] + responder.children.flatMap(responderTree)
     }
 
+    @MainActor
+    private func makeSubmenuPopupHarness(
+        primaryAction: (() -> Void)?
+    ) throws -> (
+        parent: WindowController,
+        popup: ContextMenuWindowController,
+        item: ContextMenuPresentationItem,
+        rowCenter: CGPoint
+    ) {
+        var child = PlatformItemList.Item(systemItem: .button)
+        child.text = NSAttributedString(string: "Child")
+        child.selectionBehavior = .init(
+            isMomentary: true,
+            isContainerSelection: true,
+            yieldsToContainerSelection: false,
+            isPickerOption: false,
+            visualStyle: .plain,
+            onSelect: {},
+            onDeselect: nil,
+            springLoadingBehavior: .automatic
+        )
+        var submenu = PlatformItemList.Item(systemItem: .menu)
+        submenu.text = NSAttributedString(string: "Submenu")
+        submenu.platformIdentifier = "submenu"
+        submenu.children = PlatformItemList(items: [child])
+        if let primaryAction {
+            submenu.selectionBehavior = .init(
+                isMomentary: true,
+                isContainerSelection: true,
+                yieldsToContainerSelection: false,
+                isPickerOption: false,
+                visualStyle: .plain,
+                onSelect: primaryAction,
+                onDeselect: nil,
+                springLoadingBehavior: .automatic
+            )
+        }
+        let items = contextMenuPresentationItems([submenu])
+        let actions = ContextMenuPopupActions()
+        let session = ContextMenuPresentationSession()
+        let scene = WindowKey(
+            namespace: .app,
+            sceneID: SceneID(SubmenuPopupActionProbe.self)
+        )
+        let parent = WindowController(content: EmptyView(), scene: scene)
+        let popup = ContextMenuWindowController(
+            content: contextMenuPopupContent(items: items, actions: actions),
+            environment: EnvironmentValues(),
+            viewPhase: ViewGraphHost.Phase(),
+            scene: scene,
+            anchor: .zero,
+            items: items,
+            actions: actions,
+            usesPlatformWindow: false,
+            session: session
+        )
+        session.root = popup
+        actions.openSubmenu = { [weak popup] item, origin in
+            popup?.openSubmenu(item, at: origin)
+        }
+        actions.closeSubmenus = { [weak popup] in
+            popup?.closeSubmenus()
+        }
+        actions.dismiss = { [weak session] in
+            session?.dismissAll()
+        }
+        parent.addPresentationChild(child: popup)
+
+        var redraw = false
+        for tick in 0..<2 {
+            parent.updateView(
+                tick: UInt64(tick),
+                delta: 0,
+                date: parent.date,
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw
+            ) { _, _ in }
+        }
+        let rootResponder = try XCTUnwrap(
+            popup.viewGraph.responderNode as? MultiViewResponder
+        )
+        var hitPoints: [CGPoint] = []
+        for y in stride(from: CGFloat(2), through: 238, by: 4) {
+            for x in stride(from: CGFloat(2), through: 418, by: 4) {
+                let point = CGPoint(x: x, y: y)
+                if rootResponder.respondersContaining(point: point).contains(
+                    where: { $0 is any AnyGestureResponder }
+                ) {
+                    hitPoints.append(point)
+                }
+            }
+        }
+        let firstHit = try XCTUnwrap(hitPoints.first)
+        let hitBounds = hitPoints.dropFirst().reduce(
+            CGRect(origin: firstHit, size: .zero)
+        ) { bounds, point in
+            bounds.union(CGRect(origin: point, size: .zero))
+        }
+        return (
+            parent,
+            popup,
+            items[0],
+            CGPoint(x: hitBounds.midX, y: hitBounds.midY)
+        )
+    }
+
+    @MainActor
+    private func openSubmenuBeforeParentClick(
+        _ harness: (
+            parent: WindowController,
+            popup: ContextMenuWindowController,
+            item: ContextMenuPresentationItem,
+            rowCenter: CGPoint
+        )
+    ) {
+        harness.popup.openSubmenu(
+            harness.item,
+            at: CGPoint(x: 200, y: 0)
+        )
+        var redraw = false
+        for tick in 2..<4 {
+            harness.parent.updateView(
+                tick: UInt64(tick),
+                delta: 0,
+                date: harness.parent.date,
+                contentSize: CGSize(width: 420, height: 240),
+                redraw: &redraw
+            ) { _, _ in }
+        }
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
+    }
+
+    @MainActor
+    private func pressPopupRow(
+        in controller: WindowController,
+        at point: CGPoint
+    ) throws {
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: point,
+            timestamp: 0
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+    }
+
+    @MainActor
+    private func releasePopupRow(
+        in controller: WindowController,
+        at point: CGPoint
+    ) throws {
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: point,
+            timestamp: 0.01
+        )))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.03))
+    }
+
+    private func presentationChildCount(
+        in controller: WindowController
+    ) -> Int {
+        var count = 0
+        controller.forEachPresentationChild { _ in count += 1 }
+        return count
+    }
+
+}
+
+private enum SubmenuPopupActionProbe {}
+
+private final class SubmenuPrimaryActionRecorder {
+    weak var parent: WindowController?
+    weak var popup: ContextMenuWindowController?
+    var actionCount = 0
+    var parentChildCountAtAction: Int?
+    var popupChildCountAtAction: Int?
+
+    func recordAction() {
+        actionCount += 1
+        parentChildCountAtAction = childCount(in: parent)
+        popupChildCountAtAction = childCount(in: popup)
+    }
+
+    private func childCount(in controller: WindowController?) -> Int {
+        var count = 0
+        controller?.forEachPresentationChild { _ in count += 1 }
+        return count
+    }
 }
 
 private struct ConditionalContinuousHoverRoot: View {

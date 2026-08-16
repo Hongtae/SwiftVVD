@@ -203,6 +203,94 @@ final class UpdateSchedulerTests: XCTestCase {
         XCTAssertFalse(Update.isActive)
     }
 
+    // ASSERTIONS updateLockSurfaceObserved updateSheetHostScopeObserved
+    // ASSERTIONS updatePopoverHostScopeObserved updateWindowGroupMultiWindowScopeObserved
+    func testPresentationChildFramesShareRootHostContextAcrossThreads() {
+        let parentEntered = DispatchSemaphore(value: 0)
+        let releaseParent = DispatchSemaphore(value: 0)
+        let parentFinished = DispatchSemaphore(value: 0)
+        let childEntered = DispatchSemaphore(value: 0)
+        let childFinished = DispatchSemaphore(value: 0)
+        let independentRootEntered = DispatchSemaphore(value: 0)
+        let independentRootFinished = DispatchSemaphore(value: 0)
+        let scene = WindowKey(
+            namespace: .app,
+            sceneID: SceneID(UpdateSchedulerTests.self)
+        )
+        let parent = HostContextProbeController(
+            entered: parentEntered,
+            release: releaseParent,
+            scene: scene
+        )
+        let child = HostContextProbeController(
+            entered: childEntered,
+            scene: scene
+        )
+        let independentRoot = HostContextProbeController(
+            entered: independentRootEntered,
+            scene: scene
+        )
+        child.parentWindow = parent
+
+        let parentThread = Thread {
+            parent.updateFrame(
+                tick: 0,
+                delta: 0,
+                date: .now,
+                contentSize: CGSize(width: 320, height: 240),
+                shouldDrawFrame: false
+            ) { _, _ in }
+            parentFinished.signal()
+        }
+        parentThread.start()
+        XCTAssertEqual(parentEntered.wait(timeout: .now() + 2), .success)
+
+        // Detaching the weak parent link must not move the child's final frame
+        // onto a fresh lane while the presenting root is still in its frame.
+        child.parentWindow = nil
+
+        let childThread = Thread {
+            child.updateFrame(
+                tick: 0,
+                delta: 0,
+                date: .now,
+                contentSize: CGSize(width: 120, height: 80),
+                shouldDrawFrame: false
+            ) { _, _ in }
+            childFinished.signal()
+        }
+        childThread.start()
+
+        let independentRootThread = Thread {
+            independentRoot.updateFrame(
+                tick: 0,
+                delta: 0,
+                date: .now,
+                contentSize: CGSize(width: 120, height: 80),
+                shouldDrawFrame: false
+            ) { _, _ in }
+            independentRootFinished.signal()
+        }
+        independentRootThread.start()
+
+        XCTAssertEqual(
+            independentRootEntered.wait(timeout: .now() + 2),
+            .success
+        )
+        XCTAssertEqual(
+            independentRootFinished.wait(timeout: .now() + 2),
+            .success
+        )
+        XCTAssertEqual(childEntered.wait(timeout: .now() + 0.1), .timedOut)
+
+        releaseParent.signal()
+
+        XCTAssertEqual(parentFinished.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(childEntered.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(childFinished.wait(timeout: .now() + 2), .success)
+        XCTAssertFalse(Update.isActive)
+    }
+
     func testNestedOverlayControllerDefersActionsUntilParentUpdateFrameEnds() {
         let probe = NestedUpdateScopeProbe()
         let scene = WindowKey(
@@ -234,6 +322,34 @@ final class UpdateSchedulerTests: XCTestCase {
         XCTAssertTrue(probe.parentObservedDeferredAction)
         XCTAssertTrue(probe.actionRan)
         XCTAssertFalse(Update.isActive)
+    }
+}
+
+private final class HostContextProbeController: WindowController, @unchecked Sendable {
+    private let entered: DispatchSemaphore
+    private let release: DispatchSemaphore?
+
+    init(
+        entered: DispatchSemaphore,
+        release: DispatchSemaphore? = nil,
+        scene: WindowKey
+    ) {
+        self.entered = entered
+        self.release = release
+        super.init(content: EmptyView(), scene: scene)
+    }
+
+    override func updateView(
+        tick: UInt64,
+        delta: Double,
+        date: Date,
+        contentSize: CGSize,
+        redraw: inout Bool,
+        _ withGC: WindowContext.WithGraphicsContext
+    ) {
+        XCTAssertTrue(Update.isActive)
+        entered.signal()
+        release?.wait()
     }
 }
 

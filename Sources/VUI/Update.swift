@@ -5,13 +5,14 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
 import Synchronization
 import VVD
 
-// Thread-local update scheduler used to batch graph and event side effects and
-// drain them after the outermost update pass on the current update lane.
+// Update scheduler used to batch graph and event side effects and drain them
+// after the outermost update pass on the current host lane.
 enum Update {
-    private struct Action {
+    fileprivate struct Action {
         let reason: CustomEventTrace.ActionEventType.Reason?
         let thunk: () -> Void
         let id: UInt32
@@ -34,30 +35,67 @@ enum Update {
         }
     }
 
-    private final class State: @unchecked Sendable {
+    fileprivate final class State: @unchecked Sendable {
         var lockDepth = 0
         var depth = 0
         var dispatchDepth = 0
         var actions: [Action] = []
     }
 
+    /// A root window and every window in its presentation tree must share one
+    /// scheduling context.
+    ///
+    /// A platform presentation window owns an independent frame task, but its
+    /// graph work is not independent: popup and modal graphs can read from or
+    /// tear down state in the presenting graph. Sharing only an action mailbox
+    /// is therefore insufficient. The recursive lock serializes the complete
+    /// frame, including drawing, while `State` keeps nested updates and queued
+    /// actions on the same logical host lane.
+    ///
+    /// Every independent root must own a distinct context. Sharing one across
+    /// unrelated roots would unnecessarily serialize otherwise independent UI.
+    /// A presentation child must retain its inherited context through teardown;
+    /// its final frame can overlap the operation that detaches it from its parent.
+    final class HostContext: @unchecked Sendable {
+        fileprivate let lock = NSRecursiveLock()
+        fileprivate let state = State()
+    }
+
     private final class ThreadStateKey: @unchecked Sendable {}
+    private final class HostContextKey: @unchecked Sendable {}
 
     private static let threadStateKey = ThreadStateKey()
+    private static let hostContextKey = HostContextKey()
 
     private static var threadStateKeyPointer: UnsafeRawPointer {
         UnsafeRawPointer(Unmanaged.passUnretained(threadStateKey).toOpaque())
     }
 
-    private static var currentState: State? {
+    private static var hostContextKeyPointer: UnsafeRawPointer {
+        UnsafeRawPointer(Unmanaged.passUnretained(hostContextKey).toOpaque())
+    }
+
+    private static var currentHostContext: HostContext? {
+        guard let pointer = ThreadLocalStorage.get(hostContextKeyPointer) else {
+            return nil
+        }
+        return Unmanaged<HostContext>.fromOpaque(pointer).takeUnretainedValue()
+    }
+
+    private static var currentThreadState: State? {
         guard let pointer = ThreadLocalStorage.get(threadStateKeyPointer) else {
             return nil
         }
         return Unmanaged<State>.fromOpaque(pointer).takeUnretainedValue()
     }
 
+    private static var currentState: State? {
+        currentHostContext?.state ?? currentThreadState
+    }
+
     private static func makeState() -> State {
-        precondition(currentState == nil)
+        precondition(currentHostContext == nil)
+        precondition(currentThreadState == nil)
         let state = State()
         ThreadLocalStorage.set(
             threadStateKeyPointer,
@@ -66,17 +104,58 @@ enum Update {
         return state
     }
 
+    static func withHostContext<Result>(
+        _ context: HostContext,
+        _ body: () throws -> Result
+    ) rethrows -> Result {
+        if let currentHostContext {
+            precondition(
+                currentHostContext === context,
+                "Nested window updates must use the same Update.HostContext."
+            )
+            return try body()
+        }
+        precondition(
+            currentThreadState == nil,
+            "A host update context cannot replace an active thread-local Update state."
+        )
+
+        ThreadLocalStorage.set(
+            hostContextKeyPointer,
+            Unmanaged.passUnretained(context).toOpaque()
+        )
+        defer { ThreadLocalStorage.set(hostContextKeyPointer, nil) }
+        return try withExtendedLifetime(context, body)
+    }
+
     private static var isOwner: Bool {
         currentState?.lockDepth ?? 0 > 0
     }
 
     private static func lock() {
-        let state = currentState ?? makeState()
+        if let context = currentHostContext {
+            context.lock.lock()
+            context.state.lockDepth += 1
+            return
+        }
+        let state = currentThreadState ?? makeState()
         state.lockDepth += 1
     }
 
     private static func unlock() {
-        guard let state = currentState else {
+        if let context = currentHostContext {
+            let state = context.state
+            precondition(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
+            state.lockDepth -= 1
+            if state.lockDepth == 0 {
+                precondition(state.depth == 0, "Update state released while an update is active.")
+                precondition(state.actions.isEmpty, "Update state released with queued actions.")
+            }
+            context.lock.unlock()
+            return
+        }
+
+        guard let state = currentThreadState else {
             preconditionFailure("Update.unlock() called without a matching Update.lock().")
         }
         precondition(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")

@@ -41,6 +41,14 @@ class WindowController: WindowDelegate,
 
     var windowContext: WindowContext?
 
+    // Each controller must start with an independent scheduling context so it
+    // can act as a root. When it becomes a presentation child, parentWindow's
+    // observer must replace this reference with the root tree's context. Do not
+    // derive it dynamically from parentWindow: detachment clears that weak link
+    // before teardown, while the child's final platform frame may still run
+    // concurrently with the root.
+    private var hostUpdateContext = Update.HostContext()
+
     private var _titleGraph: _GraphValue<Text>?
     private var _titleString: String = ""
     private var _style: PlatformWindowStyle
@@ -852,6 +860,24 @@ class WindowController: WindowDelegate,
     func updateFrame(tick: UInt64, delta: Double, date: Date,
                      contentSize: CGSize, shouldDrawFrame: Bool,
                      _ withGC: WindowContext.WithGraphicsContext) {
+        let hostUpdateContext = self.hostUpdateContext
+        Update.withHostContext(hostUpdateContext) {
+            Update.locked {
+                updateFrameBody(
+                    tick: tick,
+                    delta: delta,
+                    date: date,
+                    contentSize: contentSize,
+                    shouldDrawFrame: shouldDrawFrame,
+                    withGC
+                )
+            }
+        }
+    }
+
+    private func updateFrameBody(tick: UInt64, delta: Double, date: Date,
+                                 contentSize: CGSize, shouldDrawFrame: Bool,
+                                 _ withGC: WindowContext.WithGraphicsContext) {
         self.date = date
 
         // Pull render context from delegate (ViewGraphRenderDelegate).
@@ -2415,8 +2441,17 @@ class WindowController: WindowDelegate,
     // WindowController owns its dynamic children directly (strong refs).
     // AppWindowsController is not involved in dynamic presentation-child/modal lifetime.
 
-    // Parent that opened this window (nil = root window).
-    weak var parentWindow: WindowController?
+    // Parent that opened this window (nil = root window). Keep the inherited
+    // host context when the parent is cleared so teardown and any in-flight
+    // final frame remain serialized with the presentation tree. A later
+    // reparenting replaces it with the new tree's context.
+    weak var parentWindow: WindowController? {
+        didSet {
+            if let parentWindow {
+                hostUpdateContext = parentWindow.hostUpdateContext
+            }
+        }
+    }
 
     // Overlay descendants use this hook while converting their local placement
     // into the nearest platform host's coordinate space. Root/platform
