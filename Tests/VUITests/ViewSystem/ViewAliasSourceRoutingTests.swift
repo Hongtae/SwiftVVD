@@ -9,6 +9,10 @@ private final class ViewAliasSourceRecorder {
     var styleableContextType: Any.Type?
 }
 
+private final class PlatformItemActionRecorder {
+    var count = 0
+}
+
 private struct ViewAliasSourceProbe: View, TestPrimitiveView {
     typealias Body = Never
 
@@ -260,11 +264,63 @@ final class ViewAliasSourceRoutingTests: XCTestCase {
                 let item = try XCTUnwrap(
                     generator.value.buttonItems.first
                 )
-                XCTAssertEqual(item.label?.string, "Inspect")
+                XCTAssertEqual(item.text?.string, "Inspect")
                 XCTAssertTrue(
                     item.namedResolvedImage != nil
                         || item.resolvedImage != nil
                 )
+            }
+        }
+    }
+
+    func testDefaultButtonStyleCollectsButtonActionInMenuContext() throws {
+        let recorder = PlatformItemActionRecorder()
+        let content = Button("Action") {
+            recorder.count += 1
+        }
+        .modifier(StyleContextWriter<MenuStyleContext>())
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        try viewGraph.data.withCurrent {
+            try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let graph = viewGraph.data.graph
+                let attribute = graph.makeInput(value: content)
+                let generator: Attribute<PlatformItemList> =
+                    graph.makeStatefulRule(
+                        PlatformItemListGenerator<
+                            AllPlatformItemListFlags,
+                            ModifiedContent<
+                                Button<Text>,
+                                StyleContextWriter<MenuStyleContext>
+                            >
+                        >(
+                            content: attribute,
+                            inputs: makeViewInputs(graph: graph),
+                            inputsIncludeGeometry: false
+                        )
+                    )
+
+                let item = try XCTUnwrap(
+                    generator.value.buttonItems.first
+                )
+                let selectionBehavior = try XCTUnwrap(
+                    item.selectionBehavior
+                )
+                let action = try XCTUnwrap(selectionBehavior.onSelect)
+                action()
+
+                XCTAssertEqual(item.text?.string, "Action")
+                XCTAssertTrue(item.isEnabled)
+                XCTAssertTrue(selectionBehavior.isMomentary)
+                XCTAssertTrue(selectionBehavior.isContainerSelection)
+                XCTAssertFalse(selectionBehavior.yieldsToContainerSelection)
+                XCTAssertEqual(recorder.count, 1)
             }
         }
     }

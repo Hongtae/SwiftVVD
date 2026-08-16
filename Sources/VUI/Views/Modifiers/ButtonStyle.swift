@@ -97,6 +97,31 @@ public struct DefaultButtonStyle: PrimitiveButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
+        Button(configuration)
+            .modifier(
+                StaticIf<
+                    StyleContextAcceptsPredicate<MenuStyleContext>,
+                    PrimitiveButtonStyleContainerModifier<
+                        PlatformItemListButtonStyle
+                    >,
+                    EmptyModifier
+                >(
+                    trueBody: PrimitiveButtonStyleContainerModifier(
+                        style: PlatformItemListButtonStyle()
+                    ),
+                    falseBody: EmptyModifier()
+                )
+            )
+            .modifier(
+                PrimitiveButtonStyleContainerModifier(
+                    style: PlatformFallbackButtonStyle()
+                )
+            )
+    }
+}
+
+struct PlatformFallbackButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
         _DefaultButtonStyleBody(configuration: configuration)
     }
 }
