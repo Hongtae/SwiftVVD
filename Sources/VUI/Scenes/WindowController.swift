@@ -29,6 +29,21 @@ class WindowController: WindowDelegate,
     // MARK: - Types
 
     typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
+
+    // This resolver is the one-shot boundary between graph evaluation and
+    // platform-window work. The caller invokes it while the child graph's
+    // update lane owns graph access. A resolver must therefore instantiate the
+    // child graph, evaluate graph-backed layout, and reduce the result to plain
+    // values before creating a MainActor task.
+    //
+    // The MainActor handoff is limited to platform-window creation and mutation
+    // plus invocation of AttachWindow. It must not read ViewGraph, Attribute,
+    // LayoutComputer, or any state whose accessor evaluates the graph.
+    //
+    // AttachWindow may be retained only by that first queued actor handoff. It
+    // must not be held until a later layout or frame: the parent queues its
+    // overlay decision as soon as this resolver returns, so a delayed callback
+    // would allow both presentation paths to claim the same child.
     typealias AttachWindowResolver = (AttachWindow?) -> Void
 
     // Values inherited by presentation and modal windows from their parent.
@@ -784,6 +799,12 @@ class WindowController: WindowDelegate,
 
     // MARK: - Platform Window Lifecycle
 
+    // Presentation resolvers call this after leaving their graph update lane.
+    // Keep the complete method graph-free: title, style, configuration, and
+    // every other creation argument must already be cached plain state. The
+    // same restriction applies to onWindowCreated overrides. If window setup
+    // needs a graph-derived value, resolve it before the MainActor handoff and
+    // pass the reduced value through the platform attachment path.
     @MainActor
     func makeWindow() -> (any PlatformWindow)? {
         let isNew = windowContext?.window == nil
@@ -1360,6 +1381,7 @@ class WindowController: WindowDelegate,
         modalChildren.withLock { $0.isEmpty }
     }
 
+    // Called inside makeWindow and therefore inherits its graph-free rule.
     func onWindowCreated(_: any PlatformWindow) {}
 
     var appWindowsController: AppWindowsController? { appContext?.appWindowsController }
@@ -2629,15 +2651,29 @@ class WindowController: WindowDelegate,
 
         if !asOverlay, let attachWindow = entry.attachWindow {
             // Race guard: a preference-driven session can be dismissed before
-            // attachWindow creates the platform window.
+            // its window resolver creates the platform window.
             if let presented = modalChildren.withLock({ $0.first?.session.isPresented }),
                !presented.wrappedValue {
                 removeModal(child: child, reason: .cancelled)
                 return
             }
 
-            attachWindow { [weak self, weak child] childWindow in
-                guard let self else { return }
+            attachWindow({ [weak self, weak child] childWindow in
+                guard let self, let child else {
+                    childWindow.close()
+                    return
+                }
+
+                let isCurrent = self.modalChildren.withLock { entries in
+                    guard let first = entries.indices.first else { return false }
+                    return entries[first].controller === child &&
+                        !entries[first].initiated
+                }
+                guard isCurrent else {
+                    childWindow.close()
+                    return
+                }
+
                 let ok = self.window?.presentModalWindow(
                     childWindow,
                     completionHandler: { [weak self, weak child] in
@@ -2649,56 +2685,57 @@ class WindowController: WindowDelegate,
                 ) ?? false
                 if ok {
                     let didInitiate = self.modalChildren.withLock { entries in
-                        guard let child,
-                              let i = entries.firstIndex(where: { $0.controller === child }) else {
+                        guard let first = entries.indices.first,
+                              entries[first].controller === child,
+                              !entries[first].initiated else {
                             return false
                         }
-                        entries[i].isOverlay = false
-                        entries[i].initiated = true
+                        entries[first].isOverlay = false
+                        entries[first].initiated = true
                         return true
                     }
                     if didInitiate {
-                        child?.onModalSessionInitiated(transaction: entry.presentationTransaction)
+                        child.onModalSessionInitiated(
+                            transaction: entry.presentationTransaction
+                        )
+                        self.enqueueModalSessionInputReset(
+                            reason: "modal session initiated"
+                        )
+                    } else {
+                        _ = self.window?.dismissModalWindow(childWindow)
+                        childWindow.close()
                     }
                 } else {
                     Log.error("WindowController: presentModalWindow failed")
-                    if let child {
-                        self.removeModal(child: child, reason: .cancelled)
-                    }
+                    self.removeModal(child: child, reason: .cancelled)
                 }
-            }
+            })
 
-            // attachWindow is expected to create/attach the platform window through the
-            // MainActor AttachWindow callback. Enqueue this fallback after that handoff.
-            // if attach never marks the entry as initiated, default to overlay mode.
+            // The resolver may enqueue one MainActor handoff before invoking
+            // AttachWindow. Queue the fallback afterwards so that handoff gets
+            // the first opportunity to mark this entry as initiated.
             Task { @MainActor [weak self, weak child] in
                 guard let self, let child else { return }
-                let result = self.modalChildren.withLock { entries -> (initiated: Bool, fallback: Bool) in
-                    guard let i = entries.firstIndex(where: { $0.controller === child }) else {
-                        return (false, false)
+                let didInitiate = self.modalChildren.withLock { entries in
+                    guard let first = entries.indices.first,
+                          entries[first].controller === child,
+                          !entries[first].initiated else {
+                        return false
                     }
-                    if entries[i].initiated {
-                        return (true, false)
-                    } else {
-                        // initiated == false means AttachWindow did not run.
-                        entries[i].isOverlay = true
-                        entries[i].initiated = true
-                        return (true, true)
-                    }
+                    entries[first].isOverlay = true
+                    entries[first].initiated = true
+                    return true
                 }
-                if result.fallback {
-                    child.onModalSessionInitiated(transaction: entry.presentationTransaction)
-                }
-                if result.initiated {
-                    self.resetGestureHandlers(reason: "modal session initiated")
-                    self.handleMouseHover(at: .zero,
-                                          deviceID: 0,
-                                          isTopMost: false,
-                                          at: self.currentTimestamp)
+                if didInitiate {
+                    child.onModalSessionInitiated(
+                        transaction: entry.presentationTransaction
+                    )
+                    self.enqueueModalSessionInputReset(
+                        reason: "modal overlay fallback initiated"
+                    )
                 }
             }
         } else {
-            // Overlay forced or no attachWindow: notify with nil, then mark initiated.
             entry.attachWindow?(nil)
             modalChildren.withLock { entries in
                 if let i = entries.firstIndex(where: { $0.controller === child }) {
@@ -2715,8 +2752,33 @@ class WindowController: WindowDelegate,
         }
     }
 
+    private func enqueueModalSessionInputReset(reason: String) {
+        // Platform presentation completion runs on the main actor while the
+        // owning graph may be evaluated elsewhere. Graph-backed input state
+        // must always be reset through that graph's input lane.
+        enqueueInputAction { [weak self] in
+            guard let self else { return }
+            self.resetGestureHandlers(reason: reason)
+            self.handleMouseHover(at: .zero,
+                                  deviceID: 0,
+                                  isTopMost: false,
+                                  at: self.currentTimestamp)
+        }
+    }
+
     // Show the front of the queue after the previous active modal was removed.
     private func _showNextInQueue() {
+        guard modalChildren.withLock({ !$0.isEmpty }) else { return }
+
+        // Removal can originate in a platform completion callback. Resolve the
+        // next child's graph-backed attachment from this controller's update
+        // lane instead of evaluating that child on the callback thread.
+        enqueueInputAction { [weak self] in
+            self?._activateNextModalInQueue()
+        }
+    }
+
+    private func _activateNextModalInQueue() {
         guard let entry = modalChildren.withLock({ $0.first }) else { return }
         let child = entry.controller
         // Race guard: skip if preference-driven session is already dismissed.

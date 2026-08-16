@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 import VVD
 
 enum TransitionAnimationKey: String, Hashable {
@@ -287,18 +288,27 @@ final class ModalPresentationContext: @unchecked Sendable {
     func onViewLoaded() {
     }
 
-    func onViewLayoutChanged(controller: WindowController) {
+    // This method reads the root LayoutComputer and publishes graph-backed root
+    // geometry. Call it only while the controller's graph update lane is
+    // current; callers must carry the returned value, rather than this context,
+    // across a platform actor boundary.
+    func prepareInitialLayout(controller: WindowController) -> CGSize {
         guard let layoutComputer = controller.viewGraph.rootLayoutComputer else {
             fatalError("ModalWindowController: rootLayoutComputer not set: AG wiring incomplete!")
         }
 
         let fittedSize = fittedContentSize(controller: controller,
                                            layoutComputer: layoutComputer)
-
-        let sizeChanged = fittedSize != windowSize
         windowSize = fittedSize
         setRootSize(controller: controller, fittedSize: fittedSize)
         needsInputPlacement = false
+        return fittedSize
+    }
+
+    func onViewLayoutChanged(controller: WindowController) {
+        let previousSize = windowSize
+        let fittedSize = prepareInitialLayout(controller: controller)
+        let sizeChanged = fittedSize != previousSize
 
         if let platformWindow = controller.window {
             let shouldAutoResize = controller.style.contains(.autoResize)
@@ -621,11 +631,20 @@ final class ModalPresentationContext: @unchecked Sendable {
 // Content path was restored. The erased bridge should be replaced after the
 // sheet storage and type-change lifecycle are reconstructed.
 final class ModalWindowController: WindowController, @unchecked Sendable {
+    private enum PlatformWindowPresentationPhase: Sendable {
+        case unattached
+        case awaitingAttachment
+        case attached
+        case ended
+    }
+
     override var style: PlatformWindowStyle { [.autoResize] }
     override var observesRootFittedSizeForLayoutUpdates: Bool { true }
     var modalSessionPrefersPlatformWindow: Bool { usesPlatformWindow }
 
     private let presentationContext: ModalPresentationContext
+    private let platformWindowPresentationState =
+        Mutex(PlatformWindowPresentationPhase.unattached)
     private let usesPlatformWindow: Bool
 
     init(crossGraphContent contentAttr: Attribute<AnyView>,
@@ -645,16 +664,59 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
     }
 
     func resolveModalWindowAttachment(_ attach: WindowController.AttachWindow?) {
+        guard let attach, usesPlatformWindow else { return }
+        let shouldResolve = platformWindowPresentationState.withLock { state in
+            guard state == .unattached else { return false }
+            state = .awaitingAttachment
+            return true
+        }
+        guard shouldResolve else { return }
+
+        // Finish every graph operation before creating the actor task below.
+        // MainActor owns the platform window, but it is not an owner of this
+        // ViewGraph: moving instantiateIfNeeded(), withCurrent, or fitted-size
+        // evaluation into that task would enter the graph from the wrong lane.
+        viewGraph.instantiateIfNeeded()
+        let initialSize = viewGraph.data.withCurrent {
+            presentationContext.prepareInitialLayout(controller: self)
+        }
+
+        // Capture only the reduced geometry. Keep this closure restricted to
+        // attachment-phase synchronization and platform-window operations.
         Task { @MainActor [weak self] in
-            guard let attach, let self else { return }
-            guard self.usesPlatformWindow else { return }
+            guard let self else { return }
+            let shouldCreate = self.platformWindowPresentationState.withLock {
+                $0 == .awaitingAttachment
+            }
+            guard shouldCreate else { return }
             guard let childWindow = self.makeWindow() else {
+                self.platformWindowPresentationState.withLock { state in
+                    if state == .awaitingAttachment {
+                        state = .unattached
+                    }
+                }
                 Log.error("ModalWindowController: failed to create platform modal window")
                 return
             }
-            childWindow.contentSize = CGSize(width: 10, height: 10)
+            let shouldAttach = self.platformWindowPresentationState.withLock {
+                $0 == .awaitingAttachment
+            }
+            guard shouldAttach else {
+                childWindow.close()
+                return
+            }
+
+            // AttachWindow may present the modal synchronously. Install the
+            // graph-derived size before invoking it, and invoke it in this first
+            // actor turn so the parent's overlay fallback cannot win the race.
+            childWindow.contentSize = initialSize
             childWindow.origin = .zero
             attach(childWindow)
+            self.platformWindowPresentationState.withLock { state in
+                if state == .awaitingAttachment {
+                    state = .attached
+                }
+            }
         }
     }
 
@@ -664,6 +726,11 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
 
     override func onViewLayoutUpdated() {
         presentationContext.onViewLayoutChanged(controller: self)
+    }
+
+    override func endPresentationSession() {
+        platformWindowPresentationState.withLock { $0 = .ended }
+        super.endPresentationSession()
     }
 
     override func layoutContentSize(from contentSize: CGSize) -> CGSize {

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 import VVD
 
 enum PresentationAvailableFrameSpace {
@@ -160,6 +161,13 @@ private func presentationContentScreenFrame(for window: any PlatformWindow,
 // Do not add a second popup or utility/popup controller stack for the same
 // mechanics.
 class PresentationChildWindowController: WindowController, @unchecked Sendable {
+    private enum PlatformWindowPresentationState: Sendable {
+        case unattached
+        case awaitingInitialLayout
+        case presented
+        case ended
+    }
+
     override var observesRootFittedSizeForLayoutUpdates: Bool { true }
     var prefersPlatformWindowPresentation: Bool { usesPlatformWindow }
 
@@ -180,6 +188,8 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     private let usesPlatformWindow: Bool
     private var frameInParent: CGRect
     private var didTearDown = false
+    private let platformWindowPresentationState =
+        Mutex(PlatformWindowPresentationState.unattached)
 
     init<Content: View>(content: Content,
                         environment: EnvironmentValues = .tracking(),
@@ -315,31 +325,70 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
         }
     }
 
-    // Creates an actual platform child window when requested. If platform-window
-    // presentation is disabled or unsupported, WindowController keeps this child
-    // as an overlay and drives it through the same layout/event hooks.
+    // Creates and attaches a hidden platform child window when requested. The
+    // graph-derived initial frame is installed before attachment, and the first
+    // normal layout owns its initial visible presentation.
+    //
+    // If platform-window presentation is disabled or unsupported,
+    // WindowController keeps this child as an overlay and drives it through the
+    // same layout/event hooks.
     func resolvePresentationWindowAttachment(_ attach: WindowController.AttachWindow?) {
+        guard let attach, usesPlatformWindow else { return }
+        let shouldResolve = platformWindowPresentationState.withLock { state in
+            guard state == .unattached else { return false }
+            state = .awaitingInitialLayout
+            return true
+        }
+        guard shouldResolve else { return }
+
+        // Finish every graph operation before creating the actor task below.
+        // MainActor owns the platform window, but it is not an owner of this
+        // ViewGraph: moving instantiateIfNeeded(), withCurrent, or fitted-frame
+        // evaluation into that task would enter the graph from the wrong lane.
+        viewGraph.instantiateIfNeeded()
+        let initialFrame = viewGraph.data.withCurrent {
+            updateFittedFrame()
+        }
+
+        // Capture only the reduced geometry. Keep this closure restricted to
+        // attachment-phase synchronization and platform-window operations.
         Task { @MainActor [weak self] in
-            guard let attach, let self else { return }
-            guard self.usesPlatformWindow else { return }
+            guard let self else { return }
             if let requiredStyle = self.requiredPlatformWindowStyle {
                 guard Platform.factory.supportedWindowStyles(requiredStyle)
                     .contains(requiredStyle) else {
+                    self.platformWindowPresentationState.withLock { state in
+                        if state == .awaitingInitialLayout {
+                            state = .unattached
+                        }
+                    }
                     Log.error("\(type(of: self)): \(requiredStyle) style not supported on this platform")
                     return
                 }
             }
+            let shouldCreate = self.platformWindowPresentationState.withLock {
+                $0 == .awaitingInitialLayout
+            }
+            guard shouldCreate else { return }
             guard let childWindow = self.makeWindow() else {
+                self.platformWindowPresentationState.withLock { state in
+                    if state == .awaitingInitialLayout {
+                        state = .unattached
+                    }
+                }
                 Log.error("\(type(of: self)): failed to create platform presentation window")
                 return
             }
-            let size = self.frameInParent.size == .zero
-                ? CGSize(width: 10, height: 10)
-                : self.frameInParent.size
-            childWindow.contentSize = size
-            childWindow.origin = self.platformOrigin(for: self.frameInParent.origin)
+            let shouldAttach = self.platformWindowPresentationState.withLock {
+                $0 == .awaitingInitialLayout
+            }
+            guard shouldAttach else {
+                childWindow.close()
+                return
+            }
+            childWindow.contentSize = initialFrame.size
+            childWindow.origin = self.platformOrigin(for: initialFrame.origin)
             attach(childWindow)
-            childWindow.activate()
         }
     }
 
@@ -391,8 +440,11 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
                       height: abs(p1.y - p0.y))
     }
 
-    override func onViewLayoutUpdated() {
-        guard let layoutComputer = viewGraph.rootLayoutComputer else { return }
+    @discardableResult
+    private func updateFittedFrame() -> CGRect {
+        guard let layoutComputer = viewGraph.rootLayoutComputer else {
+            fatalError("Presentation child layout computer is not initialized.")
+        }
         let fittedSize = viewGraph.rootFittedSize?.value ??
             layoutComputer.value.sizeThatFits(.unspecified)
         let size = CGSize(width: max(1, fittedSize.width),
@@ -404,13 +456,36 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
             viewGraph.sizeAttr?.setValue(ViewSize(size))
         }
 
+        parentWindow?.updatePresentationChild(child: self, frame: frame)
+        return frame
+    }
+
+    override func onViewLayoutUpdated() {
+        let frame = updateFittedFrame()
+
         if let platformWindow = window {
-            Task { @MainActor [platformWindow, frame] in
+            Task { @MainActor [weak self, platformWindow, frame] in
+                guard let self else { return }
+                let canApplyFrame = self.platformWindowPresentationState
+                    .withLock { $0 != .ended }
+                guard canApplyFrame else { return }
+
+                // Window operations can synchronously emit lifecycle events,
+                // so never invoke them while holding the presentation lock.
                 platformWindow.contentSize = frame.size
                 platformWindow.origin = self.platformOrigin(for: frame.origin)
+
+                let shouldActivate = self.platformWindowPresentationState
+                    .withLock { state in
+                        guard state == .awaitingInitialLayout else { return false }
+                        state = .presented
+                        return true
+                    }
+                if shouldActivate {
+                    platformWindow.activate()
+                }
             }
         }
-        parentWindow?.updatePresentationChild(child: self, frame: frame)
     }
 
     override func layoutContentSize(from contentSize: CGSize) -> CGSize {
@@ -514,6 +589,9 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     private func tearDownPresentationChildSession() {
         guard !didTearDown else { return }
         didTearDown = true
+        platformWindowPresentationState.withLock { state in
+            state = .ended
+        }
     }
 }
 

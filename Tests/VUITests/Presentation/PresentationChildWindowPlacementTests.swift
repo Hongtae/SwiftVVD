@@ -4,7 +4,182 @@ import XCTest
 
 final class PresentationChildWindowPlacementTests: XCTestCase {
     @MainActor
-    func testOverlayModalRecentersAfterParentResizeAndTopAlignsWhenTooTall() throws {
+    func testPlatformChildActivatesAfterApplyingItsFirstFittedFrame() async throws {
+        let host = PresentationPlacementHostController(
+            contentSize: CGSize(width: 640, height: 420)
+        )
+        let platformWindow = DeferredPresentationWindow()
+        let child = DeferredActivationPresentationController(
+            platformWindow: platformWindow,
+            content: Color.clear.frame(width: 200, height: 100),
+            scene: host.scene
+        )
+
+        host.addPresentationChild(child: child) { [weak child] attach in
+            child?.resolvePresentationWindowAttachment(attach)
+        }
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        XCTAssertFalse(
+            platformWindow.events.contains(.contentSize(CGSize(width: 10, height: 10)))
+        )
+        XCTAssertTrue(platformWindow.events.contains { event in
+            guard case .contentSize(let size) = event else { return false }
+            return size.width > 10 && size.height > 10
+        })
+        XCTAssertFalse(platformWindow.events.contains(.activate))
+
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Fixed presentation content should not request graphics resources.")
+        }
+        var redraw = false
+        child.updateView(
+            tick: 0,
+            delta: 0,
+            date: child.date,
+            contentSize: CGSize(width: 10, height: 10),
+            redraw: &redraw,
+            withGC
+        )
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        let activationIndex = platformWindow.events.firstIndex(of: .activate)
+        let fittedSizeIndex = platformWindow.events.firstIndex {
+            if case .contentSize(let size) = $0 {
+                return size.width > 10 && size.height > 10
+            }
+            return false
+        }
+        XCTAssertNotNil(fittedSizeIndex)
+        XCTAssertNotNil(activationIndex)
+        if let fittedSizeIndex, let activationIndex {
+            XCTAssertLessThan(fittedSizeIndex, activationIndex)
+        }
+        XCTAssertEqual(
+            platformWindow.events.filter { $0 == .activate }.count,
+            1
+        )
+    }
+
+    @MainActor
+    func testEndedPlatformChildDoesNotActivateFromLateInitialLayout() async throws {
+        let host = PresentationPlacementHostController(
+            contentSize: CGSize(width: 640, height: 420)
+        )
+        let platformWindow = DeferredPresentationWindow()
+        let child = DeferredActivationPresentationController(
+            platformWindow: platformWindow,
+            content: Color.clear.frame(width: 200, height: 100),
+            scene: host.scene
+        )
+
+        host.addPresentationChild(child: child) { [weak child] attach in
+            child?.resolvePresentationWindowAttachment(attach)
+        }
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+        host.removePresentationChild(child: child)
+
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Fixed presentation content should not request graphics resources.")
+        }
+        var redraw = false
+        child.updateView(
+            tick: 0,
+            delta: 0,
+            date: child.date,
+            contentSize: CGSize(width: 10, height: 10),
+            redraw: &redraw,
+            withGC
+        )
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        XCTAssertFalse(platformWindow.events.contains(.activate))
+    }
+
+    @MainActor
+    func testPlatformModalPresentsAfterApplyingItsFirstFittedSize() async throws {
+        let host = PresentationPlacementHostController(
+            contentSize: CGSize(width: 640, height: 420)
+        )
+        let content = AnyView(Color.clear.frame(width: 200, height: 100))
+        let modal = makePlatformModal(
+            parent: host,
+            content: content,
+            sceneIndex: 3
+        )
+        let platformWindow = DeferredPresentationWindow()
+        let firstFittedSize = CGSize(width: 208, height: 108)
+
+        host.addModal(
+            child: modal,
+            session: sheetSession(
+                content: content,
+                namespaceID: 91_003,
+                usesPlatformWindow: true
+            ),
+            attachWindow: { attach in
+                platformWindow.contentSize = firstFittedSize
+                attach?(platformWindow)
+            }
+        )
+
+        XCTAssertEqual(host.presentedModalSizes, [firstFittedSize])
+        XCTAssertEqual(platformWindow.contentSize, firstFittedSize)
+
+        let updatedSize = CGSize(width: 240, height: 140)
+        platformWindow.contentSize = updatedSize
+
+        XCTAssertEqual(host.presentedModalSizes, [firstFittedSize])
+        XCTAssertEqual(platformWindow.contentSize, updatedSize)
+    }
+
+    @MainActor
+    func testLatePlatformModalAttachmentIsRejectedAfterOverlayFallback() async throws {
+        let host = PresentationPlacementHostController(
+            contentSize: CGSize(width: 640, height: 420)
+        )
+        let content = AnyView(Color.clear.frame(width: 200, height: 100))
+        let modal = makePlatformModal(
+            parent: host,
+            content: content,
+            sceneIndex: 4
+        )
+        let platformWindow = DeferredPresentationWindow()
+        var deferredAttach: WindowController.AttachWindow?
+
+        host.addModal(
+            child: modal,
+            session: sheetSession(
+                content: content,
+                namespaceID: 91_004,
+                usesPlatformWindow: true
+            ),
+            attachWindow: { attach in
+                deferredAttach = attach
+                platformWindow.contentSize = CGSize(width: 10, height: 10)
+            }
+        )
+
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+        platformWindow.contentSize = CGSize(width: 208, height: 108)
+        deferredAttach?(platformWindow)
+
+        XCTAssertTrue(host.presentedModalSizes.isEmpty)
+        XCTAssertEqual(platformWindow.closeCount, 1)
+    }
+
+    @MainActor
+    func testOverlayModalRecentersAfterParentResizeAndTopAlignsWhenTooTall() async throws {
         let initialHostSize = CGSize(width: 640, height: 420)
         let host = PresentationPlacementHostController(contentSize: initialHostSize)
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
@@ -100,7 +275,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     }
 
     @MainActor
-    func testOverlayPopupInsideOverlayModalFitsNearestPlatformHostSurface() throws {
+    func testOverlayPopupInsideOverlayModalFitsNearestPlatformHostSurface() async throws {
         let hostSize = CGSize(width: 640, height: 420)
         let host = PresentationPlacementHostController(contentSize: hostSize)
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
@@ -228,7 +403,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     }
 
     @MainActor
-    func testNestedOverlayModalReceivesMouseEventInItsLocalCoordinates() throws {
+    func testNestedOverlayModalReceivesMouseEventInItsLocalCoordinates() async throws {
         let hostSize = CGSize(width: 640, height: 420)
         let host = PresentationPlacementHostController(contentSize: hostSize)
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
@@ -364,8 +539,29 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private func makePlatformModal(parent: WindowController,
+                                   content: AnyView,
+                                   sceneIndex: UInt8) -> ModalWindowController {
+        parent.viewGraph.data.withCurrent {
+            let sourceGraph = parent.viewGraph.data.graph
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(value: content)
+            return ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: sourceGraph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(NestedOverlayInputProbe.self, index: sceneIndex)
+                ),
+                parentController: parent,
+                usesPlatformWindow: true
+            )
+        }
+    }
+
     private func sheetSession(content: AnyView,
-                              namespaceID: Int) -> PresentationSession {
+                              namespaceID: Int,
+                              usesPlatformWindow: Bool = false) -> PresentationSession {
         .sheet(SheetPreference(
             content: content,
             onDismiss: nil,
@@ -374,7 +570,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
             drawsBackground: true,
             placement: .automatic,
             activeInspector: nil,
-            usesPlatformWindow: false
+            usesPlatformWindow: usesPlatformWindow
         ))
     }
 
@@ -392,10 +588,100 @@ private final class NestedOverlayInputProbe {
 }
 
 @MainActor
+private final class DeferredActivationPresentationController:
+    PresentationChildWindowController, @unchecked Sendable {
+    private let platformWindow: DeferredPresentationWindow
+
+    override var window: (any VVD.Window)? { platformWindow }
+
+    init<Content: View>(
+        platformWindow: DeferredPresentationWindow,
+        content: Content,
+        scene: WindowKey
+    ) {
+        self.platformWindow = platformWindow
+        super.init(
+            content: content,
+            scene: scene,
+            usesPlatformWindow: true
+        )
+    }
+
+    override func makeWindow() -> (any VVD.Window)? {
+        platformWindow
+    }
+}
+
+@MainActor
+private final class DeferredPresentationWindow: VVD.Window {
+    enum Event: Equatable {
+        case contentSize(CGSize)
+        case origin(CGPoint)
+        case activate
+    }
+
+    var activated = false
+    var visible = false
+    var contentBounds = CGRect(origin: .zero, size: CGSize(width: 10, height: 10))
+    var windowFrame = CGRect(origin: .zero, size: CGSize(width: 10, height: 10))
+    var contentScaleFactor: CGFloat = 1
+    var resolution = CGSize(width: 10, height: 10)
+    var origin: CGPoint = .zero {
+        didSet { events.append(.origin(origin)) }
+    }
+    var contentSize = CGSize.zero {
+        didSet {
+            contentBounds.size = contentSize
+            windowFrame.size = contentSize
+            resolution = contentSize
+            events.append(.contentSize(contentSize))
+        }
+    }
+    var title = "Deferred Presentation Test"
+    weak var delegate: WindowDelegate?
+    var screen: (any VVD.Screen)? { nil }
+    var isValid: Bool { true }
+    var platformHandle: OpaquePointer? { nil }
+    var eventObservers = WindowEventObserverContainer()
+    var events: [Event] = []
+    var closeCount = 0
+
+    required init?(
+        name: String,
+        style: WindowStyle,
+        delegate: WindowDelegate?,
+        data: [String: Any]
+    ) {
+        title = name
+        self.delegate = delegate
+    }
+
+    init() {}
+
+    func show() { visible = true }
+    func hide() { visible = false }
+    func activate() {
+        activated = true
+        visible = true
+        events.append(.activate)
+    }
+    func minimize() {}
+    func requestToClose() -> Bool { true }
+    func close() {
+        closeCount += 1
+        activated = false
+        visible = false
+    }
+    func convertPointToScreen(_ point: CGPoint) -> CGPoint { point }
+    func convertPointFromScreen(_ point: CGPoint) -> CGPoint { point }
+}
+
+@MainActor
 private final class PresentationPlacementHostController: WindowController, @unchecked Sendable {
     private let platformWindow: PresentationPlacementWindow
 
     override var window: (any VVD.Window)? { platformWindow }
+    var presentedModalSizes: [CGSize] { platformWindow.presentedModalSizes }
 
     init(contentSize: CGSize) {
         self.platformWindow = PresentationPlacementWindow(contentSize: contentSize)
@@ -425,6 +711,9 @@ private final class PresentationPlacementWindow: VVD.Window {
     var isValid: Bool { true }
     var platformHandle: OpaquePointer? { nil }
     var eventObservers = WindowEventObserverContainer()
+    var presentedModalSizes: [CGSize] = []
+    var canPresentModalWindow: Bool { true }
+    var modalWindows: [any VVD.Window] { [] }
 
     init(contentSize: CGSize) {
         self.contentSize = contentSize
@@ -451,6 +740,14 @@ private final class PresentationPlacementWindow: VVD.Window {
     func minimize() {}
     func requestToClose() -> Bool { true }
     func close() {}
+    func presentModalWindow(
+        _ window: any VVD.Window,
+        completionHandler: (() -> Void)?
+    ) -> Bool {
+        presentedModalSizes.append(window.contentSize)
+        return true
+    }
+    func dismissModalWindow(_ window: any VVD.Window) -> Bool { true }
     func convertPointToScreen(_ point: CGPoint) -> CGPoint { point }
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint { point }
 }
