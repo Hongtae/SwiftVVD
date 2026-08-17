@@ -188,6 +188,75 @@ final class WindowConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuPopupTreeFiltersInheritedDebugInfoOnly() {
+        let scene = WindowKey(
+            namespace: .app,
+            sceneID: SceneID(WindowConfigurationTests.self, index: 2)
+        )
+        let root = WindowController(content: EmptyView(), scene: scene)
+        root.configurationOverride = .init(
+            activeFrameInterval: 0.01,
+            displaySyncEnabled: false,
+            drawDebugInfo: [.frameInfo, .thread],
+            contentScaleFactor: 2
+        )
+
+        func makeMenuPopup() -> ContextMenuWindowController {
+            ContextMenuWindowController(
+                content: EmptyView(),
+                environment: EnvironmentValues(),
+                viewPhase: ViewGraphHost.Phase(),
+                scene: scene,
+                anchor: .zero,
+                items: [],
+                actions: ContextMenuPopupActions(),
+                usesPlatformWindow: true,
+                session: ContextMenuPresentationSession()
+            )
+        }
+
+        let menu = makeMenuPopup()
+        root.addPresentationChild(child: menu)
+        let submenu = makeMenuPopup()
+        menu.addPresentationChild(child: submenu)
+
+        for controller in [menu, submenu] {
+            XCTAssertEqual(controller.configurationOverride.activeFrameInterval, 0.01)
+            XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, false)
+            XCTAssertNil(controller.configurationOverride.drawDebugInfo)
+            XCTAssertTrue(controller.configuration.drawDebugInfo.isEmpty)
+            XCTAssertEqual(
+                controller.configuration.backgroundColor,
+                BackendColor(white: 0.96)
+            )
+            XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 2)
+        }
+
+        var menuBaseConfiguration = menu.baseConfiguration
+        menuBaseConfiguration.drawDebugInfo = [.resourceTiming]
+        menu.baseConfiguration = menuBaseConfiguration
+        XCTAssertEqual(menu.configuration.drawDebugInfo, [.resourceTiming])
+
+        root.configurationOverride = .init(
+            inactiveFrameInterval: 0.2,
+            displaySyncEnabled: true,
+            drawDebugInfo: [.queue, .windowState],
+            contentScaleFactor: 3
+        )
+
+        for controller in [menu, submenu] {
+            XCTAssertNil(controller.configurationOverride.activeFrameInterval)
+            XCTAssertEqual(controller.configurationOverride.inactiveFrameInterval, 0.2)
+            XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, true)
+            XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 3)
+        }
+        XCTAssertNil(menu.configurationOverride.drawDebugInfo)
+        XCTAssertEqual(menu.configuration.drawDebugInfo, [.resourceTiming])
+        XCTAssertNil(submenu.configurationOverride.drawDebugInfo)
+        XCTAssertTrue(submenu.configuration.drawDebugInfo.isEmpty)
+    }
+
+    @MainActor
     func testPlatformModalChildrenInheritAndTrackConfigurationOverride() {
         let scene = WindowKey(
             namespace: .app,

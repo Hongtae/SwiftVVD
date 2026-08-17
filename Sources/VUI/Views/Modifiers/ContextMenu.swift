@@ -521,6 +521,40 @@ struct ContextMenuSubmenuPlacement {
 // deactivate/move dismissal policy; this subclass only owns menu-session state,
 // submenu fan-out, and context-menu-specific teardown.
 final class ContextMenuWindowController: PopupWindowController, @unchecked Sendable {
+    // Window diagnostics occupy the same upper-left region as transient menu
+    // content. Menu popup trees inherit every other window policy, but remove
+    // the parent's debug override at this boundary. Leaving the field nil is
+    // important: it keeps a menu's own base or future local policy effective.
+    override var inheritedValues: InheritedValues {
+        get { super.inheritedValues }
+        set {
+            var filteredValues = newValue
+            filteredValues.configurationOverride.drawDebugInfo = nil
+            super.inheritedValues = filteredValues
+        }
+    }
+
+    // Window shape and border belong to the platform window when one exists.
+    // Draw this chrome only through the overlay presentation path, which is
+    // selected from the resolved attachment rather than the requested mode.
+    override func drawOverlayPresentationChrome(
+        in frame: CGRect,
+        context: GraphicsContext
+    ) {
+        super.drawOverlayPresentationChrome(in: frame, context: context)
+
+        let shape = RoundedRectangle(cornerRadius: 6)
+        context.fill(
+            shape.path(in: frame),
+            with: .color(contextMenuPopupChromeFill)
+        )
+        context.stroke(
+            shape.inset(by: 0.5).path(in: frame),
+            with: .color(contextMenuPopupChromeStroke),
+            lineWidth: 1
+        )
+    }
+
     private var contentAttr: Attribute<AnyView>?
     private let popupActions: ContextMenuPopupActions
     private let menuSession: ContextMenuPresentationSession
@@ -550,6 +584,13 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
                    frameInParent: frame)
+
+        // A platform popup clears its rectangular render target with the menu
+        // surface color. Window shape, border, and shadow remain the platform's
+        // responsibility; overlay presentations draw those separately.
+        var configuration = baseConfiguration
+        configuration.backgroundColor = contextMenuPopupWindowBackground
+        baseConfiguration = configuration
         self.contentAttr = viewGraph.rootAnyViewContentInput
     }
 
@@ -782,6 +823,7 @@ private let contextMenuPopupHighlightBackground = Color(.sRGB,
 private let contextMenuPopupSeparatorColor = Color(.sRGB, white: 156.0 / 255.0)
 private let contextMenuPopupChromeFill = Color(.sRGB, white: 0.96)
 private let contextMenuPopupChromeStroke = Color(.sRGB, white: 0.62, opacity: 0.45)
+private let contextMenuPopupWindowBackground = BackendColor(white: 0.96)
 
 // The state/check column is menu-wide, while the image column resets across
 // separator-delimited groups.
@@ -1199,11 +1241,6 @@ private struct ContextMenuPopupPanel: View {
             }
         }
         .padding(contextMenuPopupPanelPadding)
-        .background(contextMenuPopupChromeFill, in: RoundedRectangle(cornerRadius: 6))
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(contextMenuPopupChromeStroke, lineWidth: 1)
-        }
         .fixedSize()
     }
 }
