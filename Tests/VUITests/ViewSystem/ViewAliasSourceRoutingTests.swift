@@ -325,6 +325,79 @@ final class ViewAliasSourceRoutingTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS labelIconPlatformItemProjectionObserved menuItemSurfacePropertiesObserved
+    func testTextIconLabelProjectsIconTextAsStaticMenuTitle() throws {
+        let content = Label {
+            Text("Label")
+        } icon: {
+            Text("ICON")
+        }
+        .modifier(StyleContextWriter<MenuStyleContext>())
+
+        let item = try XCTUnwrap(
+            platformItemList(for: content).items.first
+        )
+        XCTAssertEqual(item.label?.string, "ICON")
+        XCTAssertEqual(item.text?.string, "Label")
+        XCTAssertNil(item.selectionBehavior)
+        XCTAssertNil(item.namedResolvedImage)
+        XCTAssertNil(item.resolvedImage)
+        XCTAssertFalse(
+            try XCTUnwrap(contextMenuPresentationItems([item]).first)
+                .item.isEnabled
+        )
+    }
+
+    // ASSERTIONS labelIconPlatformItemProjectionObserved menuItemSurfacePropertiesObserved
+    func testImageIconLabelKeepsTitleAndImageMenuProjection() throws {
+        let content = Label("Label", systemImage: "star.fill")
+            .modifier(StyleContextWriter<MenuStyleContext>())
+
+        let item = try XCTUnwrap(
+            platformItemList(for: content).items.first
+        )
+        XCTAssertEqual((item.label ?? item.text)?.string, "Label")
+        XCTAssertNil(item.selectionBehavior)
+        XCTAssertTrue(
+            item.namedResolvedImage != nil || item.resolvedImage != nil
+        )
+        XCTAssertFalse(
+            try XCTUnwrap(contextMenuPresentationItems([item]).first)
+                .item.isEnabled
+        )
+    }
+
+    private func platformItemList<Content: View>(
+        for content: Content
+    ) throws -> PlatformItemList {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        return viewGraph.data.withCurrent {
+            AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let graph = viewGraph.data.graph
+                let attribute = graph.makeInput(value: content)
+                let generator: Attribute<PlatformItemList> =
+                    graph.makeStatefulRule(
+                        PlatformItemListGenerator<
+                            AllPlatformItemListFlags,
+                            Content
+                        >(
+                            content: attribute,
+                            inputs: makeViewInputs(graph: graph),
+                            inputsIncludeGeometry: false
+                        )
+                    )
+                return generator.value
+            }
+        }
+    }
+
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         return _ViewInputs(

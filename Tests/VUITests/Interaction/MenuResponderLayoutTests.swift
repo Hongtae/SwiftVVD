@@ -28,7 +28,7 @@ final class MenuResponderLayoutTests: XCTestCase {
             controller.viewGraph.responderNode as? MultiViewResponder
         )
         let menuResponders = responderTree(rootResponder)
-            .compactMap { $0 as? MenuDropdownResponder }
+            .compactMap { $0 as? MenuControlResponder }
         XCTAssertEqual(menuResponders.count, 2)
         var menuCenters: [CGPoint] = []
         for responder in menuResponders {
@@ -65,9 +65,9 @@ final class MenuResponderLayoutTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS menuPlatformResponderGeometryOwnershipObserved
+    // ASSERTIONS menuPlatformResponderGeometryOwnershipObserved menuControlPopupAnchorObserved
     @MainActor
-    func testMenuResponderGeometryRoutesPointerToPresentationTrigger() throws {
+    func testMenuResponderGeometryRoutesPointerToControlOwner() throws {
         let controller = WindowController(
             content: ConditionalPrimaryActionMenuRoot(),
             scene: WindowKey(
@@ -89,7 +89,7 @@ final class MenuResponderLayoutTests: XCTestCase {
         )
         let responder = try XCTUnwrap(
             responderTree(rootResponder).compactMap {
-                $0 as? MenuDropdownResponder
+                $0 as? MenuControlResponder
             }.last
         )
         var points = [CGPoint(
@@ -111,6 +111,18 @@ final class MenuResponderLayoutTests: XCTestCase {
             timestamp: 0
         )))
         XCTAssertTrue(responder.menuIsOpen)
+        let popup = try XCTUnwrap(firstMenuPopup(in: controller))
+        let expectedAnchor = menuControlPoint(
+            responder,
+            localPoint: CGPoint(
+                x: 0,
+                y: responder.helper.size.height
+            )
+        )
+        assertPoint(
+            popup.presentationPointInParent(forLocalPoint: .zero),
+            equals: expectedAnchor
+        )
         XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
             type: .buttonUp,
             device: .genericMouse,
@@ -119,6 +131,290 @@ final class MenuResponderLayoutTests: XCTestCase {
             location: center,
             timestamp: 0
         )))
+        responder.dismissMenu()
+    }
+
+    // ASSERTIONS menuPlatformControlLifecycleObserved menuPlatformResponderGeometryOwnershipObserved menuControlPopupAnchorObserved
+    @MainActor
+    func testPrimaryActionMenuControlOwnsSplitPointerSession() throws {
+        let recorder = MenuControlRecorder()
+        let controller = WindowController(
+            content: PrimaryActionMenuControlRoot(recorder: recorder),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PrimaryActionMenuControlRoot.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+
+        let rootResponder = try XCTUnwrap(
+            controller.viewGraph.responderNode as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(
+            responderTree(rootResponder).compactMap {
+                $0 as? MenuControlResponder
+            }.first
+        )
+        XCTAssertNotNil(responder.primaryAction)
+        XCTAssertEqual(responder.menuIndicatorWidth, 24)
+        let initialIdentity = ObjectIdentifier(responder)
+        let primaryPoint = menuControlPoint(
+            responder,
+            localX: max(
+                1,
+                (responder.helper.size.width - responder.menuIndicatorWidth) / 2
+            )
+        )
+        let indicatorPoint = menuControlPoint(
+            responder,
+            localX: responder.helper.size.width -
+                responder.menuIndicatorWidth / 2
+        )
+        let outsidePoint = CGPoint(
+            x: primaryPoint.x + responder.helper.size.width + 40,
+            y: primaryPoint.y + responder.helper.size.height + 40
+        )
+
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 1
+        ))
+        XCTAssertTrue(responder.isPrimaryPressing)
+        XCTAssertTrue(sendPointer(
+            .move,
+            to: controller,
+            at: outsidePoint,
+            timestamp: 1.1
+        ))
+        XCTAssertFalse(responder.isPrimaryPressing)
+        XCTAssertTrue(sendPointer(
+            .move,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 1.2
+        ))
+        XCTAssertTrue(responder.isPrimaryPressing)
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 1.3
+        ))
+        XCTAssertFalse(responder.isPrimaryPressing)
+        XCTAssertEqual(recorder.primaryActionCount, 1)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 2
+        ))
+        XCTAssertTrue(sendPointer(
+            .move,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 2.1
+        ))
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 2.2
+        ))
+        XCTAssertEqual(recorder.primaryActionCount, 1)
+        XCTAssertFalse(responder.menuIsOpen)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 3
+        ))
+        XCTAssertTrue(responder.menuIsOpen)
+        XCTAssertTrue(responder.isMenuPressing)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+        let popup = try XCTUnwrap(firstMenuPopup(in: controller))
+        let expectedAnchor = menuControlPoint(
+            responder,
+            localPoint: CGPoint(
+                x: responder.helper.size.width -
+                    responder.menuIndicatorWidth,
+                y: max(0, responder.helper.size.height - 3)
+            )
+        )
+        assertPoint(
+            popup.presentationPointInParent(forLocalPoint: .zero),
+            equals: expectedAnchor
+        )
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 3.1
+        ))
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 3.2
+        ))
+        XCTAssertFalse(responder.menuIsOpen)
+        XCTAssertFalse(responder.isMenuPressing)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 3.3
+        ))
+        XCTAssertEqual(recorder.primaryActionCount, 1)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 4
+        ))
+        controller.resetGestureHandlers()
+        XCTAssertFalse(responder.isPrimaryPressing)
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 4.1
+        ))
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 4.2
+        ))
+        XCTAssertEqual(recorder.primaryActionCount, 2)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        controller.updateView(
+            tick: 1,
+            delta: 0.1,
+            date: controller.date.addingTimeInterval(0.1),
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        let updatedRootResponder = try XCTUnwrap(
+            controller.viewGraph.responderNode as? MultiViewResponder
+        )
+        let updatedResponder = try XCTUnwrap(
+            responderTree(updatedRootResponder).compactMap {
+                $0 as? MenuControlResponder
+            }.first
+        )
+        XCTAssertEqual(ObjectIdentifier(updatedResponder), initialIdentity)
+
+        let updatedIndicatorPoint = menuControlPoint(
+            updatedResponder,
+            localX: updatedResponder.helper.size.width -
+                updatedResponder.menuIndicatorWidth / 2
+        )
+        XCTAssertTrue(sendPointer(
+            .buttonDown,
+            to: controller,
+            at: updatedIndicatorPoint,
+            timestamp: 5
+        ))
+        XCTAssertTrue(updatedResponder.menuIsOpen)
+        XCTAssertTrue(sendPointer(
+            .buttonUp,
+            to: controller,
+            at: updatedIndicatorPoint,
+            timestamp: 5.1
+        ))
+        updatedResponder.dismissMenu()
+    }
+
+    // ASSERTIONS menuPlatformControlLifecycleObserved
+    @MainActor
+    func testMenuControlPreservesDirectTouchCarrierRouting() throws {
+        let recorder = MenuControlRecorder()
+        let controller = WindowController(
+            content: PrimaryActionMenuControlRoot(recorder: recorder),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MenuControlTouchProbe.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        let rootResponder = try XCTUnwrap(
+            controller.viewGraph.responderNode as? MultiViewResponder
+        )
+        let responder = try XCTUnwrap(
+            responderTree(rootResponder).compactMap {
+                $0 as? MenuControlResponder
+            }.first
+        )
+        let primaryPoint = menuControlPoint(
+            responder,
+            localX: max(
+                1,
+                (responder.helper.size.width - responder.menuIndicatorWidth) / 2
+            )
+        )
+        let indicatorPoint = menuControlPoint(
+            responder,
+            localX: responder.helper.size.width -
+                responder.menuIndicatorWidth / 2
+        )
+
+        XCTAssertTrue(sendTouchPointer(
+            .buttonDown,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 1
+        ))
+        XCTAssertTrue(sendTouchPointer(
+            .buttonUp,
+            to: controller,
+            at: primaryPoint,
+            timestamp: 1.1
+        ))
+        XCTAssertEqual(recorder.primaryActionCount, 1)
+        XCTAssertEqual(recorder.outerTapCount, 0)
+
+        XCTAssertTrue(sendTouchPointer(
+            .buttonDown,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 2
+        ))
+        XCTAssertTrue(responder.menuIsOpen)
+        XCTAssertTrue(sendTouchPointer(
+            .buttonUp,
+            to: controller,
+            at: indicatorPoint,
+            timestamp: 2.1
+        ))
+        XCTAssertEqual(recorder.outerTapCount, 0)
         responder.dismissMenu()
     }
 
@@ -146,7 +442,7 @@ final class MenuResponderLayoutTests: XCTestCase {
         )
         let responder = try XCTUnwrap(
             responderTree(rootResponder).compactMap {
-                $0 as? MenuDropdownResponder
+                $0 as? MenuControlResponder
             }.first
         )
         controller.viewGraph.data.withCurrent {
@@ -603,6 +899,71 @@ final class MenuResponderLayoutTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS contextMenuEventBindingRouteObserved contextMenuPointerPopupAnchorObserved
+    @MainActor
+    func testSecondaryClickContextMenuUsesPointerAsRootAnchor() throws {
+        let controller = WindowController(
+            content: PositionedContextMenuRoot(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PositionedContextMenuRoot.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        let rootResponder = try XCTUnwrap(
+            controller.viewGraph.responderNode as? MultiViewResponder
+        )
+        var sampledClickPoint: CGPoint?
+        controller.viewGraph.data.withCurrent {
+            for y in stride(from: CGFloat(10), through: 230, by: 10) {
+                for x in stride(from: CGFloat(10), through: 410, by: 10) {
+                    let point = CGPoint(x: x, y: y)
+                    let event = ContextMenuEvent(
+                        timestamp: .zero,
+                        binding: nil,
+                        location: .zero,
+                        globalLocation: point
+                    )
+                    guard let responder = rootResponder
+                        .bindEvent(event)?
+                        .firstAncestor(ofType: ContextMenuResponder.self),
+                          responder.resolvedTriggerPolicy(
+                            for: .genericMouse,
+                            buttonID: 1
+                          ) == .secondaryDown else {
+                        continue
+                    }
+                    sampledClickPoint = point
+                    return
+                }
+            }
+        }
+        let clickPoint = try XCTUnwrap(sampledClickPoint)
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 1,
+            location: clickPoint,
+            timestamp: 1
+        )))
+        let popup = try XCTUnwrap(firstMenuPopup(in: controller))
+        assertPoint(
+            popup.presentationPointInParent(forLocalPoint: .zero),
+            equals: clickPoint
+        )
+        controller.dismissAllPresentationChildren()
+    }
+
     // ASSERTIONS contextMenuEventBindingRouteObserved contextMenuLongPressDriverThresholdsObserved
     @MainActor
     func testWindowControllerLongPressDeadlineOpensPresentationChild() async throws {
@@ -695,6 +1056,84 @@ final class MenuResponderLayoutTests: XCTestCase {
 
     private func responderTree(_ responder: ViewResponder) -> [ViewResponder] {
         [responder] + responder.children.flatMap(responderTree)
+    }
+
+    private func menuControlPoint(
+        _ responder: MenuControlResponder,
+        localX: CGFloat
+    ) -> CGPoint {
+        menuControlPoint(
+            responder,
+            localPoint: CGPoint(
+                x: localX,
+                y: responder.helper.size.height / 2
+            )
+        )
+    }
+
+    private func menuControlPoint(
+        _ responder: MenuControlResponder,
+        localPoint: CGPoint
+    ) -> CGPoint {
+        var points = [localPoint]
+        responder.helper.transform.convertGlobal(from: .local, points: &points)
+        return points[0]
+    }
+
+    private func firstMenuPopup(
+        in controller: WindowController
+    ) -> ContextMenuWindowController? {
+        var popup: ContextMenuWindowController?
+        controller.forEachPresentationChild { child in
+            if popup == nil {
+                popup = child as? ContextMenuWindowController
+            }
+        }
+        return popup
+    }
+
+    private func assertPoint(
+        _ actual: CGPoint,
+        equals expected: CGPoint,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(actual.x, expected.x, accuracy: 0.001, file: file, line: line)
+        XCTAssertEqual(actual.y, expected.y, accuracy: 0.001, file: file, line: line)
+    }
+
+    @discardableResult
+    private func sendPointer(
+        _ type: MouseEventType,
+        to controller: WindowController,
+        at location: CGPoint,
+        timestamp: TimeInterval
+    ) -> Bool {
+        controller.handleMouseEvent(event: MouseEvent(
+            type: type,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: timestamp
+        ))
+    }
+
+    @discardableResult
+    private func sendTouchPointer(
+        _ type: MouseEventType,
+        to controller: WindowController,
+        at location: CGPoint,
+        timestamp: TimeInterval
+    ) -> Bool {
+        controller.handleMouseEvent(event: MouseEvent(
+            type: type,
+            device: .touch,
+            deviceID: 17,
+            buttonID: 0,
+            location: location,
+            timestamp: timestamp
+        ))
     }
 
     @MainActor
@@ -939,6 +1378,30 @@ private struct ConditionalPrimaryActionMenuRoot: View {
                 Button("Menu Item") {}
             }
         }
+    }
+}
+
+private final class MenuControlRecorder {
+    var primaryActionCount = 0
+    var outerTapCount = 0
+}
+
+private enum MenuControlTouchProbe {
+}
+
+private struct PrimaryActionMenuControlRoot: View {
+    let recorder: MenuControlRecorder
+
+    var body: some View {
+        Menu("Primary Menu") {
+            Button("Menu Item") {}
+        } primaryAction: {
+            recorder.primaryActionCount += 1
+        }
+        .onTapGesture {
+            recorder.outerTapCount += 1
+        }
+        .padding(20)
     }
 }
 

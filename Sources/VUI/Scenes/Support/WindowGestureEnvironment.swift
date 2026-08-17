@@ -15,6 +15,19 @@ protocol ResponderEventConsumer: AnyObject {
         _ events: [EventID: any EventType],
         at time: Time
     ) -> GesturePhase<Void>
+    func resetEventSession()
+}
+
+extension ResponderEventConsumer {
+    func resetEventSession() {
+    }
+}
+
+/// Owns an accepted event serial at the mounted control boundary. Common
+/// gesture responders must not observe any phase of that serial.
+protocol ExclusiveResponderEventConsumer: ResponderEventConsumer
+where Self: ViewResponder {
+    func exclusivelyConsumes(_ event: any EventType) -> Bool
 }
 
 /// Adapts platform-host recognition competition to responder decisions while
@@ -388,6 +401,9 @@ final class WindowGestureEnvironment {
     }
 
     func reset() {
+        if let rootResponder {
+            resetEventConsumers(in: rootResponder)
+        }
         for recognizer in recognizers {
             recognizer.reset(resetForwardedEventDispatchers: true)
         }
@@ -395,6 +411,13 @@ final class WindowGestureEnvironment {
         cancelledGestureResponders.removeAll()
         recognitionCohorts.removeAll()
         recognizerCohortIDs.removeAll()
+    }
+
+    private func resetEventConsumers(in responder: ViewResponder) {
+        (responder as? any ResponderEventConsumer)?.resetEventSession()
+        for child in responder.children {
+            resetEventConsumers(in: child)
+        }
     }
 
     private var recognizers: [WindowGestureRecognizer] {
@@ -777,6 +800,12 @@ final class WindowGestureEnvironment {
     private func initialGestureCandidates(
         for events: [EventID: any EventType]
     ) -> [any AnyGestureResponder] {
+        if events.contains(where: { eventID, event in
+            hasExclusiveEventConsumer(for: eventID, event: event)
+        }) {
+            return []
+        }
+
         var boundResponders: [any AnyGestureResponder] = []
         var seen: Set<ObjectIdentifier> = []
         for event in events.values {
@@ -802,6 +831,30 @@ final class WindowGestureEnvironment {
         return hitTestCandidateResponders(at: location)
     }
 
+    private func hasExclusiveEventConsumer(
+        for eventID: EventID,
+        event: any EventType
+    ) -> Bool {
+        if let responder = event.binding?.responder,
+           let consumer = responder as? any ExclusiveResponderEventConsumer {
+            return consumer.exclusivelyConsumes(event)
+        }
+        if let responder = eventBindingManager?.eventBindings[eventID]?.responder,
+           let consumer = responder as? any ExclusiveResponderEventConsumer {
+            return consumer.exclusivelyConsumes(event)
+        }
+        guard let hitTestable = event as? any HitTestableEventType else {
+            return false
+        }
+        guard let consumer = hitTestEventConsumer(
+            at: hitTestable.hitTestLocation,
+            accepting: type(of: event)
+        ) as? any ExclusiveResponderEventConsumer else {
+            return false
+        }
+        return consumer.exclusivelyConsumes(event)
+    }
+
     private func dispatchToEventConsumers(
         _ events: [EventID: any EventType],
         at time: Time,
@@ -818,6 +871,11 @@ final class WindowGestureEnvironment {
         }
 
         guard let eventBindingManager else { return ([], []) }
+        let exclusiveSerials = Set(events.compactMap { eventID, event in
+            hasExclusiveEventConsumer(for: eventID, event: event)
+                ? eventID.serial
+                : nil
+        })
         var dispatches: [ObjectIdentifier: Dispatch] = [:]
         for (eventID, event) in events {
             let eventType = type(of: event)
@@ -844,6 +902,13 @@ final class WindowGestureEnvironment {
             }
 
             guard let consumerAndResponder else { continue }
+            if exclusiveSerials.contains(eventID.serial) {
+                guard let exclusiveConsumer = consumerAndResponder.consumer as?
+                    any ExclusiveResponderEventConsumer,
+                      exclusiveConsumer.exclusivelyConsumes(event) else {
+                    continue
+                }
+            }
             if event.phase == .began {
                 eventBindingManager.rebindEvent(
                     eventID,

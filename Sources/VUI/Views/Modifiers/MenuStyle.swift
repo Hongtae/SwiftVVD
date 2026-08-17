@@ -74,8 +74,8 @@ private struct _DefaultMenuStyleBody: View {
 
     var body: some View {
         if let primaryAction = configuration._primaryAction {
-            // Standalone primary-action Menu is a split control: the label segment
-            // performs the primary action, while the right-side indicator opens content.
+            // Both segments share one control owner. The initial segment keeps
+            // ownership through dragging and decides its result on release.
             HStack(spacing: 0) {
                 let labelBg: Color = isLabelPressing ? Color(white: 0.88) : isLabelHovered ? Color(white: 0.85) : .clear
                 let labelFg: Color = .primary
@@ -85,7 +85,6 @@ private struct _DefaultMenuStyleBody: View {
                     .padding(.vertical, 5)
                     .background(labelBg, in: RoundedRectangle(cornerRadius: 5))
                     .onHover { isLabelHovered = $0 }
-                    ._onButtonGesture(pressing: { isLabelPressing = $0 }, perform: primaryAction)
                 
                 Divider()
                 
@@ -98,11 +97,6 @@ private struct _DefaultMenuStyleBody: View {
                                                lineJoin: .round))
                     .frame(width: 24, height: 28)
                     .background(arrowBg, in: RoundedRectangle(cornerRadius: 5))
-                    .modifier(MenuDropdownModifier(
-                        content: configuration.content,
-                        onPressingChanged: { isArrowPressing = $0 },
-                        onPresentationChanged: configuration._onPresentationChanged
-                    ))
                     .onHover { isArrowHovered = $0 }
             }
             .fixedSize()
@@ -111,6 +105,14 @@ private struct _DefaultMenuStyleBody: View {
                 RoundedRectangle(cornerRadius: 5)
                     .stroke(Color.gray.opacity(0.5), lineWidth: 1)
             }
+            .modifier(MenuControlModifier(
+                content: configuration.content,
+                primaryAction: primaryAction,
+                menuIndicatorWidth: 24,
+                onPrimaryPressingChanged: { isLabelPressing = $0 },
+                onMenuPressingChanged: { isArrowPressing = $0 },
+                onPresentationChanged: configuration._onPresentationChanged
+            ))
         } else {
             let bg: Color = isLabelPressing ? Color(white: 0.88) : isLabelHovered ? Color(white: 0.85) : Color(white: 0.95)
             let fg: Color = .primary
@@ -123,9 +125,9 @@ private struct _DefaultMenuStyleBody: View {
                     RoundedRectangle(cornerRadius: 5)
                         .stroke(Color.gray.opacity(0.5), lineWidth: 1)
                 }
-                .modifier(MenuDropdownModifier(
+                .modifier(MenuControlModifier(
                     content: configuration.content,
-                    onPressingChanged: { isLabelPressing = $0 },
+                    onMenuPressingChanged: { isLabelPressing = $0 },
                     onPresentationChanged: configuration._onPresentationChanged
                 ))
                 .onHover { isLabelHovered = $0 }
@@ -155,8 +157,8 @@ private struct _ButtonMenuStyleBody: View {
 
     var body: some View {
         if let primaryAction = configuration._primaryAction {
-            // Keep explicit ButtonMenuStyle on the same split trigger model as
-            // the sampled standalone primary-action Menu path.
+            // Explicit button styling retains the same single split-control
+            // event owner as the default style.
             HStack(spacing: 0) {
                 let labelBg: Color = isLabelPressing ? Color(white: 0.88)
                                    : isLabelHovered ? Color(white: 0.93)
@@ -166,8 +168,6 @@ private struct _ButtonMenuStyleBody: View {
                     .padding(.vertical, 5)
                     .background(labelBg, in: RoundedRectangle(cornerRadius: 7))
                     .onHover { isLabelHovered = $0 }
-                    ._onButtonGesture(pressing: { isLabelPressing = $0 },
-                                      perform: primaryAction)
 
                 Divider()
 
@@ -181,11 +181,6 @@ private struct _ButtonMenuStyleBody: View {
                                                lineJoin: .round))
                     .frame(width: 24, height: 28)
                     .background(menuBg, in: RoundedRectangle(cornerRadius: 7))
-                    .modifier(MenuDropdownModifier(
-                        content: configuration.content,
-                        onPressingChanged: { isMenuPressing = $0 },
-                        onPresentationChanged: configuration._onPresentationChanged
-                    ))
                     .onHover { isMenuHovered = $0 }
             }
             .fixedSize()
@@ -194,6 +189,14 @@ private struct _ButtonMenuStyleBody: View {
                 RoundedRectangle(cornerRadius: 7)
                     .stroke(Color(white: 0.7), lineWidth: 1)
             }
+            .modifier(MenuControlModifier(
+                content: configuration.content,
+                primaryAction: primaryAction,
+                menuIndicatorWidth: 24,
+                onPrimaryPressingChanged: { isLabelPressing = $0 },
+                onMenuPressingChanged: { isMenuPressing = $0 },
+                onPresentationChanged: configuration._onPresentationChanged
+            ))
         } else {
             let bg: Color = isPressing ? Color(white: 0.88)
                           : isHovered  ? Color(white: 0.93)
@@ -206,9 +209,9 @@ private struct _ButtonMenuStyleBody: View {
                     RoundedRectangle(cornerRadius: 7)
                         .stroke(Color(white: 0.7), lineWidth: 1)
                 }
-                .modifier(MenuDropdownModifier(
+                .modifier(MenuControlModifier(
                     content: configuration.content,
-                    onPressingChanged: { isPressing = $0 },
+                    onMenuPressingChanged: { isPressing = $0 },
                     onPresentationChanged: configuration._onPresentationChanged
                 ))
                 .onHover { isHovered = $0 }

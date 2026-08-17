@@ -89,7 +89,6 @@ class WindowController: WindowDelegate,
     private(set) lazy var gestureEnvironment =
         WindowGestureEnvironment(host: self)
     private var contextMenuRecognizer = ContextMenuRecognizer()
-    private var menuPresentationTrigger = MenuPresentationTrigger()
 
     // MARK: - Platform Event Routing
 
@@ -1634,19 +1633,6 @@ class WindowController: WindowDelegate,
             if contextMenuConsumed {
                 return true
             }
-            let menuPresentationConsumed = self.menuPresentationTrigger.handleMouseEvent(
-                event,
-                viewGraph: self.viewGraph,
-                rootResponder: rootResponder,
-                open: { [weak self] responder in
-                    guard let self else { return }
-                    responder.present(from: self)
-                }
-            )
-            if menuPresentationConsumed {
-                return true
-            }
-
             // Map backend device IDs to EventID values before forwarding to GestureGraph.
             let hasIndependentPointerIdentity = event.device == .touch ||
                 event.device == .stylus
@@ -2284,7 +2270,6 @@ class WindowController: WindowDelegate,
             resetForwardedEventDispatchers: true
         )
         contextMenuRecognizer.reset()
-        menuPresentationTrigger.reset()
         _touchEventIDs.removeAll()
         _mouseEventID = nil
         _spatialEventIDs.removeAll()

@@ -231,7 +231,24 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
 
     var presentationAvailableFrameSpace: PresentationAvailableFrameSpace {
         runOnMainQueueSync {
-            window != nil ? .platformVisibleScreen : .hostSurface
+            if window != nil {
+                return .platformVisibleScreen
+            }
+            let isResolvingPlatformWindow = platformWindowPresentationState
+                .withLock { state in
+                    switch state {
+                    case .awaitingInitialLayout, .presented:
+                        return true
+                    case .unattached, .ended:
+                        return false
+                    }
+                }
+            // The first fitted frame is resolved before the platform window is
+            // created. Use the committed presentation mode during that gap so
+            // a popup is not constrained to an overlay host it will not use.
+            return isResolvingPlatformWindow
+                ? .platformVisibleScreen
+                : .hostSurface
         }
     }
 

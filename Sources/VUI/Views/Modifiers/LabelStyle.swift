@@ -335,27 +335,61 @@ private struct LabelItemRoleKey: ContainerValueKey {
     static var defaultValue: LabelItemRole? { nil }
 }
 
-// LabelIconPlatformItemModifier: zero-size ViewModifier applied to the icon
-// in TitleAndIconLabelStyle.makeBody. Handles platform-specific icon rendering
-// adjustments (foreground style, rendering mode, etc.).
-struct LabelIconPlatformItemModifier: ViewModifier {
+struct LabelIconPlatformItemModifier:
+    ViewModifier,
+    UnaryViewModifier,
+    PrimitiveViewModifier
+{
     typealias Body = Never
+
+    private struct Transform: Rule {
+        var _list: OptionalAttribute<PlatformItemList>
+
+        var value: PlatformItemList {
+            var list = _list.value ?? PlatformItemList()
+            list.modify { item in
+                // The legacy item carrier uses label as its icon-text slot.
+                // Preserve an existing icon value and move plain icon text out
+                // of the title slot before the title component is merged.
+                if item.label == nil, let text = item.text {
+                    item.label = text
+                    item.text = nil
+                }
+            }
+            return list
+        }
+    }
 
     static func _makeView(
         modifier: _GraphValue<Self>,
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        body(_Graph(), inputs)
+        var outputs = body(_Graph(), inputs)
+        guard inputs.preferences.keys.contains(PlatformItemList.Key.self),
+              inputs[PlatformItemListFlagsInput.self]
+                .isSuperset(of: TextPlatformItemListFlags.flags) else {
+            return outputs
+        }
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "LabelIconPlatformItemModifier called outside an active graph."
+            )
+        }
+        let list = outputs.preferences.reducedValue(
+            for: PlatformItemList.Key.self,
+            in: graph
+        )
+        let transformed = graph.makeRule(
+            Transform(_list: OptionalAttribute(list))
+        )
+        outputs.preferences.setValue(
+            transformed.identifier,
+            for: PlatformItemList.Key.self
+        )
+        return outputs
     }
 
-    static func _makeViewList(
-        modifier: _GraphValue<Self>,
-        inputs: _ViewListInputs,
-        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
-    ) -> _ViewListOutputs {
-        body(_Graph(), inputs)
-    }
 }
 
 public struct TitleAndIconLabelStyle: LabelStyle {
@@ -391,15 +425,26 @@ public struct TitleOnlyLabelStyle: LabelStyle {
     }
 }
 
-// FallbackLabelStyle: internal zero-size style applied unconditionally as the
-// last item in DefaultLabelStyle.makeBody's dispatch chain.
-// Handles generic label rendering when no style context is active.
 struct FallbackLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .center) {
-            configuration.icon
-            configuration.title
-        }
+        Label(configuration)
+            .modifier(
+                StaticIf<
+                    IsDefaultButtonLabel,
+                    LabelStyleWritingModifier<TitleOnlyLabelStyle>,
+                    EmptyModifier
+                >(
+                    trueBody: LabelStyleWritingModifier(
+                        style: TitleOnlyLabelStyle()
+                    ),
+                    falseBody: EmptyModifier()
+                )
+            )
+            .modifier(
+                LabelStyleWritingModifier(
+                    style: TitleAndIconLabelStyle()
+                )
+            )
     }
 }
 

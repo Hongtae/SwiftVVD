@@ -1805,6 +1805,51 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(ignored.containsCallCount, 0)
     }
 
+    // ASSERTIONS menuPlatformControlLifecycleObserved
+    func testExclusivePlatformControlOwnsEntirePointerSerial() {
+        let control = LayoutSchedulingExclusiveEventConsumerProbe()
+        let scroll = LayoutSchedulingScrollEventConsumerProbe()
+        scroll.children = [control]
+        let root = MultiViewResponder()
+        root.children = [scroll]
+        let manager = EventBindingManager()
+        let environment = WindowGestureEnvironment(
+            rootResponder: root,
+            eventBindingManager: manager
+        )
+        let mouseID = EventID(type: VUI.MouseEvent.self, serial: 61)
+        let scrollID = EventID(type: ScrollEvent.self, serial: 61)
+
+        let result = environment.send(
+            [
+                mouseID: VUI.MouseEvent(
+                    timestamp: .zero,
+                    binding: nil,
+                    button: .primary,
+                    phase: .began,
+                    location: CGPoint(x: 10, y: 10),
+                    globalLocation: CGPoint(x: 10, y: 10),
+                    modifiers: []
+                ),
+                scrollID: ScrollEvent(
+                    timestamp: .zero,
+                    phase: .began,
+                    binding: nil,
+                    translation: .zero,
+                    modifiers: [],
+                    hitTestLocation: CGPoint(x: 10, y: 10)
+                ),
+            ],
+            at: .zero
+        )
+
+        XCTAssertTrue(result.phase.isActive)
+        XCTAssertEqual(control.receivedEventIDs, [mouseID])
+        XCTAssertEqual(scroll.consumeCallCount, 0)
+        XCTAssertTrue(manager.eventBindings[mouseID]?.responder === control)
+        XCTAssertNil(manager.eventBindings[scrollID])
+    }
+
     @MainActor
     func testOrthogonalNestedScrollViewRoutesPhasedWheelAfterSignedThreshold() throws {
         let controller = WindowController(
@@ -10095,6 +10140,88 @@ private final class LayoutSchedulingPlatformEventConsumerProbe:
         at time: Time
     ) -> GesturePhase<Void> {
         .possible(nil)
+    }
+}
+
+private final class LayoutSchedulingScrollEventConsumerProbe:
+    MultiViewResponder,
+    ResponderEventConsumer {
+    private(set) var consumeCallCount = 0
+
+    override var features: ViewResponder.Features {
+        super.features.union(.platformViews)
+    }
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        var mask = BitVector64()
+        if !points.isEmpty {
+            mask[0] = true
+        }
+        return ViewResponder.ContainsPointsResult(
+            mask: mask,
+            priority: 1,
+            children: children
+        )
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == ScrollEvent.self
+    }
+
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> GesturePhase<Void> {
+        consumeCallCount += 1
+        return .active(())
+    }
+}
+
+private final class LayoutSchedulingExclusiveEventConsumerProbe:
+    MultiViewResponder,
+    ExclusiveResponderEventConsumer {
+    private(set) var receivedEventIDs: [EventID] = []
+
+    override var features: ViewResponder.Features {
+        super.features.union(.platformViews)
+    }
+
+    override func containsGlobalPoints(
+        _ points: [CGPoint],
+        cacheKey: UInt32?,
+        options: ViewResponder.ContainsPointsOptions
+    ) -> ViewResponder.ContainsPointsResult {
+        var mask = BitVector64()
+        if !points.isEmpty {
+            mask[0] = true
+        }
+        return ViewResponder.ContainsPointsResult(
+            mask: mask,
+            priority: 1,
+            children: children
+        )
+    }
+
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        eventType == VUI.MouseEvent.self
+    }
+
+    func exclusivelyConsumes(_ event: any EventType) -> Bool {
+        guard let event = event as? VUI.MouseEvent else { return false }
+        return event.button == .primary
+    }
+
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at time: Time
+    ) -> GesturePhase<Void> {
+        receivedEventIDs.append(contentsOf: events.keys)
+        receivedEventIDs.sort { $0.serial < $1.serial }
+        return .active(())
     }
 }
 

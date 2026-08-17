@@ -41,7 +41,9 @@ private struct PlatformItemLabelView<
                 }
                 var item = list.items[0]
                 let secondary = list.items[1]
-                item.label = secondary.label ?? secondary.text
+                if item.label == nil {
+                    item.label = secondary.label ?? secondary.text
+                }
                 list.items = [item]
             }
     }
@@ -197,4 +199,3 @@ extension _ViewOutputs {
         )
     }
 }
-

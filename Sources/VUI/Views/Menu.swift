@@ -168,22 +168,25 @@ struct ResolvedMenuStyle: StyleableView {
     }
 }
 
-struct MenuDropdownModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
+struct MenuControlModifier<MenuContent>: ViewModifier, MultiViewModifier where MenuContent: View {
     typealias Body = Never
     let content: MenuContent
+    var primaryAction: (() -> Void)? = nil
+    var menuIndicatorWidth: CGFloat = 0
     var onMenuOpenChanged: ((Bool) -> Void)? = nil
-    var onPressingChanged: ((Bool) -> Void)? = nil
+    var onPrimaryPressingChanged: ((Bool) -> Void)? = nil
+    var onMenuPressingChanged: ((Bool) -> Void)? = nil
     var onPresentationChanged: ((Bool) -> Void)? = nil
 }
 
-extension MenuDropdownModifier {
+extension MenuControlModifier {
     fileprivate var _scene: some Scene { _EmptyScene() }
 }
 
-extension MenuDropdownModifier {
+extension MenuControlModifier {
     static func _makeView(modifier: _GraphValue<Self>, inputs: _ViewInputs, body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
-            fatalError("MenuDropdownModifier._makeView called outside AG context")
+            fatalError("MenuControlModifier._makeView called outside AG context")
         }
 
         var outputs = body(_Graph(), inputs)
@@ -220,7 +223,7 @@ extension MenuDropdownModifier {
         )
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let responderAttr: Attribute<[ViewResponder]> = graph.makeStatefulRule(
-            MenuDropdownResponderFilter(
+            MenuControlResponderFilter(
                 _modifier: modifier._attribute,
                 _itemList: itemListAttr,
                 _environment: environmentAttr,
@@ -242,22 +245,22 @@ extension MenuDropdownModifier {
 
     public static func _makeViewList(modifier: _GraphValue<Self>, inputs: _ViewListInputs, body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs) -> _ViewListOutputs {
         guard _AGGraph.current != nil else {
-            fatalError("MenuDropdownModifier._makeViewList called outside AG context")
+            fatalError("MenuControlModifier._makeViewList called outside AG context")
         }
-        // Keep the dropdown modifier attached when a Menu trigger is materialized
-        // as a list child, such as the arrow segment inside a primary-action HStack.
+        // Keep the control modifier attached when a Menu style body is
+        // materialized as a list child.
         var outputs = body(_Graph(), inputs)
         outputs.multiModifier(modifier, inputs: inputs)
         return outputs
     }
 }
 
-private let _menuDropdownResponderNextKey = Mutex<UInt32>(0x91000000)
+private let _menuControlResponderNextKey = Mutex<UInt32>(0x91000000)
 
-struct MenuDropdownResponderFilter<MenuContent: View>: StatefulRule {
+struct MenuControlResponderFilter<MenuContent: View>: StatefulRule {
     typealias Value = [ViewResponder]
 
-    var _modifier: Attribute<MenuDropdownModifier<MenuContent>>
+    var _modifier: Attribute<MenuControlModifier<MenuContent>>
     var _itemList: Attribute<PlatformItemList>
     var _environment: Attribute<EnvironmentValues>
     var _phase: Attribute<_GraphInputs.Phase>
@@ -265,19 +268,19 @@ struct MenuDropdownResponderFilter<MenuContent: View>: StatefulRule {
     var _size: Attribute<ViewSize>
     var _transform: Attribute<ViewTransform>
     var _children: Attribute<[ViewResponder]>
-    var _responder: MenuDropdownResponder?
+    var _responder: MenuControlResponder?
 
     mutating func updateValue() {
         let isInitialValue = !context.hasValue
         if _responder == nil {
-            _responder = MenuDropdownResponder(
+            _responder = MenuControlResponder(
                 itemList: _itemList,
                 environment: _environment,
                 phase: _phase
             )
         }
         guard let responder = _responder else {
-            fatalError("MenuDropdownResponderFilter failed to create its responder")
+            fatalError("MenuControlResponderFilter failed to create its responder")
         }
 
         let modifier = _modifier.value
@@ -302,8 +305,11 @@ struct MenuDropdownResponderFilter<MenuContent: View>: StatefulRule {
             parent: responder
         )
         responder.isEnabled = environment.isEnabled
+        responder.primaryAction = modifier.primaryAction
+        responder.menuIndicatorWidth = modifier.menuIndicatorWidth
         responder.onMenuOpenChanged = modifier.onMenuOpenChanged
-        responder.onPressingChanged = modifier.onPressingChanged
+        responder.onPrimaryPressingChanged = modifier.onPrimaryPressingChanged
+        responder.onMenuPressingChanged = modifier.onMenuPressingChanged
         responder.onPresentationChanged = modifier.onPresentationChanged
 
         let childrenChanged = isInitialValue
@@ -318,7 +324,19 @@ struct MenuDropdownResponderFilter<MenuContent: View>: StatefulRule {
     }
 }
 
-final class MenuDropdownResponder: MultiViewResponder {
+final class MenuControlResponder: MultiViewResponder,
+    ExclusiveResponderEventConsumer {
+    private enum EventSessionKind {
+        case primaryAction
+        case menu
+        case dismissMenu
+    }
+
+    private struct EventSession {
+        var eventID: EventID
+        var kind: EventSessionKind
+    }
+
     let hitTestKey: UInt32
 
     let itemList: Attribute<PlatformItemList>
@@ -327,17 +345,23 @@ final class MenuDropdownResponder: MultiViewResponder {
 
     var helper = ContentResponderHelper<TrivialContentResponder>()
     var isEnabled: Bool?
+    var primaryAction: (() -> Void)?
+    var menuIndicatorWidth: CGFloat = 0
     var onMenuOpenChanged: ((Bool) -> Void)?
-    var onPressingChanged: ((Bool) -> Void)?
+    var onPrimaryPressingChanged: ((Bool) -> Void)?
+    var onMenuPressingChanged: ((Bool) -> Void)?
     var onPresentationChanged: ((Bool) -> Void)?
 
     private var isMenuOpen = false
+    private(set) var isPrimaryPressing = false
+    private(set) var isMenuPressing = false
+    private var eventSession: EventSession?
     private var activeSession: ContextMenuPresentationSession?
 
     init(itemList: Attribute<PlatformItemList>,
          environment: Attribute<EnvironmentValues>,
          phase: Attribute<_GraphInputs.Phase>) {
-        self.hitTestKey = _menuDropdownResponderNextKey.withLock { key in
+        self.hitTestKey = _menuControlResponderNextKey.withLock { key in
             defer { key &+= 1 }
             return key
         }
@@ -375,6 +399,63 @@ final class MenuDropdownResponder: MultiViewResponder {
         isMenuOpen
     }
 
+    func acceptsEventType(_ eventType: Any.Type) -> Bool {
+        guard isEnabled != false else { return false }
+        return eventType == MouseEvent.self || eventType == TouchEvent.self
+    }
+
+    func exclusivelyConsumes(_ event: any EventType) -> Bool {
+        controlPointerEvent(event) != nil
+    }
+
+    func consumeEvents(
+        _ events: [EventID: any EventType],
+        at _: Time
+    ) -> GesturePhase<Void> {
+        guard let parent = host as? WindowController else {
+            resetEventSession()
+            return .failed
+        }
+
+        var result: GesturePhase<Void> = .possible(nil)
+        parent.viewGraph.data.withCurrent {
+            for (eventID, event) in events.sorted(by: {
+                $0.key.serial < $1.key.serial
+            }) {
+                guard let pointer = controlPointerEvent(event) else {
+                    continue
+                }
+                let phase = consumePointerEvent(
+                    id: eventID,
+                    phase: pointer.phase,
+                    location: pointer.location,
+                    parent: parent
+                )
+                if phase.isActive {
+                    result = phase
+                } else if phase.isEnded && !result.isActive {
+                    result = phase
+                } else if phase.isFailed && result.isPossible {
+                    result = phase
+                }
+            }
+        }
+        return result
+    }
+
+    func resetEventSession() {
+        guard let eventSession else { return }
+        self.eventSession = nil
+        switch eventSession.kind {
+        case .primaryAction:
+            setPrimaryPressing(false)
+        case .menu:
+            setMenuPressing(false)
+        case .dismissMenu:
+            break
+        }
+    }
+
     func dismissMenu() {
         guard isMenuOpen else { return }
         if let activeSession {
@@ -387,7 +468,7 @@ final class MenuDropdownResponder: MultiViewResponder {
     func present(from parent: WindowController) {
         guard isEnabled != false else { return }
         guard let graph = _AGGraph.current else {
-            fatalError("MenuDropdownResponder.present called outside AG context")
+            fatalError("MenuControlResponder.present called outside AG context")
         }
         let viewPhase = ViewGraphHost.Phase(base: phase.value)
 
@@ -450,7 +531,22 @@ final class MenuDropdownResponder: MultiViewResponder {
     }
 
     private func presentationAnchor() -> CGPoint {
-        var points = [CGPoint(x: 0, y: helper.size.height)]
+        let hasPrimaryAction = primaryAction != nil
+        let indicatorWidth = min(
+            max(menuIndicatorWidth, 0),
+            helper.size.width
+        )
+        // Split controls present from the indicator segment and overlap the
+        // control edge slightly. A menu-only control keeps its full-control
+        // anchor.
+        var points = [CGPoint(
+            x: hasPrimaryAction
+                ? helper.size.width - indicatorWidth
+                : 0,
+            y: hasPrimaryAction
+                ? max(0, helper.size.height - 3)
+                : helper.size.height
+        )]
         helper.transform.convertGlobal(from: .local, points: &points)
         return points[0]
     }
@@ -459,7 +555,120 @@ final class MenuDropdownResponder: MultiViewResponder {
         guard isMenuOpen != open else { return }
         isMenuOpen = open
         onMenuOpenChanged?(open)
-        onPressingChanged?(open)
+        setMenuPressing(open)
         onPresentationChanged?(open)
+    }
+
+    private func controlPointerEvent(
+        _ event: any EventType
+    ) -> (phase: EventPhase, location: CGPoint)? {
+        if let event = event as? MouseEvent {
+            guard event.button == .primary else { return nil }
+            return (event.phase, event.globalLocation)
+        }
+        if let event = event as? TouchEvent {
+            return (event.phase, event.globalLocation)
+        }
+        return nil
+    }
+
+    private func consumePointerEvent(
+        id eventID: EventID,
+        phase: EventPhase,
+        location: CGPoint,
+        parent: WindowController
+    ) -> GesturePhase<Void> {
+        switch phase {
+        case .began:
+            if let eventSession, eventSession.eventID != eventID {
+                resetEventSession()
+            }
+            guard eventSession == nil else { return .active(()) }
+
+            if isMenuOpen {
+                eventSession = EventSession(
+                    eventID: eventID,
+                    kind: .dismissMenu
+                )
+                dismissMenu()
+                return .active(())
+            }
+
+            if primaryAction != nil && containsPrimarySegment(location) {
+                eventSession = EventSession(
+                    eventID: eventID,
+                    kind: .primaryAction
+                )
+                setPrimaryPressing(true)
+                return .active(())
+            }
+
+            eventSession = EventSession(eventID: eventID, kind: .menu)
+            present(from: parent)
+            return .active(())
+
+        case .active:
+            guard let eventSession, eventSession.eventID == eventID else {
+                return .possible(nil)
+            }
+            if eventSession.kind == .primaryAction {
+                setPrimaryPressing(
+                    isEnabled != false && containsPrimarySegment(location)
+                )
+            }
+            return .active(())
+
+        case .ended:
+            guard let eventSession, eventSession.eventID == eventID else {
+                return .possible(nil)
+            }
+            self.eventSession = nil
+            switch eventSession.kind {
+            case .primaryAction:
+                let performsAction = isEnabled != false &&
+                    containsPrimarySegment(location)
+                setPrimaryPressing(false)
+                if performsAction {
+                    primaryAction?()
+                }
+            case .menu, .dismissMenu:
+                break
+            }
+            return .ended(())
+
+        case .failed:
+            guard let eventSession, eventSession.eventID == eventID else {
+                return .possible(nil)
+            }
+            resetEventSession()
+            return .ended(())
+        }
+    }
+
+    private func containsPrimarySegment(_ globalLocation: CGPoint) -> Bool {
+        guard primaryAction != nil else { return false }
+        var points = [globalLocation]
+        helper.transform.convertGlobal(to: .local, points: &points)
+        guard let point = points.first,
+              CGRect(origin: .zero, size: helper.size).contains(point) else {
+            return false
+        }
+        let indicatorWidth = min(
+            max(menuIndicatorWidth, 0),
+            helper.size.width
+        )
+        return point.x < helper.size.width - indicatorWidth
+    }
+
+    private func setPrimaryPressing(_ pressing: Bool) {
+        guard isPrimaryPressing != pressing else { return }
+        isPrimaryPressing = pressing
+        onPrimaryPressingChanged?(pressing)
+    }
+
+    private func setMenuPressing(_ pressing: Bool) {
+        guard isMenuPressing != pressing else { return }
+        isMenuPressing = pressing
+        onMenuPressingChanged?(pressing)
     }
 }

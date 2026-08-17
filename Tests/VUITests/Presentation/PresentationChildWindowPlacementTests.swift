@@ -3,6 +3,31 @@ import XCTest
 @testable import VUI
 
 final class PresentationChildWindowPlacementTests: XCTestCase {
+    // ASSERTIONS contextMenuPointerPopupAnchorObserved
+    @MainActor
+    func testInitialPlatformPopupFitsVisibleScreenBeforeWindowAttachment() async throws {
+        let host = PresentationPlacementHostController(
+            contentSize: CGSize(width: 688, height: 368)
+        )
+        let platformWindow = DeferredPresentationWindow()
+        let popup = UnattachedPlatformPopupController(
+            platformWindow: platformWindow,
+            content: Color.clear.frame(width: 251, height: 451),
+            scene: host.scene,
+            anchor: CGPoint(x: 300, y: 228)
+        )
+
+        host.addPresentationChild(child: popup) { [weak popup] attach in
+            popup?.resolvePresentationWindowAttachment(attach)
+        }
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(platformWindow.contentSize, CGSize(width: 251, height: 451))
+        XCTAssertEqual(platformWindow.origin, CGPoint(x: 300, y: 228))
+    }
+
     @MainActor
     func testPlatformChildActivatesAfterApplyingItsFirstFittedFrame() async throws {
         let host = PresentationPlacementHostController(
@@ -588,6 +613,31 @@ private final class NestedOverlayInputProbe {
 }
 
 @MainActor
+private final class UnattachedPlatformPopupController:
+    PopupWindowController, @unchecked Sendable {
+    private let platformWindow: DeferredPresentationWindow
+
+    init<Content: View>(
+        platformWindow: DeferredPresentationWindow,
+        content: Content,
+        scene: WindowKey,
+        anchor: CGPoint
+    ) {
+        self.platformWindow = platformWindow
+        super.init(
+            content: content,
+            scene: scene,
+            usesPlatformWindow: true,
+            frameInParent: CGRect(origin: anchor, size: .zero)
+        )
+    }
+
+    override func makeWindow() -> (any VVD.Window)? {
+        platformWindow
+    }
+}
+
+@MainActor
 private final class DeferredActivationPresentationController:
     PresentationChildWindowController, @unchecked Sendable {
     private let platformWindow: DeferredPresentationWindow
@@ -707,7 +757,7 @@ private final class PresentationPlacementWindow: VVD.Window {
     var contentSize: CGSize
     var title = "Presentation Placement Test"
     weak var delegate: WindowDelegate?
-    var screen: (any VVD.Screen)? { nil }
+    let screen: (any VVD.Screen)? = PresentationPlacementScreen()
     var isValid: Bool { true }
     var platformHandle: OpaquePointer? { nil }
     var eventObservers = WindowEventObserverContainer()
@@ -750,4 +800,13 @@ private final class PresentationPlacementWindow: VVD.Window {
     func dismissModalWindow(_ window: any VVD.Window) -> Bool { true }
     func convertPointToScreen(_ point: CGPoint) -> CGPoint { point }
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint { point }
+}
+
+private struct PresentationPlacementScreen: VVD.Screen {
+    let id = ScreenID(rawValue: 91_000)
+    let frame = CGRect(x: 0, y: 0, width: 1710, height: 1107)
+    let visibleFrame = CGRect(x: 0, y: 50, width: 1710, height: 1023)
+    let safeAreaInsets = ScreenInsets.zero
+    let scaleFactor: CGFloat = 1
+    let displayModeResolution = CGSize(width: 1710, height: 1107)
 }

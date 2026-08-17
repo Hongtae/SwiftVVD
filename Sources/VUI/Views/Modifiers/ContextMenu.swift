@@ -424,7 +424,12 @@ func contextMenuPresentationItems(
     parentPath: [Int] = []
 ) -> [ContextMenuPresentationItem] {
     var result: [ContextMenuPresentationItem] = []
-    for (index, item) in items.enumerated() {
+    for (index, sourceItem) in items.enumerated() {
+        var item = sourceItem
+        if item.systemItem == nil,
+           item.selectionBehavior?.onSelect == nil {
+            item.isEnabled = false
+        }
         let path = parentPath + [index]
         let source: ContextMenuPresentationItem.ID.Source
         if let platformIdentifier = item.platformIdentifier {
