@@ -1184,6 +1184,52 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS attributeGraphDirtyPendingPropagationObserved
+    func testChangedComputedOutputMarksEveryRepeatedDirectEdgeRecord() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let intermediate = graph.makeRule {
+                source.value * 2
+            }
+            let output = graph.makeRule {
+                intermediate.value + 1
+            }
+
+            XCTAssertEqual(output.value, 3)
+            output.addInput(intermediate, options: [], token: 1)
+
+            let intermediateID = intermediate.identifier.rawValue
+            let intermediateIndex = Int(intermediateID)
+            let outputIndex = Int(output.identifier.rawValue)
+            XCTAssertEqual(
+                graph.slots[intermediateIndex].node!.outputs.filter {
+                    $0 == output.identifier.rawValue
+                }.count,
+                2
+            )
+
+            source.setValue(2)
+            for edgeIndex in graph.slots[outputIndex].node!.inputs.indices
+            where graph.slots[outputIndex].node!.inputs[edgeIndex].attribute
+                == intermediateID {
+                graph.slots[outputIndex].node!.inputs[edgeIndex].flags &=
+                    ~_AGGraph.InputEdge.changed
+            }
+
+            XCTAssertEqual(intermediate.value, 4)
+            let repeatedEdges = graph.slots[outputIndex].node!.inputs.filter {
+                $0.attribute == intermediateID
+            }
+            XCTAssertEqual(repeatedEdges.count, 2)
+            XCTAssertTrue(repeatedEdges.allSatisfy {
+                $0.flags & _AGGraph.InputEdge.changed != 0
+            })
+        }
+    }
+
     // ASSERTIONS attributeGraphDirtyTransitionGateObserved
     func testRepeatedInvalidationStopsAtAlreadyDirtyDependent() {
         let graph = _AGGraph()

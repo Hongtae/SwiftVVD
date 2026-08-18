@@ -29,26 +29,32 @@ private func _getChildMetadata(_: Any.Type, index: Int, fieldMetadata: UnsafeMut
 @_silgen_name("swift_reflectionMirror_recursiveChildOffset")
 private func _getChildOffset(_: Any.Type, index: Int) -> Int
 
-private typealias _ReflectionNameFreeFunc = @convention(c) (
-    UnsafePointer<CChar>?
-) -> Void
-
 private typealias _EnumTagWitness = @convention(c) (
     UnsafeRawPointer,
     UnsafeRawPointer
 ) -> UInt32
 
-@_silgen_name("swift_reflectionMirror_count")
-private func _getChildCount<Value>(_: Value, type: Any.Type) -> Int
+private typealias _DestroyValueWitness = @convention(c) (
+    UnsafeMutableRawPointer,
+    UnsafeRawPointer
+) -> Void
 
-@_silgen_name("swift_reflectionMirror_subscript")
-private func _getChild<Value>(
-    of: Value,
-    type: Any.Type,
-    index: Int,
-    outName: UnsafeMutablePointer<UnsafePointer<CChar>?>,
-    outFreeFunc: UnsafeMutablePointer<_ReflectionNameFreeFunc?>
-) -> Any
+private typealias _InitializeWithCopyValueWitness = @convention(c) (
+    UnsafeMutableRawPointer,
+    UnsafeMutableRawPointer,
+    UnsafeRawPointer
+) -> UnsafeMutableRawPointer
+
+private typealias _ProjectEnumDataValueWitness = @convention(c) (
+    UnsafeMutableRawPointer,
+    UnsafeRawPointer
+) -> Void
+
+private typealias _InjectEnumTagValueWitness = @convention(c) (
+    UnsafeMutableRawPointer,
+    UInt32,
+    UnsafeRawPointer
+) -> Void
 
 enum _MetadataKind: UInt, Sendable {
     case `class` = 0
@@ -74,44 +80,208 @@ enum _MetadataKind: UInt, Sendable {
     }
 }
 
+struct _EnumValueWitnesses: @unchecked Sendable {
+    private static let wordSize = MemoryLayout<UInt>.size
+    private static let destroyOffset = wordSize
+    private static let initializeWithCopyOffset = 2 * wordSize
+    private static let sizeOffset = 8 * wordSize
+    private static let flagsOffset = 10 * wordSize
+    private static let getTagOffset =
+        flagsOffset + 2 * MemoryLayout<UInt32>.size
+    private static let projectDataOffset = getTagOffset + wordSize
+    private static let injectTagOffset = projectDataOffset + wordSize
+
+    let metadata: UnsafeRawPointer
+    private let table: UnsafeRawPointer
+
+    init?(_ type: Any.Type) {
+        let kind = _MetadataKind(type)
+        guard kind == .enum || kind == .optional else { return nil }
+        metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+        table = metadata.advanced(by: -Self.wordSize).load(
+            as: UnsafeRawPointer.self
+        )
+    }
+
+    var size: Int {
+        Int(table.load(fromByteOffset: Self.sizeOffset, as: UInt.self))
+    }
+
+    var alignment: Int {
+        let flags = table.load(
+            fromByteOffset: Self.flagsOffset,
+            as: UInt32.self
+        )
+        return Int(flags & 0xff) + 1
+    }
+
+    func tag(of value: UnsafeRawPointer) -> UInt32 {
+        let function = table.load(
+            fromByteOffset: Self.getTagOffset,
+            as: UnsafeRawPointer.self
+        )
+        return unsafeBitCast(function, to: _EnumTagWitness.self)(
+            value,
+            metadata
+        )
+    }
+
+    @discardableResult
+    func initializeWithCopy(
+        _ destination: UnsafeMutableRawPointer,
+        from source: UnsafeRawPointer
+    ) -> UnsafeMutableRawPointer {
+        let function = table.load(
+            fromByteOffset: Self.initializeWithCopyOffset,
+            as: UnsafeRawPointer.self
+        )
+        return unsafeBitCast(
+            function,
+            to: _InitializeWithCopyValueWitness.self
+        )(
+            destination,
+            UnsafeMutableRawPointer(mutating: source),
+            metadata
+        )
+    }
+
+    func destroy(_ value: UnsafeMutableRawPointer) {
+        let function = table.load(
+            fromByteOffset: Self.destroyOffset,
+            as: UnsafeRawPointer.self
+        )
+        unsafeBitCast(function, to: _DestroyValueWitness.self)(value, metadata)
+    }
+
+    func projectEnumData(_ value: UnsafeMutableRawPointer) {
+        let function = table.load(
+            fromByteOffset: Self.projectDataOffset,
+            as: UnsafeRawPointer.self
+        )
+        unsafeBitCast(
+            function,
+            to: _ProjectEnumDataValueWitness.self
+        )(value, metadata)
+    }
+
+    func injectEnumTag(_ tag: UInt32, into value: UnsafeMutableRawPointer) {
+        let function = table.load(
+            fromByteOffset: Self.injectTagOffset,
+            as: UnsafeRawPointer.self
+        )
+        unsafeBitCast(
+            function,
+            to: _InjectEnumTagValueWitness.self
+        )(value, tag, metadata)
+    }
+}
+
+struct _EnumCaseMetadata: @unchecked Sendable {
+    let payloadType: Any.Type?
+    let isIndirect: Bool
+}
+
+private func _resolveRelativePointer(
+    storedAt field: UnsafeRawPointer
+) -> UnsafeRawPointer? {
+    let offset = field.load(as: Int32.self)
+    guard offset != 0 else { return nil }
+    return field.advanced(by: Int(offset))
+}
+
+private func _symbolicMangledNameLength(
+    at start: UnsafePointer<UInt8>
+) -> UInt {
+    var cursor = start
+    while cursor.pointee != 0 {
+        let byte = cursor.pointee
+        cursor = cursor.advanced(by: 1)
+        if byte >= 0x01 && byte <= 0x17 {
+            cursor = cursor.advanced(by: MemoryLayout<Int32>.size)
+        } else if byte >= 0x18 && byte <= 0x1f {
+            cursor = cursor.advanced(by: MemoryLayout<UInt>.size)
+        }
+    }
+    return UInt(start.distance(to: cursor))
+}
+
+func _enumCaseMetadata(of type: Any.Type) -> [_EnumCaseMetadata]? {
+    let kind = _MetadataKind(type)
+    guard kind == .enum || kind == .optional else { return nil }
+
+    let wordSize = MemoryLayout<UInt>.size
+    let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+    let descriptor = metadata.load(
+        fromByteOffset: wordSize,
+        as: UnsafeRawPointer.self
+    )
+    let payloadCasesAndSizeOffset = descriptor.load(
+        fromByteOffset: 20,
+        as: UInt32.self
+    )
+    let payloadCaseCount = Int(payloadCasesAndSizeOffset & 0x00ff_ffff)
+    let emptyCaseCount = Int(
+        descriptor.load(fromByteOffset: 24, as: UInt32.self)
+    )
+    let caseCount = payloadCaseCount + emptyCaseCount
+    guard caseCount > 0 else { return [] }
+
+    let fieldsField = descriptor.advanced(
+        by: 4 * MemoryLayout<UInt32>.size
+    )
+    guard let fields = _resolveRelativePointer(storedAt: fieldsField) else {
+        return nil
+    }
+    let descriptorKind = fields.load(fromByteOffset: 8, as: UInt16.self)
+    let recordSize = Int(fields.load(fromByteOffset: 10, as: UInt16.self))
+    let recordCount = Int(fields.load(fromByteOffset: 12, as: UInt32.self))
+    guard (descriptorKind == 2 || descriptorKind == 3),
+          recordSize >= 12,
+          recordCount == caseCount else {
+        return nil
+    }
+
+    let records = fields.advanced(by: 16)
+    let genericArguments = metadata.advanced(by: 2 * wordSize)
+    var cases: [_EnumCaseMetadata] = []
+    cases.reserveCapacity(recordCount)
+    for index in 0..<recordCount {
+        let record = records.advanced(by: index * recordSize)
+        let flags = record.load(as: UInt32.self)
+        let typeField = record.advanced(by: MemoryLayout<UInt32>.size)
+        let payloadType: Any.Type?
+        if let mangledTypePointer = _resolveRelativePointer(
+            storedAt: typeField
+        ) {
+            let mangledType = mangledTypePointer.assumingMemoryBound(
+                to: UInt8.self
+            )
+            guard let resolvedType = _getTypeByMangledNameInContext(
+                mangledType,
+                _symbolicMangledNameLength(at: mangledType),
+                genericContext: descriptor,
+                genericArguments: genericArguments
+            ) else {
+                return nil
+            }
+            payloadType = resolvedType
+        } else {
+            payloadType = nil
+        }
+        cases.append(
+            _EnumCaseMetadata(
+                payloadType: payloadType,
+                isIndirect: flags & 1 != 0
+            )
+        )
+    }
+    return cases
+}
+
 struct _EachFieldMetadata: Sendable {
     let kind: _MetadataKind
     let isStrong: Bool
     let isVar: Bool
-}
-
-func _enumTag<Value>(of value: UnsafePointer<Value>) -> UInt32 {
-    let wordSize = MemoryLayout<UInt>.size
-    let metadata = unsafeBitCast(Value.self, to: UnsafeRawPointer.self)
-    let witnesses = metadata.advanced(by: -wordSize).load(
-        as: UnsafeRawPointer.self
-    )
-    // Required function witnesses, stored-size values, and UInt32 layout
-    // values precede the enum-specific witnesses in the runtime ABI.
-    let enumWitnessOffset = 10 * wordSize + 2 * MemoryLayout<UInt32>.size
-    let function = witnesses.load(
-        fromByteOffset: enumWitnessOffset,
-        as: UnsafeRawPointer.self
-    )
-    let getTag = unsafeBitCast(function, to: _EnumTagWitness.self)
-    return getTag(value, metadata)
-}
-
-func _enumPayload<Value>(of value: Value) -> Any? {
-    guard _getChildCount(value, type: Value.self) == 1 else {
-        return nil
-    }
-    var name: UnsafePointer<CChar>?
-    var freeName: _ReflectionNameFreeFunc?
-    let payload = _getChild(
-        of: value,
-        type: Value.self,
-        index: 0,
-        outName: &name,
-        outFreeFunc: &freeName
-    )
-    freeName?(name)
-    return payload
 }
 
 struct _EachFieldOptions: OptionSet, Sendable {

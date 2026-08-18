@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Foundation
 import Synchronization
 
 protocol _AGTypeDescriptorEquatable {
@@ -24,10 +25,24 @@ extension _AGTypeDescriptorEquatable where Self: Equatable {
     }
 }
 
+private final class _AGPreparedEnumLayout: @unchecked Sendable {
+    let witnesses: _EnumValueWitnesses
+    let cases: [_EnumCaseMetadata]
+
+    init?(_ type: Any.Type) {
+        guard let witnesses = _EnumValueWitnesses(type),
+              let cases = _enumCaseMetadata(of: type) else {
+            return nil
+        }
+        self.witnesses = witnesses
+        self.cases = cases
+    }
+}
+
 private enum _AGPreparedComparisonOperation: @unchecked Sendable {
     case bytes(offset: Int, count: Int)
     case string(offset: Int)
-    case enumValue(offset: Int, type: Any.Type)
+    case enumValue(offset: Int, layout: _AGPreparedEnumLayout)
     case opaqueExistential(offset: Int, type: Any.Type)
     case alwaysUnequal(offset: Int)
 
@@ -37,8 +52,8 @@ private enum _AGPreparedComparisonOperation: @unchecked Sendable {
             .bytes(offset: offset + delta, count: count)
         case let .string(offset):
             .string(offset: offset + delta)
-        case let .enumValue(offset, type):
-            .enumValue(offset: offset + delta, type: type)
+        case let .enumValue(offset, layout):
+            .enumValue(offset: offset + delta, layout: layout)
         case let .opaqueExistential(offset, type):
             .opaqueExistential(offset: offset + delta, type: type)
         case let .alwaysUnequal(offset):
@@ -237,7 +252,15 @@ private enum _AGComparisonLayout {
             return
         }
         if kind == .enum || kind == .optional {
-            operations.append(.enumValue(offset: offset, type: type))
+            if let layout = _AGPreparedEnumLayout(type) {
+                operations.append(.enumValue(offset: offset, layout: layout))
+            } else {
+                appendBytes(
+                    offset: offset,
+                    count: _AGGraph.valueSize(of: type),
+                    to: &operations
+                )
+            }
             return
         }
         guard kind.supportsStoredFieldTraversal else {
@@ -385,11 +408,11 @@ extension _AGGraph {
                     .assumingMemoryBound(to: String.self).pointee
                     == rhs.advanced(by: offset)
                     .assumingMemoryBound(to: String.self).pointee
-            case let .enumValue(offset, type):
+            case let .enumValue(offset, layout):
                 isEqual = compareEnumValues(
                     lhs.advanced(by: offset),
                     rhs.advanced(by: offset),
-                    type: type
+                    layout: layout
                 )
             case let .opaqueExistential(offset, type):
                 isEqual = compareOpaqueExistentialValues(
@@ -410,59 +433,116 @@ extension _AGGraph {
     private static func compareEnumValues(
         _ lhs: UnsafeRawPointer,
         _ rhs: UnsafeRawPointer,
-        type: Any.Type
+        layout: _AGPreparedEnumLayout
     ) -> Bool {
-        func compare<Value>(_ type: Value.Type) -> Bool {
-            compareEnumValues(
-                lhs.assumingMemoryBound(to: Value.self),
-                rhs.assumingMemoryBound(to: Value.self)
+        let lhsTag = layout.witnesses.tag(of: lhs)
+        guard lhsTag == layout.witnesses.tag(of: rhs) else {
+            return false
+        }
+        guard Int(lhsTag) < layout.cases.count else {
+            return false
+        }
+        let activeCase = layout.cases[Int(lhsTag)]
+        guard let payloadType = activeCase.payloadType else {
+            return true
+        }
+        if activeCase.isIndirect {
+            return compareIndirectEnumPayloads(
+                lhs,
+                rhs,
+                payloadType: payloadType,
+                witnesses: layout.witnesses
             )
         }
-        return _openExistential(type, do: compare)
+        return compareDirectEnumPayloads(
+            lhs,
+            rhs,
+            tag: lhsTag,
+            payloadType: payloadType,
+            witnesses: layout.witnesses
+        )
     }
 
-    private static func compareEnumValues<Value>(
-        _ lhs: UnsafePointer<Value>,
-        _ rhs: UnsafePointer<Value>
+    private static func compareDirectEnumPayloads(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer,
+        tag: UInt32,
+        payloadType: Any.Type,
+        witnesses: _EnumValueWitnesses
     ) -> Bool {
-        guard _enumTag(of: lhs) == _enumTag(of: rhs) else {
-            return false
-        }
+        withEnumScratch(witnesses: witnesses) { lhsScratch, rhsScratch in
+            witnesses.initializeWithCopy(lhsScratch, from: lhs)
+            witnesses.initializeWithCopy(rhsScratch, from: rhs)
+            witnesses.projectEnumData(lhsScratch)
+            witnesses.projectEnumData(rhsScratch)
+            defer {
+                witnesses.injectEnumTag(tag, into: lhsScratch)
+                witnesses.injectEnumTag(tag, into: rhsScratch)
+                witnesses.destroy(lhsScratch)
+                witnesses.destroy(rhsScratch)
+            }
 
-        switch (_enumPayload(of: lhs.pointee), _enumPayload(of: rhs.pointee)) {
-        case (nil, nil):
-            return true
-        case let (lhsPayload?, rhsPayload?):
-            return compareEnumPayloads(lhsPayload, rhsPayload)
-        default:
-            return false
+            return comparePreparedLayoutValues(
+                lhsScratch,
+                rhsScratch,
+                program: _AGComparisonLayout.program(
+                    of: payloadType,
+                    kind: _MetadataKind(payloadType)
+                )
+            )
         }
     }
 
-    private static func compareEnumPayloads(
-        _ lhsPayload: Any,
-        _ rhsPayload: Any
+    private static func compareIndirectEnumPayloads(
+        _ lhs: UnsafeRawPointer,
+        _ rhs: UnsafeRawPointer,
+        payloadType: Any.Type,
+        witnesses: _EnumValueWitnesses
     ) -> Bool {
-        // Open the payload type before comparing so an out-of-line existential
-        // box does not become part of the value comparison.
-        func compare<Payload>(_ lhs: Payload) -> Bool {
-            guard let rhs = rhsPayload as? Payload else {
-                return false
+        withEnumScratch(witnesses: witnesses) { lhsScratch, rhsScratch in
+            lhsScratch.copyMemory(from: lhs, byteCount: witnesses.size)
+            rhsScratch.copyMemory(from: rhs, byteCount: witnesses.size)
+            witnesses.projectEnumData(lhsScratch)
+            witnesses.projectEnumData(rhsScratch)
+
+            let lhsBox = lhsScratch.load(as: UnsafeRawPointer.self)
+            let rhsBox = rhsScratch.load(as: UnsafeRawPointer.self)
+            if lhsBox == rhsBox {
+                return true
             }
-            return withUnsafePointer(to: lhs) { lhsPointer in
-                withUnsafePointer(to: rhs) { rhsPointer in
-                    comparePreparedLayoutValues(
-                        lhsPointer,
-                        rhsPointer,
-                        program: _AGComparisonLayout.program(
-                            of: Payload.self,
-                            kind: _MetadataKind(Payload.self)
-                        )
-                    )
-                }
-            }
+            let payloadLayout = valueLayout(of: payloadType)
+            let alignmentMask = payloadLayout.alignment - 1
+            let headerSize = 2 * MemoryLayout<UInt>.size
+            let payloadOffset =
+                (headerSize + alignmentMask) & ~alignmentMask
+            return comparePreparedLayoutValues(
+                lhsBox.advanced(by: payloadOffset),
+                rhsBox.advanced(by: payloadOffset),
+                program: _AGComparisonLayout.program(
+                    of: payloadType,
+                    kind: _MetadataKind(payloadType)
+                )
+            )
         }
-        return _openExistential(lhsPayload, do: compare)
+    }
+
+    private static func withEnumScratch<Result>(
+        witnesses: _EnumValueWitnesses,
+        _ body: (
+            UnsafeMutableRawPointer,
+            UnsafeMutableRawPointer
+        ) throws -> Result
+    ) rethrows -> Result {
+        let alignmentMask = witnesses.alignment - 1
+        let valueStride =
+            (max(witnesses.size, 1) + alignmentMask) & ~alignmentMask
+        return try withUnsafeTemporaryAllocation(
+            byteCount: 2 * valueStride,
+            alignment: witnesses.alignment
+        ) { storage in
+            let lhs = storage.baseAddress!
+            return try body(lhs, lhs.advanced(by: valueStride))
+        }
     }
 
     private static func compareOpaqueExistentialValues(
@@ -552,15 +632,13 @@ extension _AGGraph {
         count: Int
     ) -> Bool {
         guard count > 0 else { return true }
-        let lhsBytes = UnsafeRawBufferPointer(
-            start: lhs.advanced(by: offset),
-            count: count
-        )
-        let rhsBytes = UnsafeRawBufferPointer(
-            start: rhs.advanced(by: offset),
-            count: count
-        )
-        return lhsBytes.elementsEqual(rhsBytes)
+        let lhsBytes = lhs.advanced(by: offset)
+        let rhsBytes = rhs.advanced(by: offset)
+        if count == 1 {
+            return lhsBytes.load(as: UInt8.self)
+                == rhsBytes.load(as: UInt8.self)
+        }
+        return memcmp(lhsBytes, rhsBytes, count) == 0
     }
 
     fileprivate static func valueSize(of type: Any.Type) -> Int {

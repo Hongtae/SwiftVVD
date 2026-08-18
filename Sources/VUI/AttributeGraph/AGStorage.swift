@@ -2051,9 +2051,7 @@ extension _AGGraph {
         // traversal belongs to explicit invalidation paths.
         guard !outputIDs.isEmpty else { return }
 
-        var visited = Set<UInt32>()
-        visited.reserveCapacity(outputIDs.count)
-        for rawID in outputIDs where visited.insert(rawID).inserted {
+        for rawID in outputIDs {
             let index = Int(rawID)
             guard slots.indices.contains(index),
                   slots[index].node != nil else {

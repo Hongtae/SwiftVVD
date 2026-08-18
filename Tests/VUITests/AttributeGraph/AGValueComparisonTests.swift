@@ -83,6 +83,40 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testRawComparisonCoversSingleAndMultiByteRanges() {
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    UInt8(7),
+                    UInt8(7),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    UInt8(7),
+                    UInt8(8),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    UInt64(0x0102_0304_0506_0708),
+                    UInt64(0x0102_0304_0506_0708),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    UInt64(0x0102_0304_0506_0708),
+                    UInt64(0x0102_0304_0506_0709),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testLayoutComparisonDetectsChangedHeapBackedArrayElement() {
         let lhs = [
             ScrollGeometryState(
@@ -402,6 +436,108 @@ final class AGValueComparisonTests: XCTestCase {
                 )
             )
         }
+    }
+
+    func testPreparedEnumProjectionUsesTagIndexedCaseMetadata() {
+        // ASSERTIONS attributeGraphEnumPayloadProjectionObserved
+        // ASSERTIONS attributeGraphEnumPayloadComparisonObserved
+        let cases = try! XCTUnwrap(
+            _enumCaseMetadata(of: MixedProjectionComparisonPayload.self)
+        )
+        XCTAssertEqual(cases.count, 3)
+        XCTAssertEqual(cases.map(\.isIndirect), [false, true, false])
+        XCTAssertTrue(cases[0].payloadType == ProjectionComparisonRecord.self)
+        XCTAssertTrue(cases[1].payloadType == ProjectionComparisonRecord.self)
+        XCTAssertNil(cases[2].payloadType)
+
+        let first = ProjectionComparisonRecord(count: 7, label: "seven")
+        let changedCount = ProjectionComparisonRecord(count: 8, label: "seven")
+        let changedLabel = ProjectionComparisonRecord(count: 7, label: "eight")
+        for rawValue: UInt32 in [2, 0x102] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    MixedProjectionComparisonPayload.direct(first),
+                    MixedProjectionComparisonPayload.direct(first),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    MixedProjectionComparisonPayload.direct(first),
+                    MixedProjectionComparisonPayload.direct(changedCount),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    MixedProjectionComparisonPayload.indirect(first),
+                    MixedProjectionComparisonPayload.indirect(first),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    MixedProjectionComparisonPayload.indirect(first),
+                    MixedProjectionComparisonPayload.indirect(changedLabel),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    MixedProjectionComparisonPayload.empty,
+                    MixedProjectionComparisonPayload.direct(first),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    GenericProjectionComparisonPayload.value(first),
+                    GenericProjectionComparisonPayload.value(first),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    GenericProjectionComparisonPayload.value(first),
+                    GenericProjectionComparisonPayload.value(changedCount),
+                    options: options
+                )
+            )
+        }
+    }
+
+    func testPreparedEnumProjectionPreservesCallerValueLifetime() {
+        weak var weakReference: ComparisonReference?
+        do {
+            let reference = ComparisonReference(7)
+            weakReference = reference
+            let direct = ProjectionLifetimePayload.direct(reference)
+            let indirect = ProjectionLifetimePayload.indirect(reference)
+            let options = AGComparisonOptions(mode: .layout)
+
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    direct,
+                    ProjectionLifetimePayload.direct(reference),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    indirect,
+                    ProjectionLifetimePayload.indirect(reference),
+                    options: options
+                )
+            )
+            guard case let .direct(directReference) = direct,
+                  case let .indirect(indirectReference) = indirect else {
+                return XCTFail("comparison consumed a caller-owned enum")
+            }
+            XCTAssertTrue(directReference === reference)
+            XCTAssertTrue(indirectReference === reference)
+        }
+        XCTAssertNil(weakReference)
     }
 
     func testLayoutComparisonProjectsOutOfLineExistentialPayloads() {
@@ -996,6 +1132,27 @@ private enum SameTypeCaseComparisonPayload {
     case second(Int)
     case firstEmpty
     case secondEmpty
+}
+
+private struct ProjectionComparisonRecord {
+    var count: Int
+    var label: String
+}
+
+private enum MixedProjectionComparisonPayload {
+    case empty
+    case direct(ProjectionComparisonRecord)
+    indirect case indirect(ProjectionComparisonRecord)
+}
+
+private enum GenericProjectionComparisonPayload<Value> {
+    case empty
+    case value(Value)
+}
+
+private enum ProjectionLifetimePayload {
+    case direct(ComparisonReference)
+    indirect case indirect(ComparisonReference)
 }
 
 private protocol ComparisonMarkerA {}
