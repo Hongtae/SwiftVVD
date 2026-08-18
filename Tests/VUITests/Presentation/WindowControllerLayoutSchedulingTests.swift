@@ -958,6 +958,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         for (sample, pair) in zip(publishedOffsets, observedOffsets).enumerated() {
+            XCTAssertEqual(pair.0.y, CGFloat(sample + 1) * 688, accuracy: 0.001)
             XCTAssertEqual(pair.1.y, pair.0.y, accuracy: 0.001, "sample \(sample)")
         }
     }

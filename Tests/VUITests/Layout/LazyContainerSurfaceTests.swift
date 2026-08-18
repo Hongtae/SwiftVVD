@@ -11472,7 +11472,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertTrue(cache.item(for: targetID.canonicalID) === candidate)
             XCTAssertEqual(candidate.id, targetID)
             XCTAssertEqual(candidate.reuseIdentifier, targetID.reuseIdentifier)
-            XCTAssertEqual(candidate.usedSeed, 0)
+            XCTAssertEqual(candidate.usedSeed, 1)
             XCTAssertEqual(candidate.prefetchSeed, 0)
             XCTAssertEqual(candidate.prefetchPhase, .notPrefetching)
             XCTAssertEqual(cache.lru.usedSeed, 1)
@@ -11528,7 +11528,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 reuseIdentifier: targetID.reuseIdentifier
             )
             cache.items.removeAll()
-            cache.lru.invalidate()
+            cache.lru.reset()
             cache.lru.transactionSeed = 20
             candidate.insertionTransactionSeed = 0
             candidate.placementSeed = 10
@@ -11539,10 +11539,12 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let returned = cache.item(data: data)
 
             XCTAssertEqual(candidate.insertionTransactionSeed, 20)
+            XCTAssertEqual(candidate.usedSeed, 1)
             XCTAssertFalse(returned === candidate)
             XCTAssertTrue(cache.item(for: oldID.canonicalID) === candidate)
             XCTAssertTrue(cache.item(for: targetID.canonicalID) === returned)
             XCTAssertEqual(returned.insertionTransactionSeed, 20)
+            XCTAssertEqual(returned.usedSeed, 2)
         }
     }
 
@@ -11551,6 +11553,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
         host.data.withCurrent {
             let (cache, item, state) = makeLazyCache(host: host)
+            cache.lru.reset()
             cache.lru.transactionSeed = 8
             state.setValue(
                 LazyLayoutCacheItem.State(
@@ -11573,7 +11576,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     isRemoved: false
                 )
             )
-            XCTAssertEqual(item.usedSeed, 0)
+            XCTAssertEqual(item.usedSeed, 1)
             XCTAssertEqual(item.placementSeed, 0)
             XCTAssertEqual(item.commitSeed, 0)
             XCTAssertEqual(item.prefetchSeed, 0)
@@ -11588,6 +11591,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             let recorder = ViewListEditRecorder()
             let list = EditingViewList(edit: .inserted, recorder: recorder)
             let (cache, item, state) = makeLazyCache(host: host, list: list)
+            cache.lru.reset()
             cache.lru.lastTransactionID.value = 42
             cache.lru.transactionSeed = 13
             recorder.ids.removeAll()
@@ -11606,6 +11610,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
             }
 
             XCTAssertEqual(item.insertionTransactionSeed, 13)
+            XCTAssertEqual(item.usedSeed, 1)
             XCTAssertEqual(recorder.ids, [item.id])
             XCTAssertEqual(recorder.transactionIDs.map(\.value), [42])
             XCTAssertEqual(
@@ -11625,6 +11630,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
         host.data.withCurrent {
             let (cache, item, state) = makeLazyCache(host: host)
+            cache.lru.reset()
             cache.lru.transactionSeed = 11
             item.usedSeed = 4
             item.placementSeed = 5
@@ -11655,7 +11661,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     isRemoved: false
                 )
             )
-            XCTAssertEqual(item.usedSeed, 4)
+            XCTAssertEqual(item.usedSeed, 1)
             XCTAssertEqual(item.placementSeed, 5)
             XCTAssertEqual(item.commitSeed, 6)
             XCTAssertEqual(item.prefetchSeed, 7)
@@ -11668,6 +11674,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
         host.data.withCurrent {
             let (cache, item, state) = makeLazyCache(host: host)
+            cache.lru.reset()
             cache.lru.transactionSeed = 12
             item.usedSeed = 4
             item.placementSeed = 5
@@ -11698,7 +11705,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     isRemoved: false
                 )
             )
-            XCTAssertEqual(item.usedSeed, 0)
+            XCTAssertEqual(item.usedSeed, 1)
             XCTAssertEqual(item.placementSeed, 0)
             XCTAssertEqual(item.commitSeed, 0)
             XCTAssertEqual(item.prefetchSeed, 0)

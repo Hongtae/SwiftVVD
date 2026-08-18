@@ -2355,6 +2355,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
     func addItem(_ item: LazyLayoutCacheItem, reset: Bool = false) {
         item.cache = self
         item.insertionTransactionSeed = lru.transactionSeed
+        item.usedSeed = lru.usedSeed
         item.removedSeed = .max
         let transaction = inputs.base.transaction.value
         var state = item._state.value
@@ -2374,7 +2375,6 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
         state.isRemoved = false
         item._state.setValue(state, transaction: transaction)
         if reset {
-            item.usedSeed = 0
             item.placementSeed = 0
             item.commitSeed = 0
             item.prefetchSeed = 0
