@@ -106,6 +106,8 @@ final class AppearanceActionModifierTests: XCTestCase {
             requestedOutputs: []
         )
         rendererHost.storage = viewGraph
+        viewGraph.setSize(CGSize(width: 1, height: 1))
+        viewGraph.instantiateIfNeeded()
 
         try viewGraph.data.withCurrent {
             try AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {

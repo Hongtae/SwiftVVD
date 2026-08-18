@@ -154,6 +154,8 @@ final class GraphHostRemovedStateTests: XCTestCase {
             features: [feature]
         )
         rendererHost.storage = viewGraph
+        viewGraph.setSize(CGSize(width: 1, height: 1))
+        viewGraph.instantiateIfNeeded()
 
         XCTAssertEqual(
             viewGraph.viewGraphFeatureCount,

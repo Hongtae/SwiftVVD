@@ -473,7 +473,13 @@ final class ShaderTests: XCTestCase {
         named name: String,
         arguments: [VUI.Shader.Argument]
     ) throws -> VUI.Shader {
-        let url = try XCTUnwrap(Bundle.module.url(
+        let vuiBundleName = Bundle.module.bundleURL.lastPathComponent
+            .replacingOccurrences(of: "VUITests", with: "VUI")
+        let vuiBundleURL = Bundle.module.bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(vuiBundleName, isDirectory: true)
+        let vuiBundle = try XCTUnwrap(Bundle(url: vuiBundleURL))
+        let url = try XCTUnwrap(vuiBundle.url(
             forResource: "\(name).frag",
             withExtension: "spv",
             subdirectory: "SPIRV"
@@ -507,7 +513,7 @@ final class ShaderTests: XCTestCase {
 
     private func makeDisplayList() -> DisplayList {
         var list = DisplayList()
-        list.appendDebugItem { _ in }
+        list.appendItem(bounds: CGRect(x: 0, y: 0, width: 10, height: 10)) { _ in }
         return list
     }
 
@@ -516,6 +522,8 @@ final class ShaderTests: XCTestCase {
         environment: EnvironmentValues
     ) -> _ViewInputs {
         let environment = graph.makeInput(value: environment)
+        var keys = PreferenceKeys()
+        keys.add(DisplayList.Key.self)
         let base = _GraphInputs(
             time: graph.makeInput(value: Time(seconds: 0)),
             phase: graph.makeInput(value: _GraphInputs.Phase()),
@@ -526,7 +534,7 @@ final class ShaderTests: XCTestCase {
             base: base,
             customInputs: PropertyList(),
             preferences: PreferencesInputs(
-                keys: PreferenceKeys(),
+                keys: keys,
                 hostKeys: graph.makeInput(value: PreferenceKeys())
             ),
             transform: graph.makeInput(value: ViewTransform()),

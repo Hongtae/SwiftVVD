@@ -211,6 +211,8 @@ final class MatchedGeometryEffectTests: XCTestCase {
             rendererHost: rendererHost
         )
         rendererHost.storage = viewGraph
+        viewGraph.setSize(CGSize(width: 1, height: 1))
+        viewGraph.instantiateIfNeeded()
 
         XCTAssertTrue(capture.hasScope)
     }

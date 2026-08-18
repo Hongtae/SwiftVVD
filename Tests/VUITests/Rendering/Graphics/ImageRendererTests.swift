@@ -86,6 +86,8 @@ final class ImageRendererTests: XCTestCase {
     func testImageRendererInstallsGraphicsRendererRootFeature() {
         let recorder = ImageRendererRootInputRecorder()
         let renderer = ImageRenderer(content: ImageRendererFeatureRoot(recorder: recorder))
+        renderer.viewGraph.setSize(CGSize(width: 1, height: 1))
+        renderer.viewGraph.instantiateIfNeeded()
 
         XCTAssertEqual(
             renderer.viewGraph.viewGraphFeatureCount,

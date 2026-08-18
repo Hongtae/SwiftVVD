@@ -91,6 +91,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         layerOpacities: [Double]? = nil,
         variableColorOpacities: [Double]? = nil,
         drawProgresses: [Double]? = nil,
+        drawFallbackProgresses: [Double]? = nil,
         drawsReversed: Bool = false,
         drawFallbackOpacity: Double? = nil
     ) throws -> (count: Int, centerAlpha: UInt8) {
@@ -119,6 +120,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         image.symbolLayerOpacities = layerOpacities
         image.symbolVariableColorOpacities = variableColorOpacities
         image.symbolDrawProgresses = drawProgresses
+        image.symbolDrawFallbackProgresses = drawFallbackProgresses
         image.symbolDrawsReversed = drawsReversed
         image.symbolDrawFallbackOpacity = drawFallbackOpacity
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -335,7 +337,8 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         let drawHidden = try renderSymbol(
             "draw",
             deviceContext: deviceContext,
-            drawProgresses: [0, 0]
+            drawProgresses: [0, 0],
+            drawFallbackProgresses: [0, 0]
         )
         let reversedHideBoundary = try renderSymbol(
             "draw",

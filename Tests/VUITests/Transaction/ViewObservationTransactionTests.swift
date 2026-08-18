@@ -447,6 +447,8 @@ final class ViewObservationTransactionTests: XCTestCase {
             rendererHost: rendererHost
         )
         rendererHost.storage = host
+        host.setSize(CGSize(width: 180, height: 96))
+        host.instantiateIfNeeded()
 
         let before = try XCTUnwrap(probe.beforeBody)
         let after = try XCTUnwrap(probe.afterBody)
@@ -734,13 +736,15 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateScaleEffectOnlyRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateScaleEffectOnlyRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
                 let initialBounds = try XCTUnwrap(
@@ -792,6 +796,7 @@ final class ViewObservationTransactionTests: XCTestCase {
             rendererHost: rendererHost
         )
         rendererHost.storage = host
+        host.setSize(CGSize(width: 200, height: 200))
 
         func sampleBounds(at seconds: Double) throws -> CGRect {
             let time = Time(seconds: seconds)
@@ -1055,6 +1060,8 @@ final class ViewObservationTransactionTests: XCTestCase {
                     size: graph.makeInput(value: ViewSize(width: 200, height: 200))
                 )
                 inputs.requestsLayoutComputer = true
+                inputs.needsGeometry = true
+                inputs.preferences.keys.add(DisplayList.Key.self)
                 let outputs = StateShapeFillMeshGradientOnlyRoot._makeView(
                     view: _GraphValue(_attribute: source),
                     inputs: inputs
@@ -1168,13 +1175,15 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateAnimationLabPreMutationRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateAnimationLabPreMutationRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
                 let initialBounds = try XCTUnwrap(
@@ -1229,13 +1238,15 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateAnimationLabCompletionRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateAnimationLabCompletionRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
                 let initialBounds = try XCTUnwrap(
@@ -1290,13 +1301,15 @@ final class ViewObservationTransactionTests: XCTestCase {
                 let graph = host.data.graph
                 let time = graph.makeInput(value: Time(seconds: 0))
                 let source = graph.makeInput(value: StateAnimationLabCompletionRoot(probe: probe))
+                var inputs = makeViewInputs(
+                    graph: graph,
+                    time: time,
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20))
+                )
+                inputs.needsGeometry = true
                 let outputs = StateAnimationLabCompletionRoot._makeView(
                     view: _GraphValue(_attribute: source),
-                    inputs: makeViewInputs(
-                        graph: graph,
-                        time: time,
-                        size: graph.makeInput(value: ViewSize(width: 20, height: 20))
-                    )
+                    inputs: inputs
                 )
                 let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
                 let initialBounds = try XCTUnwrap(
@@ -1712,12 +1725,13 @@ final class ViewObservationTransactionTests: XCTestCase {
         at seconds: Double
     ) throws -> DisplayList {
         let time = Time(seconds: seconds)
+        let proposalSize = CGSize(width: 200, height: 200)
+        host.setSize(proposalSize)
         rendererHost.currentTimestamp = time
         host.updateOutputs(at: time)
         return try host.data.withCurrent {
             try AGSubgraph.withCurrent(host.data.rootSubgraph) {
                 let layout = try XCTUnwrap(host.rootLayoutComputer).value
-                let proposalSize = CGSize(width: 200, height: 200)
                 layout.place(
                     at: CGPoint(x: proposalSize.width / 2, y: proposalSize.height / 2),
                     anchor: .center,
@@ -1751,21 +1765,86 @@ final class ViewObservationTransactionTests: XCTestCase {
                 return mesh
             }
         }
-        for effect in displayList.effects {
-            if let mesh = firstShapeFillMeshGradient(in: effect.contents) {
-                return mesh
+        for item in displayList.items {
+            switch item.value {
+            case let .content(content):
+                if case let .shape(shape) = content.value {
+                    if case let .meshGradient(mesh)? = shape.shading.properties.first {
+                        return mesh
+                    }
+                    if case let .style(style)? = shape.shading.properties.first {
+                        var resolved = _ShapeStyle_Shape(
+                            operation: .fallbackColor(level: 0),
+                            environment: content.environment ?? EnvironmentValues()
+                        )
+                        style._apply(to: &resolved)
+                        if case let .meshGradient(mesh)? =
+                            resolved.resolvedShading?.properties.first {
+                            return mesh
+                        }
+                    }
+                }
+            case let .effect(_, contents):
+                if let mesh = firstShapeFillMeshGradient(in: contents) {
+                    return mesh
+                }
+            case let .states(states):
+                if let contents = states.last?.1,
+                   let mesh = firstShapeFillMeshGradient(in: contents) {
+                    return mesh
+                }
+            case .empty:
+                continue
             }
         }
         return nil
     }
 
     private func firstItemBounds(in displayList: DisplayList) -> CGRect? {
-        if let bounds = displayList.itemRecords.compactMap(\.bounds).first {
-            return bounds
-        }
-        for effect in displayList.effects {
-            if let bounds = firstItemBounds(in: effect.contents) {
-                return bounds
+        for item in displayList.items {
+            switch item.value {
+            case let .content(content):
+                if let bounds = content.command.bounds {
+                    return bounds.applying(
+                        CGAffineTransform(
+                            translationX: item.frame.minX - bounds.minX,
+                            y: item.frame.minY - bounds.minY
+                        )
+                    ).standardized
+                }
+            case let .effect(effect, contents):
+                guard let bounds = firstItemBounds(in: contents) else {
+                    continue
+                }
+                let placement = CGAffineTransform(
+                    translationX: item.frame.minX,
+                    y: item.frame.minY
+                )
+                if case let .transform(projection) = effect,
+                   projection.isAffine {
+                    return bounds.applying(
+                        CGAffineTransform(
+                            a: projection.m11,
+                            b: projection.m12,
+                            c: projection.m21,
+                            d: projection.m22,
+                            tx: projection.m31,
+                            ty: projection.m32
+                        ).concatenating(placement)
+                    ).standardized
+                }
+                return bounds.applying(placement).standardized
+            case let .states(states):
+                if let contents = states.last?.1,
+                   let bounds = firstItemBounds(in: contents) {
+                    let recordedOrigin = contents.interpolationBounds?.origin ?? .zero
+                    return bounds.offsetBy(
+                        dx: item.frame.minX - recordedOrigin.x,
+                        dy: item.frame.minY - recordedOrigin.y
+                    ).standardized
+                }
+            case .empty:
+                continue
             }
         }
         return nil

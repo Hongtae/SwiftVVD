@@ -288,6 +288,21 @@ private struct InterpolatorGroupBodyVisitor: AttributeBodyVisitor {
 }
 
 final class InterpolatableContentDisplayListTests: XCTestCase {
+    // ASSERTIONS pathStorageEqualityRuntimeObserved
+    private func assertPathElementsEqual(
+        _ actual: Path,
+        _ expected: Path,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        var actualElements: [Path.Element] = []
+        var expectedElements: [Path.Element] = []
+        actual.forEach { actualElements.append($0) }
+        expected.forEach { expectedElements.append($0) }
+        XCTAssertEqual(actualElements, expectedElements, file: file, line: line)
+        XCTAssertEqual(actual.boundingRect, expected.boundingRect, file: file, line: line)
+    }
+
     private lazy var interpolationContext = InterpolatorGroupRewriteContext()
 
     @discardableResult
@@ -1070,7 +1085,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
               case let .shape(shape) = content.value else {
             return XCTFail("compatible shape geometry should use one typed mixed item")
         }
-        XCTAssertEqual(shape.path, Path(midpointBounds))
+        assertPathElementsEqual(shape.path, Path(midpointBounds))
         XCTAssertEqual(shape.command.bounds, midpointBounds)
         XCTAssertTrue(shape.transform.isIdentity)
 
@@ -1644,7 +1659,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
               case let .shape(shape) = content.value else {
             return XCTFail("compatible stroke geometry should use one typed mixed item")
         }
-        XCTAssertEqual(shape.path, Path(midpointPathBounds))
+        assertPathElementsEqual(shape.path, Path(midpointPathBounds))
         XCTAssertEqual(shape.strokeStyle, strokeStyle)
         XCTAssertEqual(shape.command.bounds, midpointBounds)
 
@@ -2889,7 +2904,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
               case let .color(maskColor)? = maskShape.command.record.shapeStyle else {
             return XCTFail("mixed mask should retain typed color shape content")
         }
-        XCTAssertEqual(maskShape.path, Path(midpointMaskBounds))
+        assertPathElementsEqual(maskShape.path, Path(midpointMaskBounds))
         XCTAssertEqual(maskColor.provider.alpha, 0.5, accuracy: 0.000_001)
         XCTAssertEqual(effect.contents.interpolationBounds, contentBounds)
     }
@@ -3080,7 +3095,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
                   case let .shape(maskShape) = maskContent.value else {
                 return XCTFail("inner nested coverage should retain typed shape content")
             }
-            XCTAssertEqual(maskShape.path, Path(expectedBounds))
+            assertPathElementsEqual(maskShape.path, Path(expectedBounds))
         }
     }
 

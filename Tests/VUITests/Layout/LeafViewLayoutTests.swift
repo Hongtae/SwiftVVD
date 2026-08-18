@@ -273,6 +273,8 @@ final class LeafViewLayoutTests: XCTestCase {
             rendererHost: rendererHost
         )
         rendererHost.storage = viewGraph
+        viewGraph.setSize(CGSize(width: 17, height: 9))
+        viewGraph.instantiateIfNeeded()
 
         XCTAssertTrue(rootLeafInputCapture.requestsLayoutComputer)
         try viewGraph.data.withCurrent {

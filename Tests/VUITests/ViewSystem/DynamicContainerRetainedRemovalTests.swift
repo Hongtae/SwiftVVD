@@ -2101,6 +2101,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var displayOutput: Attribute<DisplayList>!
         var scrollablesOutput: Attribute<ScrollablePreferenceKey.Value>!
         var animatedValue: Attribute<_OpacityEffect>!
+        var hasVisibleLazyItem = false
 
         func sampleLayout() {
             let layout = layoutAttr.value
@@ -2114,14 +2115,16 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 if let collection = scrollable as? any ScrollableCollection {
                     (collection as? DynamicContainerLazyPlacementSampler)?
                         .resampleCollectedPlacements()
-                    _ = collection.visibleCollectionViewIDs
+                    hasVisibleLazyItem = hasVisibleLazyItem ||
+                        !collection.visibleCollectionViewIDs.isEmpty
                 }
                 _ = scrollable.mapFirstChild(
                     ofType: (any ScrollableCollection).self
                 ) { collection in
                     (collection as? DynamicContainerLazyPlacementSampler)?
                         .resampleCollectedPlacements()
-                    _ = collection.visibleCollectionViewIDs.count
+                    hasVisibleLazyItem = hasVisibleLazyItem ||
+                        !collection.visibleCollectionViewIDs.isEmpty
                 }
             }
         }
@@ -2137,6 +2140,10 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                     base: graphInputs,
                     preferenceKeys: keys
                 )
+                // The native ordering marker covers a visible lazy item. A
+                // zero-sized fixture can materialize it without committing a
+                // placement, so no initial phase mutation would exist to flush.
+                viewInputs.size.setValue(ViewSize(width: 100, height: 100))
                 source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
                 let outputs = Root._makeView(
                     view: _GraphValue(_attribute: source),
@@ -2167,6 +2174,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         // The host settles the scheduled lazy item-phase mutation before the
         // first user transaction can retarget the visible row.
         viewGraph.flushTransactions()
+        if disappearBeforeRetainedCompletions {
+            XCTAssertTrue(hasVisibleLazyItem)
+        }
         XCTAssertEqual(recorder.events, ["row appear"])
 
         func transaction(label: String) -> Transaction {
