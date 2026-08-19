@@ -5708,7 +5708,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheLRUUpdatedItemsCachesSortedCandidatesUntilInvalidated() {
+    func testLazyLayoutViewCacheLRUUpdatedItemsCachesSortedCandidatesAcrossFreshAdditions() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -5732,9 +5732,22 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(cachedPass.map(\.id.index), [2, 1])
             XCTAssertEqual(cache.lru.usedSeed, 1)
 
+            let (_, third, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 3,
+                reuseIdentifier: 4
+            )
+            third.usedSeed = 5
+            let afterFreshAddition = cache.lru.updatedItems(
+                Array(cache.items.values)
+            )
+            XCTAssertEqual(afterFreshAddition.map(\.id.index), [2, 1])
+            XCTAssertEqual(cache.lru.usedSeed, 1)
+
             cache.lru.invalidate()
             let refreshedPass = cache.lru.updatedItems(Array(cache.items.values))
-            XCTAssertEqual(refreshedPass.map(\.id.index), [1, 2])
+            XCTAssertEqual(refreshedPass.map(\.id.index), [1, 3, 2])
             XCTAssertEqual(cache.lru.usedSeed, 2)
         }
     }
@@ -7160,7 +7173,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
-    func testLazyLayoutViewCacheItemDataReturnsExistingAndRefreshesMetadata() {
+    func testLazyLayoutViewCacheItemDataRefreshesUsageMetadataOncePerLRUGeneration() {
         let host = GraphHost()
 
         host.data.withCurrent {
@@ -7172,14 +7185,34 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             var traits = ViewTraitCollection()
             traits[ZIndexTraitKey.self] = 7
+            _ = cache.lru.updatedItems(Array(cache.items.values))
 
             let data = makeLazyData(graph: host.data.graph, id: id, traits: traits)
             let returned = cache.item(data: data)
 
             XCTAssertTrue(returned === item)
             XCTAssertEqual(item.zIndex, 7)
+            XCTAssertEqual(item.usedSeed, cache.lru.usedSeed)
             XCTAssertEqual(item.reuseIdentifier, id.reuseIdentifier)
             XCTAssertTrue(cache.item(for: id.canonicalID) === item)
+
+            traits[ZIndexTraitKey.self] = 9
+            _ = cache.item(data: makeLazyData(
+                graph: host.data.graph,
+                id: id,
+                traits: traits
+            ))
+            XCTAssertEqual(item.zIndex, 7)
+
+            cache.lru.invalidate()
+            _ = cache.lru.updatedItems(Array(cache.items.values))
+            _ = cache.item(data: makeLazyData(
+                graph: host.data.graph,
+                id: id,
+                traits: traits
+            ))
+            XCTAssertEqual(item.zIndex, 9)
+            XCTAssertEqual(item.usedSeed, cache.lru.usedSeed)
         }
     }
 
@@ -7620,6 +7653,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var traits = ViewTraitCollection()
             traits[ZIndexTraitKey.self] = 12
             let data = makeLazyData(graph: host.data.graph, id: id, traits: traits)
+            cache.lru.invalidate()
+            _ = cache.lru.updatedItems(Array(cache.items.values))
             let context = AnyRuleContext(
                 attribute: host.data.graph.makeInput(value: ()).identifier
             )
@@ -7653,6 +7688,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
             var traits = ViewTraitCollection()
             traits[ZIndexTraitKey.self] = 15
             let data = makeLazyData(graph: host.data.graph, id: id, traits: traits)
+            cache.lru.invalidate()
+            _ = cache.lru.updatedItems(Array(cache.items.values))
             let context = AnyRuleContext(
                 attribute: host.data.graph.makeInput(value: ()).identifier
             )

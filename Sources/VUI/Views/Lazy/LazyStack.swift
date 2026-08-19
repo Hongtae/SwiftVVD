@@ -2338,13 +2338,23 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
 
     func item(data: _LazyLayout_Subview.Data) -> LazyLayoutCacheItem {
         let id = data.id.canonicalID
-        let transition = anyTransition(data: data)
-
         if let item = items[id] {
-            refresh(item, data: data, transition: transition)
+            if item.displayIndex == nil,
+               item.insertionTransactionSeed != lru.transactionSeed {
+                refresh(item, data: data)
+                addItem(item)
+                return item
+            }
+            guard item.usedSeed != lru.usedSeed else {
+                return item
+            }
+            item.usedSeed = lru.usedSeed
+            item.zIndex = data.traits[ZIndexTraitKey.self]
+            hasDepth = hasDepth || item.zIndex != 0
             return item
         }
 
+        let transition = anyTransition(data: data)
         if let item = reusedItem(data: data, anyTransition: transition) {
             return item
         }
@@ -2380,10 +2390,11 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             item.prefetchSeed = 0
             item.prefetchPhase = .notPrefetching
         }
+        // An item added in this transaction is not yet reusable. Preserve the
+        // current candidate snapshot until collection advances the generation.
         items[item.id.canonicalID] = item
         hasSections = hasSections || item.section.id != nil
         hasDepth = hasDepth || item.zIndex != 0
-        lru.invalidate()
     }
 
     private func lazyViewPhase(
@@ -2694,7 +2705,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
             return nil
         }
         let oldID = item.id.canonicalID
-        refresh(item, data: data, transition: transition)
+        refresh(item, data: data)
         let newID = item.id.canonicalID
         if oldID != newID {
             items.removeValue(forKey: oldID)
@@ -3176,8 +3187,7 @@ class LazyLayoutViewCache: LazyLayoutNamespace, CustomStringConvertible {
 
     private func refresh(
         _ item: LazyLayoutCacheItem,
-        data: _LazyLayout_Subview.Data,
-        transition: AnyTransition?
+        data: _LazyLayout_Subview.Data
     ) {
         item.elements = data.elements
         item.elementIndex = data.id.index
