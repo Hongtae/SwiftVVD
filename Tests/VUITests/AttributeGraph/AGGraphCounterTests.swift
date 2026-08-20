@@ -538,6 +538,33 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testSubgraphAssociationIsWeakAndSlotReuseStartsUnassociated() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            weak var releasedSubgraph: AGSubgraphRef?
+            let first: Attribute<Int>
+            do {
+                let subgraph = AGSubgraph()
+                releasedSubgraph = subgraph
+                first = AGSubgraph.withCurrent(subgraph) {
+                    graph.makeInput(value: 1)
+                }
+                XCTAssertTrue(graph.subgraph(for: first.identifier) === subgraph)
+            }
+
+            XCTAssertNil(releasedSubgraph)
+            XCTAssertNil(graph.subgraph(for: first.identifier))
+
+            let firstID = first.identifier
+            graph.removeNode(firstID)
+            let replacement = graph.makeInput(value: 2)
+            XCTAssertEqual(replacement.identifier.rawValue, firstID.rawValue)
+            XCTAssertNil(graph.subgraph(for: replacement.identifier))
+        }
+    }
+
     func testBreadthFirstSearchChecksStartAndDeduplicatesCycles() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

@@ -142,6 +142,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         var flags: AGAttributeFlags = []
         var transaction: Transaction? = nil
         var kind: NodeKind
+        weak var subgraph: AGSubgraphRef?
         var needsEvaluation: Bool = true
         // Explicit invalidation bypasses input-version validation. Ordinary
         // propagation can clear needsEvaluation without running this node when
@@ -289,7 +290,6 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     var rawOffsetPathIDs: [RawOffsetPath: UInt32] = [:]
     // Optional permanent dependency slots for typed IndirectAttribute values.
     var indirectDependencies: [UInt32: AGAttribute] = [:]
-    var nodeSubgraphs: [UInt32: WeakObject<AGSubgraphRef>] = [:]
 #if DEBUG
     var removedNodeTombstones: [UInt32: RemovedNodeTombstone] = [:]
     var removedNodeTombstoneOrder: [UInt32] = []

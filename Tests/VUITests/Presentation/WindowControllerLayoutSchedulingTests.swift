@@ -3,6 +3,49 @@ import XCTest
 @testable import VUI
 
 final class WindowControllerLayoutSchedulingTests: XCTestCase {
+    // ASSERTIONS updateRenderPhaseAnimatorOrderObserved
+    func testPendingHostTransactionsFlushBeforeNextUpdateSeedAdvances() {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(
+                    WindowControllerLayoutSchedulingTests.self
+                )
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in }
+
+        controller.updateFrame(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 220, height: 220),
+            shouldDrawFrame: false,
+            withGC
+        )
+        let seedBeforeNextFrame = controller.viewGraph.data.updateSeed
+        var appliedSeed: UInt32?
+        controller.viewGraph.asyncTransaction {
+            appliedSeed = controller.viewGraph.data.updateSeed
+        }
+
+        controller.updateFrame(
+            tick: 1,
+            delta: 1.0 / 60.0,
+            date: controller.date.addingTimeInterval(1.0 / 60.0),
+            contentSize: CGSize(width: 220, height: 220),
+            shouldDrawFrame: false,
+            withGC
+        )
+
+        XCTAssertEqual(appliedSeed, seedBeforeNextFrame)
+        XCTAssertEqual(
+            controller.viewGraph.data.updateSeed,
+            seedBeforeNextFrame &+ 1
+        )
+    }
+
     func testViewGraphActionOutboxDrainsWithoutGraphBinding() {
         let controller = WindowController(
             content: EmptyView(),

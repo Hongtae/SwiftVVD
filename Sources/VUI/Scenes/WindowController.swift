@@ -1159,6 +1159,9 @@ class WindowController: WindowDelegate,
 
         let updateChangeSet = _AGChangeSet()
         _AGGraph.withChangeSet(updateChangeSet) {
+            // Complete work queued by the previous host turn before advancing
+            // the graph update seed for this turn.
+            viewGraph.flushTransactions()
 
             // Drain platform input events before AG evaluation.
             events.forEach {

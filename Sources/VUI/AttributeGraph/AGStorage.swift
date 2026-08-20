@@ -201,17 +201,21 @@ extension _AGGraph {
     }
 
     func setSubgraph(_ subgraph: AGSubgraphRef, for id: AGAttribute) {
-        nodeSubgraphs[id.rawValue] = WeakObject(subgraph)
         let index = Int(id.rawValue)
-        if slots.indices.contains(index),
-           let node = slots[index].node,
-           node.needsEvaluation {
+        guard slots.indices.contains(index),
+              let node = slots[index].node else {
+            return
+        }
+        node.subgraph = subgraph
+        if node.needsEvaluation {
             subgraph.markPending(flags: node.flags.rawValue)
         }
     }
 
     func subgraph(for id: AGAttribute) -> AGSubgraphRef? {
-        nodeSubgraphs[id.rawValue]?.value
+        let index = Int(id.rawValue)
+        guard slots.indices.contains(index) else { return nil }
+        return slots[index].node?.subgraph
     }
 
     func flags(for id: AGAttribute) -> AGAttributeFlags {
@@ -1075,7 +1079,6 @@ extension _AGGraph {
             break
         }
         indirectDependencies.removeValue(forKey: id.rawValue)
-        nodeSubgraphs.removeValue(forKey: id.rawValue)
         // Remove any cross-graph observers that were watching this node (it was a source).
         crossGraphObservers.removeValue(forKey: id.rawValue)
 
@@ -2096,19 +2099,19 @@ extension _AGGraph {
             readIndex += 1
             let index = Int(rawID)
             guard slots.indices.contains(index),
-                  slots[index].node != nil else {
+                  let node = slots[index].node else {
                 continue
             }
             if inputsChanged, let incomingChangedInput {
                 markInputChanged(
                     incomingChangedInput,
-                    forNodeAt: index
+                    in: node
                 )
             }
-            guard slots[index].node!.invalidationTraversal != traversal else {
+            guard node.invalidationTraversal != traversal else {
                 continue
             }
-            slots[index].node!.invalidationTraversal = traversal
+            node.invalidationTraversal = traversal
             queue[writeIndex] = (rawID, nil)
             writeIndex += 1
         }
@@ -2121,49 +2124,50 @@ extension _AGGraph {
             let rawID = queue[i].id
             i += 1
             let index = Int(rawID)
-            guard slots.indices.contains(index), slots[index].node != nil else {
+            guard slots.indices.contains(index),
+                  let node = slots[index].node else {
                 continue
             }
-            let wasAlreadyDirty = slots[index].node!.needsEvaluation
+            let wasAlreadyDirty = node.needsEvaluation
             if propagateTransaction {
-                slots[index].node!.transaction = transaction
+                node.transaction = transaction
             }
             if inputsChanged {
-                slots[index].node!.inputsChanged = true
+                node.inputsChanged = true
             }
-            if !slots[index].node!.needsEvaluation {
-                slots[index].node!.needsEvaluation = true
+            if !node.needsEvaluation {
+                node.needsEvaluation = true
             }
-            if let subgraph = subgraph(for: AGAttribute(rawValue: rawID)) {
-                subgraph.markPending(flags: slots[index].node!.flags.rawValue)
+            let pendingFlags = node.flags.rawValue
+            if pendingFlags != 0, let subgraph = node.subgraph {
+                subgraph.markPending(flags: pendingFlags)
             }
             if rawID == forcedStart || forcedStarts?.contains(rawID) == true {
-                slots[index].node!.forceEvaluation = true
+                node.forceEvaluation = true
             }
             // Dirty propagation is transition-gated. A repeated invalidation
             // still records its direct changed edge and mutation metadata, but
             // descendants of an already-dirty node are already pending.
             guard !wasAlreadyDirty else { continue }
-            if slots[index].node!.kind.isSideEffect {
+            if node.kind.isSideEffect {
                 sideEffects.append(UInt32(index))
             }
-            for output in slots[index].node!.outputs {
+            for output in node.outputs {
                 let outputIndex = Int(output)
                 guard slots.indices.contains(outputIndex),
-                      slots[outputIndex].node != nil else {
+                      let outputNode = slots[outputIndex].node else {
                     continue
                 }
                 if inputsChanged {
                     markInputChanged(
                         UInt32(index),
-                        forNodeAt: outputIndex
+                        in: outputNode
                     )
                 }
-                guard slots[outputIndex].node!.invalidationTraversal
-                        != traversal else {
+                guard outputNode.invalidationTraversal != traversal else {
                     continue
                 }
-                slots[outputIndex].node!.invalidationTraversal = traversal
+                outputNode.invalidationTraversal = traversal
                 queue.append((output, nil))
             }
             // Propagate to cross-graph proxy nodes watching this node.
@@ -2196,14 +2200,22 @@ extension _AGGraph {
         attribute: UInt32
     ) -> Int {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             fatalError("Input-edge lookup requires a live node.")
         }
+        return lowerBoundInputEdgeIndex(in: node, attribute: attribute)
+    }
+
+    @inline(__always)
+    private func lowerBoundInputEdgeIndex(
+        in node: Node,
+        attribute: UInt32
+    ) -> Int {
         var lower = 0
-        var upper = slots[nodeIndex].node!.inputs.count
+        var upper = node.inputs.count
         while lower < upper {
             let middle = lower + (upper - lower) / 2
-            if slots[nodeIndex].node!.inputs[middle].attribute < attribute {
+            if node.inputs[middle].attribute < attribute {
                 lower = middle + 1
             } else {
                 upper = middle
@@ -2218,18 +2230,17 @@ extension _AGGraph {
         identityFlags: UInt8
     ) -> Int? {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return nil
         }
         var index = lowerBoundInputEdgeIndex(
-            inNodeAt: nodeIndex,
+            in: node,
             attribute: attribute
         )
         let identity = identityFlags & InputEdge.identityMask
-        while index < slots[nodeIndex].node!.inputs.count,
-              slots[nodeIndex].node!.inputs[index].attribute == attribute {
-            if slots[nodeIndex].node!.inputs[index].flags
-                & InputEdge.identityMask == identity {
+        while index < node.inputs.count,
+              node.inputs[index].attribute == attribute {
+            if node.inputs[index].flags & InputEdge.identityMask == identity {
                 return index
             }
             index += 1
@@ -2245,23 +2256,23 @@ extension _AGGraph {
     ) -> Int {
         let parentIndex = Int(parent.rawValue)
         let childIndex = Int(child.rawValue)
-        guard slots[parentIndex].node != nil else {
+        guard let parentNode = slots[parentIndex].node else {
             fatalError("insertInputEdge: parent node @\(parent.rawValue) does not exist.")
         }
-        guard slots[childIndex].node != nil else {
+        guard let childNode = slots[childIndex].node else {
             fatalError("insertInputEdge: child node @\(child.rawValue) does not exist.")
         }
         let insertionIndex = lowerBoundInputEdgeIndex(
-            inNodeAt: parentIndex,
+            in: parentNode,
             attribute: child.rawValue
         )
         let edge = InputEdge(
             attribute: child.rawValue,
             flags: flags,
-            valueVersion: slots[childIndex].node!.valueVersion
+            valueVersion: childNode.valueVersion
         )
-        slots[parentIndex].node!.inputs.insert(edge, at: insertionIndex)
-        slots[childIndex].node!.outputs.append(parent.rawValue)
+        parentNode.inputs.insert(edge, at: insertionIndex)
+        childNode.outputs.append(parent.rawValue)
         return insertionIndex
     }
 
@@ -2306,22 +2317,30 @@ extension _AGGraph {
         forNodeAt nodeIndex: Int
     ) -> Bool {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return true
         }
-        var index = lowerBoundInputEdgeIndex(
-            inNodeAt: nodeIndex,
-            attribute: input
-        )
-        while index < slots[nodeIndex].node!.inputs.count,
-              slots[nodeIndex].node!.inputs[index].attribute == input {
-            if slots[nodeIndex].node!.inputs[index].flags
-                & InputEdge.changed != 0 {
-                return true
+        return node.inputs.withUnsafeBufferPointer { inputs in
+            var lower = 0
+            var upper = inputs.count
+            while lower < upper {
+                let middle = lower + (upper - lower) / 2
+                if inputs[middle].attribute < input {
+                    lower = middle + 1
+                } else {
+                    upper = middle
+                }
             }
-            index += 1
+            var index = lower
+            while index < inputs.count,
+                  inputs[index].attribute == input {
+                if inputs[index].flags & InputEdge.changed != 0 {
+                    return true
+                }
+                index += 1
+            }
+            return false
         }
-        return false
     }
 
     private func markInputChanged(
@@ -2329,52 +2348,68 @@ extension _AGGraph {
         forNodeAt nodeIndex: Int
     ) {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return
         }
-        var index = lowerBoundInputEdgeIndex(
-            inNodeAt: nodeIndex,
-            attribute: input
-        )
-        while index < slots[nodeIndex].node!.inputs.count,
-              slots[nodeIndex].node!.inputs[index].attribute == input {
-            slots[nodeIndex].node!.inputs[index].flags |= InputEdge.changed
-            index += 1
+        markInputChanged(input, in: node)
+    }
+
+    @inline(__always)
+    private func markInputChanged(_ input: UInt32, in node: Node) {
+        node.inputs.withUnsafeMutableBufferPointer { inputs in
+            var lower = 0
+            var upper = inputs.count
+            while lower < upper {
+                let middle = lower + (upper - lower) / 2
+                if inputs[middle].attribute < input {
+                    lower = middle + 1
+                } else {
+                    upper = middle
+                }
+            }
+            var index = lower
+            while index < inputs.count,
+                  inputs[index].attribute == input {
+                inputs[index].flags |= InputEdge.changed
+                index += 1
+            }
         }
     }
 
     private func clearChangedInputFlags(forNodeAt nodeIndex: Int) {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return
         }
-        for index in slots[nodeIndex].node!.inputs.indices {
-            slots[nodeIndex].node!.inputs[index].flags &=
-                ~InputEdge.changed
+        node.inputs.withUnsafeMutableBufferPointer { inputs in
+            for index in inputs.indices {
+                inputs[index].flags &= ~InputEdge.changed
+            }
         }
     }
 
     private func beginInputEvaluation(forNodeAt nodeIndex: Int) {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return
         }
-        for index in slots[nodeIndex].node!.inputs.indices {
-            slots[nodeIndex].node!.inputs[index].flags &=
-                ~InputEdge.readThisEvaluation
+        node.inputs.withUnsafeMutableBufferPointer { inputs in
+            for index in inputs.indices {
+                inputs[index].flags &= ~InputEdge.readThisEvaluation
+            }
         }
     }
 
     private func finishInputEvaluation(forNodeAt nodeIndex: Int) {
         guard slots.indices.contains(nodeIndex),
-              slots[nodeIndex].node != nil else {
+              let node = slots[nodeIndex].node else {
             return
         }
         var index = 0
-        while index < slots[nodeIndex].node!.inputs.count {
-            let flags = slots[nodeIndex].node!.inputs[index].flags
+        while index < node.inputs.count {
+            let flags = node.inputs[index].flags
             if flags & (InputEdge.permanent | InputEdge.readThisEvaluation) != 0 {
-                slots[nodeIndex].node!.inputs[index].flags &=
+                node.inputs[index].flags &=
                     ~(InputEdge.readThisEvaluation | InputEdge.changed)
                 index += 1
             } else {

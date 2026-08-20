@@ -42,6 +42,44 @@ enum Update {
         var actions: [Action] = []
     }
 
+    fileprivate final class HostLock: @unchecked Sendable {
+        private let mutex = Mutex<Void>(())
+        private let owner = Atomic<Platform.ThreadID>(0)
+        private var depth: UInt32 = 0
+
+        @inline(__always)
+        func lock() {
+            let threadID = Platform.currentThreadID()
+            assert(threadID != 0, "The current thread must have a nonzero identifier.")
+            if owner.load(ordering: .acquiring) == threadID {
+                assert(depth < .max, "Host lock recursion depth overflowed.")
+                depth += 1
+                return
+            }
+
+            mutex._unsafeLock()
+            assert(owner.load(ordering: .relaxed) == 0)
+            assert(depth == 0)
+            depth = 1
+            owner.store(threadID, ordering: .releasing)
+        }
+
+        @inline(__always)
+        func unlock() {
+            let threadID = Platform.currentThreadID()
+            assert(
+                owner.load(ordering: .acquiring) == threadID,
+                "The host lock must be released by its owning thread."
+            )
+            assert(depth > 0, "The host lock has no matching acquisition.")
+            depth -= 1
+            if depth == 0 {
+                owner.store(0, ordering: .releasing)
+                mutex._unsafeUnlock()
+            }
+        }
+    }
+
     /// A root window and every window in its presentation tree must share one
     /// scheduling context.
     ///
@@ -57,7 +95,7 @@ enum Update {
     /// A presentation child must retain its inherited context through teardown;
     /// its final frame can overlap the operation that detaches it from its parent.
     final class HostContext: @unchecked Sendable {
-        fileprivate let lock = NSRecursiveLock()
+        fileprivate let lock = HostLock()
         fileprivate let state = State()
     }
 
@@ -145,11 +183,11 @@ enum Update {
     private static func unlock() {
         if let context = currentHostContext {
             let state = context.state
-            precondition(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
+            assert(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
             state.lockDepth -= 1
             if state.lockDepth == 0 {
-                precondition(state.depth == 0, "Update state released while an update is active.")
-                precondition(state.actions.isEmpty, "Update state released with queued actions.")
+                assert(state.depth == 0, "Update state released while an update is active.")
+                assert(state.actions.isEmpty, "Update state released with queued actions.")
             }
             context.lock.unlock()
             return
@@ -158,11 +196,11 @@ enum Update {
         guard let state = currentThreadState else {
             preconditionFailure("Update.unlock() called without a matching Update.lock().")
         }
-        precondition(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
+        assert(state.lockDepth > 0, "Update.unlock() called without a matching Update.lock().")
         state.lockDepth -= 1
         if state.lockDepth == 0 {
-            precondition(state.depth == 0, "Update state released while an update is active.")
-            precondition(state.actions.isEmpty, "Update state released with queued actions.")
+            assert(state.depth == 0, "Update state released while an update is active.")
+            assert(state.actions.isEmpty, "Update state released with queued actions.")
             guard let pointer = ThreadLocalStorage.get(threadStateKeyPointer) else {
                 preconditionFailure("Update thread state disappeared before final unlock.")
             }

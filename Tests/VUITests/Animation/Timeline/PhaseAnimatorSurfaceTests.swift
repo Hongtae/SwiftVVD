@@ -540,7 +540,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                     )
                     let sourceID = visitor.source?.rawValue
                     let sourceNode = sourceID.flatMap { graph.slots[Int($0)].node }
-                    var subgraph = graph.nodeSubgraphs[rawID]?.value
+                    var subgraph = graph.slots[Int(rawID)].node?.subgraph
                     var ancestry: [String] = []
                     while let current = subgraph {
                         ancestry.append(String(describing: ObjectIdentifier(current)))
