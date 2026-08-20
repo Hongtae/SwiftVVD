@@ -42,6 +42,10 @@ private final class _AGPreparedEnumLayout: @unchecked Sendable {
 private enum _AGPreparedComparisonOperation: @unchecked Sendable {
     case bytes(offset: Int, count: Int)
     case string(offset: Int)
+    case registeredEquality(
+        offset: Int,
+        type: any _AGTypeDescriptorEquatable.Type
+    )
     case enumValue(offset: Int, layout: _AGPreparedEnumLayout)
     case opaqueExistential(offset: Int, type: Any.Type)
     case alwaysUnequal(offset: Int)
@@ -52,6 +56,8 @@ private enum _AGPreparedComparisonOperation: @unchecked Sendable {
             .bytes(offset: offset + delta, count: count)
         case let .string(offset):
             .string(offset: offset + delta)
+        case let .registeredEquality(offset, type):
+            .registeredEquality(offset: offset + delta, type: type)
         case let .enumValue(offset, layout):
             .enumValue(offset: offset + delta, layout: layout)
         case let .opaqueExistential(offset, type):
@@ -233,6 +239,16 @@ private enum _AGComparisonLayout {
             operations.append(.string(offset: offset))
             return
         }
+        if let descriptorEquality = type
+            as? any _AGTypeDescriptorEquatable.Type {
+            operations.append(
+                .registeredEquality(
+                    offset: offset,
+                    type: descriptorEquality
+                )
+            )
+            return
+        }
         if type is AnyClass {
             appendBytes(
                 offset: offset,
@@ -347,7 +363,20 @@ extension _AGGraph {
     ) -> Bool {
         withUnsafePointer(to: lhs) { lhsPointer in
             withUnsafePointer(to: rhs) { rhsPointer in
-                compareStoredValues(lhsPointer, rhsPointer, options: options)
+                if options.comparisonMode.rawValue
+                    <= AGComparisonMode.layout.rawValue,
+                   let descriptorEquality = Value.self
+                    as? any _AGTypeDescriptorEquatable.Type {
+                    return descriptorEquality._agTypeDescriptorValuesEqual(
+                        lhsPointer,
+                        rhsPointer
+                    )
+                }
+                return compareStoredValues(
+                    lhsPointer,
+                    rhsPointer,
+                    options: options
+                )
             }
         }
     }
@@ -408,6 +437,11 @@ extension _AGGraph {
                     .assumingMemoryBound(to: String.self).pointee
                     == rhs.advanced(by: offset)
                     .assumingMemoryBound(to: String.self).pointee
+            case let .registeredEquality(offset, type):
+                isEqual = type._agTypeDescriptorValuesEqual(
+                    lhs.advanced(by: offset),
+                    rhs.advanced(by: offset)
+                )
             case let .enumValue(offset, layout):
                 isEqual = compareEnumValues(
                     lhs.advanced(by: offset),

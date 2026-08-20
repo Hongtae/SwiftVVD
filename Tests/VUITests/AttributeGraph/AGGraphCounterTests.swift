@@ -992,6 +992,76 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testTextDescriptorEqualitySuppressesEquivalentRuleOutput() {
+        // ASSERTIONS: textAttributeGraphComparisonObserved
+        func requireDescriptorEquality<T: _AGTypeDescriptorEquatable>(
+            _ type: T.Type
+        ) {}
+        requireDescriptorEquality(Text.self)
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = OutputPropagationRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let intermediate = graph.makeRule(
+                TextDescriptorOutputRule(source: source)
+            )
+            let downstream = graph.makeRule {
+                recorder.downstreamEvaluations += 1
+                return intermediate.value
+            }
+
+            XCTAssertEqual(downstream.value, Text("Static"))
+            source.setValue(11)
+
+            XCTAssertEqual(downstream.value, Text("Static"))
+            XCTAssertEqual(recorder.downstreamEvaluations, 1)
+
+            source.setValue(2)
+
+            XCTAssertEqual(downstream.value, Text("Changed"))
+            XCTAssertEqual(recorder.downstreamEvaluations, 2)
+        }
+    }
+
+    func testTypedOffsetSuppressesAnEquivalentProjectedTextField() {
+        // ASSERTIONS: attributeGraphTypedOffsetFieldComparisonObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = OutputPropagationRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let carrier = graph.makeRule(
+                OffsetTextCarrierRule(source: source)
+            )
+            let textOffset = MemoryLayout<OffsetTextCarrier>.offset(
+                of: \OffsetTextCarrier.text
+            )!
+            let projectedText = carrier.unsafeOffset(
+                at: textOffset,
+                as: Text.self
+            )
+            let downstream = graph.makeRule {
+                recorder.downstreamEvaluations += 1
+                return projectedText.value
+            }
+
+            XCTAssertEqual(downstream.value, Text("Static"))
+            XCTAssertEqual(recorder.downstreamEvaluations, 1)
+
+            source.setValue(2)
+            XCTAssertEqual(downstream.value, Text("Static"))
+            XCTAssertEqual(recorder.downstreamEvaluations, 1)
+
+            source.setValue(3)
+            XCTAssertEqual(downstream.value, Text("Changed"))
+            XCTAssertEqual(recorder.downstreamEvaluations, 2)
+        }
+    }
+
     func testGenericEquatableRuleOutputDoesNotDispatchEqualityWitness() {
         // ASSERTIONS: attributeGraphRuleOutputGenericEquatableNotDispatchedObserved
         let graph = _AGGraph()
@@ -2158,6 +2228,31 @@ private struct DescriptorEquatableOutputRule: Rule {
         return DescriptorEquatableOutput(
             semanticValue: source.value % 10,
             ignoredValue: source.value
+        )
+    }
+}
+
+private struct TextDescriptorOutputRule: Rule {
+    var source: Attribute<Int>
+
+    var value: Text {
+        source.value == 2 ? Text("Changed") : Text("Static")
+    }
+}
+
+private struct OffsetTextCarrier {
+    var text: Text
+    var marker: Int
+}
+
+private struct OffsetTextCarrierRule: Rule {
+    var source: Attribute<Int>
+
+    var value: OffsetTextCarrier {
+        let input = source.value
+        return OffsetTextCarrier(
+            text: input == 3 ? Text("Changed") : Text("Static"),
+            marker: input
         )
     }
 }

@@ -83,6 +83,66 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+    func testTextComparisonMatchesTheNativeLayoutAndStoredModes() {
+        // ASSERTIONS textAttributeGraphComparisonObserved
+        for rawValue: UInt32 in [2, 0x102] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    Text("Static"),
+                    Text("Static"),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    Text("Static"),
+                    Text("Changed"),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    Text(verbatim: "Static"),
+                    Text(verbatim: "Static"),
+                    options: options
+                )
+            )
+            XCTAssertTrue(
+                _AGGraph.compareValues(
+                    TextComparisonCarrier(text: Text("Static"), marker: 1),
+                    TextComparisonCarrier(text: Text("Static"), marker: 1),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    TextComparisonCarrier(text: Text("Static"), marker: 1),
+                    TextComparisonCarrier(text: Text("Changed"), marker: 1),
+                    options: options
+                )
+            )
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    TextComparisonCarrier(text: Text("Static"), marker: 1),
+                    TextComparisonCarrier(text: Text("Static"), marker: 2),
+                    options: options
+                )
+            )
+        }
+
+        for rawValue: UInt32 in [3, 0x103] {
+            let options = AGComparisonOptions(rawValue: rawValue)
+            XCTAssertFalse(
+                _AGGraph.compareValues(
+                    Text("Static"),
+                    Text("Static"),
+                    options: options
+                )
+            )
+        }
+    }
+
     func testRawComparisonCoversSingleAndMultiByteRanges() {
         for rawValue: UInt32 in [3, 0x103] {
             let options = AGComparisonOptions(rawValue: rawValue)
@@ -1107,6 +1167,11 @@ final class AGValueComparisonTests: XCTestCase {
         }
     }
 
+}
+
+private struct TextComparisonCarrier {
+    var text: Text
+    var marker: Int
 }
 
 private enum ComparisonPayload {

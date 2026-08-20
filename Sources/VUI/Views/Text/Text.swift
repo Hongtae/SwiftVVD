@@ -1106,7 +1106,7 @@ class AttachmentTextStorage: AnyTextStorage {
     }
 }
 
-public struct Text: Equatable {
+public struct Text: Equatable, _AGTypeDescriptorEquatable {
     enum Storage: Equatable {
         case verbatim(String)
         case anyTextStorage(AnyTextStorage)
