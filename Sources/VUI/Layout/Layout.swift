@@ -604,7 +604,7 @@ enum DynamicContainer {
     /// Stores items, the numeric-id index, display ordering, active-suffix
     /// counts, the unary fast-path flag, and the change seed. Equality compares
     /// only the seed.
-    struct Info: Equatable {
+    struct Info: Equatable, _AGTypeDescriptorEquatable {
         var items: [ItemInfo] = []
         var indexMap: [UInt32: Int] = [:]
         var displayMap: [UInt32]?

@@ -142,7 +142,66 @@ private struct ReusableDynamicContainerProbeAdaptor:
     func removeItemLayout(uniqueId: UInt32, itemLayout: Void) {}
 }
 
+private final class DynamicContainerInfoEqualityRecorder {
+    var producerEvaluations = 0
+    var consumerEvaluations = 0
+}
+
+private struct DynamicContainerInfoEqualityRule: Rule {
+    var source: Attribute<Int>
+    var recorder: DynamicContainerInfoEqualityRecorder
+
+    var value: DynamicContainer.Info {
+        recorder.producerEvaluations += 1
+        let input = source.value
+        var info = DynamicContainer.Info()
+        info.indexMap = [UInt32(input): input]
+        info.seed = input == 2 ? 8 : 7
+        return info
+    }
+}
+
 final class DynamicLayoutStateTests: XCTestCase {
+    func testDynamicContainerInfoDescriptorEqualityUsesOnlyTheSeed() {
+        // ASSERTIONS dynamicContainerInfoTypeDescriptorEqualityObserved
+        func requireDescriptorEquality<T: _AGTypeDescriptorEquatable>(
+            _ type: T.Type
+        ) {}
+        requireDescriptorEquality(DynamicContainer.Info.self)
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = DynamicContainerInfoEqualityRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 1)
+            let info = graph.makeRule(
+                DynamicContainerInfoEqualityRule(
+                    source: source,
+                    recorder: recorder
+                )
+            )
+            let consumer = graph.makeRule {
+                recorder.consumerEvaluations += 1
+                return info.value.seed
+            }
+
+            XCTAssertEqual(consumer.value, 7)
+            XCTAssertEqual(recorder.producerEvaluations, 1)
+            XCTAssertEqual(recorder.consumerEvaluations, 1)
+
+            source.setValue(11)
+            XCTAssertEqual(consumer.value, 7)
+            XCTAssertEqual(recorder.producerEvaluations, 2)
+            XCTAssertEqual(recorder.consumerEvaluations, 1)
+
+            source.setValue(2)
+            XCTAssertEqual(consumer.value, 8)
+            XCTAssertEqual(recorder.producerEvaluations, 3)
+            XCTAssertEqual(recorder.consumerEvaluations, 2)
+        }
+    }
+
     func testDynamicContainerIDUsesUniqueIDThenSignedViewIndexOrdering() {
         // ASSERTIONS dynamicLayoutStateOwnershipObserved
         let ids = [
