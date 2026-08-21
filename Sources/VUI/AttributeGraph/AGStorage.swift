@@ -34,7 +34,7 @@ private struct _AGUpdateFrame {
     var afterInputs: Bool
 }
 
-private final class _AGUpdateWorkList {
+private struct _AGUpdateWorkList {
     var frames: [_AGUpdateFrame]
 
     init() {
@@ -42,11 +42,11 @@ private final class _AGUpdateWorkList {
         frames.reserveCapacity(64)
     }
 
-    func popLast() -> _AGUpdateFrame? {
+    mutating func popLast() -> _AGUpdateFrame? {
         frames.popLast()
     }
 
-    func append(_ id: UInt32, afterInputs: Bool) {
+    mutating func append(_ id: UInt32, afterInputs: Bool) {
         frames.append(_AGUpdateFrame(id: id, afterInputs: afterInputs))
     }
 }
@@ -355,7 +355,13 @@ extension _AGGraph {
     static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
         guard let graph = _AGGraph.current,
               let nodeID = _AGGraph.currentlyEvaluatingNode else { return nil }
-        return graph.slots[Int(nodeID.rawValue)].node?.value?.anyValue as? V
+        guard let value = graph.slots[Int(nodeID.rawValue)].node?.value else {
+            return nil
+        }
+        if let storage = value as? _AGValueStorage<V> {
+            return storage.pointer.pointee
+        }
+        return value.anyValue as? V
     }
 
     /// Reports whether the current StatefulRule evaluation was caused by an
@@ -864,6 +870,12 @@ extension _AGGraph {
     /// No evaluation is triggered. The graph must already contain a cached value
     /// for the node.
     func cachedValue(for id: AGAttribute) -> Any {
+        cachedValueStorage(for: id).anyValue
+    }
+
+    private func cachedValueStorage(
+        for id: AGAttribute
+    ) -> any _AnyAGValueStorage {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else {
             fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
@@ -871,7 +883,7 @@ extension _AGGraph {
         guard let cached = node.value else {
             fatalError("cachedValue: node @\(id.rawValue) has no cached value; source graph must evaluate first.")
         }
-        return cached.anyValue
+        return cached
     }
 
     func transaction(for id: AGAttribute) -> Transaction? {
@@ -1133,6 +1145,30 @@ extension _AGGraph {
         value(for: id, dynamicInputFlags: 0)
     }
 
+    func updateValue(for id: AGAttribute) {
+        assert(_AGGraph.current === self)
+        let evaluator = _AGGraph.currentlyEvaluatingNode
+        let preparedRead = prepareValueRead(
+            id,
+            evaluator: evaluator,
+            recordsDynamicInput: true,
+            dynamicInputFlags: 0
+        )
+        if preparedRead.needsUpdate {
+            updateValueForRead(id)
+        }
+        recordValueRead(
+            id,
+            evaluator: evaluator,
+            edgeIndex: preparedRead.edgeIndex
+        )
+        guard slots[Int(id.rawValue)].node?.value != nil else {
+            fatalError(
+                "AGAttribute @\(id.rawValue) has no value after evaluation."
+            )
+        }
+    }
+
     private func value(
         for id: AGAttribute,
         dynamicInputFlags: UInt8
@@ -1214,10 +1250,10 @@ extension _AGGraph {
         return storage.mutablePointer
     }
 
-    private func valueForPermanentInput(
+    private func updatePermanentInput(
         _ id: AGAttribute,
         evaluator: AGAttribute
-    ) -> Any {
+    ) {
         let preparedRead = prepareValueRead(
             id,
             evaluator: evaluator,
@@ -1232,13 +1268,17 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        return cachedValueAfterRead(id)
+        guard slots[Int(id.rawValue)].node?.value != nil else {
+            fatalError(
+                "AGAttribute @\(id.rawValue) has no value after evaluation."
+            )
+        }
     }
 
-    private func valueForIndirectSource(
+    private func valueStorageForIndirectSource(
         _ id: AGAttribute,
         evaluator: AGAttribute
-    ) -> Any {
+    ) -> any _AnyAGValueStorage {
         let preparedRead = prepareValueRead(
             id,
             evaluator: evaluator,
@@ -1255,7 +1295,12 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        return cachedValueAfterRead(id)
+        guard let storage = slots[Int(id.rawValue)].node?.value else {
+            fatalError(
+                "AGAttribute @\(id.rawValue) has no value after evaluation."
+            )
+        }
+        return storage
     }
 
     fileprivate func valuePointerForPermanentInput<Value>(
@@ -1516,7 +1561,7 @@ extension _AGGraph {
 
     private func updateNodeIfNeeded(_ rootID: AGAttribute) {
         let traversal = beginUpdateTraversal()
-        let workList = _AGUpdateWorkList()
+        var workList = _AGUpdateWorkList()
         let context = _AGUpdateContext(
             predecessor: _AGGraph.currentUpdateContext
         )
@@ -1525,7 +1570,7 @@ extension _AGGraph {
             updateNodeIfNeeded(
                 rootID,
                 traversal: traversal,
-                workList: workList,
+                workList: &workList,
                 context: context
             )
         }
@@ -1534,7 +1579,7 @@ extension _AGGraph {
     private func updateNodeIfNeeded(
         _ rootID: AGAttribute,
         traversal: UInt64,
-        workList: _AGUpdateWorkList,
+        workList: inout _AGUpdateWorkList,
         context: _AGUpdateContext
     ) {
         workList.append(rootID.rawValue, afterInputs: false)
@@ -1542,7 +1587,7 @@ extension _AGGraph {
             switch nextUpdateAction(
                 for: frame,
                 traversal: traversal,
-                workList: workList
+                workList: &workList
             ) {
             case .none:
                 continue
@@ -1561,7 +1606,7 @@ extension _AGGraph {
     ) {
         guard !nodes.isEmpty else { return }
         let traversal = beginUpdateTraversal()
-        let workList = _AGUpdateWorkList()
+        var workList = _AGUpdateWorkList()
         let context = _AGUpdateContext(
             predecessor: _AGGraph.currentUpdateContext
         )
@@ -1572,7 +1617,7 @@ extension _AGGraph {
                 updateNodeIfNeeded(
                     node,
                     traversal: traversal,
-                    workList: workList,
+                    workList: &workList,
                     context: context
                 )
             }
@@ -1596,7 +1641,7 @@ extension _AGGraph {
     private func nextUpdateAction(
         for frame: _AGUpdateFrame,
         traversal: UInt64,
-        workList: _AGUpdateWorkList
+        workList: inout _AGUpdateWorkList
     ) -> _AGUpdateAction {
         let index = Int(frame.id)
         guard slots.indices.contains(index), slots[index].node != nil else {
@@ -1906,7 +1951,7 @@ extension _AGGraph {
         index: Int,
         parent: AGAttribute
     ) {
-        _ = valueForPermanentInput(parent, evaluator: id)
+        updatePermanentInput(parent, evaluator: id)
         // Raw offsets carry dependency state but no readable cached value.
         slots[index].node!.valueVersion &+= 1
         finishNodeEvaluation(index: index)
@@ -1920,7 +1965,10 @@ extension _AGGraph {
         sourceGraph: WeakObject<_AGGraph>
     ) {
         if let graph = sourceGraph.value {
-            publishComputedValue(graph.cachedValue(for: source), for: id)
+            graph.cachedValueStorage(for: source).publishValue(
+                to: self,
+                for: id
+            )
         }
         finishNodeEvaluation(index: index)
     }
@@ -1953,10 +2001,10 @@ extension _AGGraph {
         defaultValue: Any?
     ) {
         if source.isValid(in: self) {
-            publishComputedValue(
-                valueForIndirectSource(source.toStrong(), evaluator: id),
-                for: id
-            )
+            valueStorageForIndirectSource(
+                source.toStrong(),
+                evaluator: id
+            ).publishValue(to: self, for: id)
         } else if let defaultValue {
             publishComputedValue(defaultValue, for: id)
         } else {
@@ -2766,7 +2814,7 @@ extension _AGGraph {
         let attribute: Attribute<U> = makeOffsetNode(
             parent: parent,
             byteOffset: offset.byteOffset,
-            comparisonMode: .storedRepresentation,
+            comparisonMode: Focus<T, U>.comparisonMode,
             usesOffsetCache: true
         )
         offsetPathIDs[path] = attribute.identifier.rawValue

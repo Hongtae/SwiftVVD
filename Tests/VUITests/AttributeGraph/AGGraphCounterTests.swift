@@ -321,6 +321,35 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testUpdateValueRegistersDependencyWithoutReadingThePayload() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let intermediateRecorder = MutableRuleRecorder()
+        let consumerRecorder = MutableRuleRecorder()
+
+        ref.withCurrent {
+            let source = Attribute(value: 1)
+            let intermediate = graph.makeRule {
+                intermediateRecorder.evaluationCount += 1
+                return UpdateOnlyPayload(source: source.value)
+            }
+            let consumer = graph.makeRule {
+                consumerRecorder.evaluationCount += 1
+                intermediate.updateValue()
+                return 42
+            }
+
+            XCTAssertEqual(consumer.value, 42)
+            XCTAssertEqual(intermediateRecorder.evaluationCount, 1)
+            XCTAssertEqual(consumerRecorder.evaluationCount, 1)
+
+            source.value = 2
+            XCTAssertEqual(consumer.value, 42)
+            XCTAssertEqual(intermediateRecorder.evaluationCount, 2)
+            XCTAssertEqual(consumerRecorder.evaluationCount, 2)
+        }
+    }
+
     func testRepeatedDynamicReadsReuseOneInputEdge() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)
@@ -1712,6 +1741,74 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testIndirectAttributeReusesTypedStorageForLargeValues() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: UpdateOnlyPayload(source: 1))
+            let indirect = graph.makeIndirectAttribute(source: source)
+
+            XCTAssertEqual(indirect.value, UpdateOnlyPayload(source: 1))
+            let initialStorage = try! XCTUnwrap(
+                graph.slots[Int(indirect.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<UpdateOnlyPayload>
+            )
+            let initialPointer = initialStorage.rawPointer
+
+            source.setValue(UpdateOnlyPayload(source: 5))
+
+            XCTAssertEqual(indirect.value, UpdateOnlyPayload(source: 5))
+            let changedStorage = try! XCTUnwrap(
+                graph.slots[Int(indirect.identifier.rawValue)].node?.value
+                    as? _AGValueStorage<UpdateOnlyPayload>
+            )
+            XCTAssertTrue(initialStorage === changedStorage)
+            XCTAssertEqual(initialPointer, changedStorage.rawPointer)
+        }
+    }
+
+    func testCrossGraphReferenceReusesTypedStorageForLargeValues() {
+        let sourceGraph = _AGGraph()
+        let sourceRef = _AGGraphContext(graph: sourceGraph)
+        let source = sourceRef.withCurrent {
+            sourceGraph.makeInput(value: UpdateOnlyPayload(source: 1))
+        }
+        let targetGraph = _AGGraph()
+        let targetRef = _AGGraphContext(graph: targetGraph)
+
+        let reference = targetRef.withCurrent {
+            targetGraph.makeCrossGraphRef(
+                source: source,
+                in: sourceGraph
+            )
+        }
+
+        targetRef.withCurrent {
+            XCTAssertEqual(reference.value, UpdateOnlyPayload(source: 1))
+        }
+        let initialStorage = try! XCTUnwrap(
+            targetGraph.slots[Int(reference.identifier.rawValue)].node?.value
+                as? _AGValueStorage<UpdateOnlyPayload>
+        )
+        let initialPointer = initialStorage.rawPointer
+
+        _ = sourceRef.withCurrent {
+            source.setValue(UpdateOnlyPayload(source: 5))
+        }
+        targetRef.withCurrent {
+            targetGraph.inbox.drain()
+            XCTAssertEqual(reference.value, UpdateOnlyPayload(source: 5))
+        }
+
+        let changedStorage = try! XCTUnwrap(
+            targetGraph.slots[Int(reference.identifier.rawValue)].node?.value
+                as? _AGValueStorage<UpdateOnlyPayload>
+        )
+        XCTAssertTrue(initialStorage === changedStorage)
+        XCTAssertEqual(initialPointer, changedStorage.rawPointer)
+    }
+
     func testRemovedIndirectSourceRestoresFallbackBeforeSlotReuse() {
         // ASSERTIONS attributeGraphIndirectTargetLifetimeObserved
         let graph = _AGGraph()
@@ -2044,6 +2141,20 @@ private struct StoredProjectionRoot {
 private struct ComputedProjectionRoot {
     var storedValue: Int
     var computedValue: Int { storedValue + 1 }
+}
+
+private struct UpdateOnlyPayload: Equatable {
+    var first: Int
+    var second: Int
+    var third: Int
+    var fourth: Int
+
+    init(source: Int) {
+        first = source
+        second = source &+ 1
+        third = source &+ 2
+        fourth = source &+ 3
+    }
 }
 
 private final class AGGraphContextToken {}

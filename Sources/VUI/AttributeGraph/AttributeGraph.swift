@@ -360,7 +360,7 @@ func AGGraphInvalidateValue(_ attribute: AGAttribute) {
 }
 
 func _AGGraphUpdateValue(_ attribute: AGAttribute) {
-    _ = _AGGraphGetAttributeGraph(attribute).value(for: attribute)
+    _AGGraphGetAttributeGraph(attribute).updateValue(for: attribute)
 }
 
 func AGGraphUpdateValue(_ attribute: AGAttribute) {

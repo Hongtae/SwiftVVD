@@ -127,6 +127,8 @@ protocol _AnyAGValueStorage: AnyObject {
     var anyValue: Any { get }
     var rawPointer: UnsafeRawPointer { get }
 
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
+
     func updateErasedValue(
         _ value: Any,
         valuesEqual: (UnsafeRawPointer, UnsafeRawPointer) -> Bool
@@ -183,6 +185,10 @@ final class _AGValueStorage<Value>: _AnyAGValueStorage {
 
     var anyValue: Any {
         storage.pointee
+    }
+
+    func publishValue(to graph: _AGGraph, for attribute: AGAttribute) {
+        graph.publishComputedValue(storage.pointee, for: attribute)
     }
 }
 
