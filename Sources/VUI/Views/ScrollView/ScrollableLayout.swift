@@ -375,6 +375,7 @@ private func _scrollViewClampContentOffset(
 
 private let scrollDecelerationForceStep = 1.0 / 240.0
 private let scrollDecelerationFrameStep = 1.0 / 120.0
+private let scrollDecelerationRateFrameExponent = 1_000.0 / 120.0
 private let scrollDecelerationLowVelocityThreshold = 0.00001
 private let scrollDecelerationProjectionMultiplier = 0.001
 private let scrollDecelerationTargetSnapTolerance = 0.5
@@ -383,6 +384,14 @@ private let scrollDecelerationEstimatedTargetDrag = 10.0
 private let scrollDecelerationEstimatedTargetStiffnessScale = 30.0
 private let scrollRubberBandingMinimumMagnitude = CGFloat(Double.ulpOfOne)
 private let scrollRubberBandingScale = CGFloat(0.1)
+
+func _scrollViewDecelerationDrag(decelerationRate: Double) -> Double {
+    let frameRate = pow(decelerationRate, scrollDecelerationRateFrameExponent)
+    return max(
+        (1 - frameRate) / scrollDecelerationFrameStep,
+        1
+    )
+}
 
 func _scrollViewProjectedDecelerationDistance(
     velocity: Double,
@@ -606,7 +615,9 @@ struct Deceleration2D: Equatable {
         decelerationRate: Double,
         target: CGPoint? = nil
     ) {
-        let drag = min(max(1 - decelerationRate, 0), 1)
+        let drag = _scrollViewDecelerationDrag(
+            decelerationRate: decelerationRate
+        )
         self.init(
             time: 0,
             offset: CGSize(width: offset.x, height: offset.y),

@@ -1171,7 +1171,9 @@ class HostingScrollView {
             time: 0,
             offset: CGSize(width: offset.x, height: offset.y),
             velocity: _Velocity(valuePerSecond: value),
-            drag: min(max(1 - resolvedDecelerationRate, 0), 1),
+            drag: _scrollViewDecelerationDrag(
+                decelerationRate: resolvedDecelerationRate
+            ),
             bounceStiffness: 100,
             bounceDrag: 17,
             stoppedVelocity: _Velocity(valuePerSecond: CGFloat(2.5))

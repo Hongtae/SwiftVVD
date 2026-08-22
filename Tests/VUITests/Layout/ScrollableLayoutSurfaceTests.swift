@@ -1465,6 +1465,42 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertEqual(targeted.force, 0)
     }
 
+    func testScrollDecelerationRateUsesFrameConvertedDrag() {
+        XCTAssertEqual(
+            _scrollViewDecelerationDrag(decelerationRate: 0.998),
+            1.9853950944093768,
+            accuracy: 0.0000000001
+        )
+        XCTAssertEqual(
+            _scrollViewDecelerationDrag(decelerationRate: 0.99),
+            9.640971753730314,
+            accuracy: 0.0000000001
+        )
+        XCTAssertEqual(
+            _scrollViewDecelerationDrag(decelerationRate: 0.9999),
+            1,
+            accuracy: 0.0000000001
+        )
+
+        var simulation = Deceleration2D(
+            offset: .zero,
+            velocity: _Velocity(
+                valuePerSecond: CGSize(width: 0, height: 100)
+            ),
+            decelerationRate: 0.998
+        )
+        XCTAssertFalse(simulation.iter(
+            1,
+            minValue: .zero,
+            maxValue: CGPoint(x: 1_000, y: 1_000)
+        ))
+        XCTAssertTrue(simulation.iter(
+            3,
+            minValue: .zero,
+            maxValue: CGPoint(x: 1_000, y: 1_000)
+        ))
+    }
+
     func testScrollViewRubberBandingResidueUsesSwiftUIFormula() {
         let residue = _scrollViewAddRubberBandingToResidue(
             CGSize(width: 40, height: -30),

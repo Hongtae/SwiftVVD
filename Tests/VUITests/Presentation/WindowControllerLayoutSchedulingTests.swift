@@ -1248,6 +1248,36 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             [.interacting, .decelerating],
             "Motion samples in one deceleration phase must not republish phase velocity."
         )
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 5,
+                delta: 3,
+                date: controller.date.addingTimeInterval(3),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        XCTAssertFalse(host.isDecelerating)
+        XCTAssertEqual(host.currentPhaseState.phase, .idle)
+
+        redraw = false
+        Update.ensure {
+            controller.updateView(
+                tick: 6,
+                delta: 1.0 / 60.0,
+                date: controller.date.addingTimeInterval(3 + 1.0 / 60.0),
+                contentSize: CGSize(width: 220, height: 220),
+                redraw: &redraw,
+                withGC
+            )
+        }
+        XCTAssertEqual(
+            phaseProbe.changes.map(\.new),
+            [.interacting, .decelerating, .idle]
+        )
     }
 
     @MainActor
