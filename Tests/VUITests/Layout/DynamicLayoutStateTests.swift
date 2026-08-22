@@ -449,6 +449,39 @@ final class DynamicLayoutStateTests: XCTestCase {
         }
     }
 
+    func testDynamicContainerChangedListAdvancesSeedForStableIdentity() {
+        // ASSERTIONS dynamicContainerStableIdentityRefreshSeedObserved
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let source = graph.makeInput(value: [
+                reusableItem(
+                    id: 1,
+                    storageKind: 1,
+                    reusableStorageKinds: []
+                ),
+            ])
+            let info = makeReusableContainer(
+                graph: graph,
+                source: source
+            )
+            let initial = info.value
+
+            XCTAssertTrue(
+                source.setValue([
+                    reusableItem(
+                        id: 1,
+                        storageKind: 2,
+                        reusableStorageKinds: []
+                    ),
+                ])
+            )
+            let refreshed = info.value
+
+            XCTAssertEqual(refreshed.activeItems.map(\.uniqueId), [1])
+            XCTAssertEqual(refreshed.seed, initial.seed &+ 1)
+        }
+    }
+
     func testDynamicContainerReuseProtectsLaterIncomingIdentity() {
         // ASSERTIONS dynamicContainerReuseSelectionOrderObserved
         let graph = _AGGraph()

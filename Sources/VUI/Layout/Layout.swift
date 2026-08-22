@@ -1571,7 +1571,8 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             )
             activeItems = reconciliation.active
             inactiveItems = reconciliation.inactive
-            stateChanged = stateChanged || reconciliation.changed
+            // A refreshed adaptor generation publishes even when every item is reused.
+            stateChanged = true
         } else {
             activeItems = Array(info.activeItems)
             inactiveItems = Array(info.items.dropFirst(activeItems.count))
