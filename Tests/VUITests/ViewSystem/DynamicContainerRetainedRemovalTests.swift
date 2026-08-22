@@ -1357,7 +1357,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             let node = try XCTUnwrap(
                 graph.slots[Int(info.identifier.rawValue)].node
             )
-            let inputIdentifiers = Set(node.inputs.map(\.attribute))
+            let inputIdentifiers = Set(node.pointee.inputs.map(\.attribute))
             XCTAssertTrue(
                 inputIdentifiers.contains(viewList.identifier.rawValue)
             )

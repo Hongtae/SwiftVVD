@@ -251,10 +251,32 @@ struct IDView<Content, ID>: View, DynamicView where Content: View, ID: Hashable 
         // Explicit view identity creates a child namespace before the content
         // list is materialized when stable display identities are requested.
         inputs.base.pushStableID(id)
+        let cached = Attribute<Content>(
+            CachedView(_view: view, id: id)
+        )
         return Content._makeViewList(
-            view: _GraphValue(_attribute: view)[\.content],
+            view: _GraphValue(_attribute: cached),
             inputs: inputs
         )
+    }
+}
+
+private struct CachedView<Content, ID>: StatefulRule, AsyncAttribute
+where Content: View, ID: Hashable {
+    typealias Value = Content
+
+    var _view: Attribute<IDView<Content, ID>>
+    let id: ID
+
+    private var view: IDView<Content, ID> {
+        _view.value
+    }
+
+    mutating func updateValue() {
+        if hasValue, id == view.id {
+            return
+        }
+        value = view.content
     }
 }
 

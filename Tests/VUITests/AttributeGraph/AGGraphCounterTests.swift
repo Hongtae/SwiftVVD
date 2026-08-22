@@ -13,7 +13,7 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(output.value, 1)
 
             let initialStorage = try! XCTUnwrap(
-                graph.slots[Int(output.identifier.rawValue)].node?.value
+                graph.slots[Int(output.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<Int>
             )
             let initialPointer = initialStorage.rawPointer
@@ -21,7 +21,7 @@ final class AGGraphCounterTests: XCTestCase {
             graph.invalidateAttribute(output.identifier)
             XCTAssertEqual(output.value, 1)
             let equalStorage = try! XCTUnwrap(
-                graph.slots[Int(output.identifier.rawValue)].node?.value
+                graph.slots[Int(output.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<Int>
             )
             XCTAssertTrue(initialStorage === equalStorage)
@@ -31,12 +31,58 @@ final class AGGraphCounterTests: XCTestCase {
             graph.invalidateAttribute(output.identifier)
             XCTAssertEqual(output.value, 2)
             let changedStorage = try! XCTUnwrap(
-                graph.slots[Int(output.identifier.rawValue)].node?.value
+                graph.slots[Int(output.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<Int>
             )
             XCTAssertTrue(initialStorage === changedStorage)
             XCTAssertEqual(initialPointer, changedStorage.rawPointer)
         }
+    }
+
+    func testNodeRemovalDestroysOwnedStorageBeforeSlotReuse() {
+        let graph = _AGGraph()
+        weak var releasedToken: NodeStorageLifetimeToken?
+
+        _AGGraph.withCurrent(graph) {
+            var token: NodeStorageLifetimeToken? = NodeStorageLifetimeToken()
+            releasedToken = token
+            let attribute = graph.makeInput(value: token!)
+            token = nil
+
+            XCTAssertNotNil(releasedToken)
+            graph.removeNode(attribute.identifier)
+            XCTAssertNil(releasedToken)
+
+            let replacement = graph.makeInput(value: 1)
+            XCTAssertEqual(
+                replacement.identifier.rawValue,
+                attribute.identifier.rawValue
+            )
+        }
+    }
+
+    func testGraphTeardownDestroysLiveNodeStorage() {
+        weak var releasedValue: NodeStorageLifetimeToken?
+        weak var releasedRuleCapture: NodeStorageLifetimeToken?
+
+        do {
+            let graph = _AGGraph()
+            let value = NodeStorageLifetimeToken()
+            let ruleCapture = NodeStorageLifetimeToken()
+            releasedValue = value
+            releasedRuleCapture = ruleCapture
+
+            _AGGraph.withCurrent(graph) {
+                _ = graph.makeInput(value: value)
+                _ = graph.makeRule { ruleCapture }
+            }
+
+            XCTAssertNotNil(releasedValue)
+            XCTAssertNotNil(releasedRuleCapture)
+        }
+
+        XCTAssertNil(releasedValue)
+        XCTAssertNil(releasedRuleCapture)
     }
 
     func testStoredKeyPathProjectionUsesOffsetNodeAndReusesStorage() {
@@ -53,13 +99,13 @@ final class AGGraphCounterTests: XCTestCase {
             )
             guard case .offset = graph.slots[
                 Int(projection.identifier.rawValue)
-            ].node?.kind else {
+            ].node?.pointee.kind else {
                 return XCTFail("Stored key paths must use an offset node.")
             }
             XCTAssertEqual(projection.value, 1)
 
             let initialStorage = try! XCTUnwrap(
-                graph.slots[Int(projection.identifier.rawValue)].node?.value
+                graph.slots[Int(projection.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<Int>
             )
             let initialPointer = initialStorage.rawPointer
@@ -67,7 +113,7 @@ final class AGGraphCounterTests: XCTestCase {
             source.value = StoredProjectionRoot(value: 2)
             XCTAssertEqual(projection.value, 2)
             let changedStorage = try! XCTUnwrap(
-                graph.slots[Int(projection.identifier.rawValue)].node?.value
+                graph.slots[Int(projection.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<Int>
             )
             XCTAssertTrue(initialStorage === changedStorage)
@@ -94,7 +140,7 @@ final class AGGraphCounterTests: XCTestCase {
             )
             guard case .ruleBody = graph.slots[
                 Int(projection.identifier.rawValue)
-            ].node?.kind else {
+            ].node?.pointee.kind else {
                 return XCTFail("Computed key paths must use a Focus rule.")
             }
             XCTAssertEqual(projection.value, 2)
@@ -364,13 +410,13 @@ final class AGGraphCounterTests: XCTestCase {
             let outputIndex = Int(output.identifier.rawValue)
             let sourceIndex = Int(source.identifier.rawValue)
             XCTAssertEqual(
-                graph.slots[outputIndex].node!.inputs.filter {
+                graph.slots[outputIndex].node!.pointee.inputs.filter {
                     $0.attribute == source.identifier.rawValue
                 }.count,
                 1
             )
             XCTAssertEqual(
-                graph.slots[sourceIndex].node!.outputs.filter {
+                graph.slots[sourceIndex].node!.pointee.outputs.filter {
                     $0 == output.identifier.rawValue
                 }.count,
                 1
@@ -379,13 +425,13 @@ final class AGGraphCounterTests: XCTestCase {
             source.setValue(4)
             XCTAssertEqual(output.value, 8)
             XCTAssertEqual(
-                graph.slots[outputIndex].node!.inputs.filter {
+                graph.slots[outputIndex].node!.pointee.inputs.filter {
                     $0.attribute == source.identifier.rawValue
                 }.count,
                 1
             )
             XCTAssertEqual(
-                graph.slots[sourceIndex].node!.outputs.filter {
+                graph.slots[sourceIndex].node!.pointee.outputs.filter {
                     $0 == output.identifier.rawValue
                 }.count,
                 1
@@ -408,12 +454,12 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(output.value, 11)
             let outputIndex = Int(output.identifier.rawValue)
             XCTAssertTrue(
-                graph.slots[outputIndex].node!.inputs.contains {
+                graph.slots[outputIndex].node!.pointee.inputs.contains {
                     $0.attribute == left.identifier.rawValue
                 }
             )
             XCTAssertFalse(
-                graph.slots[outputIndex].node!.inputs.contains {
+                graph.slots[outputIndex].node!.pointee.inputs.contains {
                     $0.attribute == right.identifier.rawValue
                 }
             )
@@ -421,21 +467,21 @@ final class AGGraphCounterTests: XCTestCase {
             selector.setValue(false)
             XCTAssertEqual(output.value, 29)
             XCTAssertFalse(
-                graph.slots[outputIndex].node!.inputs.contains {
+                graph.slots[outputIndex].node!.pointee.inputs.contains {
                     $0.attribute == left.identifier.rawValue
                 }
             )
             XCTAssertTrue(
-                graph.slots[outputIndex].node!.inputs.contains {
+                graph.slots[outputIndex].node!.pointee.inputs.contains {
                     $0.attribute == right.identifier.rawValue
                 }
             )
             XCTAssertFalse(
-                graph.slots[Int(left.identifier.rawValue)].node!.outputs
+                graph.slots[Int(left.identifier.rawValue)].node!.pointee.outputs
                     .contains(output.identifier.rawValue)
             )
             XCTAssertEqual(
-                graph.slots[Int(right.identifier.rawValue)].node!.outputs
+                graph.slots[Int(right.identifier.rawValue)].node!.pointee.outputs
                     .filter { $0 == output.identifier.rawValue }.count,
                 1
             )
@@ -463,12 +509,12 @@ final class AGGraphCounterTests: XCTestCase {
             )
 
             XCTAssertEqual(
-                graph.slots[Int(output.identifier.rawValue)].node!.inputs
+                graph.slots[Int(output.identifier.rawValue)].node!.pointee.inputs
                     .filter { $0.attribute == source.identifier.rawValue }.count,
                 2
             )
             XCTAssertEqual(
-                graph.slots[Int(source.identifier.rawValue)].node!.outputs
+                graph.slots[Int(source.identifier.rawValue)].node!.pointee.outputs
                     .filter { $0 == output.identifier.rawValue }.count,
                 2
             )
@@ -491,15 +537,15 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(projection.value, 1)
             XCTAssertEqual(
-                graph.slots[projectionIndex].node!.inputs.count,
+                graph.slots[projectionIndex].node!.pointee.inputs.count,
                 1
             )
             XCTAssertEqual(
-                graph.slots[projectionIndex].node!.inputs[0].attribute,
+                graph.slots[projectionIndex].node!.pointee.inputs[0].attribute,
                 source.identifier.rawValue
             )
             XCTAssertNotEqual(
-                graph.slots[projectionIndex].node!.inputs[0].flags
+                graph.slots[projectionIndex].node!.pointee.inputs[0].flags
                     & _AGGraph.InputEdge.permanent,
                 0
             )
@@ -509,7 +555,7 @@ final class AGGraphCounterTests: XCTestCase {
             )
             XCTAssertEqual(projection.value, 2)
             XCTAssertEqual(
-                graph.slots[projectionIndex].node!.inputs.count,
+                graph.slots[projectionIndex].node!.pointee.inputs.count,
                 1
             )
         }
@@ -1259,7 +1305,7 @@ final class AGGraphCounterTests: XCTestCase {
                     let value = source.value
                     if value == 2, recorder.allOutputsWereDirty == nil {
                         recorder.allOutputsWereDirty = recorder.outputIDs.allSatisfy { rawID in
-                            graph.slots[Int(rawID)].node?.needsEvaluation == true
+                            graph.slots[Int(rawID)].node?.pointee.needsEvaluation == true
                         }
                     }
                 }
@@ -1295,7 +1341,7 @@ final class AGGraphCounterTests: XCTestCase {
 
             let outputIndex = Int(output.identifier.rawValue)
             let changedInputs = Set(
-                graph.slots[outputIndex].node!.inputs.compactMap { input in
+                graph.slots[outputIndex].node!.pointee.inputs.compactMap { input in
                     input.flags & _AGGraph.InputEdge.changed != 0
                         ? input.attribute
                         : nil
@@ -1305,7 +1351,7 @@ final class AGGraphCounterTests: XCTestCase {
                 first.identifier.rawValue,
                 second.identifier.rawValue,
             ]))
-            XCTAssertTrue(graph.slots[outputIndex].node!.needsEvaluation)
+            XCTAssertTrue(graph.slots[outputIndex].node!.pointee.needsEvaluation)
             XCTAssertEqual(output.value, 34)
         }
     }
@@ -1331,22 +1377,22 @@ final class AGGraphCounterTests: XCTestCase {
             let intermediateIndex = Int(intermediateID)
             let outputIndex = Int(output.identifier.rawValue)
             XCTAssertEqual(
-                graph.slots[intermediateIndex].node!.outputs.filter {
+                graph.slots[intermediateIndex].node!.pointee.outputs.filter {
                     $0 == output.identifier.rawValue
                 }.count,
                 2
             )
 
             source.setValue(2)
-            for edgeIndex in graph.slots[outputIndex].node!.inputs.indices
-            where graph.slots[outputIndex].node!.inputs[edgeIndex].attribute
+            for edgeIndex in graph.slots[outputIndex].node!.pointee.inputs.indices
+            where graph.slots[outputIndex].node!.pointee.inputs[edgeIndex].attribute
                 == intermediateID {
-                graph.slots[outputIndex].node!.inputs[edgeIndex].flags &=
+                graph.slots[outputIndex].node!.pointee.inputs[edgeIndex].flags &=
                     ~_AGGraph.InputEdge.changed
             }
 
             XCTAssertEqual(intermediate.value, 4)
-            let repeatedEdges = graph.slots[outputIndex].node!.inputs.filter {
+            let repeatedEdges = graph.slots[outputIndex].node!.pointee.inputs.filter {
                 $0.attribute == intermediateID
             }
             XCTAssertEqual(repeatedEdges.count, 2)
@@ -1375,20 +1421,20 @@ final class AGGraphCounterTests: XCTestCase {
 
             first.setValue(2)
             let downstreamIndex = Int(downstream.identifier.rawValue)
-            let firstTraversal = graph.slots[downstreamIndex].node!
+            let firstTraversal = graph.slots[downstreamIndex].node!.pointee
                 .invalidationTraversal
-            XCTAssertTrue(graph.slots[downstreamIndex].node!.needsEvaluation)
+            XCTAssertTrue(graph.slots[downstreamIndex].node!.pointee.needsEvaluation)
 
             second.setValue(20)
 
             XCTAssertEqual(
-                graph.slots[downstreamIndex].node!.invalidationTraversal,
+                graph.slots[downstreamIndex].node!.pointee.invalidationTraversal,
                 firstTraversal,
                 "An already-dirty shared node must stop repeated descendant traversal."
             )
             let sharedIndex = Int(shared.identifier.rawValue)
             let changedInputs = Set(
-                graph.slots[sharedIndex].node!.inputs.compactMap { input in
+                graph.slots[sharedIndex].node!.pointee.inputs.compactMap { input in
                     input.flags & _AGGraph.InputEdge.changed != 0
                         ? input.attribute
                         : nil
@@ -1751,7 +1797,7 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(indirect.value, UpdateOnlyPayload(source: 1))
             let initialStorage = try! XCTUnwrap(
-                graph.slots[Int(indirect.identifier.rawValue)].node?.value
+                graph.slots[Int(indirect.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<UpdateOnlyPayload>
             )
             let initialPointer = initialStorage.rawPointer
@@ -1760,7 +1806,7 @@ final class AGGraphCounterTests: XCTestCase {
 
             XCTAssertEqual(indirect.value, UpdateOnlyPayload(source: 5))
             let changedStorage = try! XCTUnwrap(
-                graph.slots[Int(indirect.identifier.rawValue)].node?.value
+                graph.slots[Int(indirect.identifier.rawValue)].node?.pointee.value
                     as? _AGValueStorage<UpdateOnlyPayload>
             )
             XCTAssertTrue(initialStorage === changedStorage)
@@ -1788,7 +1834,7 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(reference.value, UpdateOnlyPayload(source: 1))
         }
         let initialStorage = try! XCTUnwrap(
-            targetGraph.slots[Int(reference.identifier.rawValue)].node?.value
+            targetGraph.slots[Int(reference.identifier.rawValue)].node?.pointee.value
                 as? _AGValueStorage<UpdateOnlyPayload>
         )
         let initialPointer = initialStorage.rawPointer
@@ -1802,7 +1848,7 @@ final class AGGraphCounterTests: XCTestCase {
         }
 
         let changedStorage = try! XCTUnwrap(
-            targetGraph.slots[Int(reference.identifier.rawValue)].node?.value
+            targetGraph.slots[Int(reference.identifier.rawValue)].node?.pointee.value
                 as? _AGValueStorage<UpdateOnlyPayload>
         )
         XCTAssertTrue(initialStorage === changedStorage)
@@ -1986,11 +2032,11 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(deferredRecorder.evaluationCount, 1)
 
             let prefetchedEdge = try! XCTUnwrap(
-                graph.slots[Int(prefetched.identifier.rawValue)].node?.inputs
+                graph.slots[Int(prefetched.identifier.rawValue)].node?.pointee.inputs
                     .first
             )
             let deferredEdge = try! XCTUnwrap(
-                graph.slots[Int(deferred.identifier.rawValue)].node?.inputs
+                graph.slots[Int(deferred.identifier.rawValue)].node?.pointee.inputs
                     .first
             )
             XCTAssertEqual(
@@ -2005,13 +2051,13 @@ final class AGGraphCounterTests: XCTestCase {
             source.setValue(3)
             let cachedNodeIndex = Int(prefetchedEdge.attribute)
             XCTAssertTrue(
-                graph.slots[cachedNodeIndex].node!.needsEvaluation
+                graph.slots[cachedNodeIndex].node!.pointee.needsEvaluation
             )
 
             XCTAssertEqual(prefetched.value, 1)
             XCTAssertEqual(prefetchedRecorder.evaluationCount, 1)
             XCTAssertFalse(
-                graph.slots[cachedNodeIndex].node!.needsEvaluation
+                graph.slots[cachedNodeIndex].node!.pointee.needsEvaluation
             )
             XCTAssertEqual(deferred.value, 1)
             XCTAssertEqual(deferredRecorder.evaluationCount, 2)
@@ -2167,6 +2213,8 @@ private struct KeyPathChangedInputPair: Equatable {
 private struct DefaultAttributeBody: _AttributeBody {}
 
 private struct AsyncAttributeBody: AsyncAttribute {}
+
+private final class NodeStorageLifetimeToken {}
 
 private final class RuleInitialValueRecorder {
     var evaluationCount = 0

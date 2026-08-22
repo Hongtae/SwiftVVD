@@ -129,6 +129,25 @@ final class PrimitiveViewTests: XCTestCase {
         }
     }
 
+    func testConditionalContentReturnsOnlyMatchingKnownBranchCounts() {
+        // ASSERTIONS foreachConditionalCountClassificationObserved
+        typealias Matching = _ConditionalContent<Text, Image>
+        typealias Mismatching = _ConditionalContent<
+            Text,
+            TupleView<(Text, Text)>
+        >
+        typealias Unknown = _ConditionalContent<Text, Button<Text>>
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        ref.withCurrent {
+            let inputs = makeViewListCountInputs(graph: graph)
+            XCTAssertEqual(Matching._viewListCount(inputs: inputs), 1)
+            XCTAssertNil(Mismatching._viewListCount(inputs: inputs))
+            XCTAssertNil(Unknown._viewListCount(inputs: inputs))
+        }
+    }
+
     func testUnaryListHelpersKeepGeneratorSpecializations() throws {
         // ASSERTIONS unaryViewGeneratorStructureObserved
         let graph = _AGGraph()

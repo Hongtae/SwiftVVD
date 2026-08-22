@@ -60,6 +60,24 @@ private struct TupleStableScopeProbeView<Payload>: PrimitiveView {
     }
 }
 
+private final class IDViewCachedContentRecorder {
+    var content: Attribute<IDViewCachedContentProbeView>?
+}
+
+private struct IDViewCachedContentProbeView: PrimitiveView {
+    var payload: Int
+    var recorder: IDViewCachedContentRecorder
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        let content = view._attribute.value
+        content.recorder.content = view._attribute
+        return .unaryViewList(view: view, inputs: inputs)
+    }
+}
+
 private struct ZeroCountProbeViewList: ViewList {
     func applyNodes(
         from: inout Int,
@@ -926,6 +944,55 @@ final class DynamicLayoutStateTests: XCTestCase {
                 childScope.hash,
                 childStableHash(id: "row", parent: rootHash)
             )
+        }
+    }
+
+    func testIDViewChildListCachesContentUntilIdentityChanges()
+        throws {
+        // ASSERTIONS idViewCachedContentRuleObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let recorder = IDViewCachedContentRecorder()
+            let initial = IDView(
+                IDViewCachedContentProbeView(
+                    payload: 1,
+                    recorder: recorder
+                ),
+                id: "row"
+            )
+            let source = graph.makeInput(value: initial)
+            let inputs = makeViewInputs(graph: graph)
+
+            _ = initial.makeChildViewList(
+                metadata: (),
+                view: source,
+                inputs: _ViewListInputs(from: inputs)
+            )
+
+            let cached = try XCTUnwrap(recorder.content)
+            XCTAssertEqual(cached.value.payload, 1)
+
+            source.setValue(
+                IDView(
+                    IDViewCachedContentProbeView(
+                        payload: 2,
+                        recorder: recorder
+                    ),
+                    id: "row"
+                )
+            )
+            XCTAssertEqual(cached.value.payload, 1)
+
+            source.setValue(
+                IDView(
+                    IDViewCachedContentProbeView(
+                        payload: 3,
+                        recorder: recorder
+                    ),
+                    id: "replacement"
+                )
+            )
+            XCTAssertEqual(cached.value.payload, 3)
         }
     }
 

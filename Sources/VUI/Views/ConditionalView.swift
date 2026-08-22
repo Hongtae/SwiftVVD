@@ -24,6 +24,17 @@ extension _ConditionalContent: View where TrueContent: View, FalseContent: View 
         )
     }
 
+    public static func _viewListCount(
+        inputs: _ViewListCountInputs
+    ) -> Int? {
+        guard let trueCount = TrueContent._viewListCount(inputs: inputs),
+              let falseCount = FalseContent._viewListCount(inputs: inputs),
+              trueCount == falseCount else {
+            return nil
+        }
+        return trueCount
+    }
+
     var _trueContent: TrueContent {
         if case let .trueContent(content) = storage { return content }
         fatalError()

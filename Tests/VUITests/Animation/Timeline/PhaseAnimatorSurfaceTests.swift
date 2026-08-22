@@ -540,7 +540,7 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                     )
                     let sourceID = visitor.source?.rawValue
                     let sourceNode = sourceID.flatMap { graph.slots[Int($0)].node }
-                    var subgraph = graph.slots[Int(rawID)].node?.subgraph
+                    var subgraph = graph.slots[Int(rawID)].node?.pointee.subgraph
                     var ancestry: [String] = []
                     while let current = subgraph {
                         ancestry.append(String(describing: ObjectIdentifier(current)))
@@ -550,15 +550,15 @@ final class PhaseAnimatorSurfaceTests: XCTestCase {
                         "PRESENTED_SCALE_NODE",
                         stage,
                         rawID,
-                        node?.flags.rawValue as Any,
-                        node?.needsEvaluation as Any,
-                        node?.valueVersion as Any,
-                        node?.transaction?.effectiveAnimation as Any,
+                        node?.pointee.flags.rawValue as Any,
+                        node?.pointee.needsEvaluation as Any,
+                        node?.pointee.valueVersion as Any,
+                        node?.pointee.transaction?.effectiveAnimation as Any,
                         "source=\(sourceID as Any)",
-                        "sourceValue=\(sourceNode?.value?.anyValue as Any)",
-                        "sourceDirty=\(sourceNode?.needsEvaluation as Any)",
-                        "sourceVersion=\(sourceNode?.valueVersion as Any)",
-                        "sourceInputs=\(sourceNode?.inputs as Any)",
+                        "sourceValue=\(sourceNode?.pointee.value?.anyValue as Any)",
+                        "sourceDirty=\(sourceNode?.pointee.needsEvaluation as Any)",
+                        "sourceVersion=\(sourceNode?.pointee.valueVersion as Any)",
+                        "sourceInputs=\(sourceNode?.pointee.inputs as Any)",
                         ancestry,
                         "root=\(ObjectIdentifier(child.viewGraph.data.rootSubgraph))"
                     )

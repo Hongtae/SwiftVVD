@@ -3485,12 +3485,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
                     return current
                 }
                 XCTAssertTrue(
-                    node.flags.contains(.transactional),
+                    node.pointee.flags.contains(.transactional),
                     file: file,
                     line: line
                 )
                 XCTAssertTrue(
-                    node.outputs.isEmpty,
+                    node.pointee.outputs.isEmpty,
                     "The dispatcher must not feed an eager wrapper rule.",
                     file: file,
                     line: line

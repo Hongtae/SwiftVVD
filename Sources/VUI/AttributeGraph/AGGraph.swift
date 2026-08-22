@@ -132,7 +132,7 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         }
     }
 
-    final class Node {
+    struct NodeStorage {
         var value: (any _AnyAGValueStorage)?
         var makeValueStorage: (Any) -> any _AnyAGValueStorage
         private var valueComparator: (
@@ -191,33 +191,60 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         }
 
         @inline(__always)
-        func valuesEqual(
-            _ lhs: any _AnyAGValueStorage,
-            _ rhs: any _AnyAGValueStorage
-        ) -> Bool {
-            valueComparator(lhs.rawPointer, rhs.rawPointer)
-        }
-
-        @inline(__always)
-        func valuesEqual(
+        static func valuesEqual(
             _ lhs: UnsafeRawPointer,
-            _ rhs: UnsafeRawPointer
+            _ rhs: UnsafeRawPointer,
+            in node: UnsafePointer<NodeStorage>
         ) -> Bool {
-            valueComparator(lhs, rhs)
+            node.pointee.valueComparator(lhs, rhs)
         }
 
         @inline(__always)
-        func updateErasedValue(
+        static func valuesEqual(
+            _ lhs: any _AnyAGValueStorage,
+            _ rhs: any _AnyAGValueStorage,
+            in node: UnsafePointer<NodeStorage>
+        ) -> Bool {
+            node.pointee.valueComparator(lhs.rawPointer, rhs.rawPointer)
+        }
+
+        @inline(__always)
+        static func updateErasedValue(
             _ value: Any,
-            in storage: any _AnyAGValueStorage
+            in storage: any _AnyAGValueStorage,
+            node: UnsafePointer<NodeStorage>
         ) -> _AGValueStorageUpdateResult {
-            storage.updateErasedValue(value, valuesEqual: valueComparator)
+            storage.updateErasedValue(
+                value,
+                valuesEqual: node.pointee.valueComparator
+            )
         }
     }
 
     struct NodeSlot {
         var seed: UInt32    // generation token replaced on each removal
-        var node: Node?     // nil = free slot
+        // The live slot is the sole owner. Graph operations may borrow this
+        // pointer only until removal or graph teardown destroys the storage.
+        private(set) var node: UnsafeMutablePointer<NodeStorage>?
+
+        init(seed: UInt32) {
+            self.seed = seed
+            node = nil
+        }
+
+        mutating func initializeNode(_ storage: NodeStorage) {
+            precondition(node == nil, "Cannot initialize an occupied node slot.")
+            let pointer = UnsafeMutablePointer<NodeStorage>.allocate(capacity: 1)
+            pointer.initialize(to: storage)
+            node = pointer
+        }
+
+        mutating func destroyNode() {
+            guard let pointer = node else { return }
+            node = nil
+            pointer.deinitialize(count: 1)
+            pointer.deallocate()
+        }
     }
 
     struct AttributeInfo {
@@ -387,6 +414,12 @@ final class _AGGraph: Equatable, @unchecked Sendable {
         initialWeakSeed = seed
         Self.weakSeedRegistry.withLock {
             $0.owners[seed] = WeakObject(self)
+        }
+    }
+
+    deinit {
+        for index in slots.indices {
+            slots[index].destroyNode()
         }
     }
 

@@ -1352,7 +1352,7 @@ final class SymbolEffectsTests: XCTestCase {
             let initialLayout = layoutAttribute.value
             let initialVersion = try XCTUnwrap(
                 graph.slots[Int(layoutAttribute.identifier.rawValue)]
-                    .node?.valueVersion
+                    .node?.pointee.valueVersion
             )
 
             var identityTransaction = Transaction(
@@ -1370,7 +1370,7 @@ final class SymbolEffectsTests: XCTestCase {
             let updatedLayout = layoutAttribute.value
             let updatedVersion = try XCTUnwrap(
                 graph.slots[Int(layoutAttribute.identifier.rawValue)]
-                    .node?.valueVersion
+                    .node?.pointee.valueVersion
             )
 
             XCTAssertEqual(updatedVersion, initialVersion)
@@ -1412,7 +1412,7 @@ final class SymbolEffectsTests: XCTestCase {
                 graph.slots[Int(child.identifier.rawValue)].node
             )
             XCTAssertFalse(
-                childNode.inputs.contains {
+                childNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )
@@ -1420,7 +1420,7 @@ final class SymbolEffectsTests: XCTestCase {
             time.setValue(Time(seconds: 1))
             _ = child.value
             XCTAssertFalse(
-                childNode.inputs.contains {
+                childNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )
@@ -1497,12 +1497,12 @@ final class SymbolEffectsTests: XCTestCase {
                 graph.slots[Int(presentation.identifier.rawValue)].node
             )
             XCTAssertFalse(
-                childNode.inputs.contains {
+                childNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )
             XCTAssertFalse(
-                presentationNode.inputs.contains {
+                presentationNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )
@@ -2263,12 +2263,12 @@ final class SymbolEffectsTests: XCTestCase {
                 graph.slots[Int(presentation.identifier.rawValue)].node
             )
             XCTAssertFalse(
-                childNode.inputs.contains {
+                childNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )
             XCTAssertFalse(
-                presentationNode.inputs.contains {
+                presentationNode.pointee.inputs.contains {
                     $0.attribute == time.identifier.rawValue
                 }
             )

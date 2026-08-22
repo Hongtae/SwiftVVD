@@ -2608,7 +2608,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         ) { versions, element in
             guard let node = element.element.node else { return }
             let bodyType: Any.Type?
-            switch node.kind {
+            switch node.pointee.kind {
             case .ruleBody(let box):
                 bodyType = box.bodyType
             case .stateful(let box):
@@ -2622,7 +2622,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             let name = String(reflecting: bodyType)
             if name.contains("ScrollViewDisplayList")
                 || name.contains("InterpolatedDisplayList<VUI.ResolvedStyledText>") {
-                versions[UInt32(element.offset)] = node.valueVersion
+                versions[UInt32(element.offset)] = node.pointee.valueVersion
             }
         }
         XCTAssertGreaterThan(
@@ -2635,7 +2635,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         for (index, slot) in graph.slots.enumerated() {
             guard let node = slot.node else { continue }
             let bodyType: Any.Type?
-            switch node.kind {
+            switch node.pointee.kind {
             case .ruleBody(let box):
                 bodyType = box.bodyType
             case .stateful(let box):
@@ -2652,7 +2652,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             } else if name.contains(
                 "ShapeStyledDisplayList<VUI.StyledTextContentView>"
             ) {
-                styledTextShapeInputs[UInt32(index)] = node.inputs.map(\.attribute)
+                styledTextShapeInputs[UInt32(index)] = node.pointee.inputs.map(\.attribute)
             }
         }
         XCTAssertFalse(childTransformIDs.isEmpty)
@@ -2685,7 +2685,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             XCTAssertEqual(counter.snapshot() - settled, .zero)
             for (id, version) in settledDisplayVersions {
                 XCTAssertEqual(
-                    graph.slots[Int(id)].node?.valueVersion,
+                    graph.slots[Int(id)].node?.pointee.valueVersion,
                     version,
                     "host-only viewport motion republished display node @\(id)"
                 )

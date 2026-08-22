@@ -98,19 +98,20 @@ extension _AGGraph {
         guard let node = slots[Int(id.rawValue)].node else {
             fatalError("makeValueStorage called on AGAttribute @\(id.rawValue) that does not exist.")
         }
-        return node.makeValueStorage(value)
+        return node.pointee.makeValueStorage(value)
     }
 
     private func updateValueStorage<Value>(
         _ value: Value,
         for id: AGAttribute,
-        in node: Node
+        in node: UnsafeMutablePointer<NodeStorage>
     ) -> Bool {
-        if let storage = node.value as? _AGValueStorage<Value> {
+        if let storage = node.pointee.value as? _AGValueStorage<Value> {
             return withUnsafePointer(to: value) { proposedValue in
-                let changed = !node.valuesEqual(
+                let changed = !NodeStorage.valuesEqual(
                     storage.rawPointer,
-                    UnsafeRawPointer(proposedValue)
+                    UnsafeRawPointer(proposedValue),
+                    in: node
                 )
                 if changed {
                     storage.mutablePointer.pointee = value
@@ -119,8 +120,12 @@ extension _AGGraph {
             }
         }
 
-        if let storage = node.value {
-            switch node.updateErasedValue(value, in: storage) {
+        if let storage = node.pointee.value {
+            switch NodeStorage.updateErasedValue(
+                value,
+                in: storage,
+                node: node
+            ) {
             case .unchanged:
                 return false
             case .changed:
@@ -130,7 +135,7 @@ extension _AGGraph {
             }
         }
 
-        node.value = makeValueStorage(value, for: id)
+        node.pointee.value = makeValueStorage(value, for: id)
         return true
     }
 
@@ -142,9 +147,9 @@ extension _AGGraph {
         }
         let changed = updateValueStorage(value, for: id, in: node)
         if changed {
-            slots[index].node!.valueVersion &+= 1
-            let transaction = slots[index].node!.transaction
-            let outputs = slots[index].node!.outputs
+            slots[index].node!.pointee.valueVersion &+= 1
+            let transaction = slots[index].node!.pointee.transaction
+            let outputs = slots[index].node!.pointee.outputs
             markChangedOutputEdges(
                 outputs,
                 transaction: transaction,
@@ -169,7 +174,7 @@ extension _AGGraph {
         id._debugValidate()
         let index = Int(id.rawValue)
         guard index < slots.count else { return false }
-        return slots[index].node?.value != nil
+        return slots[index].node?.pointee.value != nil
     }
 
     func valueState(for id: AGAttribute) -> AGValueState {
@@ -181,17 +186,17 @@ extension _AGGraph {
         }
 
         var state: AGValueState = []
-        if node.needsEvaluation { state.insert(.needsEvaluation) }
-        if node.isEvaluating { state.insert(.evaluating) }
-        if node.inputsChanged { state.insert(.inputsChanged) }
-        if node.value != nil { state.insert(.hasValue) }
-        if node.forceEvaluation { state.insert(.forcedEvaluation) }
-        if node.inputs.contains(where: {
+        if node.pointee.needsEvaluation { state.insert(.needsEvaluation) }
+        if node.pointee.isEvaluating { state.insert(.evaluating) }
+        if node.pointee.inputsChanged { state.insert(.inputsChanged) }
+        if node.pointee.value != nil { state.insert(.hasValue) }
+        if node.pointee.forceEvaluation { state.insert(.forcedEvaluation) }
+        if node.pointee.inputs.contains(where: {
             $0.flags & InputEdge.changed != 0
         }) {
             state.insert(.hasChangedInput)
         }
-        if node.transaction != nil { state.insert(.hasTransaction) }
+        if node.pointee.transaction != nil { state.insert(.hasTransaction) }
         return state
     }
 
@@ -206,16 +211,16 @@ extension _AGGraph {
               let node = slots[index].node else {
             return
         }
-        node.subgraph = subgraph
-        if node.needsEvaluation {
-            subgraph.markPending(flags: node.flags.rawValue)
+        node.pointee.subgraph = subgraph
+        if node.pointee.needsEvaluation {
+            subgraph.markPending(flags: node.pointee.flags.rawValue)
         }
     }
 
     func subgraph(for id: AGAttribute) -> AGSubgraphRef? {
         let index = Int(id.rawValue)
         guard slots.indices.contains(index) else { return nil }
-        return slots[index].node?.subgraph
+        return slots[index].node?.pointee.subgraph
     }
 
     func flags(for id: AGAttribute) -> AGAttributeFlags {
@@ -223,7 +228,7 @@ extension _AGGraph {
         guard let node = slots[Int(id.rawValue)].node else {
             fatalError("flags(for:) called on AGAttribute @\(id.rawValue) that does not exist.")
         }
-        return node.flags
+        return node.pointee.flags
     }
 
     func setFlags(
@@ -236,10 +241,10 @@ extension _AGGraph {
         guard slots[index].node != nil else {
             fatalError("setFlags(_:mask:for:) called on AGAttribute @\(id.rawValue) that does not exist.")
         }
-        let old = slots[index].node!.flags.rawValue
+        let old = slots[index].node!.pointee.flags.rawValue
         let newFlags = (old & ~mask.rawValue) | (flags.rawValue & mask.rawValue)
-        slots[index].node!.flags = AGAttributeFlags(rawValue: newFlags)
-        if slots[index].node!.needsEvaluation {
+        slots[index].node!.pointee.flags = AGAttributeFlags(rawValue: newFlags)
+        if slots[index].node!.pointee.needsEvaluation {
             subgraph(for: id)?.markPending(flags: newFlags)
         }
     }
@@ -307,7 +312,7 @@ extension _AGGraph {
         }
         let index = UInt32(slots.count)
         // Reserve the all-zero weak handle as the invalid sentinel.
-        slots.append(NodeSlot(seed: initialWeakSeed, node: nil))
+        slots.append(NodeSlot(seed: initialWeakSeed))
         return index
     }
 
@@ -355,7 +360,7 @@ extension _AGGraph {
     static func currentStatefulOutput<V>(_ type: V.Type = V.self) -> V? {
         guard let graph = _AGGraph.current,
               let nodeID = _AGGraph.currentlyEvaluatingNode else { return nil }
-        guard let value = graph.slots[Int(nodeID.rawValue)].node?.value else {
+        guard let value = graph.slots[Int(nodeID.rawValue)].node?.pointee.value else {
             return nil
         }
         if let storage = value as? _AGValueStorage<V> {
@@ -373,7 +378,7 @@ extension _AGGraph {
     static func _currentStatefulInputsChanged() -> Bool {
         guard let graph = _AGGraph.current,
               let nodeID = _AGGraph.currentlyEvaluatingNode else { return true }
-        return graph.slots[Int(nodeID.rawValue)].node?.inputsChanged ?? true
+        return graph.slots[Int(nodeID.rawValue)].node?.pointee.inputsChanged ?? true
     }
 
     static func currentStatefulInputChanged(_ attribute: AGAttribute) -> Bool {
@@ -448,7 +453,7 @@ extension _AGGraph {
             flags: _External.flags,
             update: { _, _ in }
         )
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: _AGValueStorage(value),
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(
@@ -457,7 +462,7 @@ extension _AGGraph {
             ),
             kind: .input,
             needsEvaluation: false
-        )
+        ))
         registerAttributeInfo(at: index, valueType: Value.self, body: body)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -473,7 +478,7 @@ extension _AGGraph {
             flags: _External.flags,
             update: { _, _ in }
         )
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(
@@ -482,7 +487,7 @@ extension _AGGraph {
             ),
             kind: .input,
             needsEvaluation: false
-        )
+        ))
         registerAttributeInfo(at: index, valueType: Value.self, body: body)
         let attribute = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attribute.identifier)
@@ -494,12 +499,12 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         let box = _RuleClosureBox(rule: rule, isSideEffect: false)
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
             kind: .rule(box)
-        )
+        ))
         registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -595,7 +600,7 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         let box = _RuleBox(rule)
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: initialValue.map(_AGValueStorage.init),
             makeValueStorage: Self.valueStorageFactory(for: R.Value.self),
             valuesEqual: Self.valueComparator(
@@ -604,7 +609,7 @@ extension _AGGraph {
             ),
             kind: .ruleBody(box),
             forceEvaluation: initialValue != nil
-        )
+        ))
         registerAttributeInfo(at: index, valueType: R.Value.self, body: box)
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -624,7 +629,7 @@ extension _AGGraph {
             flags: flags,
             update: update
         )
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: value.map(_AGValueStorage.init),
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(
@@ -633,7 +638,7 @@ extension _AGGraph {
             ),
             kind: .lowLevelBody(box),
             forceEvaluation: value != nil
-        )
+        ))
         registerAttributeInfo(at: index, valueType: Value.self, body: box)
         let attribute = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attribute.identifier)
@@ -652,7 +657,7 @@ extension _AGGraph {
               let node = slots[index].node else {
             return
         }
-        guard case .ruleBody(let box) = node.kind,
+        guard case .ruleBody(let box) = node.pointee.kind,
               let typedBox = box as? _RuleBox<R> else {
             return
         }
@@ -725,7 +730,7 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         let box = _StatefulBox(rule)
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: initialValue.map(_AGValueStorage.init),
             makeValueStorage: Self.valueStorageFactory(for: R.Value.self),
             valuesEqual: Self.valueComparator(
@@ -734,7 +739,7 @@ extension _AGGraph {
             ),
             kind: .stateful(box),
             forceEvaluation: initialValue != nil
-        )
+        ))
         registerAttributeInfo(at: index, valueType: R.Value.self, body: box)
         let attr = Attribute<R.Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -753,7 +758,7 @@ extension _AGGraph {
               let node = slots[index].node else {
             return
         }
-        guard case .stateful(let box) = node.kind,
+        guard case .stateful(let box) = node.pointee.kind,
               let typedBox = box as? _StatefulBox<R> else {
             return
         }
@@ -780,12 +785,12 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         let box = _RuleClosureBox(rule: rule, isSideEffect: true)
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: Value.self),
             valuesEqual: Self.valueComparator(for: Value.self),
             kind: .rule(box)
-        )
+        ))
         registerAttributeInfo(at: index, valueType: Value.self)
         let attr = Attribute<Value>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -808,8 +813,8 @@ extension _AGGraph {
             for rawID in pending {
                 let index = Int(rawID)
                 guard index < slots.count,
-                      slots[index].node?.kind.isSideEffect == true,
-                      slots[index].node?.needsEvaluation == true else {
+                      slots[index].node?.pointee.kind.isSideEffect == true,
+                      slots[index].node?.pointee.needsEvaluation == true else {
                     continue
                 }
                 evaluateSideEffectIfNeeded(AGAttribute(rawValue: rawID))
@@ -880,7 +885,7 @@ extension _AGGraph {
         guard let node = slots[index].node else {
             fatalError("cachedValue: node @\(id.rawValue) does not exist in source graph.")
         }
-        guard let cached = node.value else {
+        guard let cached = node.pointee.value else {
             fatalError("cachedValue: node @\(id.rawValue) has no cached value; source graph must evaluate first.")
         }
         return cached
@@ -893,7 +898,7 @@ extension _AGGraph {
               let node = slots[index].node else {
             return nil
         }
-        return node.transaction
+        return node.pointee.transaction
     }
 
     /// Registers a cross-graph observer: when node `sourceAttr` in this graph changes,
@@ -967,7 +972,7 @@ extension _AGGraph {
         precondition(sourceGraph !== self,
                      "makeCrossGraphRef: source and target graph must be different")
         let index = allocateSlot()
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
@@ -975,7 +980,7 @@ extension _AGGraph {
                 sourceAttr: source.identifier,
                 sourceGraph: WeakObject(sourceGraph)
             )
-        )
+        ))
         registerAttributeInfo(at: index, valueType: V.self)
         let attr = Attribute<V>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -1002,7 +1007,7 @@ extension _AGGraph {
         let index = Int(outputIndex)
         guard slots.indices.contains(index),
               case let .indirect(current, defaultSource, defaultValue) =
-                slots[index].node?.kind,
+                slots[index].node?.pointee.kind,
               current == source else {
             return
         }
@@ -1012,7 +1017,7 @@ extension _AGGraph {
         if defaultSource != source,
            defaultSource.isValid(in: self),
            slots.indices.contains(defaultIndex),
-           slots[defaultIndex].node?.isBeingRemoved == false {
+           slots[defaultIndex].node?.pointee.isBeingRemoved == false {
             replacement = defaultSource
         } else {
             replacement = .invalid
@@ -1020,7 +1025,7 @@ extension _AGGraph {
 
         let indirect = AGAttribute(rawValue: outputIndex)
         removeIndirectSourceDependency(from: indirect, to: current)
-        slots[index].node!.kind = .indirect(
+        slots[index].node!.pointee.kind = .indirect(
             source: replacement,
             defaultSource: defaultSource,
             defaultValue: defaultValue
@@ -1036,10 +1041,10 @@ extension _AGGraph {
         guard let removingNode = slots[index].node else {
             fatalError("removeNode called on @\(id.rawValue) which does not exist; double-remove is a usage error.")
         }
-        guard !removingNode.isBeingRemoved else {
+        guard !removingNode.pointee.isBeingRemoved else {
             fatalError("removeNode called on @\(id.rawValue) while removal is already in progress.")
         }
-        removingNode.isBeingRemoved = true
+        removingNode.pointee.isBeingRemoved = true
         let replacementSeed = makeWeakSeed()
 #if DEBUG
         recordRemovedNodeTombstone(
@@ -1054,7 +1059,7 @@ extension _AGGraph {
         clearInputs(for: id, includingPermanent: true)
 
         // 2. Collect outputs and clean up their back-references.
-        let outputs = Set(slots[index].node!.outputs)
+        let outputs = Set(slots[index].node!.pointee.outputs)
         let removedSource = AGWeakAttribute(id)
         for outputIndex in outputs {
             resetIndirectOutputIfNeeded(
@@ -1071,7 +1076,7 @@ extension _AGGraph {
         }
 
         // 3. Remove from offset caches / cross-graph observer registry if applicable
-        switch slots[index].node?.kind {
+        switch slots[index].node?.pointee.kind {
         case .offset(let projection) where projection.usesOffsetCache:
             offsetPathIDs.removeValue(forKey: RelativeOffsetPath(
                 parentID: projection.parent.rawValue,
@@ -1115,7 +1120,7 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let id = removal.id
         let index = Int(id.rawValue)
-        guard slots[index].node?.isBeingRemoved == true else {
+        guard slots[index].node?.pointee.isBeingRemoved == true else {
             fatalError("finishNodeRemoval called for @\(id.rawValue) without a prepared removal.")
         }
 
@@ -1129,7 +1134,7 @@ extension _AGGraph {
 
         // Invalidate all weak handles before making the slot available again.
         slots[index].seed = removal.replacementSeed
-        slots[index].node = nil
+        slots[index].destroyNode()
         freeList.append(id.rawValue)
     }
 
@@ -1162,7 +1167,7 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        guard slots[Int(id.rawValue)].node?.value != nil else {
+        guard slots[Int(id.rawValue)].node?.pointee.value != nil else {
             fatalError(
                 "AGAttribute @\(id.rawValue) has no value after evaluation."
             )
@@ -1213,7 +1218,7 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        guard let storage = slots[Int(id.rawValue)].node?.value
+        guard let storage = slots[Int(id.rawValue)].node?.pointee.value
                 as? _AGValueStorage<Value> else {
             fatalError(
                 "AGAttribute @\(id.rawValue) does not contain \(Value.self)."
@@ -1241,7 +1246,7 @@ extension _AGGraph {
         let index = Int(attribute.identifier.rawValue)
         guard slots.indices.contains(index),
               let storage =
-                slots[index].node?.value as? _AGValueStorage<Value> else {
+                slots[index].node?.pointee.value as? _AGValueStorage<Value> else {
             fatalError(
                 "mutableValuePointer requires a live graph-owned value of " +
                     "\(Value.self)."
@@ -1268,7 +1273,7 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        guard slots[Int(id.rawValue)].node?.value != nil else {
+        guard slots[Int(id.rawValue)].node?.pointee.value != nil else {
             fatalError(
                 "AGAttribute @\(id.rawValue) has no value after evaluation."
             )
@@ -1295,7 +1300,7 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        guard let storage = slots[Int(id.rawValue)].node?.value else {
+        guard let storage = slots[Int(id.rawValue)].node?.pointee.value else {
             fatalError(
                 "AGAttribute @\(id.rawValue) has no value after evaluation."
             )
@@ -1322,7 +1327,7 @@ extension _AGGraph {
             evaluator: evaluator,
             edgeIndex: preparedRead.edgeIndex
         )
-        guard let storage = slots[Int(id.rawValue)].node?.value
+        guard let storage = slots[Int(id.rawValue)].node?.pointee.value
                 as? _AGValueStorage<Value> else {
             fatalError(
                 "Permanent input @\(id.rawValue) does not contain \(Value.self)."
@@ -1343,9 +1348,9 @@ extension _AGGraph {
         guard slots.indices.contains(index), slots[index].node != nil else {
             fatalError("Invalid AGAttribute @\(id.rawValue): node does not exist.")
         }
-        if slots[index].node!.needsEvaluation
-            && slots[index].node!.isEvaluating
-            && slots[index].node!.value == nil {
+        if slots[index].node!.pointee.needsEvaluation
+            && slots[index].node!.pointee.isEvaluating
+            && slots[index].node!.pointee.value == nil {
             fatalError("_AGGraph: cycle detected at @\(id.rawValue) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
         }
         let edgeIndex: Int?
@@ -1373,8 +1378,8 @@ extension _AGGraph {
             edgeIndex = nil
         }
         return (
-            slots[index].node!.needsEvaluation
-                && !slots[index].node!.isEvaluating,
+            slots[index].node!.pointee.needsEvaluation
+                && !slots[index].node!.pointee.isEvaluating,
             edgeIndex
         )
     }
@@ -1411,20 +1416,20 @@ extension _AGGraph {
               slots[inputIndex].node != nil else {
             return
         }
-        guard slots[evaluatorIndex].node!.inputs.indices.contains(edgeIndex),
-              slots[evaluatorIndex].node!.inputs[edgeIndex].attribute
+        guard slots[evaluatorIndex].node!.pointee.inputs.indices.contains(edgeIndex),
+              slots[evaluatorIndex].node!.pointee.inputs[edgeIndex].attribute
                 == id.rawValue else {
             fatalError(
                 "Missing input edge from @\(evaluator.rawValue) to @\(id.rawValue)."
             )
         }
-        slots[evaluatorIndex].node!.inputs[edgeIndex].valueVersion =
-            slots[inputIndex].node!.valueVersion
+        slots[evaluatorIndex].node!.pointee.inputs[edgeIndex].valueVersion =
+            slots[inputIndex].node!.pointee.valueVersion
     }
 
     @inline(never)
     private func cachedValueAfterRead(_ id: AGAttribute) -> Any {
-        guard let value = slots[Int(id.rawValue)].node?.value else {
+        guard let value = slots[Int(id.rawValue)].node?.pointee.value else {
             fatalError("AGAttribute @\(id.rawValue) has no value after evaluation.")
         }
         return value.anyValue
@@ -1449,10 +1454,10 @@ extension _AGGraph {
         ) {
             return false
         }
-        slots[index].node!.valueVersion &+= 1
+        slots[index].node!.pointee.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
-        slots[index].node!.transaction = transactionToPropagate
-        let outputs = slots[index].node!.outputs
+        slots[index].node!.pointee.transaction = transactionToPropagate
+        let outputs = slots[index].node!.pointee.outputs
         // Mark every outgoing edge before an eager side effect can pull a
         // shared downstream node. Otherwise a diamond path can evaluate that
         // node before its direct changed-input edge has been recorded.
@@ -1491,10 +1496,10 @@ extension _AGGraph {
         ) {
             return false
         }
-        slots[index].node!.valueVersion &+= 1
+        slots[index].node!.pointee.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
-        slots[index].node!.transaction = transactionToPropagate
-        let outputs = slots[index].node!.outputs
+        slots[index].node!.pointee.transaction = transactionToPropagate
+        let outputs = slots[index].node!.pointee.outputs
         markOutputsNeedEvaluation(
             outputs,
             evaluateSideEffects: evaluateSideEffects,
@@ -1520,9 +1525,10 @@ extension _AGGraph {
         let index = Int(id.rawValue)
         guard let node = slots[index].node else { return }
 
-        if case .input = node.kind {
+        if case .input = node.pointee.kind {
+            let outputs = node.pointee.outputs
             markOutputsNeedEvaluation(
-                node.outputs,
+                outputs,
                 transaction: transaction,
                 propagateTransaction: propagateTransaction,
                 changedInput: id.rawValue,
@@ -1548,8 +1554,8 @@ extension _AGGraph {
         // while the side effect is still reading it. The current evaluation
         // already observes that dependency's completed value, so do not enter
         // the same side effect recursively.
-        guard !slots[index].node!.isEvaluating else { return }
-        slots[index].node!.isEvaluating = true
+        guard !slots[index].node!.pointee.isEvaluating else { return }
+        slots[index].node!.pointee.isEvaluating = true
         if isUpdatingOnCurrentThread {
             evaluateNode(id)
         } else {
@@ -1629,8 +1635,8 @@ extension _AGGraph {
         updateTraversal &+= 1
         if updateTraversal == 0 {
             for index in slots.indices where slots[index].node != nil {
-                slots[index].node!.updateTraversal = 0
-                slots[index].node!.updateTraversalState = 0
+                slots[index].node!.pointee.updateTraversal = 0
+                slots[index].node!.pointee.updateTraversalState = 0
             }
             updateTraversal = 1
         }
@@ -1649,7 +1655,7 @@ extension _AGGraph {
         }
 
         if frame.afterInputs {
-            guard slots[index].node!.needsEvaluation else {
+            guard slots[index].node!.pointee.needsEvaluation else {
                 completeUpdateTraversal(index: index, traversal: traversal)
                 return .none
             }
@@ -1659,23 +1665,23 @@ extension _AGGraph {
             return .finish(AGAttribute(rawValue: frame.id), index)
         }
 
-        guard slots[index].node!.needsEvaluation else {
+        guard slots[index].node!.pointee.needsEvaluation else {
             completeUpdateTraversal(index: index, traversal: traversal)
             return .none
         }
-        if slots[index].node!.isEvaluating
-            || (slots[index].node!.updateTraversal == traversal
-                && slots[index].node!.updateTraversalState == 1) {
-            guard slots[index].node!.value != nil else {
+        if slots[index].node!.pointee.isEvaluating
+            || (slots[index].node!.pointee.updateTraversal == traversal
+                && slots[index].node!.pointee.updateTraversalState == 1) {
+            guard slots[index].node!.pointee.value != nil else {
                 fatalError("_AGGraph: cycle detected at @\(frame.id) with no cached value. Call setValue(_:) on this attribute before it is first read to provide a fallback.")
             }
             return .none
         }
 
-        slots[index].node!.updateTraversal = traversal
-        slots[index].node!.updateTraversalState = 1
+        slots[index].node!.pointee.updateTraversal = traversal
+        slots[index].node!.pointee.updateTraversalState = 1
         workList.append(frame.id, afterInputs: true)
-        for input in slots[index].node!.inputs
+        for input in slots[index].node!.pointee.inputs
         where input.flags & InputEdge.deferredUpdate == 0 {
             workList.append(input.attribute, afterInputs: false)
         }
@@ -1684,16 +1690,16 @@ extension _AGGraph {
 
     @inline(never)
     private func nodeRequiresEvaluation(index: Int) -> Bool {
-        if slots[index].node!.forceEvaluation
-            || slots[index].node!.value == nil {
+        if slots[index].node!.pointee.forceEvaluation
+            || slots[index].node!.pointee.value == nil {
             return true
         }
-        for input in slots[index].node!.inputs {
+        for input in slots[index].node!.pointee.inputs {
             if input.flags & InputEdge.deferredUpdate != 0 {
                 return true
             }
             guard let currentVersion =
-                    slots[Int(input.attribute)].node?.valueVersion,
+                    slots[Int(input.attribute)].node?.pointee.valueVersion,
                   input.valueVersion == currentVersion else {
                 return true
             }
@@ -1706,18 +1712,18 @@ extension _AGGraph {
         guard slots.indices.contains(index), slots[index].node != nil else {
             return
         }
-        slots[index].node!.updateTraversal = traversal
-        slots[index].node!.updateTraversalState = 2
+        slots[index].node!.pointee.updateTraversal = traversal
+        slots[index].node!.pointee.updateTraversalState = 2
     }
 
     private func finishEvaluationWithoutUpdating(_ id: AGAttribute) {
         let index = Int(id.rawValue)
         guard slots[index].node != nil else { return }
-        slots[index].node!.needsEvaluation = false
-        slots[index].node!.forceEvaluation = false
-        slots[index].node!.inputsChanged = false
+        slots[index].node!.pointee.needsEvaluation = false
+        slots[index].node!.pointee.forceEvaluation = false
+        slots[index].node!.pointee.inputsChanged = false
         clearChangedInputFlags(forNodeAt: index)
-        slots[index].node!.isEvaluating = false
+        slots[index].node!.pointee.isEvaluating = false
     }
 
     func updateSubgraph(_ subgraph: AGSubgraph, flags: UInt32) {
@@ -1753,8 +1759,8 @@ extension _AGGraph {
                         continue
                     }
                     guard let liveStorage = slots[Int(liveNode.rawValue)].node,
-                          liveStorage.flags.rawValue & flags != 0,
-                          liveStorage.needsEvaluation else {
+                          liveStorage.pointee.flags.rawValue & flags != 0,
+                          liveStorage.pointee.needsEvaluation else {
                         continue
                     }
                     selectedNodes.append(liveNode)
@@ -1781,7 +1787,7 @@ extension _AGGraph {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                 continue
             }
-            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.kind {
+            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.pointee.kind {
                 box.callWillRemove(attribute: liveNode)
             }
         }
@@ -1796,7 +1802,7 @@ extension _AGGraph {
             guard let liveNode = weakAttributeIfValid(for: node)?.toStrong() else {
                 continue
             }
-            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.kind {
+            if case .stateful(let box) = slots[Int(liveNode.rawValue)].node?.pointee.kind {
                 box.callDidReinsert(attribute: liveNode)
             }
         }
@@ -1858,7 +1864,7 @@ extension _AGGraph {
             fatalError("evaluateNode called on AGAttribute @\(id.rawValue) that does not exist.")
         }
 
-        if case .input = slots[index].node!.kind {
+        if case .input = slots[index].node!.pointee.kind {
             fatalError("evaluateNode called on an input node @\(id.rawValue); input nodes must never be marked needsEvaluation.")
         }
 
@@ -1869,7 +1875,7 @@ extension _AGGraph {
     }
 
     private func evaluateNodeBody(_ id: AGAttribute, index: Int) {
-        switch slots[index].node!.kind {
+        switch slots[index].node!.pointee.kind {
         case .input:
             preconditionFailure("input evaluation was rejected before entering the rule context")
 
@@ -1953,7 +1959,7 @@ extension _AGGraph {
     ) {
         updatePermanentInput(parent, evaluator: id)
         // Raw offsets carry dependency state but no readable cached value.
-        slots[index].node!.valueVersion &+= 1
+        slots[index].node!.pointee.valueVersion &+= 1
         finishNodeEvaluation(index: index)
     }
 
@@ -2008,7 +2014,7 @@ extension _AGGraph {
         } else if let defaultValue {
             publishComputedValue(defaultValue, for: id)
         } else {
-            slots[index].node!.value = nil
+            slots[index].node!.pointee.value = nil
         }
         finishNodeEvaluation(index: index)
     }
@@ -2019,20 +2025,20 @@ extension _AGGraph {
             // A cancelled body may still publish a cached value, but its
             // evaluation is not final. Preserve input-change state and force
             // the next pull to retry the body before downstream work resumes.
-            slots[index].node!.needsEvaluation = true
-            slots[index].node!.forceEvaluation = true
-            slots[index].node!.isEvaluating = false
+            slots[index].node!.pointee.needsEvaluation = true
+            slots[index].node!.pointee.forceEvaluation = true
+            slots[index].node!.pointee.isEvaluating = false
             let id = AGAttribute(rawValue: UInt32(index))
             subgraph(for: id)?.markPending(
-                flags: slots[index].node!.flags.rawValue
+                flags: slots[index].node!.pointee.flags.rawValue
             )
             return
         }
         finishInputEvaluation(forNodeAt: index)
-        slots[index].node!.needsEvaluation = false
-        slots[index].node!.forceEvaluation = false
-        slots[index].node!.inputsChanged = false
-        slots[index].node!.isEvaluating = false
+        slots[index].node!.pointee.needsEvaluation = false
+        slots[index].node!.pointee.forceEvaluation = false
+        slots[index].node!.pointee.inputsChanged = false
+        slots[index].node!.pointee.isEvaluating = false
     }
 
     /// Marks `startID` and all its transitive dependents as needing re-evaluation.
@@ -2111,7 +2117,7 @@ extension _AGGraph {
 
             markInputChanged(changedInput, forNodeAt: index)
             if propagateTransaction {
-                slots[index].node!.transaction = transaction
+                slots[index].node!.pointee.transaction = transaction
             }
         }
     }
@@ -2134,7 +2140,7 @@ extension _AGGraph {
         invalidationTraversal &+= 1
         if invalidationTraversal == 0 {
             for index in slots.indices where slots[index].node != nil {
-                slots[index].node!.invalidationTraversal = 0
+                slots[index].node!.pointee.invalidationTraversal = 0
             }
             invalidationTraversal = 1
         }
@@ -2156,10 +2162,10 @@ extension _AGGraph {
                     in: node
                 )
             }
-            guard node.invalidationTraversal != traversal else {
+            guard node.pointee.invalidationTraversal != traversal else {
                 continue
             }
-            node.invalidationTraversal = traversal
+            node.pointee.invalidationTraversal = traversal
             queue[writeIndex] = (rawID, nil)
             writeIndex += 1
         }
@@ -2176,31 +2182,31 @@ extension _AGGraph {
                   let node = slots[index].node else {
                 continue
             }
-            let wasAlreadyDirty = node.needsEvaluation
+            let wasAlreadyDirty = node.pointee.needsEvaluation
             if propagateTransaction {
-                node.transaction = transaction
+                node.pointee.transaction = transaction
             }
             if inputsChanged {
-                node.inputsChanged = true
+                node.pointee.inputsChanged = true
             }
-            if !node.needsEvaluation {
-                node.needsEvaluation = true
+            if !node.pointee.needsEvaluation {
+                node.pointee.needsEvaluation = true
             }
-            let pendingFlags = node.flags.rawValue
-            if pendingFlags != 0, let subgraph = node.subgraph {
+            let pendingFlags = node.pointee.flags.rawValue
+            if pendingFlags != 0, let subgraph = node.pointee.subgraph {
                 subgraph.markPending(flags: pendingFlags)
             }
             if rawID == forcedStart || forcedStarts?.contains(rawID) == true {
-                node.forceEvaluation = true
+                node.pointee.forceEvaluation = true
             }
             // Dirty propagation is transition-gated. A repeated invalidation
             // still records its direct changed edge and mutation metadata, but
             // descendants of an already-dirty node are already pending.
             guard !wasAlreadyDirty else { continue }
-            if node.kind.isSideEffect {
+            if node.pointee.kind.isSideEffect {
                 sideEffects.append(UInt32(index))
             }
-            for output in node.outputs {
+            for output in node.pointee.outputs {
                 let outputIndex = Int(output)
                 guard slots.indices.contains(outputIndex),
                       let outputNode = slots[outputIndex].node else {
@@ -2212,10 +2218,10 @@ extension _AGGraph {
                         in: outputNode
                     )
                 }
-                guard outputNode.invalidationTraversal != traversal else {
+                guard outputNode.pointee.invalidationTraversal != traversal else {
                     continue
                 }
-                outputNode.invalidationTraversal = traversal
+                outputNode.pointee.invalidationTraversal = traversal
                 queue.append((output, nil))
             }
             // Propagate to cross-graph proxy nodes watching this node.
@@ -2230,7 +2236,7 @@ extension _AGGraph {
         for id in sideEffects {
             let index = Int(id)
             guard slots[index].node != nil else { continue }  // may have been freed
-            guard slots[index].node!.needsEvaluation else { continue }  // already evaluated by cascade
+            guard slots[index].node!.pointee.needsEvaluation else { continue }  // already evaluated by cascade
             scheduleSideEffectEvaluation(AGAttribute(rawValue: id))
         }
     }
@@ -2256,14 +2262,14 @@ extension _AGGraph {
 
     @inline(__always)
     private func lowerBoundInputEdgeIndex(
-        in node: Node,
+        in node: UnsafeMutablePointer<NodeStorage>,
         attribute: UInt32
     ) -> Int {
         var lower = 0
-        var upper = node.inputs.count
+        var upper = node.pointee.inputs.count
         while lower < upper {
             let middle = lower + (upper - lower) / 2
-            if node.inputs[middle].attribute < attribute {
+            if node.pointee.inputs[middle].attribute < attribute {
                 lower = middle + 1
             } else {
                 upper = middle
@@ -2286,9 +2292,9 @@ extension _AGGraph {
             attribute: attribute
         )
         let identity = identityFlags & InputEdge.identityMask
-        while index < node.inputs.count,
-              node.inputs[index].attribute == attribute {
-            if node.inputs[index].flags & InputEdge.identityMask == identity {
+        while index < node.pointee.inputs.count,
+              node.pointee.inputs[index].attribute == attribute {
+            if node.pointee.inputs[index].flags & InputEdge.identityMask == identity {
                 return index
             }
             index += 1
@@ -2317,10 +2323,10 @@ extension _AGGraph {
         let edge = InputEdge(
             attribute: child.rawValue,
             flags: flags,
-            valueVersion: childNode.valueVersion
+            valueVersion: childNode.pointee.valueVersion
         )
-        parentNode.inputs.insert(edge, at: insertionIndex)
-        childNode.outputs.append(parent.rawValue)
+        parentNode.pointee.inputs.insert(edge, at: insertionIndex)
+        childNode.pointee.outputs.append(parent.rawValue)
         return insertionIndex
     }
 
@@ -2337,7 +2343,7 @@ extension _AGGraph {
             attribute: child.rawValue,
             identityFlags: identityFlags
         ) {
-            slots[parentIndex].node!.inputs[edgeIndex].flags |=
+            slots[parentIndex].node!.pointee.inputs[edgeIndex].flags |=
                 InputEdge.readThisEvaluation
             return edgeIndex
         }
@@ -2368,7 +2374,7 @@ extension _AGGraph {
               let node = slots[nodeIndex].node else {
             return true
         }
-        return node.inputs.withUnsafeBufferPointer { inputs in
+        return node.pointee.inputs.withUnsafeBufferPointer { inputs in
             var lower = 0
             var upper = inputs.count
             while lower < upper {
@@ -2403,8 +2409,11 @@ extension _AGGraph {
     }
 
     @inline(__always)
-    private func markInputChanged(_ input: UInt32, in node: Node) {
-        node.inputs.withUnsafeMutableBufferPointer { inputs in
+    private func markInputChanged(
+        _ input: UInt32,
+        in node: UnsafeMutablePointer<NodeStorage>
+    ) {
+        node.pointee.inputs.withUnsafeMutableBufferPointer { inputs in
             var lower = 0
             var upper = inputs.count
             while lower < upper {
@@ -2429,7 +2438,7 @@ extension _AGGraph {
               let node = slots[nodeIndex].node else {
             return
         }
-        node.inputs.withUnsafeMutableBufferPointer { inputs in
+        node.pointee.inputs.withUnsafeMutableBufferPointer { inputs in
             for index in inputs.indices {
                 inputs[index].flags &= ~InputEdge.changed
             }
@@ -2441,7 +2450,7 @@ extension _AGGraph {
               let node = slots[nodeIndex].node else {
             return
         }
-        node.inputs.withUnsafeMutableBufferPointer { inputs in
+        node.pointee.inputs.withUnsafeMutableBufferPointer { inputs in
             for index in inputs.indices {
                 inputs[index].flags &= ~InputEdge.readThisEvaluation
             }
@@ -2454,10 +2463,10 @@ extension _AGGraph {
             return
         }
         var index = 0
-        while index < node.inputs.count {
-            let flags = node.inputs[index].flags
+        while index < node.pointee.inputs.count {
+            let flags = node.pointee.inputs[index].flags
             if flags & (InputEdge.permanent | InputEdge.readThisEvaluation) != 0 {
-                node.inputs[index].flags &=
+                node.pointee.inputs[index].flags &=
                     ~(InputEdge.readThisEvaluation | InputEdge.changed)
                 index += 1
             } else {
@@ -2473,26 +2482,26 @@ extension _AGGraph {
         guard slots.indices.contains(nodeIndex),
               slots[nodeIndex].node != nil,
               let outputIndex =
-                slots[nodeIndex].node!.outputs.firstIndex(of: output) else {
+                slots[nodeIndex].node!.pointee.outputs.firstIndex(of: output) else {
             return
         }
-        let lastIndex = slots[nodeIndex].node!.outputs.index(
-            before: slots[nodeIndex].node!.outputs.endIndex
+        let lastIndex = slots[nodeIndex].node!.pointee.outputs.index(
+            before: slots[nodeIndex].node!.pointee.outputs.endIndex
         )
         if outputIndex != lastIndex {
-            slots[nodeIndex].node!.outputs[outputIndex] =
-                slots[nodeIndex].node!.outputs[lastIndex]
+            slots[nodeIndex].node!.pointee.outputs[outputIndex] =
+                slots[nodeIndex].node!.pointee.outputs[lastIndex]
         }
-        slots[nodeIndex].node!.outputs.removeLast()
+        slots[nodeIndex].node!.pointee.outputs.removeLast()
     }
 
     private func removeInputEdge(
         fromNodeAt nodeIndex: Int,
         at edgeIndex: Int
     ) {
-        let input = slots[nodeIndex].node!.inputs[edgeIndex].attribute
+        let input = slots[nodeIndex].node!.pointee.inputs[edgeIndex].attribute
         let output = UInt32(nodeIndex)
-        slots[nodeIndex].node!.inputs.remove(at: edgeIndex)
+        slots[nodeIndex].node!.pointee.inputs.remove(at: edgeIndex)
         removeOutputEdge(fromNodeAt: Int(input), matching: output)
     }
 
@@ -2510,10 +2519,10 @@ extension _AGGraph {
             attribute: input
         )
         let identity = identityFlags.map { $0 & InputEdge.identityMask }
-        while index < slots[nodeIndex].node!.inputs.count,
-              slots[nodeIndex].node!.inputs[index].attribute == input {
+        while index < slots[nodeIndex].node!.pointee.inputs.count,
+              slots[nodeIndex].node!.pointee.inputs[index].attribute == input {
             let matches = identity.map {
-                slots[nodeIndex].node!.inputs[index].flags
+                slots[nodeIndex].node!.pointee.inputs[index].flags
                     & InputEdge.identityMask == $0
             } ?? true
             if matches {
@@ -2570,13 +2579,13 @@ extension _AGGraph {
 
             let node = slots[Int(rawValue)].node!
             if options.contains(.inputs) {
-                for input in node.inputs
+                for input in node.pointee.inputs
                 where visited.insert(input.attribute).inserted {
                     queue.append(input.attribute)
                 }
             }
             if options.contains(.outputs) {
-                for output in node.outputs.sorted() where visited.insert(output).inserted {
+                for output in node.pointee.outputs.sorted() where visited.insert(output).inserted {
                     queue.append(output)
                 }
             }
@@ -2595,9 +2604,9 @@ extension _AGGraph {
             fatalError("clearInputs called on AGAttribute @\(id.rawValue) that does not exist.")
         }
         var edgeIndex = 0
-        while edgeIndex < slots[index].node!.inputs.count {
+        while edgeIndex < slots[index].node!.pointee.inputs.count {
             let isPermanent =
-                slots[index].node!.inputs[edgeIndex].flags
+                slots[index].node!.pointee.inputs[edgeIndex].flags
                     & InputEdge.permanent != 0
             if includingPermanent || !isPermanent {
                 removeInputEdge(fromNodeAt: index, at: edgeIndex)
@@ -2644,7 +2653,7 @@ extension _AGGraph {
         let index = allocateSlot()
         // needsEvaluation: false because default value is already stored. Evaluation is triggered
         // only after setIndirectTarget is called (which calls markNeedsEvaluation).
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: _AGValueStorage(defaultValue),
             makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
@@ -2654,7 +2663,7 @@ extension _AGGraph {
                 defaultValue: defaultValue
             ),
             needsEvaluation: false
-        )
+        ))
         registerAttributeInfo(at: index, valueType: V.self)
         let attr = Attribute<V>(AGAttribute(rawValue: index))
         AGSubgraph.current?.register(attr.identifier)
@@ -2668,7 +2677,7 @@ extension _AGGraph {
         assert(_AGGraph.current === self)
         let index = allocateSlot()
         let weakSource = AGWeakAttribute(source.identifier)
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: V.self),
             valuesEqual: Self.valueComparator(for: V.self),
@@ -2677,7 +2686,7 @@ extension _AGGraph {
                 defaultSource: weakSource,
                 defaultValue: nil
             )
-        )
+        ))
         // Local indirect edges always use ordinary invalidation.
         _ = withoutInvalidation
         registerAttributeInfo(at: index, valueType: V.self)
@@ -2701,7 +2710,7 @@ extension _AGGraph {
         let index = Int(indirect.rawValue)
         guard slots.indices.contains(index),
               case let .indirect(source, defaultSource, defaultValue) =
-                slots[index].node?.kind else {
+                slots[index].node?.pointee.kind else {
             fatalError("setIndirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
         let replacement: AGWeakAttribute
@@ -2720,7 +2729,7 @@ extension _AGGraph {
         guard replacement != source else { return }
 
         removeIndirectSourceDependency(from: indirect, to: source)
-        slots[index].node!.kind = .indirect(
+        slots[index].node!.pointee.kind = .indirect(
             source: replacement,
             defaultSource: defaultSource,
             defaultValue: defaultValue
@@ -2738,7 +2747,7 @@ extension _AGGraph {
 
     func indirectTarget(_ indirect: AGAttribute) -> AGAttribute? {
         guard case let .indirect(source, _, _) =
-                slots[Int(indirect.rawValue)].node?.kind else {
+                slots[Int(indirect.rawValue)].node?.pointee.kind else {
             fatalError("indirectTarget: @\(indirect.rawValue) is not an indirect node.")
         }
         guard source.isValid(in: self) else { return nil }
@@ -2833,7 +2842,7 @@ extension _AGGraph {
             byteOffset: byteOffset,
             usesOffsetCache: usesOffsetCache
         )
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: Self.valueStorageFactory(for: U.self),
             valuesEqual: Self.valueComparator(
@@ -2841,7 +2850,7 @@ extension _AGGraph {
                 mode: comparisonMode
             ),
             kind: .offset(projection)
-        )
+        ))
         registerAttributeInfo(at: index, valueType: U.self)
         addPermanentDependency(
             from: AGAttribute(rawValue: index),
@@ -2863,14 +2872,14 @@ extension _AGGraph {
         }
 
         let index = allocateSlot()
-        slots[Int(index)].node = Node(
+        slots[Int(index)].initializeNode(NodeStorage(
             value: nil,
             makeValueStorage: { _ in
                 fatalError("Raw offset attributes do not store readable values.")
             },
             valuesEqual: { _, _ in false },
             kind: .rawOffset(parent: parent, byteOffset: byteOffset)
-        )
+        ))
         rawOffsetPathIDs[path] = index
         addPermanentDependency(
             from: AGAttribute(rawValue: index),
@@ -2882,7 +2891,7 @@ extension _AGGraph {
     }
 
     func parent(of id: AGAttribute) -> AGAttribute? {
-        switch slots[Int(id.rawValue)].node?.kind {
+        switch slots[Int(id.rawValue)].node?.pointee.kind {
         case .offset(let projection):
             return projection.parent
         case .ruleBody(let box):
@@ -2894,7 +2903,7 @@ extension _AGGraph {
 
     func keyPath(of id: AGAttribute) -> AnyKeyPath? {
         guard case .ruleBody(let box) =
-                slots[Int(id.rawValue)].node?.kind else {
+                slots[Int(id.rawValue)].node?.pointee.kind else {
             return nil
         }
         return box.keyPathProjection()?.keyPath
@@ -2943,7 +2952,7 @@ extension _AGGraph {
         guard index < slots.count, let node = slots[index].node else {
             return "@\(id.rawValue)(invalid)"
         }
-        switch node.kind {
+        switch node.pointee.kind {
         case .offset(let projection):
             return "@\(id.rawValue)(offset: @\(projection.parent.rawValue) + \(projection.byteOffset))"
         case .rawOffset(let parent, let byteOffset):
@@ -3030,7 +3039,7 @@ extension _AGGraph {
 
     private func recordRemovedNodeTombstone(
         id: AGAttribute,
-        node: Node,
+        node: UnsafeMutablePointer<NodeStorage>,
         replacementSeed: UInt32
     ) {
         guard _attributeGraphRecordRemovalTombstones else { return }
@@ -3038,12 +3047,14 @@ extension _AGGraph {
         let tombstone = RemovedNodeTombstone(
             seedBeforeRemoval: seedBeforeRemoval,
             seedAfterRemoval: replacementSeed,
-            kindDescription: debugDescription(for: node.kind),
-            valueTypeDescription: debugValueTypeDescription(for: node.value?.anyValue),
-            inputs: Set(node.inputs.map(\.attribute)),
-            outputs: Set(node.outputs),
+            kindDescription: debugDescription(for: node.pointee.kind),
+            valueTypeDescription: debugValueTypeDescription(
+                for: node.pointee.value?.anyValue
+            ),
+            inputs: Set(node.pointee.inputs.map(\.attribute)),
+            outputs: Set(node.pointee.outputs),
             staticInputs: Set(
-                node.inputs.lazy
+                node.pointee.inputs.lazy
                     .filter { $0.flags & InputEdge.permanent != 0 }
                     .map(\.attribute)
             ),

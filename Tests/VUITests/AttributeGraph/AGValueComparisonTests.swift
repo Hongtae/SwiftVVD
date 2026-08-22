@@ -295,8 +295,16 @@ final class AGValueComparisonTests: XCTestCase {
                 word: 42
             )
 
-            XCTAssertTrue(projectionNode.valuesEqual(lhs, differentPadding))
-            XCTAssertFalse(projectionNode.valuesEqual(lhs, changedField))
+            XCTAssertTrue(_AGGraph.NodeStorage.valuesEqual(
+                lhs,
+                differentPadding,
+                in: projectionNode
+            ))
+            XCTAssertFalse(_AGGraph.NodeStorage.valuesEqual(
+                lhs,
+                changedField,
+                in: projectionNode
+            ))
         }
     }
 

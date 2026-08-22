@@ -87,7 +87,7 @@ final class AGUpdateCancellationTests: XCTestCase {
             recorder.shouldCancel = true
             XCTAssertEqual(output.value, 5)
             XCTAssertEqual(
-                graph.slots[outputIndex].node!.inputs.filter {
+                graph.slots[outputIndex].node!.pointee.inputs.filter {
                     $0.attribute == source.identifier.rawValue
                 }.count,
                 1
@@ -95,19 +95,19 @@ final class AGUpdateCancellationTests: XCTestCase {
 
             XCTAssertEqual(output.value, 5)
             XCTAssertEqual(
-                graph.slots[outputIndex].node!.inputs.filter {
+                graph.slots[outputIndex].node!.pointee.inputs.filter {
                     $0.attribute == source.identifier.rawValue
                 }.count,
                 1
             )
             XCTAssertEqual(
-                graph.slots[sourceIndex].node!.outputs.filter {
+                graph.slots[sourceIndex].node!.pointee.outputs.filter {
                     $0 == output.identifier.rawValue
                 }.count,
                 1
             )
             XCTAssertEqual(
-                graph.slots[outputIndex].node!.inputs[0].flags
+                graph.slots[outputIndex].node!.pointee.inputs[0].flags
                     & _AGGraph.InputEdge.readThisEvaluation,
                 0
             )
