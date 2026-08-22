@@ -339,7 +339,7 @@ where LayoutType.Cache == _LazyStack_Cache<LayoutType> {
             if let layoutComputer = _layoutComputer.attribute {
                 cache.invalidateSize(
                     layoutComputer: layoutComputer,
-                    animation: Transaction.current.animation
+                    animation: nil
                 )
             }
         }

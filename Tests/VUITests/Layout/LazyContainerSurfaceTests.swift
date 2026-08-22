@@ -12604,6 +12604,54 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazySubviewPlacementsDirectInvalidSizeIgnoresAmbientAnimation() {
+        // ASSERTIONS: lazySubviewPlacementsInvalidSizeGateObserved
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let layout = LazyVStackLayout(
+                base: _VStackLayout(),
+                pinnedViews: []
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            let layoutComputer = graph.makeRule {
+                LayoutComputer.fixed(CGSize(width: 20, height: 20))
+            }
+            let placements: Attribute<[_LazyLayout_PlacedSubview]> = graph.makeStatefulRule(
+                LazySubviewPlacements(
+                    layout: graph.makeInput(value: layout),
+                    size: graph.makeInput(value: ViewSize(width: 20, height: 20)),
+                    position: graph.makeInput(value: CGPoint.zero),
+                    transform: graph.makeInput(value: ViewTransform()),
+                    containerSize: OptionalAttribute(),
+                    environment: graph.makeInput(value: EnvironmentValues()),
+                    layoutDirection: graph.makeInput(value: LayoutDirection.leftToRight),
+                    accessibilityEnabled: graph.makeInput(value: false),
+                    cache: graph.makeInput(value: cache as LazyLayoutViewCache),
+                    layoutComputer: OptionalAttribute(layoutComputer)
+                )
+            )
+
+            XCTAssertEqual(cache.invalidationTTL, .max)
+            host.data.updateSeed = 1
+            var transaction = Transaction(animation: .linear(duration: 0.1))
+            transaction.disablesAnimations = false
+            withTransaction(transaction) {
+                Update.ensure {
+                    _ = placements.value
+                }
+            }
+
+            XCTAssertEqual(cache.invalidationTTL, 1)
+            XCTAssertFalse(host.hasPendingTransactions)
+        }
+    }
+
     func testLazyStackMakeViewPhaseResetRefreshesConcreteCache() throws {
         let host = GraphHost()
         var scrollablesID: AGAttribute!
