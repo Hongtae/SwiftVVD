@@ -1643,7 +1643,7 @@ extension _AGGraph {
         return updateTraversal
     }
 
-    @inline(never)
+    @inline(__always)
     private func nextUpdateAction(
         for frame: _AGUpdateFrame,
         traversal: UInt64,
@@ -1688,7 +1688,7 @@ extension _AGGraph {
         return .none
     }
 
-    @inline(never)
+    @inline(__always)
     private func nodeRequiresEvaluation(index: Int) -> Bool {
         if slots[index].node!.pointee.forceEvaluation
             || slots[index].node!.pointee.value == nil {
@@ -1707,7 +1707,7 @@ extension _AGGraph {
         return false
     }
 
-    @inline(never)
+    @inline(__always)
     private func completeUpdateTraversal(index: Int, traversal: UInt64) {
         guard slots.indices.contains(index), slots[index].node != nil else {
             return
