@@ -17,6 +17,22 @@ enum HoverCallback {
     case nonSpatial((Bool) -> Void)
 }
 
+/// Receives a hover stream already bound by the shared responder hit test.
+/// Framework controls use this observer without installing a second dispatcher.
+protocol HoverEventObserver: AnyObject {
+    @discardableResult
+    func updateHoverEvent(
+        id: EventID,
+        at globalPoint: CGPoint,
+        time: Time
+    ) -> Bool
+
+    @discardableResult
+    func endHoverEvent(id: EventID, time: Time) -> Bool
+
+    func resetHoverEvents()
+}
+
 final class HoverResponder: DefaultLayoutViewResponder {
     var callback: HoverCallback
     var transform: ViewTransform
@@ -205,6 +221,7 @@ struct HoverEventDispatcher: ForwardedEventDispatcher {
     static var eventType: any EventType.Type { HoverEvent.self }
 
     private var bindings: [EventID: EventBinding] = [:]
+    private var observerBindings: [EventID: EventBinding] = [:]
 
     @discardableResult
     mutating func receiveEvents(
@@ -218,6 +235,7 @@ struct HoverEventDispatcher: ForwardedEventDispatcher {
             guard let hoverEvent = event as? HoverEvent else { continue }
 
             let oldBinding = bindings[eventID]
+            let oldObserverBinding = observerBindings[eventID]
             if hoverEvent.phase.isTerminal {
                 if let oldBinding {
                     dispatchHoverCallbacks(
@@ -228,11 +246,23 @@ struct HoverEventDispatcher: ForwardedEventDispatcher {
                     bindings.removeValue(forKey: eventID)
                     consumed.insert(eventID)
                 }
+                if let oldObserverBinding {
+                    if dispatchHoverObservers(
+                        id: eventID,
+                        oldResponder: oldObserverBinding.responder,
+                        newResponder: nil,
+                        point: hoverEvent.globalLocation,
+                        time: hoverEvent.timestamp
+                    ) {
+                        consumed.insert(eventID)
+                    }
+                    observerBindings.removeValue(forKey: eventID)
+                }
                 continue
             }
 
-            let newResponder = rootResponder
-                .bindEvent(hoverEvent)?
+            let boundResponder = rootResponder.bindEvent(hoverEvent)
+            let newResponder = boundResponder?
                 .firstAncestor(ofType: HoverResponder.self)
 
             dispatchHoverCallbacks(
@@ -249,12 +279,41 @@ struct HoverEventDispatcher: ForwardedEventDispatcher {
             if oldBinding != nil || newResponder != nil {
                 consumed.insert(eventID)
             }
+
+            let newObservers = hoverObservers(from: boundResponder)
+            let observerHandled = dispatchHoverObservers(
+                id: eventID,
+                oldResponder: oldObserverBinding?.responder,
+                newResponder: boundResponder,
+                point: hoverEvent.globalLocation,
+                time: hoverEvent.timestamp
+            )
+            if let boundResponder, !newObservers.isEmpty {
+                observerBindings[eventID] = EventBinding(
+                    responder: boundResponder
+                )
+            } else {
+                observerBindings.removeValue(forKey: eventID)
+            }
+            if observerHandled {
+                consumed.insert(eventID)
+            }
         }
         return consumed
     }
 
     mutating func reset() {
         bindings.removeAll()
+        var observers: [ObjectIdentifier: any HoverEventObserver] = [:]
+        for binding in observerBindings.values {
+            for observer in hoverObservers(from: binding.responder) {
+                observers[ObjectIdentifier(observer)] = observer
+            }
+        }
+        observerBindings.removeAll()
+        for observer in observers.values {
+            observer.resetHoverEvents()
+        }
     }
 
     private func hoverAncestors(
@@ -262,6 +321,40 @@ struct HoverEventDispatcher: ForwardedEventDispatcher {
     ) -> [HoverResponder] {
         guard let responder else { return [] }
         return responder.sequence.compactMap { $0 as? HoverResponder }
+    }
+
+    private func hoverObservers(
+        from responder: ResponderNode?
+    ) -> [any HoverEventObserver] {
+        guard let responder else { return [] }
+        return responder.sequence.compactMap { $0 as? any HoverEventObserver }
+    }
+
+    @discardableResult
+    private func dispatchHoverObservers(
+        id: EventID,
+        oldResponder: ResponderNode?,
+        newResponder: ResponderNode?,
+        point: CGPoint,
+        time: Time
+    ) -> Bool {
+        let oldObservers = hoverObservers(from: oldResponder)
+        let newObservers = hoverObservers(from: newResponder)
+        let newIdentities = Set(newObservers.map(ObjectIdentifier.init))
+        var handled = false
+
+        for observer in oldObservers
+            where !newIdentities.contains(ObjectIdentifier(observer)) {
+            handled = observer.endHoverEvent(id: id, time: time) || handled
+        }
+        for observer in newObservers {
+            handled = observer.updateHoverEvent(
+                id: id,
+                at: point,
+                time: time
+            ) || handled
+        }
+        return handled
     }
 
     private func contains(

@@ -518,6 +518,58 @@ class HostingScrollView {
         var beginTime: Time
     }
 
+    /// Interpolates one overlay indicator between its configured collapsed
+    /// thickness and the host-owned rollover presentation.
+    private struct IndicatorExpansionTransition {
+        private(set) var progress: CGFloat = 0
+        private var initialProgress: CGFloat = 0
+        private var targetProgress: CGFloat = 0
+        private var beginTime: Time?
+
+        var isAnimating: Bool {
+            beginTime != nil
+        }
+
+        mutating func setExpanded(
+            _ expanded: Bool,
+            at time: Time,
+            duration: Double
+        ) -> Bool {
+            let advanced = update(at: time, duration: duration)
+            let target: CGFloat = expanded ? 1 : 0
+            guard target != targetProgress else { return advanced }
+            initialProgress = progress
+            targetProgress = target
+            beginTime = progress == target ? nil : time
+            return true
+        }
+
+        mutating func update(at time: Time, duration: Double) -> Bool {
+            guard let beginTime else { return false }
+            let fraction = duration > 0
+                ? min(max((time.seconds - beginTime.seconds) / duration, 0), 1)
+                : 1
+            let curved = CGFloat(UnitCurve.easeInOut.value(at: fraction))
+            let nextProgress = initialProgress
+                + (targetProgress - initialProgress) * curved
+            let changed = nextProgress != progress
+            progress = nextProgress
+            if fraction >= 1 {
+                progress = targetProgress
+                initialProgress = targetProgress
+                self.beginTime = nil
+            }
+            return changed
+        }
+
+        mutating func reset() {
+            progress = 0
+            initialProgress = 0
+            targetProgress = 0
+            beginTime = nil
+        }
+    }
+
     final class PlatformGroupContainer {
         weak var scrollView: HostingScrollView?
         private(set) var bounds = CGRect.zero
@@ -626,12 +678,16 @@ class HostingScrollView {
     private var indicatorOuterSize = CGSize.zero
     private var indicatorInteraction: IndicatorInteraction?
     private var indicatorPageAnimation: IndicatorPageAnimation?
+    private var indicatorHoverAxesByEvent: [EventID: Axis.Set] = [:]
+    private var horizontalIndicatorExpansion = IndicatorExpansionTransition()
+    private var verticalIndicatorExpansion = IndicatorExpansionTransition()
     private var overlayIndicatorFadeStart: Time?
     private(set) var currentPhaseState = ScrollPhaseState()
     private(set) var overlayIndicatorOpacity = 0.0
 
     private static let overlayIndicatorHoldDuration = 0.7
     private static let overlayIndicatorFadeDuration = 0.25
+    private static let overlayIndicatorExpansionDuration = 0.125
     private static let indicatorPageOverlap: CGFloat = 10
     private static let indicatorPageAnimationDuration = 0.2
     private static let indicatorPageRepeatDelay = 0.5
@@ -883,6 +939,76 @@ class HostingScrollView {
         updateIndicatorLayout()
     }
 
+    /// Updates the rollover owner for one hover stream in host-local coordinates.
+    @discardableResult
+    func updateScrollIndicatorHover(
+        eventID: EventID,
+        at point: CGPoint,
+        time: Time
+    ) -> Bool {
+        let previousAxes = indicatorHoverAxesByEvent[eventID] ?? []
+        let previousCombinedAxes = hoveredIndicatorAxes
+        let nextAxes = host.indicatorLayout.hoverAxes(at: point)
+        if nextAxes.isEmpty {
+            indicatorHoverAxesByEvent.removeValue(forKey: eventID)
+        } else {
+            indicatorHoverAxesByEvent[eventID] = nextAxes
+        }
+        let combinedAxes = hoveredIndicatorAxes
+        let transitionChanged = updateIndicatorExpansionTargets(
+            axes: combinedAxes,
+            at: time
+        )
+        if transitionChanged {
+            updateIndicatorLayout()
+        }
+
+        if !combinedAxes.isEmpty {
+            revealOverlayIndicators(at: time)
+        } else if !previousCombinedAxes.isEmpty {
+            resumeOverlayIndicatorFade(at: time)
+        }
+        scheduleIndicatorExpansionUpdateIfNeeded()
+        return !previousAxes.isEmpty || !nextAxes.isEmpty
+    }
+
+    /// Ends one hover stream while preserving rollover owned by other devices.
+    @discardableResult
+    func endScrollIndicatorHover(eventID: EventID, time: Time) -> Bool {
+        guard let previousAxes = indicatorHoverAxesByEvent.removeValue(
+            forKey: eventID
+        ) else {
+            return false
+        }
+        let combinedAxes = hoveredIndicatorAxes
+        if updateIndicatorExpansionTargets(axes: combinedAxes, at: time) {
+            updateIndicatorLayout()
+        }
+        if combinedAxes.isEmpty {
+            resumeOverlayIndicatorFade(at: time)
+        } else {
+            revealOverlayIndicators(at: time)
+        }
+        scheduleIndicatorExpansionUpdateIfNeeded()
+        return !previousAxes.isEmpty
+    }
+
+    /// Clears internal rollover state when the window event bridge is reset.
+    func resetScrollIndicatorHover() {
+        guard !indicatorHoverAxesByEvent.isEmpty
+                || horizontalIndicatorExpansion.progress > 0
+                || verticalIndicatorExpansion.progress > 0 else {
+            return
+        }
+        indicatorHoverAxesByEvent.removeAll(keepingCapacity: true)
+        horizontalIndicatorExpansion.reset()
+        verticalIndicatorExpansion.reset()
+        updateIndicatorLayout()
+        if !indicatorVisibilityIsHeld {
+            resumeOverlayIndicatorFade()
+        }
+    }
+
     func scrollIndicatorInteractionPart(
         at point: CGPoint
     ) -> ScrollIndicatorLayout.InteractionPart? {
@@ -981,9 +1107,12 @@ class HostingScrollView {
         }
     }
 
-    func endScrollIndicatorInteraction(cancelled: Bool) {
+    func endScrollIndicatorInteraction(
+        cancelled: Bool,
+        at time: Time? = nil
+    ) {
         if cancelled {
-            cancelScrollIndicatorInteraction()
+            cancelScrollIndicatorInteraction(at: time)
             return
         }
         guard let interaction = indicatorInteraction else { return }
@@ -992,20 +1121,25 @@ class HostingScrollView {
         case .thumb:
             indicatorPageAnimation = nil
             publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+            resumeOverlayIndicatorFade(at: time)
         case .paging:
             if indicatorPageAnimation == nil {
                 publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+                resumeOverlayIndicatorFade(at: time)
             }
         }
     }
 
-    func cancelScrollIndicatorInteraction() {
+    func cancelScrollIndicatorInteraction(at time: Time? = nil) {
         let hadInteraction = indicatorInteraction != nil
             || indicatorPageAnimation != nil
         indicatorInteraction = nil
         indicatorPageAnimation = nil
         if hadInteraction, currentPhaseState.phase == .interacting {
             publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+        }
+        if hadInteraction {
+            resumeOverlayIndicatorFade(at: time)
         }
     }
 
@@ -1386,6 +1520,7 @@ class HostingScrollView {
                   currentPhaseState.phase == .interacting,
                   didUpdate {
             publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+            resumeOverlayIndicatorFade(at: time)
         }
         return didUpdate
     }
@@ -1430,12 +1565,28 @@ class HostingScrollView {
 
     @discardableResult
     func updateIndicatorVisibility(at time: Time) -> Bool {
+        var changed = updateIndicatorExpansion(at: time)
+        if changed {
+            updateIndicatorLayout()
+        }
+        scheduleIndicatorExpansionUpdateIfNeeded()
+
+        if indicatorVisibilityIsHeld {
+            overlayIndicatorFadeStart = nil
+            if overlayIndicatorOpacity != 1 {
+                overlayIndicatorOpacity = 1
+                updateIndicatorLayout()
+                changed = true
+            }
+            return changed
+        }
+
         guard let fadeStart = overlayIndicatorFadeStart else {
-            return false
+            return changed
         }
         guard time >= fadeStart else {
             scheduleIndicatorUpdate(at: fadeStart)
-            return false
+            return changed
         }
 
         let duration = Self.overlayIndicatorFadeDuration
@@ -1443,10 +1594,11 @@ class HostingScrollView {
             ? min(max((time.seconds - fadeStart.seconds) / duration, 0), 1)
             : 1
         let opacity = 1 - progress
-        let changed = opacity != overlayIndicatorOpacity
+        let opacityChanged = opacity != overlayIndicatorOpacity
         overlayIndicatorOpacity = opacity
-        if changed {
+        if opacityChanged {
             updateIndicatorLayout()
+            changed = true
         }
         if progress < 1 {
             scheduleMotionUpdate()
@@ -1707,14 +1859,90 @@ class HostingScrollView {
         viewGraph.nextUpdate.views.at(time)
     }
 
-    private func revealOverlayIndicators() {
+    private var hoveredIndicatorAxes: Axis.Set {
+        indicatorHoverAxesByEvent.values.reduce(into: Axis.Set()) {
+            $0.formUnion($1)
+        }
+    }
+
+    private var indicatorVisibilityIsHeld: Bool {
+        !hoveredIndicatorAxes.isEmpty
+            || indicatorInteraction != nil
+            || indicatorPageAnimation != nil
+    }
+
+    private var indicatorExpansion: ScrollIndicatorExpansion {
+        ScrollIndicatorExpansion(
+            horizontal: horizontalIndicatorExpansion.progress,
+            vertical: verticalIndicatorExpansion.progress
+        )
+    }
+
+    @discardableResult
+    private func updateIndicatorExpansionTargets(
+        axes: Axis.Set,
+        at time: Time
+    ) -> Bool {
+        let duration = Self.overlayIndicatorExpansionDuration
+        let horizontalChanged = horizontalIndicatorExpansion.setExpanded(
+            axes.contains(.horizontal),
+            at: time,
+            duration: duration
+        )
+        let verticalChanged = verticalIndicatorExpansion.setExpanded(
+            axes.contains(.vertical),
+            at: time,
+            duration: duration
+        )
+        return horizontalChanged || verticalChanged
+    }
+
+    @discardableResult
+    private func updateIndicatorExpansion(at time: Time) -> Bool {
+        let duration = Self.overlayIndicatorExpansionDuration
+        let horizontalChanged = horizontalIndicatorExpansion.update(
+            at: time,
+            duration: duration
+        )
+        let verticalChanged = verticalIndicatorExpansion.update(
+            at: time,
+            duration: duration
+        )
+        return horizontalChanged || verticalChanged
+    }
+
+    private func scheduleIndicatorExpansionUpdateIfNeeded() {
+        if horizontalIndicatorExpansion.isAnimating
+            || verticalIndicatorExpansion.isAnimating {
+            scheduleMotionUpdate()
+        }
+    }
+
+    private func revealOverlayIndicators(at time: Time? = nil) {
         guard let viewGraph = graphRef.context as? ViewGraph else {
             return
         }
         overlayIndicatorOpacity = 1
-        overlayIndicatorFadeStart = viewGraph.currentTimestamp
-            + Self.overlayIndicatorHoldDuration
+        if indicatorVisibilityIsHeld {
+            overlayIndicatorFadeStart = nil
+        } else {
+            overlayIndicatorFadeStart = (time ?? viewGraph.currentTimestamp)
+                + Self.overlayIndicatorHoldDuration
+        }
         updateIndicatorLayout()
+        if let overlayIndicatorFadeStart {
+            scheduleIndicatorUpdate(at: overlayIndicatorFadeStart)
+        }
+    }
+
+    private func resumeOverlayIndicatorFade(at time: Time? = nil) {
+        guard overlayIndicatorOpacity > 0,
+              !indicatorVisibilityIsHeld,
+              let viewGraph = graphRef.context as? ViewGraph else {
+            return
+        }
+        overlayIndicatorFadeStart = (time ?? viewGraph.currentTimestamp)
+            + Self.overlayIndicatorHoldDuration
         if let overlayIndicatorFadeStart {
             scheduleIndicatorUpdate(at: overlayIndicatorFadeStart)
         }
@@ -1734,7 +1962,8 @@ class HostingScrollView {
             properties: properties,
             metrics: indicatorMetrics,
             layoutDirection: layoutDirection,
-            overlayOpacity: overlayIndicatorOpacity
+            overlayOpacity: overlayIndicatorOpacity,
+            expansion: indicatorExpansion
         ))
     }
 
@@ -2178,7 +2407,8 @@ struct ScrollViewDisplayList: Rule {
 /// Responder mounted at the same logical platform-group boundary as display output.
 final class HostingScrollViewResponder: MultiViewResponder,
     ExclusiveResponderEventConsumer,
-    GestureArbitratingEventConsumer {
+    GestureArbitratingEventConsumer,
+    HoverEventObserver {
     private struct PanSession {
         var eventID: EventID?
         var wasActive = false
@@ -2279,6 +2509,32 @@ final class HostingScrollViewResponder: MultiViewResponder,
         var features = super.features
         features.insert(.platformViews)
         return features
+    }
+
+    func updateHoverEvent(
+        id: EventID,
+        at globalPoint: CGPoint,
+        time: Time
+    ) -> Bool {
+        guard let scrollView = hostContainer?.scrollView else { return false }
+        var points = [globalPoint]
+        helper.transform.convertGlobal(to: .local, points: &points)
+        return scrollView.updateScrollIndicatorHover(
+            eventID: id,
+            at: points[0],
+            time: time
+        )
+    }
+
+    func endHoverEvent(id: EventID, time: Time) -> Bool {
+        hostContainer?.scrollView.endScrollIndicatorHover(
+            eventID: id,
+            time: time
+        ) ?? false
+    }
+
+    func resetHoverEvents() {
+        hostContainer?.scrollView.resetScrollIndicatorHover()
     }
 
     func acceptsEventType(_ eventType: Any.Type) -> Bool {
@@ -2424,12 +2680,12 @@ final class HostingScrollViewResponder: MultiViewResponder,
         case .ended:
             guard indicatorEventID == eventID else { return .failed }
             indicatorEventID = nil
-            scrollView.endScrollIndicatorInteraction(cancelled: false)
+            scrollView.endScrollIndicatorInteraction(cancelled: false, at: time)
             return .ended(())
         case .failed:
             guard indicatorEventID == eventID else { return .failed }
             indicatorEventID = nil
-            scrollView.endScrollIndicatorInteraction(cancelled: true)
+            scrollView.endScrollIndicatorInteraction(cancelled: true, at: time)
             return .failed
         }
     }

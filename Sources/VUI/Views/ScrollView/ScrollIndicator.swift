@@ -49,6 +49,27 @@ struct ScrollIndicatorMetricsStorage: Equatable, Sendable {
     }
 }
 
+/// Carries the current overlay expansion fraction independently for each axis.
+struct ScrollIndicatorExpansion: Equatable, Sendable {
+    var horizontal: CGFloat = 0
+    var vertical: CGFloat = 0
+
+    subscript(axis: Axis) -> CGFloat {
+        get {
+            switch axis {
+            case .horizontal: horizontal
+            case .vertical: vertical
+            }
+        }
+        set {
+            switch axis {
+            case .horizontal: horizontal = newValue
+            case .vertical: vertical = newValue
+            }
+        }
+    }
+}
+
 /// Resolved outer-viewport geometry shared by indicator rendering and hit testing.
 struct ScrollIndicatorLayout: Equatable {
     /// The indicator element that admitted a pointer stream. Page cases describe
@@ -68,13 +89,20 @@ struct ScrollIndicatorLayout: Equatable {
         }
     }
 
-    /// One axis's resolved track, thumb, opacity, and layout-reservation mode.
+    /// One axis's resolved drawing, interaction, and hover-proximity geometry.
     struct Indicator: Equatable {
         var trackFrame: CGRect
         var thumbFrame: CGRect
+        var proximityFrame: CGRect? = nil
         var opacity: Double
         var isFixedArea: Bool
     }
+
+    /// Overlay expansion adds an absolute amount without changing the configured
+    /// collapsed thickness. The edge-anchored proximity span is four points wider
+    /// than the fully expanded cross-axis band.
+    static let overlayExpansionDelta: CGFloat = 5
+    static let overlayProximityPadding: CGFloat = 2
 
     var viewportFrame = CGRect.zero
     var reservedInsets = EdgeInsets()
@@ -110,7 +138,8 @@ struct ScrollIndicatorLayout: Equatable {
         properties: ScrollEnvironmentProperties,
         metrics: ScrollIndicatorMetricsStorage,
         layoutDirection: LayoutDirection,
-        overlayOpacity: Double
+        overlayOpacity: Double,
+        expansion: ScrollIndicatorExpansion = ScrollIndicatorExpansion()
     ) -> ScrollIndicatorLayout {
         let outerSize = resolvedSize(outerSize)
         let resolvedMetrics = ScrollIndicatorMetricsStorage(
@@ -160,7 +189,11 @@ struct ScrollIndicatorLayout: Equatable {
                     height: horizontalThickness
                 )
             } else {
-                let thickness = min(metrics.thickness, viewportFrame.height)
+                let thickness = overlayThickness(
+                    collapsed: metrics.thickness,
+                    available: viewportFrame.height,
+                    expansion: expansion.horizontal
+                )
                 trackFrame = CGRect(
                     x: viewportFrame.minX,
                     y: viewportFrame.maxY - thickness,
@@ -168,6 +201,12 @@ struct ScrollIndicatorLayout: Equatable {
                     height: thickness
                 )
             }
+            let proximityFrame = fixedHorizontal ? nil : overlayProximityFrame(
+                axis: .horizontal,
+                viewportFrame: viewportFrame,
+                collapsedThickness: metrics.thickness,
+                layoutDirection: layoutDirection
+            )
             layout.horizontal = makeIndicator(
                 axis: .horizontal,
                 trackFrame: trackFrame,
@@ -179,7 +218,8 @@ struct ScrollIndicatorLayout: Equatable {
                 showsIndicators: configuration.showsIndicators,
                 isFixedArea: fixedHorizontal,
                 layoutDirection: layoutDirection,
-                overlayOpacity: opacity
+                overlayOpacity: opacity,
+                proximityFrame: proximityFrame
             )
         }
 
@@ -194,7 +234,11 @@ struct ScrollIndicatorLayout: Equatable {
                     height: viewportFrame.height
                 )
             } else {
-                let thickness = min(metrics.thickness, viewportFrame.width)
+                let thickness = overlayThickness(
+                    collapsed: metrics.thickness,
+                    available: viewportFrame.width,
+                    expansion: expansion.vertical
+                )
                 trackFrame = CGRect(
                     x: layoutDirection == .rightToLeft
                         ? viewportFrame.minX
@@ -204,6 +248,12 @@ struct ScrollIndicatorLayout: Equatable {
                     height: viewportFrame.height
                 )
             }
+            let proximityFrame = fixedVertical ? nil : overlayProximityFrame(
+                axis: .vertical,
+                viewportFrame: viewportFrame,
+                collapsedThickness: metrics.thickness,
+                layoutDirection: layoutDirection
+            )
             layout.vertical = makeIndicator(
                 axis: .vertical,
                 trackFrame: trackFrame,
@@ -215,7 +265,8 @@ struct ScrollIndicatorLayout: Equatable {
                 showsIndicators: configuration.showsIndicators,
                 isFixedArea: fixedVertical,
                 layoutDirection: layoutDirection,
-                overlayOpacity: opacity
+                overlayOpacity: opacity,
+                proximityFrame: proximityFrame
             )
         }
 
@@ -263,6 +314,18 @@ struct ScrollIndicatorLayout: Equatable {
         return nil
     }
 
+    /// Returns overlay axes whose maximum rollover band contains `point`.
+    func hoverAxes(at point: CGPoint) -> Axis.Set {
+        var axes = Axis.Set()
+        if horizontal?.proximityFrame?.contains(point) == true {
+            axes.insert(.horizontal)
+        }
+        if vertical?.proximityFrame?.contains(point) == true {
+            axes.insert(.vertical)
+        }
+        return axes
+    }
+
     private static func makeIndicator(
         axis: Axis,
         trackFrame: CGRect,
@@ -274,7 +337,8 @@ struct ScrollIndicatorLayout: Equatable {
         showsIndicators: Bool,
         isFixedArea: Bool,
         layoutDirection: LayoutDirection,
-        overlayOpacity: Double
+        overlayOpacity: Double,
+        proximityFrame: CGRect?
     ) -> Indicator? {
         let trackLength = axis == .horizontal
             ? trackFrame.width
@@ -353,9 +417,54 @@ struct ScrollIndicatorLayout: Equatable {
         return Indicator(
             trackFrame: trackFrame,
             thumbFrame: thumbFrame,
+            proximityFrame: proximityFrame,
             opacity: isFixedArea ? 1 : overlayOpacity,
             isFixedArea: isFixedArea
         )
+    }
+
+    private static func overlayThickness(
+        collapsed: CGFloat,
+        available: CGFloat,
+        expansion: CGFloat
+    ) -> CGFloat {
+        guard collapsed > 0, available > 0 else { return 0 }
+        let progress = min(max(expansion.isFinite ? expansion : 0, 0), 1)
+        return min(collapsed + overlayExpansionDelta * progress, available)
+    }
+
+    private static func overlayProximityFrame(
+        axis: Axis,
+        viewportFrame: CGRect,
+        collapsedThickness: CGFloat,
+        layoutDirection: LayoutDirection
+    ) -> CGRect? {
+        guard collapsedThickness > 0 else { return nil }
+        let requestedThickness = collapsedThickness
+            + overlayExpansionDelta
+            + overlayProximityPadding * 2
+        switch axis {
+        case .horizontal:
+            let thickness = min(requestedThickness, viewportFrame.height)
+            guard thickness > 0 else { return nil }
+            return CGRect(
+                x: viewportFrame.minX,
+                y: viewportFrame.maxY - thickness,
+                width: viewportFrame.width,
+                height: thickness
+            )
+        case .vertical:
+            let thickness = min(requestedThickness, viewportFrame.width)
+            guard thickness > 0 else { return nil }
+            return CGRect(
+                x: layoutDirection == .rightToLeft
+                    ? viewportFrame.minX
+                    : viewportFrame.maxX - thickness,
+                y: viewportFrame.minY,
+                width: thickness,
+                height: viewportFrame.height
+            )
+        }
     }
 
     private static func resolvedLength(_ value: CGFloat) -> CGFloat {

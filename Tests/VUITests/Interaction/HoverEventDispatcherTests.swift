@@ -185,6 +185,52 @@ final class HoverEventDispatcherTests: XCTestCase {
         XCTAssertEqual(recorder.events, ["hover:true", "hover:false"])
     }
 
+    // ASSERTIONS hoverEventBindingAncestorDispatchObserved scrollIndicatorPresentationGeometryObserved
+    func testControlObserverSharesHoverRootBindingAndTerminalLifetime() {
+        let recorder = HoverEventRecorder()
+        let fixture = makeHoverResponderFixture(recorder: recorder, name: "hover")
+        let observer = HoverObserverResponder()
+        fixture.responder.parent = observer
+        let harness = HoverDispatchHarness(
+            target: fixture.responder,
+            retaining: [fixture, observer]
+        )
+        let eventID = EventID(type: HoverEvent.self, serial: 9)
+
+        XCTAssertEqual(
+            harness.manager.send([
+                eventID: hoverEvent(phase: .began)
+            ]),
+            Set([eventID])
+        )
+        XCTAssertEqual(harness.root.bindCount, 1)
+        XCTAssertEqual(recorder.events, ["hover:true"])
+        XCTAssertEqual(observer.updatedEventIDs, [eventID])
+
+        XCTAssertEqual(
+            harness.manager.send([
+                eventID: hoverEvent(
+                    phase: .active,
+                    point: CGPoint(x: 12, y: 14)
+                )
+            ]),
+            Set([eventID])
+        )
+        XCTAssertEqual(harness.root.bindCount, 2)
+        XCTAssertEqual(observer.updatedEventIDs, [eventID, eventID])
+
+        XCTAssertEqual(
+            harness.manager.send([
+                eventID: hoverEvent(phase: .ended)
+            ]),
+            Set([eventID])
+        )
+        XCTAssertEqual(harness.root.bindCount, 2)
+        XCTAssertEqual(recorder.events, ["hover:true", "hover:false"])
+        XCTAssertEqual(observer.endedEventIDs, [eventID])
+        XCTAssertEqual(harness.host.downstreamSendCount, 0)
+    }
+
     // ASSERTIONS hoverEventBindingAncestorDispatchObserved forwardedEventDispatcherRegistrationDispatchObserved
     func testFirstMissIsUnconsumedAndNeverReachesGestureGraph() {
         let recorder = HoverEventRecorder()
@@ -245,6 +291,30 @@ final class HoverEventDispatcherTests: XCTestCase {
         ).isEmpty)
         XCTAssertEqual(recorder.events, ["hover:true"])
         XCTAssertEqual(harness.host.downstreamSendCount, 0)
+    }
+
+    // ASSERTIONS hoverEventBindingAncestorDispatchObserved
+    func testForwardedDispatcherResetClearsInternalHoverObserversOnly() {
+        let recorder = HoverEventRecorder()
+        let fixture = makeHoverResponderFixture(recorder: recorder, name: "hover")
+        let observer = HoverObserverResponder()
+        fixture.responder.parent = observer
+        let harness = HoverDispatchHarness(
+            target: fixture.responder,
+            retaining: [fixture, observer]
+        )
+        let eventID = EventID(type: HoverEvent.self, serial: 15)
+
+        _ = harness.manager.send([
+            eventID: hoverEvent(phase: .began)
+        ])
+        XCTAssertEqual(recorder.events, ["hover:true"])
+        XCTAssertEqual(observer.resetCount, 0)
+
+        harness.manager.reset(resetForwardedEventDispatchers: true)
+        XCTAssertEqual(observer.resetCount, 1)
+        XCTAssertEqual(observer.endedEventIDs, [])
+        XCTAssertEqual(recorder.events, ["hover:true"])
     }
 
     // ASSERTIONS hoverEventBindingAncestorDispatchObserved
@@ -542,6 +612,30 @@ private final class CountingBindingRoot: ResponderNode {
     override func bindEvent(_ event: any EventType) -> ResponderNode? {
         bindCount += 1
         return target
+    }
+}
+
+private final class HoverObserverResponder: ViewResponder, HoverEventObserver {
+    private(set) var updatedEventIDs: [EventID] = []
+    private(set) var endedEventIDs: [EventID] = []
+    private(set) var resetCount = 0
+
+    func updateHoverEvent(
+        id: EventID,
+        at globalPoint: CGPoint,
+        time: Time
+    ) -> Bool {
+        updatedEventIDs.append(id)
+        return true
+    }
+
+    func endHoverEvent(id: EventID, time: Time) -> Bool {
+        endedEventIDs.append(id)
+        return true
+    }
+
+    func resetHoverEvents() {
+        resetCount += 1
     }
 }
 
