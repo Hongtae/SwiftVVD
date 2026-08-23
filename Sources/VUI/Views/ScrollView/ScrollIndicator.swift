@@ -49,6 +49,21 @@ struct ScrollIndicatorMetricsStorage: Equatable, Sendable {
 }
 
 struct ScrollIndicatorLayout: Equatable {
+    enum InteractionPart: Equatable {
+        case thumb(Axis)
+        case decrementPage(Axis)
+        case incrementPage(Axis)
+
+        var axis: Axis {
+            switch self {
+            case .thumb(let axis),
+                 .decrementPage(let axis),
+                 .incrementPage(let axis):
+                axis
+            }
+        }
+    }
+
     struct Indicator: Equatable {
         var trackFrame: CGRect
         var thumbFrame: CGRect
@@ -208,6 +223,39 @@ struct ScrollIndicatorLayout: Equatable {
             )
         }
         return layout
+    }
+
+    func interactionPart(
+        at point: CGPoint,
+        layoutDirection: LayoutDirection
+    ) -> InteractionPart? {
+        let indicators: [(Axis, Indicator?)] = [
+            (.vertical, vertical),
+            (.horizontal, horizontal),
+        ]
+        for (axis, indicator) in indicators {
+            if indicator?.thumbFrame.contains(point) == true {
+                return .thumb(axis)
+            }
+        }
+        for (axis, indicator) in indicators {
+            guard let indicator, indicator.trackFrame.contains(point) else {
+                continue
+            }
+            let coordinate = axis == .horizontal ? point.x : point.y
+            let thumbStart = axis == .horizontal
+                ? indicator.thumbFrame.minX
+                : indicator.thumbFrame.minY
+            let isBeforeThumb = coordinate < thumbStart
+            let decrementsOffset = axis != .horizontal
+                || layoutDirection == .leftToRight
+                ? isBeforeThumb
+                : !isBeforeThumb
+            return decrementsOffset
+                ? .decrementPage(axis)
+                : .incrementPage(axis)
+        }
+        return nil
     }
 
     private static func makeIndicator(

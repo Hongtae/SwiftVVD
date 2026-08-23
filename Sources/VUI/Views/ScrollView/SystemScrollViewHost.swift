@@ -487,6 +487,33 @@ class HostingScrollView {
         var resolvedOffset: CGPoint
     }
 
+    private struct IndicatorThumbInteraction {
+        var axis: Axis
+        var initialPointerCoordinate: CGFloat
+        var initialOffset: CGFloat
+        var thumbTravel: CGFloat
+        var maximumOffset: CGFloat
+        var direction: CGFloat
+    }
+
+    private struct IndicatorPagingInteraction {
+        var part: ScrollIndicatorLayout.InteractionPart
+        var pointerLocation: CGPoint
+        var nextRepeatTime: Time
+    }
+
+    private enum IndicatorInteraction {
+        case thumb(IndicatorThumbInteraction)
+        case paging(IndicatorPagingInteraction)
+    }
+
+    private struct IndicatorPageAnimation {
+        var axis: Axis
+        var initialOffset: CGFloat
+        var targetOffset: CGFloat
+        var beginTime: Time
+    }
+
     final class PlatformGroupContainer {
         weak var scrollView: HostingScrollView?
         private(set) var bounds = CGRect.zero
@@ -593,12 +620,18 @@ class HostingScrollView {
     private var cachedTargetOffset = CGPoint.zero
     private var indicatorMetrics = ScrollIndicatorMetricsStorage()
     private var indicatorOuterSize = CGSize.zero
+    private var indicatorInteraction: IndicatorInteraction?
+    private var indicatorPageAnimation: IndicatorPageAnimation?
     private var overlayIndicatorFadeStart: Time?
     private(set) var currentPhaseState = ScrollPhaseState()
     private(set) var overlayIndicatorOpacity = 0.0
 
     private static let overlayIndicatorHoldDuration = 0.7
     private static let overlayIndicatorFadeDuration = 0.25
+    private static let indicatorPageOverlap: CGFloat = 10
+    private static let indicatorPageAnimationDuration = 0.2
+    private static let indicatorPageRepeatDelay = 0.5
+    private static let indicatorPageRepeatInterval = 0.05
 
     let host: PlatformGroupContainer
     weak var parentContainer: PlatformContainer?
@@ -656,6 +689,8 @@ class HostingScrollView {
                 // stale drag or inertial state must not move it afterward.
                 dragState = nil
                 decelerationState = nil
+                indicatorInteraction = nil
+                indicatorPageAnimation = nil
                 publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
             }
             let geometry = ScrollGeometry(
@@ -827,7 +862,12 @@ class HostingScrollView {
     }
 
     func updateProperties(_ properties: ScrollEnvironmentProperties) {
+        let flashesIndicators = properties.indicatorFlashSeed
+            != self.properties.indicatorFlashSeed
         self.properties = properties
+        if flashesIndicators {
+            revealOverlayIndicators()
+        }
     }
 
     func updateIndicatorPresentation(
@@ -837,6 +877,132 @@ class HostingScrollView {
         indicatorOuterSize = outerSize
         indicatorMetrics = metrics
         updateIndicatorLayout()
+    }
+
+    func scrollIndicatorInteractionPart(
+        at point: CGPoint
+    ) -> ScrollIndicatorLayout.InteractionPart? {
+        guard let part = host.indicatorLayout.interactionPart(
+            at: point,
+            layoutDirection: layoutDirection
+        ), maximumContentOffset()[part.axis] > 0 else {
+            return nil
+        }
+        if case .thumb(let axis) = part,
+           let indicator = scrollIndicator(for: axis),
+           indicator.trackFrame.size[axis] <= indicator.thumbFrame.size[axis] {
+            return nil
+        }
+        return part
+    }
+
+    @discardableResult
+    func beginScrollIndicatorInteraction(
+        _ part: ScrollIndicatorLayout.InteractionPart,
+        at point: CGPoint,
+        time: Time
+    ) -> Bool {
+        let axis = part.axis
+        let maximumOffset = maximumContentOffset()[axis]
+        guard maximumOffset > 0,
+              let indicator = scrollIndicator(for: axis) else {
+            return false
+        }
+
+        let interaction: IndicatorInteraction
+        switch part {
+        case .thumb:
+            let trackLength = indicator.trackFrame.size[axis]
+            let thumbLength = indicator.thumbFrame.size[axis]
+            let thumbTravel = max(trackLength - thumbLength, 0)
+            guard thumbTravel > 0 else { return false }
+            interaction = .thumb(IndicatorThumbInteraction(
+                axis: axis,
+                initialPointerCoordinate: point[axis],
+                initialOffset: liveContentOffset[axis],
+                thumbTravel: thumbTravel,
+                maximumOffset: maximumOffset,
+                direction: axis == .horizontal && layoutDirection == .rightToLeft
+                    ? -1
+                    : 1
+            ))
+
+        case .decrementPage, .incrementPage:
+            interaction = .paging(IndicatorPagingInteraction(
+                part: part,
+                pointerLocation: point,
+                nextRepeatTime: time + Self.indicatorPageRepeatDelay
+            ))
+        }
+
+        dragState = nil
+        decelerationState = nil
+        indicatorPageAnimation = nil
+        indicatorInteraction = interaction
+
+        publishInteraction(
+            offset: liveContentOffset,
+            phase: .interacting,
+            velocity: _Velocity(valuePerSecond: .zero)
+        )
+        if case .some(.paging) = indicatorInteraction {
+            startIndicatorPageAnimation(for: part, at: time)
+        }
+        return true
+    }
+
+    func updateScrollIndicatorInteraction(at point: CGPoint) {
+        switch indicatorInteraction {
+        case .none:
+            return
+        case .thumb(let interaction):
+            let pointerDelta = point[interaction.axis]
+                - interaction.initialPointerCoordinate
+            let offsetDelta = pointerDelta
+                * interaction.direction
+                * interaction.maximumOffset
+                / interaction.thumbTravel
+            var offset = liveContentOffset
+            offset[interaction.axis] = interaction.initialOffset + offsetDelta
+            offset = clampedContentOffset(offset)
+            guard offset != liveContentOffset else { return }
+            publishInteraction(
+                offset: offset,
+                phase: .interacting,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+        case .paging(var interaction):
+            interaction.pointerLocation = point
+            indicatorInteraction = .paging(interaction)
+        }
+    }
+
+    func endScrollIndicatorInteraction(cancelled: Bool) {
+        if cancelled {
+            cancelScrollIndicatorInteraction()
+            return
+        }
+        guard let interaction = indicatorInteraction else { return }
+        indicatorInteraction = nil
+        switch interaction {
+        case .thumb:
+            indicatorPageAnimation = nil
+            publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+        case .paging:
+            if indicatorPageAnimation == nil {
+                publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+            }
+        }
+    }
+
+    func cancelScrollIndicatorInteraction() {
+        let hadInteraction = indicatorInteraction != nil
+            || indicatorPageAnimation != nil
+        indicatorInteraction = nil
+        indicatorPageAnimation = nil
+        if hadInteraction, currentPhaseState.phase == .interacting {
+            publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+        }
     }
 
     func updateContentMargins(_ margins: ContentMarginProxy) {
@@ -985,6 +1151,8 @@ class HostingScrollView {
 
     /// Publishes a host-originated offset, such as a platform wheel or scrollbar update.
     func publishSystemContentOffset(_ offset: CGPoint) {
+        indicatorInteraction = nil
+        indicatorPageAnimation = nil
         guard updateLiveContentOffset(offset) else { return }
         revealOverlayIndicators()
         updateGraphState(isPreferred: false)
@@ -992,6 +1160,8 @@ class HostingScrollView {
 
     func willStartPanning() {
         let currentOffset = liveContentOffset
+        indicatorInteraction = nil
+        indicatorPageAnimation = nil
         decelerationState = nil
         dragState = DragState(
             initialOffset: currentOffset,
@@ -1022,6 +1192,8 @@ class HostingScrollView {
                 velocity = _Velocity(valuePerSecond: .zero)
             }
 
+            indicatorInteraction = nil
+            indicatorPageAnimation = nil
             decelerationState = nil
             var drag = dragState ?? DragState(
                 initialOffset: currentOffset,
@@ -1103,6 +1275,8 @@ class HostingScrollView {
         case .failed:
             dragState = nil
             decelerationState = nil
+            indicatorInteraction = nil
+            indicatorPageAnimation = nil
             publishInteraction(
                 offset: currentOffset,
                 phase: .idle,
@@ -1111,11 +1285,111 @@ class HostingScrollView {
         }
     }
 
+    private func scrollIndicator(
+        for axis: Axis
+    ) -> ScrollIndicatorLayout.Indicator? {
+        switch axis {
+        case .horizontal:
+            host.indicatorLayout.horizontal
+        case .vertical:
+            host.indicatorLayout.vertical
+        }
+    }
+
+    private func startIndicatorPageAnimation(
+        for part: ScrollIndicatorLayout.InteractionPart,
+        at time: Time
+    ) {
+        let direction: CGFloat
+        switch part {
+        case .thumb:
+            return
+        case .decrementPage:
+            direction = -1
+        case .incrementPage:
+            direction = 1
+        }
+        guard let context = pendingContext else { return }
+        let axis = part.axis
+        let viewportLength = max(
+            context.containingSize.inset(by: context.safeInsets)[axis],
+            0
+        )
+        let pageLength = viewportLength >= Self.indicatorPageOverlap
+            ? viewportLength - Self.indicatorPageOverlap
+            : viewportLength * 0.5
+        var target = liveContentOffset
+        target[axis] += pageLength * direction
+        target = clampedContentOffset(target)
+        guard target[axis] != liveContentOffset[axis] else {
+            indicatorPageAnimation = nil
+            return
+        }
+        indicatorPageAnimation = IndicatorPageAnimation(
+            axis: axis,
+            initialOffset: liveContentOffset[axis],
+            targetOffset: target[axis],
+            beginTime: time
+        )
+        scheduleMotionUpdate()
+    }
+
+    @discardableResult
+    private func updateIndicatorPageMotion(at time: Time) -> Bool {
+        var didUpdate = false
+        if let animation = indicatorPageAnimation {
+            let duration = Self.indicatorPageAnimationDuration
+            let progress = duration > 0
+                ? min(max(
+                    (time.seconds - animation.beginTime.seconds) / duration,
+                    0
+                ), 1)
+                : 1
+            let curvedProgress = UnitCurve.easeInOut.value(at: progress)
+            var offset = liveContentOffset
+            offset[animation.axis] = animation.initialOffset
+                + (animation.targetOffset - animation.initialOffset)
+                * curvedProgress
+            if progress >= 1 {
+                indicatorPageAnimation = nil
+            }
+            publishInteraction(
+                offset: offset,
+                phase: .interacting,
+                velocity: _Velocity(valuePerSecond: .zero)
+            )
+            didUpdate = true
+        }
+
+        if case .some(.paging(var interaction)) = indicatorInteraction {
+            if time >= interaction.nextRepeatTime {
+                if scrollIndicatorInteractionPart(
+                    at: interaction.pointerLocation
+                ) == interaction.part {
+                    startIndicatorPageAnimation(for: interaction.part, at: time)
+                    didUpdate = true
+                }
+                interaction.nextRepeatTime = time
+                    + Self.indicatorPageRepeatInterval
+                indicatorInteraction = .paging(interaction)
+            }
+            scheduleIndicatorUpdate(at: interaction.nextRepeatTime)
+        }
+
+        if indicatorPageAnimation != nil {
+            scheduleMotionUpdate()
+        } else if indicatorInteraction == nil,
+                  currentPhaseState.phase == .interacting,
+                  didUpdate {
+            publishPhase(.idle, velocity: _Velocity(valuePerSecond: .zero))
+        }
+        return didUpdate
+    }
+
     @discardableResult
     func updateMotion(at time: Time) -> Bool {
-        guard var decelerationState else {
-            return false
-        }
+        let updatedIndicator = updateIndicatorPageMotion(at: time)
+        guard var decelerationState else { return updatedIndicator }
         let elapsed: Double
         if let beginTime = decelerationState.beginTime {
             elapsed = max(time.seconds - beginTime.seconds, 0)
@@ -1899,6 +2173,7 @@ struct ScrollViewDisplayList: Rule {
 
 /// Responder mounted at the same logical platform-group boundary as display output.
 final class HostingScrollViewResponder: MultiViewResponder,
+    ExclusiveResponderEventConsumer,
     GestureArbitratingEventConsumer {
     private struct PanSession {
         var eventID: EventID?
@@ -1949,6 +2224,7 @@ final class HostingScrollViewResponder: MultiViewResponder,
     let layoutResponder: DefaultLayoutViewResponder
     private var panSession = PanSession()
     private var wheelSession = WheelSession()
+    private var indicatorEventID: EventID?
     private var preventedPanEventIDs: Set<EventID> = []
 
     init(layoutResponder: DefaultLayoutViewResponder) {
@@ -1962,11 +2238,18 @@ final class HostingScrollViewResponder: MultiViewResponder,
         cacheKey: UInt32?,
         options: ViewResponder.ContainsPointsOptions
     ) -> ViewResponder.ContainsPointsResult {
-        helper.containsGlobalPoints(
+        let hitChildren: [ViewResponder]
+        if points.count == 1,
+           scrollIndicatorPart(atGlobalPoint: points[0]) != nil {
+            hitChildren = []
+        } else {
+            hitChildren = children
+        }
+        return helper.containsGlobalPoints(
             points,
             cacheKey: cacheKey,
             options: options,
-            children: children
+            children: hitChildren
         )
     }
 
@@ -2004,6 +2287,17 @@ final class HostingScrollViewResponder: MultiViewResponder,
         return eventType == SystemWheelEvent.self || eventType == ScrollEvent.self
     }
 
+    func exclusivelyConsumes(_ event: any EventType) -> Bool {
+        guard let event = event as? ScrollEvent else { return false }
+        if indicatorEventID != nil {
+            return true
+        }
+        guard event.phase == .began else { return false }
+        return scrollIndicatorPart(
+            atGlobalPoint: event.hitTestLocation
+        ) != nil
+    }
+
     func isPrevented(by responder: any AnyGestureResponder) -> Bool {
         let hostPolicy: GestureResponderExclusionPolicy = responder.isCancellable
             ? .simultaneous(.descendants)
@@ -2034,15 +2328,13 @@ final class HostingScrollViewResponder: MultiViewResponder,
             }
         }
         guard let scrollView = hostContainer?.scrollView else {
-            panSession.reset()
-            wheelSession.reset()
+            resetEventSession()
             return .failed
         }
         guard scrollView.properties.isEnabled,
               scrollView.configuration.isScrollEnabled ?? true,
               !scrollView.configuration.axes.isEmpty else {
-            panSession.reset()
-            wheelSession.reset()
+            resetEventSession()
             scrollView.dispatchScrollGesturePhase(.failed)
             return .failed
         }
@@ -2052,6 +2344,19 @@ final class HostingScrollViewResponder: MultiViewResponder,
             if let wheel = event as? SystemWheelEvent {
                 phases.append(consumeWheelEvent(wheel, id: eventID))
             } else if let event = event as? ScrollEvent {
+                if indicatorEventID == eventID
+                    || (event.phase == .began
+                        && scrollIndicatorPart(
+                            atGlobalPoint: event.hitTestLocation
+                        ) != nil) {
+                    phases.append(consumeIndicatorEvent(
+                        event,
+                        id: eventID,
+                        at: time,
+                        scrollView: scrollView
+                    ))
+                    continue
+                }
                 let phase = consumePanEvent(
                     event,
                     id: eventID,
@@ -2067,6 +2372,62 @@ final class HostingScrollViewResponder: MultiViewResponder,
         if phases.contains(where: { $0.isEnded }) { return .ended(()) }
         if !phases.isEmpty && phases.allSatisfy({ $0.isFailed }) { return .failed }
         return .possible(nil)
+    }
+
+    func resetEventSession() {
+        panSession.reset()
+        wheelSession.reset()
+        preventedPanEventIDs.removeAll(keepingCapacity: true)
+        indicatorEventID = nil
+        hostContainer?.scrollView.cancelScrollIndicatorInteraction()
+    }
+
+    private func scrollIndicatorPart(
+        atGlobalPoint point: CGPoint
+    ) -> ScrollIndicatorLayout.InteractionPart? {
+        guard let scrollView = hostContainer?.scrollView else { return nil }
+        var points = [point]
+        helper.transform.convertGlobal(to: .local, points: &points)
+        return scrollView.scrollIndicatorInteractionPart(at: points[0])
+    }
+
+    private func consumeIndicatorEvent(
+        _ event: ScrollEvent,
+        id eventID: EventID,
+        at time: Time,
+        scrollView: HostingScrollView
+    ) -> GesturePhase<Void> {
+        var points = [event.hitTestLocation]
+        helper.transform.convertGlobal(to: .local, points: &points)
+        let point = points[0]
+        switch event.phase {
+        case .began:
+            guard let part = scrollView.scrollIndicatorInteractionPart(at: point),
+                  scrollView.beginScrollIndicatorInteraction(
+                      part,
+                      at: point,
+                      time: time
+                  ) else {
+                indicatorEventID = nil
+                return .failed
+            }
+            indicatorEventID = eventID
+            return .active(())
+        case .active:
+            guard indicatorEventID == eventID else { return .failed }
+            scrollView.updateScrollIndicatorInteraction(at: point)
+            return .active(())
+        case .ended:
+            guard indicatorEventID == eventID else { return .failed }
+            indicatorEventID = nil
+            scrollView.endScrollIndicatorInteraction(cancelled: false)
+            return .ended(())
+        case .failed:
+            guard indicatorEventID == eventID else { return .failed }
+            indicatorEventID = nil
+            scrollView.endScrollIndicatorInteraction(cancelled: true)
+            return .failed
+        }
     }
 
     private func consumeWheelEvent(
@@ -2677,9 +3038,17 @@ struct ScrollViewAdjustedState: StatefulRule {
 
 private extension CGPoint {
     subscript(axis: Axis) -> CGFloat {
-        switch axis {
-        case .horizontal: x
-        case .vertical: y
+        get {
+            switch axis {
+            case .horizontal: x
+            case .vertical: y
+            }
+        }
+        set {
+            switch axis {
+            case .horizontal: x = newValue
+            case .vertical: y = newValue
+            }
         }
     }
 }

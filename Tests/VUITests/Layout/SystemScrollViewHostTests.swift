@@ -147,6 +147,323 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertNil(layout(contentHeight: 120).vertical)
     }
 
+    func testScrollIndicatorInteractionPartsRespectThumbAndHorizontalRTL() {
+        var layout = ScrollIndicatorLayout()
+        layout.horizontal = ScrollIndicatorLayout.Indicator(
+            trackFrame: CGRect(x: 0, y: 90, width: 100, height: 10),
+            thumbFrame: CGRect(x: 30, y: 90, width: 20, height: 10),
+            opacity: 1,
+            isFixedArea: true
+        )
+        layout.vertical = ScrollIndicatorLayout.Indicator(
+            trackFrame: CGRect(x: 90, y: 0, width: 10, height: 90),
+            thumbFrame: CGRect(x: 90, y: 30, width: 10, height: 20),
+            opacity: 1,
+            isFixedArea: true
+        )
+
+        XCTAssertEqual(
+            layout.interactionPart(
+                at: CGPoint(x: 95, y: 40),
+                layoutDirection: .leftToRight
+            ),
+            .thumb(.vertical)
+        )
+        XCTAssertEqual(
+            layout.interactionPart(
+                at: CGPoint(x: 95, y: 10),
+                layoutDirection: .leftToRight
+            ),
+            .decrementPage(.vertical)
+        )
+        XCTAssertEqual(
+            layout.interactionPart(
+                at: CGPoint(x: 95, y: 70),
+                layoutDirection: .leftToRight
+            ),
+            .incrementPage(.vertical)
+        )
+        XCTAssertEqual(
+            layout.interactionPart(
+                at: CGPoint(x: 10, y: 95),
+                layoutDirection: .leftToRight
+            ),
+            .decrementPage(.horizontal)
+        )
+        XCTAssertEqual(
+            layout.interactionPart(
+                at: CGPoint(x: 10, y: 95),
+                layoutDirection: .rightToLeft
+            ),
+            .incrementPage(.horizontal)
+        )
+        XCTAssertNil(layout.interactionPart(
+            at: CGPoint(x: 50, y: 50),
+            layoutDirection: .leftToRight
+        ))
+    }
+
+    func testHostingScrollViewThumbDragCapturesOutsideTrackAndPublishesPhase() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let host = makeIndicatorHost(
+                graph: graph,
+                axes: .vertical,
+                contentOffset: CGPoint(x: 0, y: 100),
+                contentSize: CGSize(width: 90, height: 500),
+                viewportSize: CGSize(width: 90, height: 100)
+            )
+            let thumb = try XCTUnwrap(host.host.indicatorLayout.vertical?.thumbFrame)
+            let start = CGPoint(x: thumb.midX, y: thumb.midY)
+            XCTAssertEqual(
+                host.scrollIndicatorInteractionPart(at: start),
+                .thumb(.vertical)
+            )
+            XCTAssertTrue(host.beginScrollIndicatorInteraction(
+                .thumb(.vertical),
+                at: start,
+                time: Time(seconds: 1)
+            ))
+            XCTAssertEqual(host.currentPhaseState.phase, .interacting)
+            XCTAssertEqual(host.currentPhaseState.velocity, .zero)
+
+            host.updateScrollIndicatorInteraction(at: CGPoint(
+                x: -200,
+                y: start.y + 40
+            ))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset.y,
+                300,
+                accuracy: 0.000_001
+            )
+
+            host.endScrollIndicatorInteraction(cancelled: false)
+            XCTAssertEqual(host.currentPhaseState.phase, .idle)
+            XCTAssertEqual(host.currentPhaseState.velocity, .zero)
+        }
+    }
+
+    func testHostingScrollViewHorizontalRTLThumbDragReversesOffsetMapping() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let host = makeIndicatorHost(
+                graph: graph,
+                axes: .horizontal,
+                contentOffset: CGPoint(x: 100, y: 0),
+                contentSize: CGSize(width: 500, height: 90),
+                viewportSize: CGSize(width: 100, height: 90),
+                layoutDirection: .rightToLeft
+            )
+            let thumb = try XCTUnwrap(host.host.indicatorLayout.horizontal?.thumbFrame)
+            let start = CGPoint(x: thumb.midX, y: thumb.midY)
+            XCTAssertTrue(host.beginScrollIndicatorInteraction(
+                .thumb(.horizontal),
+                at: start,
+                time: Time(seconds: 1)
+            ))
+
+            host.updateScrollIndicatorInteraction(at: CGPoint(
+                x: start.x - 40,
+                y: -100
+            ))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset.x,
+                300,
+                accuracy: 0.000_001
+            )
+            host.endScrollIndicatorInteraction(cancelled: false)
+        }
+    }
+
+    func testHostingScrollViewTrackPagingUsesOverlapAnimationAndTerminalIdle() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let host = makeIndicatorHost(
+                graph: graph,
+                axes: .vertical,
+                contentOffset: CGPoint(x: 0, y: 500),
+                contentSize: CGSize(width: 90, height: 2_000),
+                viewportSize: CGSize(width: 90, height: 200)
+            )
+            let indicator = try XCTUnwrap(host.host.indicatorLayout.vertical)
+            let point = CGPoint(
+                x: indicator.trackFrame.midX,
+                y: indicator.thumbFrame.maxY + 20
+            )
+            XCTAssertEqual(
+                host.scrollIndicatorInteractionPart(at: point),
+                .incrementPage(.vertical)
+            )
+            XCTAssertTrue(host.beginScrollIndicatorInteraction(
+                .incrementPage(.vertical),
+                at: point,
+                time: Time(seconds: 1)
+            ))
+            host.endScrollIndicatorInteraction(cancelled: false)
+            XCTAssertEqual(host.currentPhaseState.phase, .interacting)
+
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.1)))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset.y,
+                595,
+                accuracy: 0.000_001
+            )
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.21)))
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset.y,
+                690,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(host.currentPhaseState.phase, .idle)
+            XCTAssertEqual(host.currentPhaseState.velocity, .zero)
+        }
+    }
+
+    func testHostingScrollViewTrackPagingRepeatsAfterHoldDelay() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let host = makeIndicatorHost(
+                graph: graph,
+                axes: .vertical,
+                contentOffset: CGPoint(x: 0, y: 500),
+                contentSize: CGSize(width: 90, height: 2_000),
+                viewportSize: CGSize(width: 90, height: 200)
+            )
+            let indicator = try XCTUnwrap(host.host.indicatorLayout.vertical)
+            let point = CGPoint(
+                x: indicator.trackFrame.midX,
+                y: indicator.thumbFrame.maxY + 20
+            )
+            XCTAssertTrue(host.beginScrollIndicatorInteraction(
+                .incrementPage(.vertical),
+                at: point,
+                time: Time(seconds: 1)
+            ))
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.21)))
+            XCTAssertEqual(host.makeLayoutState().contentOffset.y, 690, accuracy: 0.000_001)
+
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.5)))
+            XCTAssertEqual(host.makeLayoutState().contentOffset.y, 690, accuracy: 0.000_001)
+            XCTAssertEqual(host.currentPhaseState.phase, .interacting)
+            host.endScrollIndicatorInteraction(cancelled: false)
+
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.6)))
+            XCTAssertEqual(host.makeLayoutState().contentOffset.y, 785, accuracy: 0.000_001)
+            XCTAssertTrue(host.updateMotion(at: Time(seconds: 1.71)))
+            XCTAssertEqual(host.makeLayoutState().contentOffset.y, 880, accuracy: 0.000_001)
+            XCTAssertEqual(host.currentPhaseState.phase, .idle)
+        }
+    }
+
+    func testScrollViewResponderExclusivelyCapturesIndicatorSerialOutsideTrack() throws {
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let host = makeIndicatorHost(
+                graph: graph,
+                axes: .vertical,
+                contentOffset: CGPoint(x: 0, y: 100),
+                contentSize: CGSize(width: 90, height: 500),
+                viewportSize: CGSize(width: 90, height: 100)
+            )
+            let container = HostingScrollView.PlatformContainer(scrollView: host)
+            host.parentContainer = container
+            let hostAttribute = graph.makeInput(value: host)
+            let position = graph.makeInput(value: CGPoint(x: 10, y: 20))
+            let size = graph.makeInput(value: ViewSize(
+                CGSize(width: 100, height: 100)
+            ))
+            let transform = graph.makeInput(value: ViewTransform.identity)
+            let child = ScrollHostTestResponder()
+            let children = graph.makeInput(value: [child] as [ViewResponder])
+            let layoutResponder = DefaultLayoutViewResponder(
+                inputs: makeAttachmentViewInputs(
+                    graph: graph,
+                    position: position,
+                    size: size,
+                    transform: transform
+                ),
+                viewSubgraph: AGSubgraph()
+            )
+            let responders = graph.makeStatefulRule(ScrollViewResponder(
+                _scrollView: hostAttribute,
+                _position: position,
+                _size: size,
+                _transform: transform,
+                _children: children,
+                _responder: nil,
+                layoutResponder: layoutResponder
+            ))
+            let responder = try XCTUnwrap(
+                responders.value.first as? HostingScrollViewResponder
+            )
+            let thumb = try XCTUnwrap(host.host.indicatorLayout.vertical?.thumbFrame)
+            let start = CGPoint(
+                x: position.value.x + thumb.midX,
+                y: position.value.y + thumb.midY
+            )
+            let eventID = EventID(type: ScrollEvent.self, serial: 701)
+            let began = ScrollEvent(
+                timestamp: Time(seconds: 1),
+                phase: .began,
+                binding: nil,
+                translation: .zero,
+                modifiers: [],
+                hitTestLocation: start
+            )
+            XCTAssertTrue(responder.exclusivelyConsumes(began))
+            let indicatorHit = responder.containsGlobalPoints(
+                [start],
+                cacheKey: nil,
+                options: .platformDefault
+            )
+            XCTAssertTrue(indicatorHit.mask[0])
+            XCTAssertTrue(indicatorHit.children.isEmpty)
+            XCTAssertTrue(responder.consumeEvents(
+                [eventID: began],
+                at: Time(seconds: 1)
+            ).isActive)
+
+            let outside = CGPoint(
+                x: position.value.x - 200,
+                y: position.value.y + thumb.midY + 40
+            )
+            let active = ScrollEvent(
+                timestamp: Time(seconds: 1.1),
+                phase: .active,
+                binding: nil,
+                translation: CGSize(width: -200, height: 40),
+                modifiers: [],
+                hitTestLocation: outside
+            )
+            XCTAssertTrue(responder.exclusivelyConsumes(active))
+            XCTAssertTrue(responder.consumeEvents(
+                [eventID: active],
+                at: Time(seconds: 1.1)
+            ).isActive)
+            XCTAssertEqual(
+                host.makeLayoutState().contentOffset.y,
+                300,
+                accuracy: 0.000_001
+            )
+
+            let ended = ScrollEvent(
+                timestamp: Time(seconds: 1.2),
+                phase: .ended,
+                binding: nil,
+                translation: CGSize(width: -200, height: 40),
+                modifiers: [],
+                hitTestLocation: outside
+            )
+            XCTAssertTrue(responder.exclusivelyConsumes(ended))
+            XCTAssertTrue(responder.consumeEvents(
+                [eventID: ended],
+                at: Time(seconds: 1.2)
+            ).isActive)
+            XCTAssertEqual(host.currentPhaseState.phase, .idle)
+            XCTAssertFalse(responder.exclusivelyConsumes(ended))
+        }
+    }
+
     func testHostingScrollViewFadesOverlayIndicatorsOnGraphClock() {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -211,6 +528,60 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertTrue(host.updateIndicatorVisibility(at: Time(seconds: 0.95)))
             XCTAssertEqual(host.overlayIndicatorOpacity, 0)
             XCTAssertNil(host.host.indicatorLayout.vertical)
+        }
+    }
+
+    func testHostingScrollViewConsumesEachIndicatorFlashSeedOnce() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let host = HostingScrollView(
+                graphRef: _AGGraphContext(graph: graph),
+                layoutState: graph.makeInput(
+                    value: SystemScrollLayoutState()
+                ).asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            var properties = ScrollEnvironmentProperties()
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: .overlay
+            )
+            host.updateProperties(properties)
+            host.updateIndicatorPresentation(
+                outerSize: CGSize(width: 80, height: 60),
+                metrics: ScrollIndicatorMetricsStorage()
+            )
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 80, height: 180),
+                containingSize: CGSize(width: 80, height: 60),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0)
+
+            properties.indicatorFlashSeed = 1
+            host.updateProperties(properties)
+            XCTAssertEqual(host.overlayIndicatorOpacity, 1)
+            XCTAssertNotNil(host.host.indicatorLayout.vertical)
+            XCTAssertTrue(host.updateIndicatorVisibility(at: Time(seconds: 0.95)))
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0)
+
+            host.updateProperties(properties)
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0)
+
+            properties.indicatorFlashSeed = 2
+            host.updateProperties(properties)
+            XCTAssertEqual(host.overlayIndicatorOpacity, 1)
+            XCTAssertNotNil(host.host.indicatorLayout.vertical)
         }
     }
 
@@ -2345,6 +2716,69 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertNil(weakContainer)
             XCTAssertNil(weakGroup)
         }
+    }
+
+    private func makeIndicatorHost(
+        graph: _AGGraph,
+        axes: Axis.Set,
+        contentOffset: CGPoint,
+        contentSize: CGSize,
+        viewportSize: CGSize,
+        layoutDirection: LayoutDirection = .leftToRight
+    ) -> HostingScrollView {
+        let graphRef = _AGGraphContext(graph: graph)
+        let state = graph.makeInput(value: SystemScrollLayoutState(
+            contentOffset: contentOffset
+        ))
+        let phase = graph.makeInput(value: ScrollPhaseState())
+        let host = HostingScrollView(
+            graphRef: graphRef,
+            layoutState: state.asWeak(),
+            phaseState: phase.asWeak()
+        )
+        host.updateConfiguration(ScrollViewConfiguration(axes: axes))
+        var properties = ScrollEnvironmentProperties()
+        if axes.contains(.horizontal) {
+            properties.horizontalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: .fixedArea
+            )
+        }
+        if axes.contains(.vertical) {
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: .fixedArea
+            )
+        }
+        host.updateProperties(properties)
+        host.updateSafeArea(EdgeInsets(), layoutDirection: layoutDirection)
+        let thickness: CGFloat = 10
+        host.updateIndicatorPresentation(
+            outerSize: CGSize(
+                width: viewportSize.width
+                    + (axes.contains(.vertical) ? thickness : 0),
+                height: viewportSize.height
+                    + (axes.contains(.horizontal) ? thickness : 0)
+            ),
+            metrics: ScrollIndicatorMetricsStorage(
+                horizontal: ScrollIndicatorMetrics(
+                    thickness: thickness,
+                    minimumThumbLength: 20
+                ),
+                vertical: ScrollIndicatorMetrics(
+                    thickness: thickness,
+                    minimumThumbLength: 20
+                )
+            )
+        )
+        _ = host.updateContext(HostingScrollViewUpdateContext(
+            contentOffset: contentOffset,
+            contentFrame: CGRect(origin: .zero, size: contentSize),
+            containingSize: viewportSize,
+            offsetMode: .system,
+            safeInsets: EdgeInsets()
+        ))
+        return host
     }
 
     private func attachmentDisplayList(serial: UInt32) -> DisplayList {
