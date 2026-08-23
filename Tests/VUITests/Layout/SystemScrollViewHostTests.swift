@@ -51,6 +51,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(vertical.thumbFrame.minY, 23.31, accuracy: 0.001)
         XCTAssertEqual(vertical.thumbFrame.height, 27.38, accuracy: 0.001)
         XCTAssertNil(vertical.proximityFrame)
+        XCTAssertEqual(vertical.trackOpacity, 1)
         XCTAssertEqual(layout.cornerFrame, CGRect(x: 90, y: 74, width: 10, height: 6))
     }
 
@@ -114,11 +115,12 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(horizontal.trackFrame, CGRect(x: 0, y: 44, width: 100, height: 6))
         XCTAssertEqual(horizontal.thumbFrame.minX, 46.666, accuracy: 0.001)
         XCTAssertEqual(horizontal.thumbFrame.width, 30)
+        XCTAssertEqual(horizontal.trackOpacity, 0)
         XCTAssertEqual(horizontal.opacity, 0.4)
         XCTAssertFalse(horizontal.isFixedArea)
     }
 
-    // ASSERTIONS scrollIndicatorPresentationGeometryObserved
+    // ASSERTIONS scrollIndicatorPresentationGeometryObserved scrollIndicatorSkinRuntimeObserved
     func testOverlayScrollIndicatorSeparatesDrawInteractionAndProximityGeometry() throws {
         let configuration = ScrollViewConfiguration(
             axes: [.horizontal, .vertical]
@@ -185,6 +187,8 @@ final class SystemScrollViewHostTests: XCTestCase {
             width: 100,
             height: 15
         ))
+        XCTAssertEqual(collapsed.horizontal?.trackOpacity, 0)
+        XCTAssertEqual(expanded.horizontal?.trackOpacity, 1)
         XCTAssertEqual(collapsed.vertical?.trackFrame, CGRect(
             x: 92,
             y: 0,
@@ -203,6 +207,8 @@ final class SystemScrollViewHostTests: XCTestCase {
             width: 17,
             height: 80
         ))
+        XCTAssertEqual(collapsed.vertical?.trackOpacity, 0)
+        XCTAssertEqual(expanded.vertical?.trackOpacity, 1)
 
         let proximityOnlyPoint = CGPoint(x: 84, y: 30)
         XCTAssertEqual(collapsed.hoverAxes(at: proximityOnlyPoint), .vertical)
@@ -752,7 +758,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS scrollIndicatorPresentationGeometryObserved
+    // ASSERTIONS scrollIndicatorPresentationGeometryObserved scrollIndicatorSkinRuntimeObserved
     func testHostingScrollViewAnimatesOverlayRolloverAndHoldsVisibility() throws {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -806,6 +812,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             ))
             XCTAssertEqual(host.overlayIndicatorOpacity, 1)
             XCTAssertEqual(host.host.indicatorLayout.vertical?.trackFrame.width, 8)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.trackOpacity, 0)
 
             XCTAssertTrue(host.updateIndicatorVisibility(
                 at: Time(seconds: 0.0625)
@@ -815,11 +822,13 @@ final class SystemScrollViewHostTests: XCTestCase {
             )
             XCTAssertGreaterThan(intermediateWidth, 8)
             XCTAssertLessThan(intermediateWidth, 13)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.trackOpacity, 1)
 
             XCTAssertTrue(host.updateIndicatorVisibility(
                 at: Time(seconds: 0.125)
             ))
             XCTAssertEqual(host.host.indicatorLayout.vertical?.trackFrame.width, 13)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.trackOpacity, 1)
             XCTAssertEqual(host.overlayIndicatorOpacity, 1)
 
             XCTAssertTrue(host.updateScrollIndicatorHover(
@@ -831,6 +840,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 at: Time(seconds: 0.325)
             ))
             XCTAssertEqual(host.host.indicatorLayout.vertical?.trackFrame.width, 8)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.trackOpacity, 0)
             XCTAssertEqual(host.overlayIndicatorOpacity, 1)
 
             XCTAssertFalse(host.updateIndicatorVisibility(
@@ -855,7 +865,7 @@ final class SystemScrollViewHostTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS scrollIndicatorPresentationGeometryObserved
+    // ASSERTIONS scrollIndicatorPresentationGeometryObserved scrollIndicatorSkinRuntimeObserved
     func testOverlayIndicatorPressHoldsVisibilityWithoutExpandingTrack() throws {
         let rendererHost = TestViewRendererHost()
         let viewGraph = ViewGraph(
@@ -914,6 +924,7 @@ final class SystemScrollViewHostTests: XCTestCase {
             ))
             XCTAssertEqual(host.overlayIndicatorOpacity, 1)
             XCTAssertEqual(host.host.indicatorLayout.vertical?.trackFrame.width, 8)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.trackOpacity, 0)
 
             host.endScrollIndicatorInteraction(
                 cancelled: false,

@@ -594,6 +594,13 @@ class HostingScrollView {
     }
 
     final class PlatformContainer: PlatformGroupFactory {
+        /// The flat backend skin keeps the native semantic track role while
+        /// leaving platform material rendering out of the logical scroll host.
+        private static let indicatorTrackStyle = OffsetShapeStyle(
+            base: SystemColorsStyle(),
+            offset: 4
+        )
+
         let scrollView: HostingScrollView
         private(set) var safeAreaInsets = EdgeInsets()
         private(set) var layoutDirection = LayoutDirection.leftToRight
@@ -636,28 +643,76 @@ class HostingScrollView {
         ) {
             let indicators = [layout.horizontal, layout.vertical].compactMap { $0 }
             for indicator in indicators {
-                context.fill(
+                guard indicator.trackOpacity > 0 else { continue }
+                var trackContext = context
+                trackContext.opacity *= indicator.trackOpacity
+                trackContext.fill(
                     Path(indicator.trackFrame),
-                    with: .color(.black.opacity(0.12 * indicator.opacity))
+                    with: .style(Self.indicatorTrackStyle)
                 )
             }
             if let cornerFrame = layout.cornerFrame {
                 let opacity = indicators
                     .filter(\.isFixedArea)
-                    .map(\.opacity)
+                    .map(\.trackOpacity)
                     .max() ?? 0
                 if opacity > 0 {
-                    context.fill(
+                    var cornerContext = context
+                    cornerContext.opacity *= opacity
+                    cornerContext.fill(
                         Path(cornerFrame),
-                        with: .color(.black.opacity(0.12 * opacity))
+                        with: .style(Self.indicatorTrackStyle)
                     )
                 }
             }
             for indicator in indicators {
+                var thumbContext = context
+                thumbContext.opacity *= indicator.opacity
+                renderThumb(indicator, in: thumbContext)
+            }
+        }
+
+        /// Draws the thumb as a capsule. Overlay thumbs use a contrasting rim;
+        /// fixed-area thumbs need that rim only against a dark appearance.
+        private func renderThumb(
+            _ indicator: ScrollIndicatorLayout.Indicator,
+            in context: GraphicsContext
+        ) {
+            let frame = indicator.thumbFrame
+            guard frame.width > 0, frame.height > 0 else { return }
+            guard let outlineColor = thumbOutlineColor(
+                for: indicator,
+                colorScheme: context.environment.colorScheme
+            ) else {
                 context.fill(
-                    Path(indicator.thumbFrame),
-                    with: .color(.black.opacity(0.48 * indicator.opacity))
+                    Capsule().path(in: frame),
+                    with: .color(.secondary)
                 )
+                return
+            }
+
+            let borderWidth = min(1, min(frame.width, frame.height) / 4)
+            context.fill(
+                Capsule().path(in: frame),
+                with: .color(outlineColor)
+            )
+            let bodyFrame = frame.insetBy(dx: borderWidth, dy: borderWidth)
+            guard bodyFrame.width > 0, bodyFrame.height > 0 else { return }
+            context.fill(
+                Capsule().path(in: bodyFrame),
+                with: .color(.secondary)
+            )
+        }
+
+        private func thumbOutlineColor(
+            for indicator: ScrollIndicatorLayout.Indicator,
+            colorScheme: ColorScheme
+        ) -> Color? {
+            switch colorScheme {
+            case .light:
+                indicator.isFixedArea ? nil : .white.opacity(0.15)
+            case .dark:
+                .black.opacity(0.20)
             }
         }
     }

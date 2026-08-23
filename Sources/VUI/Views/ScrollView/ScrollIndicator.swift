@@ -94,6 +94,10 @@ struct ScrollIndicatorLayout: Equatable {
         var trackFrame: CGRect
         var thumbFrame: CGRect
         var proximityFrame: CGRect? = nil
+        /// Track visibility is independent of the thumb's overall visibility.
+        /// A collapsed overlay presents only its thumb, while fixed-area tracks
+        /// remain visible for the lifetime of their reserved region.
+        var trackOpacity: Double = 1
         var opacity: Double
         var isFixedArea: Bool
     }
@@ -219,7 +223,8 @@ struct ScrollIndicatorLayout: Equatable {
                 isFixedArea: fixedHorizontal,
                 layoutDirection: layoutDirection,
                 overlayOpacity: opacity,
-                proximityFrame: proximityFrame
+                proximityFrame: proximityFrame,
+                expansion: expansion.horizontal
             )
         }
 
@@ -266,7 +271,8 @@ struct ScrollIndicatorLayout: Equatable {
                 isFixedArea: fixedVertical,
                 layoutDirection: layoutDirection,
                 overlayOpacity: opacity,
-                proximityFrame: proximityFrame
+                proximityFrame: proximityFrame,
+                expansion: expansion.vertical
             )
         }
 
@@ -338,7 +344,8 @@ struct ScrollIndicatorLayout: Equatable {
         isFixedArea: Bool,
         layoutDirection: LayoutDirection,
         overlayOpacity: Double,
-        proximityFrame: CGRect?
+        proximityFrame: CGRect?,
+        expansion: CGFloat
     ) -> Indicator? {
         let trackLength = axis == .horizontal
             ? trackFrame.width
@@ -418,6 +425,9 @@ struct ScrollIndicatorLayout: Equatable {
             trackFrame: trackFrame,
             thumbFrame: thumbFrame,
             proximityFrame: proximityFrame,
+            trackOpacity: isFixedArea
+                ? 1
+                : (resolvedExpansion(expansion) > 0 ? overlayOpacity : 0),
             opacity: isFixedArea ? 1 : overlayOpacity,
             isFixedArea: isFixedArea
         )
@@ -429,8 +439,12 @@ struct ScrollIndicatorLayout: Equatable {
         expansion: CGFloat
     ) -> CGFloat {
         guard collapsed > 0, available > 0 else { return 0 }
-        let progress = min(max(expansion.isFinite ? expansion : 0, 0), 1)
+        let progress = resolvedExpansion(expansion)
         return min(collapsed + overlayExpansionDelta * progress, available)
+    }
+
+    private static func resolvedExpansion(_ expansion: CGFloat) -> CGFloat {
+        min(max(expansion.isFinite ? expansion : 0, 0), 1)
     }
 
     private static func overlayProximityFrame(

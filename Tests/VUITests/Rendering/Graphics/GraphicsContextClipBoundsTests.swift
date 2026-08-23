@@ -689,6 +689,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertEqual(renderer.animatorCount, 0)
     }
 
+    // ASSERTIONS scrollIndicatorSkinRuntimeObserved
     func testPlatformGroupRendersFixedScrollIndicatorOutsideContentClipOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
@@ -777,8 +778,8 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         }
 
         XCTAssertEqual(pixel(x: 3, y: 3), [255, 56, 60, 255])
-        XCTAssertEqual(pixel(x: 7, y: 2), [0, 0, 0, 31])
-        XCTAssertEqual(pixel(x: 7, y: 3), [0, 0, 0, 138])
+        XCTAssertEqual(pixel(x: 7, y: 2), [0, 0, 0, 12])
+        XCTAssertEqual(pixel(x: 7, y: 3), [0, 0, 0, 73])
         XCTAssertEqual(pixel(x: 8, y: 3), [0, 0, 0, 0])
     }
 
