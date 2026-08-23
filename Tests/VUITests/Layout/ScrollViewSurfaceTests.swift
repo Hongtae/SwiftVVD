@@ -1,3 +1,4 @@
+import Observation
 import XCTest
 @testable import VUI
 
@@ -545,6 +546,7 @@ private final class ScrollBehaviorEnvironmentRecorder {
 private final class ScrollIndicatorEnvironmentRecorder {
     var properties = ScrollEnvironmentProperties()
     var metrics = ScrollIndicatorMetricsStorage()
+    var environment: Attribute<EnvironmentValues>?
 }
 
 private struct ScrollIndicatorEnvironmentContent: View, TestPrimitiveView {
@@ -556,13 +558,30 @@ private struct ScrollIndicatorEnvironmentContent: View, TestPrimitiveView {
         guard let graph = _AGGraph.current else {
             fatalError("ScrollIndicatorEnvironmentContent._makeView requires an active graph.")
         }
-        let environment = inputs.base.cachedEnvironment.value.environment.value
+        let environmentAttribute = inputs.base.cachedEnvironment.value.environment
+        let environment = environmentAttribute.value
         let recorder = view._attribute.value.recorder
         recorder.properties = environment.scrollEnvironmentStorage.properties
         recorder.metrics = environment.scrollIndicatorMetrics
+        recorder.environment = environmentAttribute
         return _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 10, height: 10))
         }))
+    }
+}
+
+@Observable
+private final class ScrollIndicatorFlashTriggerModel {
+    var value = 0
+}
+
+private struct ScrollIndicatorFlashTriggerContent: View {
+    var model: ScrollIndicatorFlashTriggerModel
+    var recorder: ScrollIndicatorEnvironmentRecorder
+
+    var body: some View {
+        ScrollIndicatorEnvironmentContent(recorder: recorder)
+            .scrollIndicatorsFlash(trigger: model.value)
     }
 }
 
@@ -1995,6 +2014,122 @@ final class ScrollViewSurfaceTests: XCTestCase {
             environment.scrollEnvironmentStorage.properties.verticalIndicator.visibility,
             .visible
         )
+    }
+
+    // ASSERTIONS: scrollIndicatorsFlashProducerObserved
+    func testScrollIndicatorFlashModifierStorageAndTransforms() {
+        let trigger = ScrollIndicatorsFlashModifier(value: 7, seed: 0)
+        let triggerMirror = Mirror(reflecting: trigger)
+        let triggerChildren = Array(triggerMirror.children)
+        XCTAssertEqual(triggerChildren.map(\.label), ["value", "_seed"])
+        XCTAssertEqual(
+            Mirror(reflecting: triggerChildren.last!.value).children.map(\.label),
+            ["_value", "_location"]
+        )
+
+        let appear = ScrollIndicatorFlashOnAppearModifier(isEnabled: true)
+        XCTAssertEqual(Mirror(reflecting: appear).children.map(\.label), ["isEnabled"])
+
+        var properties = ScrollEnvironmentProperties()
+        properties.verticalIndicator.options = ScrollIndicatorOptions(rawValue: 4)
+        properties.horizontalIndicator.options = ScrollIndicatorOptions(rawValue: 4)
+
+        ScrollIndicatorsFlashModifier<Int>.UpdateFlashSeed(seed: 29)
+            .update(properties: &properties)
+        XCTAssertEqual(properties.indicatorFlashSeed, 29)
+
+        ScrollIndicatorFlashOnAppearModifier.UpdateIndicators(isEnabled: true)
+            .update(properties: &properties)
+        XCTAssertEqual(properties.verticalIndicator.options.rawValue, 5)
+        XCTAssertEqual(properties.horizontalIndicator.options.rawValue, 5)
+
+        ScrollIndicatorFlashOnAppearModifier.UpdateIndicators(isEnabled: false)
+            .update(properties: &properties)
+        XCTAssertEqual(properties.verticalIndicator.options.rawValue, 4)
+        XCTAssertEqual(properties.horizontalIndicator.options.rawValue, 4)
+    }
+
+    func testScrollIndicatorFlashPublicModifiersPublishInitialEnvironment() {
+        let initialRecorder = ScrollIndicatorEnvironmentRecorder()
+        let triggerRecorder = ScrollIndicatorEnvironmentRecorder()
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let initialView = ScrollIndicatorEnvironmentContent(recorder: initialRecorder)
+                    .scrollIndicatorsFlash(onAppear: true)
+                let initialAttribute = graph.makeInput(value: initialView)
+                _ = type(of: initialView)._makeView(
+                    view: _GraphValue(_attribute: initialAttribute),
+                    inputs: makeViewInputs(graph: graph)
+                )
+
+                let triggerView = ScrollIndicatorEnvironmentContent(recorder: triggerRecorder)
+                    .scrollIndicatorsFlash(trigger: 11)
+                let triggerAttribute = graph.makeInput(value: triggerView)
+                _ = type(of: triggerView)._makeView(
+                    view: _GraphValue(_attribute: triggerAttribute),
+                    inputs: makeViewInputs(graph: graph)
+                )
+            }
+        }
+
+        XCTAssertTrue(
+            initialRecorder.properties.verticalIndicator.options.contains(.revealsInitially)
+        )
+        XCTAssertTrue(
+            initialRecorder.properties.horizontalIndicator.options.contains(.revealsInitially)
+        )
+        XCTAssertEqual(triggerRecorder.properties.indicatorFlashSeed, 0)
+    }
+
+    func testScrollIndicatorFlashTriggerAdvancesEnvironmentSeedAfterChange() throws {
+        let host = GraphHost()
+        let model = ScrollIndicatorFlashTriggerModel()
+        let recorder = ScrollIndicatorEnvironmentRecorder()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                let graph = host.data.graph
+                let root = ScrollIndicatorFlashTriggerContent(
+                    model: model,
+                    recorder: recorder
+                )
+                let source = graph.makeInput(value: root)
+                _ = type(of: root)._makeView(
+                    view: _GraphValue(_attribute: source),
+                    inputs: makeViewInputs(graph: graph)
+                )
+                host.data.rootSubgraph.update()
+
+                let environment = try XCTUnwrap(recorder.environment)
+                XCTAssertEqual(
+                    environment.value.scrollEnvironmentStorage.properties.indicatorFlashSeed,
+                    0
+                )
+            }
+        }
+
+        model.value = 1
+        Update.ensure {
+            host.data.withCurrent {
+                host.data.graph.inbox.drain()
+                host.data.rootSubgraph.update()
+            }
+        }
+        host.flushTransactions()
+
+        try host.data.withCurrent {
+            try AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                host.data.rootSubgraph.update()
+                let environment = try XCTUnwrap(recorder.environment)
+                XCTAssertEqual(
+                    environment.value.scrollEnvironmentStorage.properties.indicatorFlashSeed,
+                    1
+                )
+            }
+        }
     }
 
     func testScrollIndicatorMetricsResolveInvalidLengthsWithoutChangingValidValues() {

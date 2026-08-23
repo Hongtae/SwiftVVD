@@ -493,6 +493,62 @@ private struct TransformScrollIndicatorStyle: ScrollEnvironmentTransform {
     }
 }
 
+/// Publishes a new indicator-flash seed whenever its trigger changes.
+struct ScrollIndicatorsFlashModifier<Value>: ViewModifier where Value: Equatable {
+    var value: Value
+    @State private var seed: UInt32
+
+    init(value: Value, seed: UInt32) {
+        self.value = value
+        self._seed = State(wrappedValue: seed)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(TransformScrollStorageModifier(
+                transform: UpdateFlashSeed(seed: seed)
+            ))
+            .onChange(of: value, initial: false) {
+                seed &+= 1
+            }
+    }
+
+    /// Replaces the inherited flash seed with the modifier's current seed.
+    struct UpdateFlashSeed: ScrollEnvironmentTransform {
+        var seed: UInt32
+
+        func update(properties: inout ScrollEnvironmentProperties) {
+            properties.indicatorFlashSeed = seed
+        }
+    }
+}
+
+/// Controls whether both scroll indicators reveal themselves on appearance.
+struct ScrollIndicatorFlashOnAppearModifier: ViewModifier {
+    var isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        content.modifier(TransformScrollStorageModifier(
+            transform: UpdateIndicators(isEnabled: isEnabled)
+        ))
+    }
+
+    /// Sets or clears the initial-reveal option without changing other options.
+    struct UpdateIndicators: ScrollEnvironmentTransform {
+        var isEnabled: Bool
+
+        func update(properties: inout ScrollEnvironmentProperties) {
+            if isEnabled {
+                properties.verticalIndicator.options.insert(.revealsInitially)
+                properties.horizontalIndicator.options.insert(.revealsInitially)
+            } else {
+                properties.verticalIndicator.options.remove(.revealsInitially)
+                properties.horizontalIndicator.options.remove(.revealsInitially)
+            }
+        }
+    }
+}
+
 extension View {
     nonisolated public func scrollIndicators(
         _ visibility: ScrollIndicatorVisibility,
@@ -525,5 +581,17 @@ extension View {
         transformEnvironment(\.scrollIndicatorMetrics) {
             $0.set(metrics, axes: axes)
         }
+    }
+
+    /// Flashes scroll indicators whenever the equatable trigger changes.
+    nonisolated public func scrollIndicatorsFlash(
+        trigger value: some Equatable
+    ) -> some View {
+        modifier(ScrollIndicatorsFlashModifier(value: value, seed: 0))
+    }
+
+    /// Controls whether scroll indicators flash when the view appears.
+    nonisolated public func scrollIndicatorsFlash(onAppear: Bool) -> some View {
+        modifier(ScrollIndicatorFlashOnAppearModifier(isEnabled: onAppear))
     }
 }
