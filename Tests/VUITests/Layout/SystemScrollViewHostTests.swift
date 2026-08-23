@@ -2,6 +2,218 @@ import XCTest
 @testable import VUI
 
 final class SystemScrollViewHostTests: XCTestCase {
+    func testFixedAreaScrollIndicatorsReserveViewportAndCornerByAxis() throws {
+        let configuration = ScrollViewConfiguration(
+            axes: [.horizontal, .vertical],
+            showsIndicators: false
+        )
+        var properties = ScrollEnvironmentProperties()
+        properties.horizontalIndicator = ScrollIndicatorConfiguration(
+            visibility: .hidden,
+            style: .fixedArea
+        )
+        properties.verticalIndicator = ScrollIndicatorConfiguration(
+            visibility: .hidden,
+            style: .fixedArea
+        )
+        let metrics = ScrollIndicatorMetricsStorage(
+            horizontal: ScrollIndicatorMetrics(
+                thickness: 6,
+                minimumThumbLength: 18
+            ),
+            vertical: ScrollIndicatorMetrics(
+                thickness: 10,
+                minimumThumbLength: 20
+            )
+        )
+
+        let layout = ScrollIndicatorLayout.make(
+            outerSize: CGSize(width: 100, height: 80),
+            contentOffset: CGPoint(x: 105, y: 63),
+            contentSize: CGSize(width: 300, height: 200),
+            contentInsets: EdgeInsets(),
+            configuration: configuration,
+            properties: properties,
+            metrics: metrics,
+            layoutDirection: .leftToRight,
+            overlayOpacity: 0
+        )
+
+        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 90, height: 74))
+        XCTAssertEqual(
+            layout.reservedInsets,
+            EdgeInsets(top: 0, leading: 0, bottom: 6, trailing: 10)
+        )
+        XCTAssertEqual(layout.horizontal?.trackFrame, CGRect(x: 0, y: 74, width: 90, height: 6))
+        XCTAssertEqual(layout.horizontal?.thumbFrame, CGRect(x: 31.5, y: 74, width: 27, height: 6))
+        let vertical = try XCTUnwrap(layout.vertical)
+        XCTAssertEqual(vertical.trackFrame, CGRect(x: 90, y: 0, width: 10, height: 74))
+        XCTAssertEqual(vertical.thumbFrame.minY, 23.31, accuracy: 0.001)
+        XCTAssertEqual(vertical.thumbFrame.height, 27.38, accuracy: 0.001)
+        XCTAssertEqual(layout.cornerFrame, CGRect(x: 90, y: 74, width: 10, height: 6))
+    }
+
+    func testFixedAreaNeverHidesIndicatorWithoutReleasingReservedViewport() {
+        let configuration = ScrollViewConfiguration(axes: .vertical)
+        var properties = ScrollEnvironmentProperties()
+        properties.verticalIndicator = ScrollIndicatorConfiguration(
+            visibility: .never,
+            style: .fixedArea
+        )
+        let metrics = ScrollIndicatorMetricsStorage(
+            vertical: ScrollIndicatorMetrics(thickness: 12, minimumThumbLength: 24)
+        )
+
+        let layout = ScrollIndicatorLayout.make(
+            outerSize: CGSize(width: 80, height: 60),
+            contentOffset: .zero,
+            contentSize: CGSize(width: 68, height: 40),
+            contentInsets: EdgeInsets(),
+            configuration: configuration,
+            properties: properties,
+            metrics: metrics,
+            layoutDirection: .leftToRight,
+            overlayOpacity: 1
+        )
+
+        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 68, height: 60))
+        XCTAssertEqual(layout.reservedInsets.trailing, 12)
+        XCTAssertNil(layout.vertical)
+    }
+
+    func testOverlayScrollIndicatorUsesOpacityMinimumThumbAndRTLProgress() throws {
+        let configuration = ScrollViewConfiguration(axes: .horizontal)
+        var properties = ScrollEnvironmentProperties()
+        properties.horizontalIndicator = ScrollIndicatorConfiguration(
+            visibility: .visible,
+            style: .automatic
+        )
+        let metrics = ScrollIndicatorMetricsStorage(
+            horizontal: ScrollIndicatorMetrics(
+                thickness: 6,
+                minimumThumbLength: 30
+            )
+        )
+
+        let layout = ScrollIndicatorLayout.make(
+            outerSize: CGSize(width: 100, height: 50),
+            contentOffset: CGPoint(x: 100, y: 0),
+            contentSize: CGSize(width: 400, height: 50),
+            contentInsets: EdgeInsets(),
+            configuration: configuration,
+            properties: properties,
+            metrics: metrics,
+            layoutDirection: .rightToLeft,
+            overlayOpacity: 0.4
+        )
+
+        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 100, height: 50))
+        XCTAssertEqual(layout.reservedInsets, EdgeInsets())
+        let horizontal = try XCTUnwrap(layout.horizontal)
+        XCTAssertEqual(horizontal.trackFrame, CGRect(x: 0, y: 44, width: 100, height: 6))
+        XCTAssertEqual(horizontal.thumbFrame.minX, 46.666, accuracy: 0.001)
+        XCTAssertEqual(horizontal.thumbFrame.width, 30)
+        XCTAssertEqual(horizontal.opacity, 0.4)
+        XCTAssertFalse(horizontal.isFixedArea)
+    }
+
+    func testOverlayScrollIndicatorRequiresOverflowAndPresentationPermission() {
+        var configuration = ScrollViewConfiguration(axes: .vertical)
+        var properties = ScrollEnvironmentProperties()
+        let metrics = ScrollIndicatorMetricsStorage()
+
+        func layout(contentHeight: CGFloat) -> ScrollIndicatorLayout {
+            ScrollIndicatorLayout.make(
+                outerSize: CGSize(width: 80, height: 60),
+                contentOffset: .zero,
+                contentSize: CGSize(width: 80, height: contentHeight),
+                contentInsets: EdgeInsets(),
+                configuration: configuration,
+                properties: properties,
+                metrics: metrics,
+                layoutDirection: .leftToRight,
+                overlayOpacity: 1
+            )
+        }
+
+        XCTAssertNil(layout(contentHeight: 60).vertical)
+        XCTAssertNotNil(layout(contentHeight: 120).vertical)
+
+        configuration.showsIndicators = false
+        XCTAssertNil(layout(contentHeight: 120).vertical)
+
+        configuration.showsIndicators = true
+        properties.verticalIndicator.visibility = .hidden
+        XCTAssertNil(layout(contentHeight: 120).vertical)
+    }
+
+    func testHostingScrollViewFadesOverlayIndicatorsOnGraphClock() {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            let host = HostingScrollView(
+                graphRef: _AGGraphContext(graph: graph),
+                layoutState: graph.makeInput(
+                    value: SystemScrollLayoutState()
+                ).asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(axes: .vertical))
+            var properties = ScrollEnvironmentProperties()
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: .overlay
+            )
+            host.updateProperties(properties)
+            host.updateIndicatorPresentation(
+                outerSize: CGSize(width: 80, height: 60),
+                metrics: ScrollIndicatorMetricsStorage(
+                    vertical: ScrollIndicatorMetrics(
+                        thickness: 6,
+                        minimumThumbLength: 20
+                    )
+                )
+            )
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 80, height: 180),
+                containingSize: CGSize(width: 80, height: 60),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+
+            XCTAssertNil(host.host.indicatorLayout.vertical)
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0)
+
+            Update.ensure {
+                host.publishSystemContentOffset(CGPoint(x: 0, y: 20))
+            }
+            XCTAssertEqual(host.overlayIndicatorOpacity, 1)
+            XCTAssertEqual(host.host.indicatorLayout.vertical?.opacity, 1)
+
+            XCTAssertFalse(host.updateIndicatorVisibility(at: Time(seconds: 0.69)))
+            XCTAssertEqual(host.overlayIndicatorOpacity, 1)
+
+            XCTAssertTrue(host.updateIndicatorVisibility(at: Time(seconds: 0.825)))
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0.5, accuracy: 0.001)
+            XCTAssertEqual(
+                host.host.indicatorLayout.vertical?.opacity ?? 0,
+                0.5,
+                accuracy: 0.001
+            )
+
+            XCTAssertTrue(host.updateIndicatorVisibility(at: Time(seconds: 0.95)))
+            XCTAssertEqual(host.overlayIndicatorOpacity, 0)
+            XCTAssertNil(host.host.indicatorLayout.vertical)
+        }
+    }
+
     func testScrollViewContentFrameUsesUnspecifiedScrollableAxes() {
         let graph = _AGGraph()
         _AGGraph.withCurrent(graph) {
@@ -1798,6 +2010,8 @@ final class SystemScrollViewHostTests: XCTestCase {
             propertiesValue.isClippingEnabled = false
             let properties = graph.makeInput(value: propertiesValue)
             let containerSize = graph.makeInput(value: CGSize(width: 80, height: 120))
+            let outerSize = graph.makeInput(value: CGSize(width: 88, height: 126))
+            let indicatorMetrics = graph.makeInput(value: ScrollIndicatorMetricsStorage())
             let safeAreaInsets = graph.makeInput(value: insets)
             let rtlAdjustment = graph.makeInput(value: CGSize.zero)
             let updatedRule = UpdatedHostingScrollView(
@@ -1806,6 +2020,8 @@ final class SystemScrollViewHostTests: XCTestCase {
                 _properties: properties,
                 _contentFrame: frame,
                 _size: containerSize,
+                _outerSize: outerSize,
+                _indicatorMetrics: indicatorMetrics,
                 _safeAreaInsets: safeAreaInsets,
                 _rtlAdjustment: rtlAdjustment,
                 _adjustedState: adjusted,
@@ -1816,9 +2032,9 @@ final class SystemScrollViewHostTests: XCTestCase {
                 [
                     "_descendantScrollViewsAxes", "_container", "_scrollView",
                     "_configuration", "_properties", "_contentFrame", "_size",
-                    "_safeAreaInsets", "_rtlAdjustment", "_adjustedState",
-                    "_environment", "lastUpdateSeed", "tracker", "oldProperties",
-                    "oldMargins",
+                    "_outerSize", "_indicatorMetrics", "_safeAreaInsets",
+                    "_rtlAdjustment", "_adjustedState", "_environment",
+                    "lastUpdateSeed", "tracker", "oldProperties", "oldMargins",
                 ]
             )
             let updated = graph.makeStatefulRule(updatedRule)

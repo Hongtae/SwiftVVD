@@ -200,6 +200,19 @@ struct SystemScrollView<Content>: View where Content: View {
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
             environment.value.layoutDirection
         }
+        let scrollEnvironmentStorage: Attribute<ScrollEnvironmentStorage> = graph.makeRule {
+            environment.value.scrollEnvironmentStorage
+        }
+        let scrollIndicatorMetrics: Attribute<ScrollIndicatorMetricsStorage> = graph.makeRule {
+            environment.value.scrollIndicatorMetrics
+        }
+        let scrollIndicatorInsets: Attribute<EdgeInsets> = graph.makeRule(
+            ScrollIndicatorReservedInsets(
+                _configuration: configuration,
+                _storage: scrollEnvironmentStorage,
+                _metrics: scrollIndicatorMetrics
+            )
+        )
         let pixelLength: Attribute<CGFloat> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.animationPixelLength
         }
@@ -210,9 +223,30 @@ struct SystemScrollView<Content>: View where Content: View {
         let animatedSize = cachedEnvironment.animatedSize(for: inputs)
         cachedEnvironmentAttribute.value = cachedEnvironment
 
+        let viewportSize: Attribute<ViewSize> = graph.makeRule(
+            ScrollIndicatorViewportSize(
+                _size: inputs.size,
+                _reservedInsets: scrollIndicatorInsets
+            )
+        )
+        let animatedViewportSize: Attribute<ViewSize> = graph.makeRule(
+            ScrollIndicatorViewportSize(
+                _size: animatedSize,
+                _reservedInsets: scrollIndicatorInsets
+            )
+        )
+        let animatedViewportPosition: Attribute<CGPoint> = graph.makeRule(
+            ScrollIndicatorViewportPosition(
+                _position: animatedPosition,
+                _size: animatedSize,
+                _reservedInsets: scrollIndicatorInsets,
+                _layoutDirection: layoutDirection
+            )
+        )
+
         let contentFrameSize: Attribute<ViewSize> = graph.makeRule(
             ScrollViewContentFrameSize(
-                _size: animatedSize,
+                _size: animatedViewportSize,
                 _configuration: configuration
             )
         )
@@ -233,6 +267,7 @@ struct SystemScrollView<Content>: View where Content: View {
         let childContainerSize: Attribute<ViewSize> = graph.makeStatefulRule(
             ScrollViewChildContainerSize(
                 _configuration: configuration,
+                _indicatorInsets: scrollIndicatorInsets,
                 _parentContainerSize: inputs.containerSize,
                 _resolvedSize: resolvedContainerSize,
                 oldParentSize: ViewSize(
@@ -258,7 +293,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 _configuration: configuration,
                 _scrollAnchors: defaultAnchors,
                 _contentFrame: frame,
-                _size: inputs.size
+                _size: viewportSize
             )
         )
         let animatedAlignmentAdjustment = alignmentAdjustment.animated(inputs: inputs.base)
@@ -267,20 +302,20 @@ struct SystemScrollView<Content>: View where Content: View {
                 _configuration: configuration,
                 _scrollAnchors: defaultAnchors,
                 _contentFrame: frame,
-                _size: inputs.size,
+                _size: viewportSize,
                 _layoutDirection: layoutDirection
             )
         )
         let adjustedPosition: Attribute<CGPoint> = graph.makeRule(
             ScrollViewAdjustedPosition(
-                _position: animatedPosition,
+                _position: animatedViewportPosition,
                 _configuration: configuration,
                 _rtlAdjustment: rtlAdjustment
             )
         )
         let adjustedSize: Attribute<ViewSize> = graph.makeRule(
             ScrollViewAdjustedSize(
-                _size: animatedSize,
+                _size: animatedViewportSize,
                 _rtlAdjustment: rtlAdjustment
             )
         )
@@ -320,7 +355,7 @@ struct SystemScrollView<Content>: View where Content: View {
         let positionBinding = inputs.base.scrollPositionBinding(kind: .scrollView).attribute?.value
         let adjustedState: Attribute<SystemScrollLayoutState> = graph.makeStatefulRule(
             ScrollViewAdjustedState(
-                _size: inputs.size,
+                _size: viewportSize,
                 _configuration: configuration,
                 _defaultAnchors: defaultAnchors,
                 _state: layoutState,
@@ -333,9 +368,6 @@ struct SystemScrollView<Content>: View where Content: View {
                 _positionBinding: positionBinding
             )
         )
-        let scrollEnvironmentStorage: Attribute<ScrollEnvironmentStorage> = graph.makeRule {
-            environment.value.scrollEnvironmentStorage
-        }
         let adjustedScrollBehavior: Attribute<ResolvedScrollBehavior?> = graph.makeRule(
             ScrollViewAdjustedBehavior(
                 _axes: scrollableAxes,
@@ -405,6 +437,7 @@ struct SystemScrollView<Content>: View where Content: View {
                 ScrollViewLayoutComputer(
                     _configuration: configuration,
                     _systemContentInsets: systemContentInsets,
+                    _indicatorInsets: scrollIndicatorInsets,
                     _contentComputer: contentOutputs._layoutComputer
                 )
             )
@@ -485,6 +518,9 @@ struct SystemScrollView<Content>: View where Content: View {
             displayListFrame = nil
         }
         let containerSize: Attribute<CGSize> = graph.makeRule {
+            viewportSize.value.value
+        }
+        let outerSize: Attribute<CGSize> = graph.makeRule {
             inputs.size.value.value
         }
         let descendantScrollViewsAxes: Attribute<Axis.Set?>? = contentOutputs.preferences
@@ -498,6 +534,8 @@ struct SystemScrollView<Content>: View where Content: View {
                 _properties: scrollEnvironmentProperties,
                 _contentFrame: frame,
                 _size: containerSize,
+                _outerSize: outerSize,
+                _indicatorMetrics: scrollIndicatorMetrics,
                 _safeAreaInsets: adjustedSafeArea,
                 _rtlAdjustment: rtlAdjustment,
                 _adjustedState: adjustedState,
@@ -524,7 +562,7 @@ struct SystemScrollView<Content>: View where Content: View {
             ScrollGeometryProvider(
                 layoutState: adjustedState,
                 frame: frame,
-                size: inputs.size,
+                size: viewportSize,
                 layoutDirection: layoutDirection
             )
         )
@@ -1095,6 +1133,7 @@ private struct ScrollViewChildContainerSize: StatefulRule {
     typealias Value = ViewSize
 
     var _configuration: Attribute<ScrollViewConfiguration>
+    var _indicatorInsets: Attribute<EdgeInsets>
     var _parentContainerSize: OptionalAttribute<ViewSize>
     var _resolvedSize: Attribute<CGSize>
     var oldParentSize: ViewSize
@@ -1103,7 +1142,7 @@ private struct ScrollViewChildContainerSize: StatefulRule {
     mutating func updateValue() {
         var inheritedSize = _parentContainerSize.attribute?.value ?? .zero
         inheritedSize.value = inheritedSize.value.inset(
-            by: _configuration.value.contentInsets
+            by: _configuration.value.contentInsets.adding(_indicatorInsets.value)
         )
 
         let resolvedSize = _resolvedSize.value
@@ -1129,13 +1168,14 @@ private struct ScrollViewLayoutComputer: StatefulRule {
 
     var _configuration: Attribute<ScrollViewConfiguration>
     var _systemContentInsets: Attribute<EdgeInsets>
+    var _indicatorInsets: Attribute<EdgeInsets>
     var _contentComputer: OptionalAttribute<LayoutComputer>
 
     mutating func updateValue() {
         let configuration = _configuration.value
         let contentInsets = configuration.contentInsets.adding(
             _systemContentInsets.value
-        )
+        ).adding(_indicatorInsets.value)
         let contentComputer = _contentComputer.attribute?.value
         updateIfNotEqual(
             to: Engine(

@@ -491,6 +491,7 @@ class HostingScrollView {
         weak var scrollView: HostingScrollView?
         private(set) var bounds = CGRect.zero
         private(set) var clipBounds = CGRect.zero
+        private(set) var indicatorLayout = ScrollIndicatorLayout()
 
         func updateViewport(
             contentOffset: CGPoint,
@@ -502,6 +503,10 @@ class HostingScrollView {
             )
             bounds = viewport
             clipBounds = viewport
+        }
+
+        func updateIndicators(_ layout: ScrollIndicatorLayout) {
+            indicatorLayout = layout
         }
     }
 
@@ -532,13 +537,45 @@ class HostingScrollView {
             render: (DisplayList, GraphicsContext) -> Void
         ) {
             let group = scrollView.host
-            var context = context
-            context.translateBy(
+            var contentContext = context
+            contentContext.translateBy(
                 x: -group.bounds.origin.x,
                 y: -group.bounds.origin.y
             )
-            context.clip(to: Path(group.clipBounds))
-            render(contents, context)
+            contentContext.clip(to: Path(group.clipBounds))
+            render(contents, contentContext)
+            renderIndicators(group.indicatorLayout, in: context)
+        }
+
+        private func renderIndicators(
+            _ layout: ScrollIndicatorLayout,
+            in context: GraphicsContext
+        ) {
+            let indicators = [layout.horizontal, layout.vertical].compactMap { $0 }
+            for indicator in indicators {
+                context.fill(
+                    Path(indicator.trackFrame),
+                    with: .color(.black.opacity(0.12 * indicator.opacity))
+                )
+            }
+            if let cornerFrame = layout.cornerFrame {
+                let opacity = indicators
+                    .filter(\.isFixedArea)
+                    .map(\.opacity)
+                    .max() ?? 0
+                if opacity > 0 {
+                    context.fill(
+                        Path(cornerFrame),
+                        with: .color(.black.opacity(0.12 * opacity))
+                    )
+                }
+            }
+            for indicator in indicators {
+                context.fill(
+                    Path(indicator.thumbFrame),
+                    with: .color(.black.opacity(0.48 * indicator.opacity))
+                )
+            }
         }
     }
 
@@ -554,7 +591,14 @@ class HostingScrollView {
     private var targetProvider: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?
     private var targetConfiguration: ScrollTargetConfiguration?
     private var cachedTargetOffset = CGPoint.zero
+    private var indicatorMetrics = ScrollIndicatorMetricsStorage()
+    private var indicatorOuterSize = CGSize.zero
+    private var overlayIndicatorFadeStart: Time?
     private(set) var currentPhaseState = ScrollPhaseState()
+    private(set) var overlayIndicatorOpacity = 0.0
+
+    private static let overlayIndicatorHoldDuration = 0.7
+    private static let overlayIndicatorFadeDuration = 0.25
 
     let host: PlatformGroupContainer
     weak var parentContainer: PlatformContainer?
@@ -598,6 +642,10 @@ class HostingScrollView {
     @discardableResult
     func updateContext(_ context: HostingScrollViewUpdateContext) -> Bool {
         var context = context
+        let previousOffset = pendingContext?.contentOffset
+        let revealsInitially = pendingContext == nil
+            && (properties.horizontalIndicator.options.contains(.revealsInitially)
+                || properties.verticalIndicator.options.contains(.revealsInitially))
         var targetPublicationIsPreferred: Bool?
         publishContainerSize(context.containingSize)
         switch context.offsetMode {
@@ -650,6 +698,11 @@ class HostingScrollView {
             containingSize: context.containingSize
         )
         pendingContext = context
+        if revealsInitially || previousOffset.map({ $0 != context.contentOffset }) == true {
+            revealOverlayIndicators()
+        } else {
+            updateIndicatorLayout()
+        }
         if let targetPublicationIsPreferred {
             updateGraphState(isPreferred: targetPublicationIsPreferred)
         }
@@ -722,6 +775,7 @@ class HostingScrollView {
             contentOffset: offset,
             containingSize: context.containingSize
         )
+        revealOverlayIndicators()
         if targetConfiguration.preservesVelocity, var decelerationState {
             decelerationState.simulation.updateTarget(offset)
             decelerationState.targetOffsetState = nil
@@ -774,6 +828,15 @@ class HostingScrollView {
 
     func updateProperties(_ properties: ScrollEnvironmentProperties) {
         self.properties = properties
+    }
+
+    func updateIndicatorPresentation(
+        outerSize: CGSize,
+        metrics: ScrollIndicatorMetricsStorage
+    ) {
+        indicatorOuterSize = outerSize
+        indicatorMetrics = metrics
+        updateIndicatorLayout()
     }
 
     func updateContentMargins(_ margins: ContentMarginProxy) {
@@ -916,12 +979,14 @@ class HostingScrollView {
             contentOffset: offset,
             containingSize: context.containingSize
         )
+        updateIndicatorLayout()
         return true
     }
 
     /// Publishes a host-originated offset, such as a platform wheel or scrollbar update.
     func publishSystemContentOffset(_ offset: CGPoint) {
         guard updateLiveContentOffset(offset) else { return }
+        revealOverlayIndicators()
         updateGraphState(isPreferred: false)
     }
 
@@ -1083,6 +1148,34 @@ class HostingScrollView {
             scheduleMotionUpdate()
         }
         return true
+    }
+
+    @discardableResult
+    func updateIndicatorVisibility(at time: Time) -> Bool {
+        guard let fadeStart = overlayIndicatorFadeStart else {
+            return false
+        }
+        guard time >= fadeStart else {
+            scheduleIndicatorUpdate(at: fadeStart)
+            return false
+        }
+
+        let duration = Self.overlayIndicatorFadeDuration
+        let progress = duration > 0
+            ? min(max((time.seconds - fadeStart.seconds) / duration, 0), 1)
+            : 1
+        let opacity = 1 - progress
+        let changed = opacity != overlayIndicatorOpacity
+        overlayIndicatorOpacity = opacity
+        if changed {
+            updateIndicatorLayout()
+        }
+        if progress < 1 {
+            scheduleMotionUpdate()
+        } else {
+            overlayIndicatorFadeStart = nil
+        }
+        return changed
     }
 
     private func clampedContentOffset(_ offset: CGPoint) -> CGPoint {
@@ -1329,12 +1422,51 @@ class HostingScrollView {
         viewGraph.nextUpdate.views.interval(1.0 / 60.0)
     }
 
+    private func scheduleIndicatorUpdate(at time: Time) {
+        guard let viewGraph = graphRef.context as? ViewGraph else {
+            return
+        }
+        viewGraph.nextUpdate.views.at(time)
+    }
+
+    private func revealOverlayIndicators() {
+        guard let viewGraph = graphRef.context as? ViewGraph else {
+            return
+        }
+        overlayIndicatorOpacity = 1
+        overlayIndicatorFadeStart = viewGraph.currentTimestamp
+            + Self.overlayIndicatorHoldDuration
+        updateIndicatorLayout()
+        if let overlayIndicatorFadeStart {
+            scheduleIndicatorUpdate(at: overlayIndicatorFadeStart)
+        }
+    }
+
+    private func updateIndicatorLayout() {
+        guard let context = pendingContext else {
+            host.updateIndicators(ScrollIndicatorLayout())
+            return
+        }
+        host.updateIndicators(ScrollIndicatorLayout.make(
+            outerSize: indicatorOuterSize,
+            contentOffset: context.contentOffset,
+            contentSize: context.contentFrame.size,
+            contentInsets: context.safeInsets,
+            configuration: configuration,
+            properties: properties,
+            metrics: indicatorMetrics,
+            layoutDirection: layoutDirection,
+            overlayOpacity: overlayIndicatorOpacity
+        ))
+    }
+
     private func publishInteraction(
         offset: CGPoint,
         phase: ScrollPhase,
         velocity: _Velocity<CGSize>
     ) {
         guard updateLiveContentOffset(offset) else { return }
+        revealOverlayIndicators()
         if currentPhaseState.phase != phase {
             // Velocity belongs to the phase transition. Motion samples within
             // that phase only publish the latest viewport geometry.
@@ -2581,6 +2713,8 @@ struct UpdatedHostingScrollView: StatefulRule {
     var _properties: Attribute<ScrollEnvironmentProperties>
     var _contentFrame: Attribute<ViewFrame>
     var _size: Attribute<CGSize>
+    var _outerSize: Attribute<CGSize>
+    var _indicatorMetrics: Attribute<ScrollIndicatorMetricsStorage>
     var _safeAreaInsets: Attribute<EdgeInsets>
     var _rtlAdjustment: Attribute<CGSize>
     var _adjustedState: Attribute<SystemScrollLayoutState>
@@ -2598,6 +2732,8 @@ struct UpdatedHostingScrollView: StatefulRule {
         _properties: Attribute<ScrollEnvironmentProperties>,
         _contentFrame: Attribute<ViewFrame>,
         _size: Attribute<CGSize>,
+        _outerSize: Attribute<CGSize>,
+        _indicatorMetrics: Attribute<ScrollIndicatorMetricsStorage>,
         _safeAreaInsets: Attribute<EdgeInsets>,
         _rtlAdjustment: Attribute<CGSize>,
         _adjustedState: Attribute<SystemScrollLayoutState>,
@@ -2614,6 +2750,8 @@ struct UpdatedHostingScrollView: StatefulRule {
         self._properties = _properties
         self._contentFrame = _contentFrame
         self._size = _size
+        self._outerSize = _outerSize
+        self._indicatorMetrics = _indicatorMetrics
         self._safeAreaInsets = _safeAreaInsets
         self._rtlAdjustment = _rtlAdjustment
         self._adjustedState = _adjustedState
@@ -2630,6 +2768,8 @@ struct UpdatedHostingScrollView: StatefulRule {
         let configuration = _configuration.value
         let properties = _properties.value
         let frame = _contentFrame.value
+        let outerSize = _outerSize.value
+        let indicatorMetrics = _indicatorMetrics.value
         let state = _adjustedState.value
         let safeAreaInsets = _safeAreaInsets.value
         let rtlAdjustment = _rtlAdjustment.value
@@ -2660,6 +2800,10 @@ struct UpdatedHostingScrollView: StatefulRule {
             layoutDirection: properties.layoutDirection
         )
         scrollView.updateRTLAdjustment(rtlAdjustment)
+        scrollView.updateIndicatorPresentation(
+            outerSize: outerSize,
+            metrics: indicatorMetrics
+        )
 
         let offsetMode: SystemScrollLayoutState.ContentOffsetMode = lastUpdateSeed.matches(
             state.contentOffsetSeed
@@ -2690,6 +2834,7 @@ struct HostingScrollViewMotionUpdate: StatefulRule {
     mutating func updateValue() {
         let scrollView = _scrollView.value
         _ = scrollView.updateMotion(at: _time.value)
+        _ = scrollView.updateIndicatorVisibility(at: _time.value)
         _AGGraph.setStatefulOutput(scrollView)
     }
 }

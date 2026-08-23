@@ -171,7 +171,7 @@ struct ScrollIndicatorOptions: OptionSet, Equatable, Sendable {
     static let revealsInitially = ScrollIndicatorOptions(rawValue: 1)
 }
 
-struct ScrollIndicatorStyle: Equatable, Sendable {
+public struct ScrollIndicatorStyle: Equatable, Sendable {
     enum Value: Equatable, Sendable {
         case automatic
         case overlay
@@ -180,7 +180,13 @@ struct ScrollIndicatorStyle: Equatable, Sendable {
 
     var value: Value
 
-    static let automatic = ScrollIndicatorStyle(value: .automatic)
+    public static let automatic = ScrollIndicatorStyle(value: .automatic)
+    public static let overlay = ScrollIndicatorStyle(value: .overlay)
+
+    /// Reserves a persistent scrollbar area outside the content viewport.
+    public static let fixedArea = ScrollIndicatorStyle(value: .legacy)
+
+    static let legacy = ScrollIndicatorStyle(value: .legacy)
 }
 
 struct ScrollIndicatorConfiguration: Equatable {
@@ -593,6 +599,33 @@ struct TransformScrollStorageEnvironment<Transform: ScrollEnvironmentTransform>:
         values.scrollEnvironmentStorage = storage
         previousProperties = storage.properties
         _AGGraph.setStatefulOutput(values)
+    }
+}
+
+struct TransformScrollStorageModifier<Transform>: ViewModifier, _GraphInputsModifier
+where Transform: ScrollEnvironmentTransform {
+    typealias Body = Never
+
+    var transform: Transform
+
+    static func _makeInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeInputs called outside an active _AGGraph context.")
+        }
+        let environment = inputs.cachedEnvironment.value.environment
+        let transformedEnvironment: Attribute<EnvironmentValues> = graph.makeStatefulRule(
+            TransformScrollStorageEnvironment(
+                _environment: environment,
+                _transform: modifier[\.transform]._attribute,
+                previousProperties: nil
+            )
+        )
+        inputs.cachedEnvironment = MutableBox(
+            inputs.cachedEnvironment.value.replacingEnvironment(transformedEnvironment)
+        )
     }
 }
 

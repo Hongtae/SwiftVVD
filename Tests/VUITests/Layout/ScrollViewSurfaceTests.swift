@@ -542,6 +542,30 @@ private final class ScrollBehaviorEnvironmentRecorder {
     var environment: Attribute<EnvironmentValues>?
 }
 
+private final class ScrollIndicatorEnvironmentRecorder {
+    var properties = ScrollEnvironmentProperties()
+    var metrics = ScrollIndicatorMetricsStorage()
+}
+
+private struct ScrollIndicatorEnvironmentContent: View, TestPrimitiveView {
+    var recorder: ScrollIndicatorEnvironmentRecorder
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollIndicatorEnvironmentContent._makeView requires an active graph.")
+        }
+        let environment = inputs.base.cachedEnvironment.value.environment.value
+        let recorder = view._attribute.value.recorder
+        recorder.properties = environment.scrollEnvironmentStorage.properties
+        recorder.metrics = environment.scrollIndicatorMetrics
+        return _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
+            LayoutComputer.fixed(CGSize(width: 10, height: 10))
+        }))
+    }
+}
+
 private struct ScrollBehaviorEnvironmentContent: View, TestPrimitiveView {
     var recorder: ScrollBehaviorEnvironmentRecorder
     var size = CGSize(width: 11, height: 13)
@@ -1907,8 +1931,88 @@ final class ScrollViewSurfaceTests: XCTestCase {
             "style",
         ])
         XCTAssertEqual(Mirror(reflecting: ScrollIndicatorStyle.automatic).children.map(\.label), ["value"])
+        XCTAssertEqual(ScrollIndicatorStyle.automatic.value, .automatic)
+        XCTAssertEqual(ScrollIndicatorStyle.overlay.value, .overlay)
+        XCTAssertEqual(ScrollIndicatorStyle.fixedArea.value, .legacy)
+        XCTAssertEqual(ScrollIndicatorStyle.fixedArea, .legacy)
 
         // ASSERTIONS: scrollIndicatorVisibilityFocusedSurfaceObserved
+        // ASSERTIONS: scrollIndicatorStyleConsumptionObserved
+    }
+
+    func testScrollIndicatorModifiersComposeStyleVisibilityAndMetricsByAxis() {
+        let recorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let view = ScrollIndicatorEnvironmentContent(recorder: recorder)
+                .scrollIndicatorStyle(.fixedArea, axes: .vertical)
+                .scrollIndicatorStyle(.overlay, axes: .horizontal)
+                .scrollIndicators(.never, axes: .horizontal)
+                .scrollIndicators(.visible, axes: .vertical)
+                .scrollIndicatorMetrics(
+                    ScrollIndicatorMetrics(thickness: 13, minimumThumbLength: 31),
+                    axes: .vertical
+                )
+                .scrollIndicatorMetrics(
+                    ScrollIndicatorMetrics(thickness: 7, minimumThumbLength: 19),
+                    axes: .horizontal
+                )
+            let attribute = graph.makeInput(value: view)
+            _ = type(of: view)._makeView(
+                view: _GraphValue(_attribute: attribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertEqual(recorder.properties.verticalIndicator.style, .fixedArea)
+        XCTAssertEqual(recorder.properties.horizontalIndicator.style, .overlay)
+        XCTAssertEqual(recorder.properties.verticalIndicator.visibility, .visible)
+        XCTAssertEqual(recorder.properties.horizontalIndicator.visibility, .never)
+        XCTAssertEqual(
+            recorder.metrics.vertical,
+            ScrollIndicatorMetrics(thickness: 13, minimumThumbLength: 31)
+        )
+        XCTAssertEqual(
+            recorder.metrics.horizontal,
+            ScrollIndicatorMetrics(thickness: 7, minimumThumbLength: 19)
+        )
+    }
+
+    func testScrollIndicatorEnvironmentVisibilitySettersRemainAxisSpecific() {
+        var environment = EnvironmentValues()
+        environment.horizontalScrollIndicatorVisibility = .hidden
+        environment.verticalScrollIndicatorVisibility = .visible
+
+        XCTAssertEqual(environment.horizontalScrollIndicatorVisibility, .hidden)
+        XCTAssertEqual(environment.verticalScrollIndicatorVisibility, .visible)
+        XCTAssertEqual(
+            environment.scrollEnvironmentStorage.properties.horizontalIndicator.visibility,
+            .hidden
+        )
+        XCTAssertEqual(
+            environment.scrollEnvironmentStorage.properties.verticalIndicator.visibility,
+            .visible
+        )
+    }
+
+    func testScrollIndicatorMetricsResolveInvalidLengthsWithoutChangingValidValues() {
+        XCTAssertEqual(
+            ScrollIndicatorMetrics(thickness: 9, minimumThumbLength: 27).resolved,
+            ScrollIndicatorMetrics(thickness: 9, minimumThumbLength: 27)
+        )
+        XCTAssertEqual(
+            ScrollIndicatorMetrics(
+                thickness: -.infinity,
+                minimumThumbLength: -.nan
+            ).resolved,
+            ScrollIndicatorMetrics(thickness: 0, minimumThumbLength: 0)
+        )
+        XCTAssertEqual(
+            ScrollIndicatorMetrics(thickness: -4, minimumThumbLength: -8).resolved,
+            ScrollIndicatorMetrics(thickness: 0, minimumThumbLength: 0)
+        )
     }
 
     func testScrollEnvironmentPropertiesStorageAndTransform() {
@@ -2434,6 +2538,95 @@ final class ScrollViewSurfaceTests: XCTestCase {
                     height: size.height - updatedInsets.top - updatedInsets.bottom
                 )
             )
+        }
+    }
+
+    func testSystemScrollViewFixedAreaIndicatorsSeparateOuterAndContentViewports() throws {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        try ref.withCurrent {
+            var preferenceKeys = PreferenceKeys()
+            preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(DisplayList.Key.self)
+
+            var environment = EnvironmentValues.tracking()
+            var properties = environment.scrollEnvironmentStorage.properties
+            properties.horizontalIndicator = ScrollIndicatorConfiguration(
+                visibility: .hidden,
+                style: .fixedArea
+            )
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .hidden,
+                style: .fixedArea
+            )
+            environment.scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+            environment.scrollIndicatorMetrics = ScrollIndicatorMetricsStorage(
+                horizontal: ScrollIndicatorMetrics(
+                    thickness: 6,
+                    minimumThumbLength: 18
+                ),
+                vertical: ScrollIndicatorMetrics(
+                    thickness: 10,
+                    minimumThumbLength: 20
+                )
+            )
+
+            let recorder = ScrollViewInputRecorder()
+            let view = SystemScrollView(
+                configuration: ScrollViewConfiguration(
+                    axes: [.horizontal, .vertical],
+                    showsIndicators: false
+                ),
+                content: ScrollViewRecordingContent(
+                    recorder: recorder,
+                    size: CGSize(width: 300, height: 400)
+                )
+            )
+            let viewAttr = graph.makeInput(value: view)
+            var inputs = makeViewInputs(
+                graph: graph,
+                preferenceKeys: preferenceKeys,
+                environment: environment
+            )
+            inputs.position = graph.makeInput(value: CGPoint(x: 5, y: 7))
+            inputs.size = graph.makeInput(value: ViewSize(CGSize(width: 100, height: 80)))
+            inputs.requestsLayoutComputer = true
+
+            let outputs = SystemScrollView<ScrollViewRecordingContent>._makeView(
+                view: _GraphValue(_attribute: viewAttr),
+                inputs: inputs
+            )
+
+            let geometryID = try XCTUnwrap(
+                outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
+            )
+            let geometry = try XCTUnwrap(
+                Attribute<[ScrollGeometryState]>(geometryID).value.first?.geometry
+            )
+            XCTAssertEqual(geometry.containerSize, CGSize(width: 90, height: 74))
+            XCTAssertEqual(geometry.contentSize, CGSize(width: 300, height: 400))
+
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute).value
+            XCTAssertEqual(
+                layout.sizeThatFits(.unspecified),
+                CGSize(width: 310, height: 406)
+            )
+
+            let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
+            let displayItem = try XCTUnwrap(Attribute<DisplayList>(displayID).value.items.first)
+            XCTAssertEqual(displayItem.frame, CGRect(x: 5, y: 7, width: 100, height: 80))
+            let effect = try XCTUnwrap(displayItem.effectItem)
+            guard case let .platformGroup(factory) = effect.effect else {
+                return XCTFail("expected platform-group attachment")
+            }
+            let hostLayout = try XCTUnwrap(
+                factory.platformGroupContainer as? HostingScrollView.PlatformGroupContainer
+            ).indicatorLayout
+            XCTAssertEqual(hostLayout.viewportFrame, CGRect(x: 0, y: 0, width: 90, height: 74))
+            XCTAssertEqual(hostLayout.horizontal?.trackFrame, CGRect(x: 0, y: 74, width: 90, height: 6))
+            XCTAssertEqual(hostLayout.vertical?.trackFrame, CGRect(x: 90, y: 0, width: 10, height: 74))
+            XCTAssertEqual(hostLayout.cornerFrame, CGRect(x: 90, y: 74, width: 10, height: 6))
         }
     }
 
@@ -3826,13 +4019,14 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
     private func makeViewInputs(
         graph: _AGGraph,
-        preferenceKeys: PreferenceKeys = PreferenceKeys()
+        preferenceKeys: PreferenceKeys = PreferenceKeys(),
+        environment: EnvironmentValues = EnvironmentValues.tracking()
     ) -> _ViewInputs {
         _ViewInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time()),
                 phase: graph.makeInput(value: _GraphInputs.Phase()),
-                environment: graph.makeInput(value: EnvironmentValues.tracking()),
+                environment: graph.makeInput(value: environment),
                 transaction: graph.makeInput(value: Transaction())
             ),
             customInputs: PropertyList(),
