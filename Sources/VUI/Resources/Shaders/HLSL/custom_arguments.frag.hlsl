@@ -1,3 +1,10 @@
+//
+//  File: custom_arguments.frag.hlsl
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
 struct FragmentInput
 {
     [[vk::location(0)]] float2 textureCoordinate : TEXCOORD0;

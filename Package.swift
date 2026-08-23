@@ -116,9 +116,7 @@ let package = Package(
                 .target(name: "VUIMacros"),
             ],
             exclude: [
-                "Resources/Shaders/GLSL",
                 "Resources/Shaders/HLSL",
-                "Resources/Shaders/gen_spv.py",
                 "Resources/Shaders/gen_hlsl_spv.py"
             ],
             resources: [
