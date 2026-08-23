@@ -4915,6 +4915,169 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazySectionGridAsymmetricBoundaryTargetRecurrenceObserved
+    func testLazySectionGridAsymmetricIncompleteGroupUsesEstimatedThenExactBoundaryRecurrence() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+
+            func region(
+                sizes: [CGSize],
+                implicitID: Int
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(
+                        graph: graph,
+                        sizes: sizes
+                    ),
+                    implicitID: implicitID
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            let bodyBaseHeights: [CGFloat] = [13, 31, 17, 43, 19]
+            let headerBaseHeights: [CGFloat] = [11, 23, 17, 29]
+            var sectionEntries: [(
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            )] = []
+            for section in 0..<12 {
+                let header = region(
+                    sizes: [
+                        CGSize(
+                            width: 120,
+                            height: headerBaseHeights[
+                                section % headerBaseHeights.count
+                            ]
+                        ),
+                    ],
+                    implicitID: 1_000 + section
+                )
+                let sectionAdjustment = CGFloat((section % 3) * 2)
+                let content = region(
+                    sizes: bodyBaseHeights.map {
+                        CGSize(width: 40, height: $0 + sectionAdjustment)
+                    },
+                    implicitID: 2_000 + section
+                )
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: UInt32(section),
+                    base: _ViewList_Group(lists: [header, content])
+                )
+                sectionEntries.append((
+                    sectionList,
+                    graph.makeInput(value: sectionList)
+                ))
+            }
+
+            let list: any ViewList = _ViewList_Group(lists: sectionEntries)
+            let layout = LazyVGridLayout(
+                columns: Array(
+                    repeating: GridItem(.fixed(40), spacing: 3),
+                    count: 3
+                ),
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let incompleteGroupTarget = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 4).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 0).canonicalID
+
+            XCTAssertEqual(subviews.firstIndex(of: incompleteGroupTarget), 47)
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                70
+            )
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 49)
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                75
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedLength = CGFloat(463) / 17
+            let estimatedOrigin = CGFloat(794.4117647058823)
+            var stackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [11: 4, 31: 5, 43: 4, 23: 4],
+                    spacingToCount: [7: 13]
+                )
+            )
+            let estimatedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(estimatedRect.origin.y, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(estimatedRect.size.height, estimatedLength, accuracy: 0.000_001)
+            XCTAssertEqual(estimatedRect.size.width, 140, accuracy: 0.000_001)
+
+            stackCache.placedIndices = 69..<72
+            stackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let nextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                nextSectionRect.origin.y,
+                estimatedOrigin + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(nextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.size.width, 140, accuracy: 0.000_001)
+        }
+    }
+
     func testLazyStackResolveIndexAndPositionUsesCachedRelativeEstimate() {
         // ASSERTIONS: lazyIndexPositionRuntimeObserved
         let host = GraphHost()

@@ -1268,7 +1268,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
         return forEachNode(from: &from, style: style) { nodeFrom, node, temporaryTransform in
             var shouldStop = false
             let nodeTransform = combinedTransform(with: temporaryTransform)
-            let estimatedCount: Int
+            let concreteCount: Int
 
             switch node {
             case .section(let section):
@@ -1280,7 +1280,9 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     baseIndex: traversalIndex
                 )
                 body(&nodeFrom, .section(child), &shouldStop)
-                estimatedCount = section.estimatedCount(style: style)
+                concreteCount = section.estimatedCount(
+                    style: _ViewList_IteratorStyle(value: 2)
+                )
 
             case .sublist(let sublist):
                 let child = _LazyLayout_Subviews(
@@ -1292,7 +1294,7 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     baseIndex: traversalIndex
                 )
                 body(&nodeFrom, .subviews(child), &shouldStop)
-                estimatedCount = child.estimatedCount(style: style)
+                concreteCount = child.estimatedCount()
 
             case .list(let list, let attribute):
                 let child = _LazyLayout_Subviews(
@@ -1304,7 +1306,9 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     baseIndex: traversalIndex
                 )
                 body(&nodeFrom, .subviews(child), &shouldStop)
-                estimatedCount = list.estimatedCount(style: style)
+                concreteCount = list.estimatedCount(
+                    style: _ViewList_IteratorStyle(value: 2)
+                )
 
             case .group(let group):
                 let child = _LazyLayout_Subviews(
@@ -1316,9 +1320,13 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                     baseIndex: traversalIndex
                 )
                 body(&nodeFrom, .subviews(child), &shouldStop)
-                estimatedCount = group.estimatedCount(style: style)
+                concreteCount = group.estimatedCount(
+                    style: _ViewList_IteratorStyle(value: 2)
+                )
             }
-            traversalIndex += estimatedCount
+            // Concrete lazy subview indexes do not include the caller's
+            // minor-axis padding used by layout target offsets.
+            traversalIndex += concreteCount
             return !shouldStop
         }
     }
@@ -1491,8 +1499,19 @@ struct _LazyLayout_Subviews: LazyLayoutNamespace {
                 style: style,
                 list: listAttribute,
                 transform: _ViewList_TemporarySublistTransform()
-            ) { nodeFrom, _, node, temporaryTransform in
-                body(&nodeFrom, node, temporaryTransform)
+            ) { nodeFrom, nodeStyle, node, temporaryTransform in
+                // A list root can surface a group wrapper. Expand that wrapper
+                // once so section boundaries remain visible to stack placement.
+                if case .group(let group) = node {
+                    return group.applyNodes(
+                        from: &nodeFrom,
+                        style: nodeStyle,
+                        transform: temporaryTransform
+                    ) { childFrom, _, childNode, childTransform in
+                        body(&childFrom, childNode, childTransform)
+                    }
+                }
+                return body(&nodeFrom, node, temporaryTransform)
             }
         case .group(let group):
             return group.applyNodes(
