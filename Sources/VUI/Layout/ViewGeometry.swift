@@ -894,7 +894,10 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             }
 
         case .projectionTransform(let t, let isLocalToGlobal):
-            let effective = isLocalToGlobal ? t.inverted() : t
+            var effective = t
+            if isLocalToGlobal, !effective.invert() {
+                return
+            }
             for i in points.indices {
                 points[i] = points[i].applying(effective)
             }

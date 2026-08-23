@@ -70,6 +70,10 @@ private struct GeometryEffectTransform<Effect: GeometryEffect>:
         if _layoutDirection.value == .rightToLeft {
             projection.flipRTL(width: _size.value.width)
         }
+        guard projection.isInvertible else {
+            Log.warning("ignoring singular matrix: \(projection)")
+            return transform
+        }
         transform.appendProjectionTransform(projection, inverse: true)
         return transform
     }

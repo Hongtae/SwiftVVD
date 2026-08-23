@@ -1,6 +1,43 @@
 import XCTest
 @testable import VUI
 
+private final class GeometryEffectTransformCapture: @unchecked Sendable {
+    var transform: Attribute<ViewTransform>?
+}
+
+private struct GeometryEffectTransformProbe: View, TestPrimitiveView {
+    var capture: GeometryEffectTransformCapture
+
+    typealias Body = Never
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("GeometryEffectTransformProbe called outside an active graph.")
+        }
+        view._attribute.value.capture.transform = inputs.transform
+        return _ViewOutputs(
+            layoutComputer: OptionalAttribute(
+                graph.makeInput(value: LayoutComputer.fixed(
+                    CGSize(width: 40, height: 20)
+                ))
+            )
+        )
+    }
+}
+
+private struct GeometryEffectTransformRoot: View {
+    var projection: ProjectionTransform
+    var capture: GeometryEffectTransformCapture
+
+    var body: some View {
+        GeometryEffectTransformProbe(capture: capture)
+            .projectionEffect(projection)
+    }
+}
+
 final class GeometryEffectSurfaceTests: XCTestCase {
     func testIdentityEffectCanonicalizationUnwrapsOneChild() throws {
         let childIdentity = _DisplayList_Identity()
@@ -185,6 +222,121 @@ final class GeometryEffectSurfaceTests: XCTestCase {
         XCTAssertEqual(inverseGlobal, expectedGlobal)
         inverseStored.convertGlobal(to: .local, points: &inverseGlobal)
         assertPointsEqual(inverseGlobal, localPoints)
+    }
+
+    // ASSERTIONS projectionInverseFailureRuntimeObserved
+    func testViewTransformProjectionInverseFailurePreservesNativeItemPolicy() {
+        let point = CGPoint(x: 30, y: 40)
+
+        let singularAffine = ProjectionTransform(CGAffineTransform(
+            a: 0,
+            b: 0,
+            c: 0,
+            d: 1,
+            tx: 10,
+            ty: 20
+        ))
+        var affineTransform = ViewTransform.identity
+        affineTransform.appendProjectionTransform(singularAffine, inverse: true)
+        var affinePoints = [point]
+        affineTransform.convertGlobal(to: .local, points: &affinePoints)
+        XCTAssertEqual(affinePoints, [CGPoint(x: 10, y: 60)])
+
+        var singularProjection = ProjectionTransform()
+        singularProjection.m11 = 1
+        singularProjection.m12 = 0
+        singularProjection.m13 = 0.01
+        singularProjection.m21 = 1
+        singularProjection.m22 = 0
+        singularProjection.m23 = 0.01
+
+        var localToGlobalStorage = ViewTransform.identity
+        localToGlobalStorage.appendProjectionTransform(
+            singularProjection,
+            inverse: true
+        )
+        var inverseFailurePoints = [point]
+        localToGlobalStorage.convertGlobal(
+            to: .local,
+            points: &inverseFailurePoints
+        )
+        XCTAssertEqual(inverseFailurePoints, [point])
+
+        var globalToLocalStorage = ViewTransform.identity
+        globalToLocalStorage.appendProjectionTransform(
+            singularProjection,
+            inverse: false
+        )
+        inverseFailurePoints = [point]
+        globalToLocalStorage.convertGlobal(
+            from: .local,
+            points: &inverseFailurePoints
+        )
+        XCTAssertEqual(inverseFailurePoints, [point])
+
+        var forwardPoints = [point]
+        globalToLocalStorage.convertGlobal(to: .local, points: &forwardPoints)
+        assertPointsEqual(
+            forwardPoints,
+            [CGPoint(x: 41.1764705882353, y: 0)]
+        )
+    }
+
+    // ASSERTIONS geometryEffectSingularProjectionIgnoredObserved projectionInverseFailureHitTestObserved
+    @MainActor
+    func testGeometryEffectIgnoresSingularProjectionInChildTransform() throws {
+        func childTransform(
+            projection: ProjectionTransform
+        ) throws -> ViewTransform {
+            let capture = GeometryEffectTransformCapture()
+            let controller = WindowController(
+                content: GeometryEffectTransformRoot(
+                    projection: projection,
+                    capture: capture
+                ),
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(GeometryEffectTransformRoot.self)
+                )
+            )
+            controller.updateFrame(
+                tick: 0,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 120, height: 80),
+                shouldDrawFrame: false
+            ) { _, _ in }
+            return try controller.viewGraph.data.withCurrent {
+                try XCTUnwrap(capture.transform).value
+            }
+        }
+
+        let identity = try childTransform(projection: ProjectionTransform())
+
+        let singularAffine = ProjectionTransform(CGAffineTransform(
+            a: 0,
+            b: 0,
+            c: 0,
+            d: 1,
+            tx: 40,
+            ty: 15
+        ))
+        XCTAssertEqual(
+            try childTransform(projection: singularAffine),
+            identity
+        )
+
+        var singularNonAffine = ProjectionTransform()
+        singularNonAffine.m11 = 1
+        singularNonAffine.m12 = 0
+        singularNonAffine.m13 = 0.01
+        singularNonAffine.m21 = 1
+        singularNonAffine.m22 = 0
+        singularNonAffine.m23 = 0.01
+        XCTAssertEqual(
+            try childTransform(projection: singularNonAffine),
+            identity
+        )
     }
 
     func testRotation3DEffectMatrixAndAnimatableDataScaling() {
