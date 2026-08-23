@@ -171,7 +171,9 @@ struct ScrollIndicatorOptions: OptionSet, Equatable, Sendable {
     static let revealsInitially = ScrollIndicatorOptions(rawValue: 1)
 }
 
+/// Selects whether scroll indicators overlay content or reserve viewport space.
 public struct ScrollIndicatorStyle: Equatable, Sendable {
+    /// The internal presentation mode consumed by the logical scroll host.
     enum Value: Equatable, Sendable {
         case automatic
         case overlay

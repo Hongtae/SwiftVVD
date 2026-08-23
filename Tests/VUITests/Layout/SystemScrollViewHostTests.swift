@@ -117,6 +117,115 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertFalse(horizontal.isFixedArea)
     }
 
+    func testScrollIndicatorCompressesOverscrolledThumbAtLogicalEndpoints() throws {
+        let configuration = ScrollViewConfiguration(
+            axes: [.horizontal, .vertical]
+        )
+        var properties = ScrollEnvironmentProperties()
+        properties.horizontalIndicator = ScrollIndicatorConfiguration(
+            visibility: .visible,
+            style: .overlay
+        )
+        properties.verticalIndicator = ScrollIndicatorConfiguration(
+            visibility: .visible,
+            style: .overlay
+        )
+        let metrics = ScrollIndicatorMetricsStorage(
+            horizontal: ScrollIndicatorMetrics(
+                thickness: 8,
+                minimumThumbLength: 20
+            ),
+            vertical: ScrollIndicatorMetrics(
+                thickness: 8,
+                minimumThumbLength: 20
+            )
+        )
+
+        func layout(
+            offset: CGPoint,
+            direction: LayoutDirection
+        ) -> ScrollIndicatorLayout {
+            ScrollIndicatorLayout.make(
+                outerSize: CGSize(width: 100, height: 100),
+                contentOffset: offset,
+                contentSize: CGSize(width: 250, height: 250),
+                contentInsets: EdgeInsets(),
+                configuration: configuration,
+                properties: properties,
+                metrics: metrics,
+                layoutDirection: direction,
+                overlayOpacity: 1
+            )
+        }
+
+        let normalStart = layout(offset: .zero, direction: .leftToRight)
+        let overscrolledStart = layout(
+            offset: CGPoint(x: -25, y: -25),
+            direction: .leftToRight
+        )
+        XCTAssertEqual(normalStart.horizontal?.thumbFrame.width, 40)
+        XCTAssertEqual(normalStart.vertical?.thumbFrame.height, 40)
+        XCTAssertEqual(overscrolledStart.horizontal?.thumbFrame, CGRect(
+            x: 0,
+            y: 92,
+            width: 30,
+            height: 8
+        ))
+        XCTAssertEqual(overscrolledStart.vertical?.thumbFrame, CGRect(
+            x: 92,
+            y: 0,
+            width: 8,
+            height: 30
+        ))
+
+        let overscrolledEnd = layout(
+            offset: CGPoint(x: 175, y: 175),
+            direction: .leftToRight
+        )
+        XCTAssertEqual(overscrolledEnd.horizontal?.thumbFrame, CGRect(
+            x: 70,
+            y: 92,
+            width: 30,
+            height: 8
+        ))
+        XCTAssertEqual(overscrolledEnd.vertical?.thumbFrame, CGRect(
+            x: 92,
+            y: 70,
+            width: 8,
+            height: 30
+        ))
+
+        let fullyOverscrolled = layout(
+            offset: CGPoint(x: 500, y: -500),
+            direction: .leftToRight
+        )
+        XCTAssertEqual(fullyOverscrolled.horizontal?.thumbFrame, CGRect(
+            x: 80,
+            y: 92,
+            width: 20,
+            height: 8
+        ))
+        XCTAssertEqual(fullyOverscrolled.vertical?.thumbFrame, CGRect(
+            x: 92,
+            y: 0,
+            width: 8,
+            height: 20
+        ))
+
+        let rtlStart = layout(
+            offset: CGPoint(x: -25, y: 0),
+            direction: .rightToLeft
+        )
+        let rtlEnd = layout(
+            offset: CGPoint(x: 175, y: 0),
+            direction: .rightToLeft
+        )
+        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.minX, 70)
+        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.maxX, 100)
+        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.minX, 0)
+        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.maxX, 30)
+    }
+
     func testOverlayScrollIndicatorRequiresOverflowAndPresentationPermission() {
         var configuration = ScrollViewConfiguration(axes: .vertical)
         var properties = ScrollEnvironmentProperties()

@@ -487,6 +487,7 @@ class HostingScrollView {
         var resolvedOffset: CGPoint
     }
 
+    /// Captures the fixed geometry and pointer origin used for one thumb-drag serial.
     private struct IndicatorThumbInteraction {
         var axis: Axis
         var initialPointerCoordinate: CGFloat
@@ -496,17 +497,20 @@ class HostingScrollView {
         var direction: CGFloat
     }
 
+    /// Retains the admitted page region, latest pointer location, and repeat deadline.
     private struct IndicatorPagingInteraction {
         var part: ScrollIndicatorLayout.InteractionPart
         var pointerLocation: CGPoint
         var nextRepeatTime: Time
     }
 
+    /// The mutually exclusive indicator interaction currently owned by the host.
     private enum IndicatorInteraction {
         case thumb(IndicatorThumbInteraction)
         case paging(IndicatorPagingInteraction)
     }
 
+    /// Keeps page motion alive on the graph clock after the pointer is released.
     private struct IndicatorPageAnimation {
         var axis: Axis
         var initialOffset: CGFloat

@@ -34,6 +34,7 @@ public struct ScrollIndicatorMetrics: Equatable, Hashable, Sendable {
     }
 }
 
+/// Stores independent indicator metrics for each scroll axis in the environment.
 struct ScrollIndicatorMetricsStorage: Equatable, Sendable {
     var horizontal = ScrollIndicatorMetrics.defaultValue
     var vertical = ScrollIndicatorMetrics.defaultValue
@@ -48,7 +49,10 @@ struct ScrollIndicatorMetricsStorage: Equatable, Sendable {
     }
 }
 
+/// Resolved outer-viewport geometry shared by indicator rendering and hit testing.
 struct ScrollIndicatorLayout: Equatable {
+    /// The indicator element that admitted a pointer stream. Page cases describe
+    /// content-offset direction, which can differ from visual order in RTL layouts.
     enum InteractionPart: Equatable {
         case thumb(Axis)
         case decrementPage(Axis)
@@ -64,6 +68,7 @@ struct ScrollIndicatorLayout: Equatable {
         }
     }
 
+    /// One axis's resolved track, thumb, opacity, and layout-reservation mode.
     struct Indicator: Equatable {
         var trackFrame: CGRect
         var thumbFrame: CGRect
@@ -293,10 +298,21 @@ struct ScrollIndicatorLayout: Equatable {
             }
         }
 
+        let resolvedOffset = contentOffset.isFinite ? contentOffset : 0
+        let leadingOverscroll = max(-resolvedOffset, 0)
+        let trailingOverscroll = max(resolvedOffset - maximumOffset, 0)
+        // The visible document intersection shrinks during rubber-band motion.
+        // Keep the thumb pinned to the reached endpoint while shortening it by
+        // the same proportion, subject to the configured minimum length.
+        let presentedViewportLength = max(
+            viewportLength - leadingOverscroll - trailingOverscroll,
+            0
+        )
+
         let thumbLength: CGFloat
         if hasOverflow {
             let proportionalLength = contentLength > 0 && contentLength.isFinite
-                ? trackLength * viewportLength / contentLength
+                ? trackLength * presentedViewportLength / contentLength
                 : 0
             thumbLength = min(
                 max(metrics.minimumThumbLength, proportionalLength),
@@ -306,9 +322,7 @@ struct ScrollIndicatorLayout: Equatable {
             thumbLength = trackLength
         }
 
-        let clampedOffset = contentOffset.isFinite
-            ? min(max(contentOffset, 0), maximumOffset)
-            : 0
+        let clampedOffset = min(max(resolvedOffset, 0), maximumOffset)
         var progress: CGFloat
         if maximumOffset.isFinite, maximumOffset > 0 {
             progress = clampedOffset / maximumOffset
@@ -360,6 +374,7 @@ struct ScrollIndicatorLayout: Equatable {
     }
 }
 
+/// Projects the outer-viewport space reserved by fixed-area indicators.
 struct ScrollIndicatorReservedInsets: Rule {
     typealias Value = EdgeInsets
 
@@ -376,6 +391,7 @@ struct ScrollIndicatorReservedInsets: Rule {
     }
 }
 
+/// Derives the content viewport size after fixed-area reservation.
 struct ScrollIndicatorViewportSize: Rule {
     typealias Value = ViewSize
 
@@ -389,6 +405,7 @@ struct ScrollIndicatorViewportSize: Rule {
     }
 }
 
+/// Positions the content viewport within its reserved outer frame.
 struct ScrollIndicatorViewportPosition: Rule {
     typealias Value = CGPoint
 
@@ -411,6 +428,7 @@ struct ScrollIndicatorViewportPosition: Rule {
     }
 }
 
+/// Carries axis-specific indicator geometry settings through the environment.
 private struct ScrollIndicatorMetricsKey: EnvironmentKey {
     static var defaultValue: ScrollIndicatorMetricsStorage {
         ScrollIndicatorMetricsStorage()
@@ -442,6 +460,7 @@ extension EnvironmentValues {
     }
 }
 
+/// Applies visibility and option changes only to the selected indicator axes.
 private struct TransformScrollIndicators: ScrollEnvironmentTransform {
     var visibility: ScrollIndicatorVisibility
     var options: ScrollIndicatorOptions
@@ -459,6 +478,7 @@ private struct TransformScrollIndicators: ScrollEnvironmentTransform {
     }
 }
 
+/// Applies a presentation style only to the selected indicator axes.
 private struct TransformScrollIndicatorStyle: ScrollEnvironmentTransform {
     var style: ScrollIndicatorStyle
     var axes: Axis.Set
