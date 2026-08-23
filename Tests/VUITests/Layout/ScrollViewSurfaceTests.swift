@@ -1907,6 +1907,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
             "style",
         ])
         XCTAssertEqual(Mirror(reflecting: ScrollIndicatorStyle.automatic).children.map(\.label), ["value"])
+
+        // ASSERTIONS: scrollIndicatorVisibilityFocusedSurfaceObserved
     }
 
     func testScrollEnvironmentPropertiesStorageAndTransform() {

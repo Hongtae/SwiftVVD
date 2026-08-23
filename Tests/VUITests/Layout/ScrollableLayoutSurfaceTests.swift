@@ -3564,8 +3564,11 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
         XCTAssertTrue(erasedType is any PrimitiveView.Type)
         XCTAssertTrue(erasedType is any UnaryView.Type)
         XCTAssertTrue(erasedType is any _ScrollableContentProvider.Type)
+        XCTAssertFalse(erasedType is any Scrollable.Type)
+        XCTAssertFalse(erasedType is any ScrollableCollection.Type)
 
-        // ASSERTIONS: scrollableLayoutMarkerProtocolsObserved
+        // ASSERTIONS: scrollableLayoutMarkerProtocolsObserved,
+        // scrollableLayoutDedicatedCollectionProducerAbsentObserved
     }
 
     func testScrollableLayoutViewPlacesVisibleItemsAndReusesOneUnusedItem() throws {
