@@ -3641,19 +3641,38 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 }
 
             case let .transform(transform):
-                guard transform.isAffine else { return }
-                var context = context
-                context.concatenate(
-                    CGAffineTransform(
-                        a: transform.m11,
-                        b: transform.m12,
-                        c: transform.m21,
-                        d: transform.m22,
-                        tx: transform.m31,
-                        ty: transform.m32
+                if transform.isAffine {
+                    var context = context
+                    context.concatenate(
+                        CGAffineTransform(
+                            a: transform.m11,
+                            b: transform.m12,
+                            c: transform.m21,
+                            d: transform.m22,
+                            tx: transform.m31,
+                            ty: transform.m32
+                        )
                     )
-                )
-                renderItems(in: contents, context: context, includeDebug: includeDebug)
+                    renderItems(
+                        in: contents,
+                        context: context,
+                        includeDebug: includeDebug
+                    )
+                } else {
+                    context.drawProjectiveLayer(
+                        transform: transform,
+                        contentBounds: contents.interpolationBounds ?? CGRect(
+                            origin: .zero,
+                            size: frame.size
+                        )
+                    ) { layer in
+                        self.renderItems(
+                            in: contents,
+                            context: layer,
+                            includeDebug: includeDebug
+                        )
+                    }
+                }
 
             case .animation:
                 preconditionFailure("Effect animations must be sampled before rendering")

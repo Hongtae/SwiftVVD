@@ -1856,6 +1856,255 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS projectionNonAffineScrollInputObserved
+    @MainActor
+    func testNonAffineProjectionMapsScrollHostHitRegionByPlacement() throws {
+        let size = CGSize(width: 260, height: 260)
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+        var bounds: [LayoutSchedulingNonAffineFlatPlacement: CGRect] = [:]
+
+        for placement in LayoutSchedulingNonAffineFlatPlacement.allCases {
+            let controller = WindowController(
+                content: LayoutSchedulingNonAffineFlatScrollRoot(
+                    placement: placement
+                ),
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(LayoutSchedulingNonAffineFlatScrollRoot.self)
+                )
+            )
+            var redraw = false
+            controller.updateView(
+                tick: 0,
+                delta: 0,
+                date: controller.date,
+                contentSize: size,
+                redraw: &redraw,
+                withGC
+            )
+            let root = try XCTUnwrap(
+                controller.responderNode as? MultiViewResponder
+            )
+            let responder = try XCTUnwrap(
+                firstHostingScrollViewResponder(in: root)
+            )
+            bounds[placement] = try XCTUnwrap(sampledHitBounds(
+                of: responder,
+                in: size
+            ))
+            let location = try XCTUnwrap(firstCommonHitPoint(
+                for: [responder],
+                in: size
+            ))
+            let binding = try XCTUnwrap(
+                controller.gestureEnvironment.eventBinding(
+                    at: location,
+                    accepting: SystemWheelEvent.self
+                )
+            )
+            XCTAssertTrue(binding.responder === responder)
+        }
+
+        let baseline = try XCTUnwrap(bounds[.baseline])
+        let descendant = try XCTUnwrap(bounds[.descendant])
+        XCTAssertEqual(descendant, baseline)
+
+        let scroll = try XCTUnwrap(bounds[.scroll])
+        let ancestor = try XCTUnwrap(bounds[.ancestor])
+        XCTAssertLessThan(scroll.width, baseline.width)
+        XCTAssertLessThan(scroll.height, baseline.height)
+        XCTAssertLessThan(ancestor.width, baseline.width)
+        XCTAssertLessThan(ancestor.height, baseline.height)
+        XCTAssertNotEqual(scroll, ancestor)
+    }
+
+    // ASSERTIONS projectionNonAffineScrollInputObserved
+    @MainActor
+    func testDescendantNonAffineProjectionInverseMapsDragLocation() throws {
+        let size = CGSize(width: 260, height: 260)
+        let baselineProbe = LayoutSchedulingProjectionInputProbe()
+        let projectedProbe = LayoutSchedulingProjectionInputProbe()
+        let baselineController = WindowController(
+            content: LayoutSchedulingProjectionInputRoot(
+                projection: nil,
+                probe: baselineProbe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingProjectionInputRoot.self)
+            )
+        )
+        let projectedController = WindowController(
+            content: LayoutSchedulingProjectionInputRoot(
+                projection: layoutSchedulingPrimaryNonAffineProjection(),
+                probe: projectedProbe
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(LayoutSchedulingProjectionInputRoot.self)
+            )
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Projection input test should not request graphics resources.")
+        }
+        var redraw = false
+        baselineController.updateView(
+            tick: 0,
+            delta: 0,
+            date: baselineController.date,
+            contentSize: size,
+            redraw: &redraw,
+            withGC
+        )
+        projectedController.updateView(
+            tick: 0,
+            delta: 0,
+            date: projectedController.date,
+            contentSize: size,
+            redraw: &redraw,
+            withGC
+        )
+
+        let baselineRoot = try XCTUnwrap(
+            baselineController.responderNode as? MultiViewResponder
+        )
+        let projectedRoot = try XCTUnwrap(
+            projectedController.responderNode as? MultiViewResponder
+        )
+        let baselineHost = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: baselineRoot)
+        )
+        let projectedHost = try XCTUnwrap(
+            firstHostingScrollViewResponder(in: projectedRoot)
+        )
+        let location = try XCTUnwrap(firstCommonDescendantGestureHitPoint(
+            rootsAndHosts: [
+                (baselineRoot, baselineHost),
+                (projectedRoot, projectedHost),
+            ],
+            in: size
+        ))
+
+        func click(_ controller: WindowController, timestamp: Double) {
+            XCTAssertTrue(controller.handleMouseEvent(
+                event: MouseEvent(
+                    type: .buttonDown,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: location,
+                    timestamp: timestamp
+                ),
+                at: Time(seconds: timestamp)
+            ))
+            XCTAssertTrue(controller.handleMouseEvent(
+                event: MouseEvent(
+                    type: .buttonUp,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: location,
+                    timestamp: timestamp + 0.001
+                ),
+                at: Time(seconds: timestamp + 0.001)
+            ))
+        }
+        click(baselineController, timestamp: 0)
+        click(projectedController, timestamp: 1)
+
+        let baselineLocal = try XCTUnwrap(baselineProbe.endedLocations.last)
+        let projectedLocal = try XCTUnwrap(projectedProbe.endedLocations.last)
+        let expected = baselineLocal.applying(
+            layoutSchedulingPrimaryNonAffineProjection().inverted()
+        )
+        XCTAssertEqual(projectedLocal.x, expected.x, accuracy: 0.001)
+        XCTAssertEqual(projectedLocal.y, expected.y, accuracy: 0.001)
+    }
+
+    // ASSERTIONS projectionNonAffineNestedHostSelectionObserved
+    @MainActor
+    func testNestedNonAffineProjectionKeepsWheelOnInnermostHost() throws {
+        let size = CGSize(width: 300, height: 300)
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Scroll-view input test should not request graphics resources.")
+        }
+
+        for placement in LayoutSchedulingNonAffineNestedPlacement.allCases {
+            let controller = WindowController(
+                content: LayoutSchedulingNonAffineNestedScrollRoot(
+                    placement: placement
+                ),
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(LayoutSchedulingNonAffineNestedScrollRoot.self)
+                )
+            )
+            var redraw = false
+            controller.updateView(
+                tick: 0,
+                delta: 0,
+                date: controller.date,
+                contentSize: size,
+                redraw: &redraw,
+                withGC
+            )
+
+            let root = try XCTUnwrap(
+                controller.responderNode as? MultiViewResponder
+            )
+            let responders = allHostingScrollViewResponders(in: root)
+            XCTAssertEqual(responders.count, 2)
+            let inner = try XCTUnwrap(responders.first { candidate in
+                responders.contains { ancestor in
+                    ancestor !== candidate && candidate.isDescendant(of: ancestor)
+                }
+            })
+            let outer = try XCTUnwrap(responders.first { candidate in
+                candidate !== inner && inner.isDescendant(of: candidate)
+            })
+            let location = try XCTUnwrap(firstCommonHitPoint(
+                for: [outer, inner],
+                in: size
+            ))
+            let binding = try XCTUnwrap(
+                controller.gestureEnvironment.eventBinding(
+                    at: location,
+                    accepting: SystemWheelEvent.self
+                )
+            )
+            XCTAssertTrue(binding.responder === inner, "placement: \(placement)")
+
+            XCTAssertTrue(controller.handleMouseWheel(
+                at: location,
+                delta: CGPoint(x: 0, y: -40)
+            ))
+            controller.updateView(
+                tick: 1,
+                delta: 1.0 / 60.0,
+                date: controller.date,
+                contentSize: size,
+                redraw: &redraw,
+                withGC
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(inner.hostContainer?.scrollView.pendingContext)
+                    .contentOffset.y,
+                40,
+                accuracy: 0.001,
+                "placement: \(placement)"
+            )
+            XCTAssertEqual(
+                try XCTUnwrap(outer.hostContainer?.scrollView.pendingContext)
+                    .contentOffset.y,
+                0,
+                accuracy: 0.001,
+                "placement: \(placement)"
+            )
+        }
+    }
+
     // ASSERTIONS platformViewResponderFeatureHitTestPruningObserved
     func testPlatformEventConsumerHitTestSkipsBranchesWithoutPlatformViews() throws {
         let ignored = LayoutSchedulingNonPlatformHitTestProbe()
@@ -10108,6 +10357,176 @@ private struct LayoutSchedulingTransformedScrollViewAttachmentRoot: View {
     }
 }
 
+private enum LayoutSchedulingNonAffineFlatPlacement: CaseIterable {
+    case baseline
+    case descendant
+    case scroll
+    case ancestor
+}
+
+private struct LayoutSchedulingNonAffineFlatScrollRoot: View {
+    var placement: LayoutSchedulingNonAffineFlatPlacement
+
+    @ViewBuilder
+    var body: some View {
+        if placement == .ancestor {
+            ZStack { scrollView }
+                .frame(width: 200, height: 160)
+                .projectionEffect(
+                    layoutSchedulingPrimaryNonAffineProjection()
+                )
+        } else {
+            ZStack { selfProjectedScrollView }
+                .frame(width: 200, height: 160)
+        }
+    }
+
+    @ViewBuilder
+    private var selfProjectedScrollView: some View {
+        if placement == .scroll {
+            scrollView.projectionEffect(
+                layoutSchedulingPrimaryNonAffineProjection()
+            )
+        } else {
+            scrollView
+        }
+    }
+
+    private var scrollView: some View {
+        ScrollView([.horizontal, .vertical]) {
+            flatContent
+        }
+        .frame(width: 180, height: 140)
+    }
+
+    @ViewBuilder
+    private var flatContent: some View {
+        if placement == .descendant {
+            Color.green
+                .frame(width: 260, height: 240)
+                .projectionEffect(
+                    layoutSchedulingPrimaryNonAffineProjection()
+                )
+        } else {
+            Color.green.frame(width: 260, height: 240)
+        }
+    }
+}
+
+private final class LayoutSchedulingProjectionInputProbe {
+    var endedLocations: [CGPoint] = []
+}
+
+private struct LayoutSchedulingProjectionInputRoot: View {
+    var projection: VUI.ProjectionTransform?
+    let probe: LayoutSchedulingProjectionInputProbe
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            projectedTarget
+        }
+        .frame(width: 180, height: 140)
+    }
+
+    @ViewBuilder
+    private var projectedTarget: some View {
+        if let projection {
+            target.projectionEffect(projection)
+        } else {
+            target
+        }
+    }
+
+    private var target: some View {
+        Color.green
+            .frame(width: 260, height: 240)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onEnded { value in
+                        probe.endedLocations.append(value.location)
+                    }
+            )
+    }
+}
+
+private enum LayoutSchedulingNonAffineNestedPlacement: CaseIterable {
+    case inner
+    case outer
+    case combined
+}
+
+private struct LayoutSchedulingNonAffineNestedScrollRoot: View {
+    var placement: LayoutSchedulingNonAffineNestedPlacement
+
+    @ViewBuilder
+    var body: some View {
+        if placement == .outer || placement == .combined {
+            outerScrollView.projectionEffect(
+                layoutSchedulingSecondaryNonAffineProjection()
+            )
+        } else {
+            outerScrollView
+        }
+    }
+
+    private var outerScrollView: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 14)
+                projectedInnerScrollView
+                Color.blue.frame(width: 180, height: 240)
+            }
+            .frame(width: 200)
+        }
+        .frame(width: 200, height: 170)
+    }
+
+    @ViewBuilder
+    private var projectedInnerScrollView: some View {
+        if placement == .inner || placement == .combined {
+            innerScrollView.projectionEffect(
+                layoutSchedulingPrimaryNonAffineProjection()
+            )
+        } else {
+            innerScrollView
+        }
+    }
+
+    private var innerScrollView: some View {
+        ScrollView([.horizontal, .vertical]) {
+            Color.green.frame(width: 260, height: 240)
+        }
+        .frame(width: 160, height: 120)
+    }
+}
+
+private func layoutSchedulingPrimaryNonAffineProjection() -> VUI.ProjectionTransform {
+    var projection = VUI.ProjectionTransform()
+    projection.m11 = 1.04
+    projection.m12 = 0.08
+    projection.m13 = 0.0014
+    projection.m21 = -0.05
+    projection.m22 = 0.96
+    projection.m23 = 0.0009
+    projection.m31 = 6
+    projection.m32 = 4
+    return projection
+}
+
+private func layoutSchedulingSecondaryNonAffineProjection() -> VUI.ProjectionTransform {
+    var projection = VUI.ProjectionTransform()
+    projection.m11 = 0.96
+    projection.m12 = -0.05
+    projection.m13 = -0.0007
+    projection.m21 = 0.06
+    projection.m22 = 1.02
+    projection.m23 = 0.0006
+    projection.m31 = 3
+    projection.m32 = 5
+    return projection
+}
+
 private struct LayoutSchedulingNestedScrollViewAttachmentRoot: View {
     var body: some View {
         ScrollView(.vertical) {
@@ -10388,6 +10807,26 @@ private func firstCommonHitPoint(
                     cacheKey: nil,
                     options: .platformDefault
                 ).mask[0]
+            }) {
+                return point
+            }
+        }
+    }
+    return nil
+}
+
+private func firstCommonDescendantGestureHitPoint(
+    rootsAndHosts: [(MultiViewResponder, HostingScrollViewResponder)],
+    in size: CGSize
+) -> CGPoint? {
+    for y in stride(from: CGFloat(2), to: size.height, by: 2) {
+        for x in stride(from: CGFloat(2), to: size.width, by: 2) {
+            let point = CGPoint(x: x, y: y)
+            if rootsAndHosts.allSatisfy({ root, host in
+                root.respondersContaining(point: point).contains { responder in
+                    responder is any AnyGestureResponder &&
+                        responder.isDescendant(of: host)
+                }
             }) {
                 return point
             }

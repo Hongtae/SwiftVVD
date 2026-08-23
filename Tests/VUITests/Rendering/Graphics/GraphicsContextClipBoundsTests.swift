@@ -689,6 +689,420 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         XCTAssertEqual(renderer.animatorCount, 0)
     }
 
+    // ASSERTIONS projectionNonAffineScrollPresentationObserved
+    func testDisplayListComposesInvertibleNonAffineProjectionsOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let width = 64
+        let height = 64
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: SceneResources(),
+            environment: EnvironmentValues(),
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .clear)
+
+        let localBounds = CGRect(x: 0, y: 0, width: 24, height: 20)
+        let markerBounds = CGRect(x: 14, y: 6, width: 4, height: 4)
+        let frame = CGRect(x: 10, y: 12, width: 24, height: 20)
+        var projection = ProjectionTransform()
+        projection.m11 = 1.1
+        projection.m12 = 0.08
+        projection.m13 = 0.006
+        projection.m21 = -0.04
+        projection.m22 = 1.02
+        projection.m23 = 0.004
+        projection.m31 = 5
+        projection.m32 = 3
+        var outerProjection = ProjectionTransform()
+        outerProjection.m11 = 0.97
+        outerProjection.m12 = -0.03
+        outerProjection.m13 = -0.002
+        outerProjection.m21 = 0.04
+        outerProjection.m22 = 1.03
+        outerProjection.m23 = 0.001
+        outerProjection.m31 = 2
+        outerProjection.m32 = 4
+
+        var contents = DisplayList()
+        contents.appendItem(bounds: localBounds) { context in
+            context.fill(Path(localBounds), with: .color(.red))
+        }
+        contents.appendItem(bounds: markerBounds) { context in
+            context.fill(Path(markerBounds), with: .color(.blue))
+        }
+        var projectedContents = DisplayList()
+        projectedContents.appendEffect(
+            .transform(projection),
+            contents: contents,
+            frame: CGRect(origin: .zero, size: localBounds.size),
+            identity: _DisplayList_Identity(decodedValue: 95),
+            version: DisplayList.Version(value: 1)
+        )
+        var list = DisplayList()
+        list.appendEffect(
+            .transform(outerProjection),
+            contents: projectedContents,
+            frame: frame,
+            identity: _DisplayList_Identity(decodedValue: 96),
+            version: DisplayList.Version(value: 1)
+        )
+
+        DisplayList.GraphicsRenderer().render(
+            list: list,
+            at: .zero,
+            in: context
+        )
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: width * height * 4
+        )
+        var occupiedBounds = CGRect.null
+        var markerSum = CGPoint.zero
+        var markerCount = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                guard bytes[offset + 3] > 0 else { continue }
+                occupiedBounds = occupiedBounds.union(
+                    CGRect(x: x, y: y, width: 1, height: 1)
+                )
+                if Int(bytes[offset + 2]) > Int(bytes[offset]) + 32 {
+                    markerSum.x += CGFloat(x) + 0.5
+                    markerSum.y += CGFloat(y) + 0.5
+                    markerCount += 1
+                }
+            }
+        }
+
+        let projectedCorners = [
+            CGPoint(x: localBounds.minX, y: localBounds.minY),
+            CGPoint(x: localBounds.maxX, y: localBounds.minY),
+            CGPoint(x: localBounds.maxX, y: localBounds.maxY),
+            CGPoint(x: localBounds.minX, y: localBounds.maxY),
+        ].map {
+            let point = $0
+                .applying(projection)
+                .applying(outerProjection)
+            return CGPoint(x: point.x + frame.minX, y: point.y + frame.minY)
+        }
+        let expectedBounds = projectedCorners.dropFirst().reduce(
+            CGRect(origin: projectedCorners[0], size: .zero)
+        ) { bounds, point in
+            bounds.union(CGRect(origin: point, size: .zero))
+        }
+        XCTAssertFalse(occupiedBounds.isNull)
+        XCTAssertEqual(occupiedBounds.minX, expectedBounds.minX, accuracy: 3)
+        XCTAssertEqual(occupiedBounds.minY, expectedBounds.minY, accuracy: 3)
+        XCTAssertEqual(occupiedBounds.maxX, expectedBounds.maxX, accuracy: 3)
+        XCTAssertEqual(occupiedBounds.maxY, expectedBounds.maxY, accuracy: 3)
+
+        XCTAssertGreaterThan(markerCount, 2)
+        let markerCentroid = CGPoint(
+            x: markerSum.x / CGFloat(markerCount),
+            y: markerSum.y / CGFloat(markerCount)
+        )
+        let expectedMarker = CGPoint(
+            x: markerBounds.midX,
+            y: markerBounds.midY
+        )
+            .applying(projection)
+            .applying(outerProjection)
+        XCTAssertEqual(
+            markerCentroid.x,
+            expectedMarker.x + frame.minX,
+            accuracy: 1
+        )
+        XCTAssertEqual(
+            markerCentroid.y,
+            expectedMarker.y + frame.minY,
+            accuracy: 1
+        )
+    }
+
+    // ASSERTIONS projectionNonAffineScrollPresentationObserved
+    func testPlatformGroupClipsNonAffineProjectionAfterContentMappingOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        let attachment = graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(
+                axes: [.horizontal, .vertical],
+                showsIndicators: false
+            ))
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: CGRect(x: 0, y: 0, width: 260, height: 240),
+                containingSize: CGSize(width: 180, height: 140),
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+            return HostingScrollView.PlatformContainer(scrollView: host)
+        }
+
+        let width = 240
+        let height = 200
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: SceneResources(),
+            environment: EnvironmentValues(),
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .clear)
+
+        let contentBounds = CGRect(x: 0, y: 0, width: 260, height: 240)
+        let markerBounds = CGRect(x: 225, y: 95, width: 10, height: 10)
+        let viewportFrame = CGRect(x: 20, y: 20, width: 180, height: 140)
+        var projection = ProjectionTransform()
+        projection.m11 = 1.04
+        projection.m12 = 0.08
+        projection.m13 = 0.0014
+        projection.m21 = -0.05
+        projection.m22 = 0.96
+        projection.m23 = 0.0009
+        projection.m31 = 6
+        projection.m32 = 4
+
+        var rawContents = DisplayList()
+        rawContents.appendItem(bounds: contentBounds) { context in
+            context.fill(Path(contentBounds), with: .color(.red))
+        }
+        rawContents.appendItem(bounds: markerBounds) { context in
+            context.fill(Path(markerBounds), with: .color(.blue))
+        }
+        var projectedContents = DisplayList()
+        projectedContents.appendEffect(
+            .transform(projection),
+            contents: rawContents,
+            frame: contentBounds,
+            identity: _DisplayList_Identity(decodedValue: 96),
+            version: DisplayList.Version(value: 1)
+        )
+        var list = DisplayList()
+        list.appendEffect(
+            .platformGroup(attachment),
+            contents: projectedContents,
+            frame: viewportFrame,
+            identity: _DisplayList_Identity(decodedValue: 97),
+            version: DisplayList.Version(value: 1)
+        )
+
+        DisplayList.GraphicsRenderer().render(
+            list: list,
+            at: .zero,
+            in: context
+        )
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: width * height * 4
+        )
+        var occupiedBounds = CGRect.null
+        var markerSum = CGPoint.zero
+        var markerCount = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                guard bytes[offset + 3] > 0 else { continue }
+                occupiedBounds = occupiedBounds.union(
+                    CGRect(x: x, y: y, width: 1, height: 1)
+                )
+                if Int(bytes[offset + 2]) > Int(bytes[offset]) + 32 {
+                    markerSum.x += CGFloat(x) + 0.5
+                    markerSum.y += CGFloat(y) + 0.5
+                    markerCount += 1
+                }
+            }
+        }
+
+        XCTAssertFalse(occupiedBounds.isNull)
+        XCTAssertGreaterThanOrEqual(occupiedBounds.minX, viewportFrame.minX)
+        XCTAssertGreaterThanOrEqual(occupiedBounds.minY, viewportFrame.minY)
+        XCTAssertLessThanOrEqual(occupiedBounds.maxX, viewportFrame.maxX)
+        XCTAssertLessThanOrEqual(occupiedBounds.maxY, viewportFrame.maxY)
+        XCTAssertGreaterThan(markerCount, 4)
+
+        let expectedMarker = CGPoint(
+            x: markerBounds.midX,
+            y: markerBounds.midY
+        ).applying(projection)
+        XCTAssertGreaterThan(markerBounds.minX, viewportFrame.width)
+        XCTAssertLessThan(expectedMarker.x, viewportFrame.width)
+        XCTAssertLessThan(expectedMarker.y, viewportFrame.height)
+        XCTAssertEqual(
+            markerSum.x / CGFloat(markerCount),
+            expectedMarker.x + viewportFrame.minX,
+            accuracy: 1.5
+        )
+        XCTAssertEqual(
+            markerSum.y / CGFloat(markerCount),
+            expectedMarker.y + viewportFrame.minY,
+            accuracy: 1.5
+        )
+    }
+
+    // ASSERTIONS projectionNonAffineScrollPresentationObserved
+    func testNonAffineProjectionMapsPlatformGroupAfterViewportClipOnGPU() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+        let viewportSize = CGSize(width: 80, height: 60)
+        let contentBounds = CGRect(x: 0, y: 0, width: 120, height: 100)
+        let attachment = graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            host.updateConfiguration(ScrollViewConfiguration(
+                axes: [.horizontal, .vertical],
+                showsIndicators: false
+            ))
+            _ = host.updateContext(HostingScrollViewUpdateContext(
+                contentOffset: .zero,
+                contentFrame: contentBounds,
+                containingSize: viewportSize,
+                offsetMode: .system,
+                safeInsets: EdgeInsets()
+            ))
+            return HostingScrollView.PlatformContainer(scrollView: host)
+        }
+
+        let width = 140
+        let height = 120
+        let queue = try XCTUnwrap(deviceContext.renderQueue())
+        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: SceneResources(),
+            environment: EnvironmentValues(),
+            viewport: CGRect(x: 0, y: 0, width: width, height: height),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: CGSize(width: width, height: height),
+            commandBuffer: commandBuffer
+        ))
+        context.clear(with: .clear)
+
+        var projection = ProjectionTransform()
+        projection.m11 = 1.04
+        projection.m12 = 0.08
+        projection.m13 = 0.0014
+        projection.m21 = -0.05
+        projection.m22 = 0.96
+        projection.m23 = 0.0009
+        projection.m31 = 6
+        projection.m32 = 4
+        let viewportBounds = CGRect(origin: .zero, size: viewportSize)
+        let projectedFrame = CGRect(
+            x: 25,
+            y: 20,
+            width: viewportSize.width,
+            height: viewportSize.height
+        )
+
+        var rawContents = DisplayList()
+        rawContents.appendItem(bounds: contentBounds) { context in
+            context.fill(Path(contentBounds), with: .color(.red))
+        }
+        var hostedContents = DisplayList()
+        hostedContents.appendEffect(
+            .platformGroup(attachment),
+            contents: rawContents,
+            frame: viewportBounds,
+            identity: _DisplayList_Identity(decodedValue: 98),
+            version: DisplayList.Version(value: 1)
+        )
+        var list = DisplayList()
+        list.appendEffect(
+            .transform(projection),
+            contents: hostedContents,
+            frame: projectedFrame,
+            identity: _DisplayList_Identity(decodedValue: 99),
+            version: DisplayList.Version(value: 1)
+        )
+
+        DisplayList.GraphicsRenderer().render(
+            list: list,
+            at: .zero,
+            in: context
+        )
+        try waitForCompletion(commandBuffer)
+
+        let staging = try XCTUnwrap(
+            deviceContext.makeCPUAccessible(texture: context.backdrop)
+        )
+        let pointer = try XCTUnwrap(staging.contents())
+        let bytes = UnsafeRawBufferPointer(
+            start: pointer,
+            count: width * height * 4
+        )
+        var occupiedBounds = CGRect.null
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                guard bytes[offset + 3] > 0 else { continue }
+                occupiedBounds = occupiedBounds.union(
+                    CGRect(x: x, y: y, width: 1, height: 1)
+                )
+            }
+        }
+
+        let projectedCorners = [
+            CGPoint(x: viewportBounds.minX, y: viewportBounds.minY),
+            CGPoint(x: viewportBounds.maxX, y: viewportBounds.minY),
+            CGPoint(x: viewportBounds.maxX, y: viewportBounds.maxY),
+            CGPoint(x: viewportBounds.minX, y: viewportBounds.maxY),
+        ].map {
+            let point = $0.applying(projection)
+            return CGPoint(
+                x: point.x + projectedFrame.minX,
+                y: point.y + projectedFrame.minY
+            )
+        }
+        let expectedBounds = projectedCorners.dropFirst().reduce(
+            CGRect(origin: projectedCorners[0], size: .zero)
+        ) { bounds, point in
+            bounds.union(CGRect(origin: point, size: .zero))
+        }
+        XCTAssertFalse(occupiedBounds.isNull)
+        XCTAssertEqual(occupiedBounds.minX, expectedBounds.minX, accuracy: 2)
+        XCTAssertEqual(occupiedBounds.minY, expectedBounds.minY, accuracy: 2)
+        XCTAssertEqual(occupiedBounds.maxX, expectedBounds.maxX, accuracy: 2)
+        XCTAssertEqual(occupiedBounds.maxY, expectedBounds.maxY, accuracy: 2)
+    }
+
     // ASSERTIONS scrollIndicatorSkinRuntimeObserved
     func testPlatformGroupRendersFixedScrollIndicatorOutsideContentClipOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {

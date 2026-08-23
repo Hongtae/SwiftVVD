@@ -58,6 +58,7 @@ enum _Shader {
     case stencil        // fill stencil, no fragment function
     case vertexColor    // vertex color
     case image          // texture with tint color
+    case projectiveImage
     case rcImage        // for glyph, single(red) channel texture
     case resolveMask    // merge two masks (a8, r8) to render target (r8)
 
@@ -109,6 +110,14 @@ enum _Stencil {
 
 struct _Vertex {
     var position: Float2
+    var texcoord: Float2
+    var color: Float4
+}
+
+/// Carries homogeneous clip coordinates so texture interpolation follows the
+/// same projective divide as the rendered geometry.
+struct _ProjectiveVertex {
+    var position: Float4
     var texcoord: Float2
     var color: Float4
 }
@@ -176,6 +185,28 @@ class GraphicsPipelineStates {
             ]
             pipelineDescriptor.vertexDescriptor.layouts = [
                 .init(stepRate: .vertex, stride: MemoryLayout<Float2>.stride)
+            ]
+        } else if rs.shader == .projectiveImage {
+            pipelineDescriptor.vertexDescriptor.attributes = [
+                .init(format: .float4, offset: 0, bufferIndex: 0, location: 0),
+                .init(
+                    format: .float2,
+                    offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.texcoord)!,
+                    bufferIndex: 0,
+                    location: 1
+                ),
+                .init(
+                    format: .float4,
+                    offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.color)!,
+                    bufferIndex: 0,
+                    location: 2
+                ),
+            ]
+            pipelineDescriptor.vertexDescriptor.layouts = [
+                .init(
+                    stepRate: .vertex,
+                    stride: MemoryLayout<_ProjectiveVertex>.stride
+                )
             ]
         } else {
             pipelineDescriptor.vertexDescriptor.attributes = [
@@ -369,6 +400,7 @@ class GraphicsPipelineStates {
             }
 
             let vertexFunction = try loadShader("default.vert")
+            let projectiveVertexFunction = try loadShader("projective.vert")
 
             var shaderFunctions: [_Shader: ShaderFunctions] = [:]
 
@@ -387,6 +419,10 @@ class GraphicsPipelineStates {
 
             shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
             shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
+            shaderFunctions[.projectiveImage] = ShaderFunctions(
+                vertexFunction: projectiveVertexFunction,
+                fragmentFunction: try loadShader("draw_image.frag")
+            )
             shaderFunctions[.rcImage] = try loadFragmentFunction("draw_r8_opacity_image.frag")
             shaderFunctions[.resolveMask] = try loadFragmentFunction("resolve_mask.frag")
 
