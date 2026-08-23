@@ -235,15 +235,53 @@ extension CGSize {
     }
 }
 
+/// Distinguishes internal coordinate-space IDs from user-provided names while
+/// keeping the public `CoordinateSpace` surface unchanged.
+private struct CoordinateSpaceIDStorage: Hashable, Sendable {
+    var id: CoordinateSpace.ID
+}
+
+private extension CoordinateSpace {
+    static func internalID(_ id: CoordinateSpace.ID) -> CoordinateSpace {
+        .named(AnyHashable(CoordinateSpaceIDStorage(id: id)))
+    }
+
+    var internalID: CoordinateSpace.ID? {
+        guard case let .named(name) = self,
+              let storage = name.base as? CoordinateSpaceIDStorage else {
+            return nil
+        }
+        return storage.id
+    }
+}
+
+/// One immutable entry in a transform-local coordinate-space lookup chain.
+/// Copies of `ViewTransform` may share an existing tail and prepend new entries.
+private final class CoordinateSpaceNode: @unchecked Sendable {
+    let next: CoordinateSpaceNode?
+    let space: CoordinateSpace
+    let depth: Int
+
+    init(next: CoordinateSpaceNode?, space: CoordinateSpace, depth: Int) {
+        self.next = next
+        self.space = space
+        self.depth = depth
+    }
+}
+
 /// The cumulative coordinate-space transform applied to a view.
 ///
-/// Internally stores two coordinated layers:
+/// Internally stores three coordinated layers:
 ///
 /// 1. **`_transformItems`** - ordered transform elements in global-to-local
 ///    traversal order. Appending a non-folded element first commits the current
 ///    folded translation at that exact position in the sequence.
 ///
-/// 2. **Position storage** - a position adjustment plus a folded
+/// 2. **Coordinate-space lookup** - an immutable transform-local chain that
+///    assigns stable tags to named and internal coordinate spaces. Items carry
+///    only those tags; the lookup is derived state and is not part of equality.
+///
+/// 3. **Position storage** - a position adjustment plus a folded
 ///    global-to-local translation. Appending a position replaces the previous
 ///    adjustment by folding their delta into the translation. Resetting a
 ///    position performs the same fold and clears the adjustment, allowing
@@ -276,20 +314,14 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         /// `inverse == true` means the stored transform is in local-to-global form.
         case projectionTransform(ProjectionTransform, inverse: Bool)
 
+        /// Coordinate-space marker resolved through the transform-local chain.
+        case coordinateSpace(CoordinateSpaceTag)
+
+        /// Sized coordinate-space marker resolved through the same tag chain.
+        case sizedSpace(CoordinateSpaceTag, size: CGSize)
+
         /// Scroll-container geometry (offset, clip).
         case scrollGeometry(ScrollGeometry, isClipped: Bool)
-
-        /// Named coordinate-space marker (by `AnyHashable` name).
-        case coordinateSpaceName(AnyHashable)
-
-        /// Coordinate-space marker (by internal coordinate-space id).
-        case coordinateSpaceID(CoordinateSpace.ID)
-
-        /// Sized named coordinate-space marker.
-        case sizedSpace(name: AnyHashable, size: CGSize)
-
-        /// Sized coordinate-space marker (by internal coordinate-space id).
-        case sizedSpaceID(id: CoordinateSpace.ID, size: CGSize)
     }
 
     struct UnsafeBuffer: Sendable {
@@ -345,7 +377,9 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             id: CoordinateSpace.ID,
             transform: inout ViewTransform
         ) {
-            append(.coordinateSpaceID(id))
+            append(.coordinateSpace(
+                transform.resolveCoordinateSpaceTag(.internalID(id))
+            ))
         }
 
         mutating func appendSizedSpace(
@@ -353,7 +387,10 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             size: CGSize,
             transform: inout ViewTransform
         ) {
-            append(.sizedSpaceID(id: id, size: size))
+            append(.sizedSpace(
+                transform.resolveCoordinateSpaceTag(.internalID(id)),
+                size: size
+            ))
         }
 
         mutating func appendScrollGeometry(
@@ -373,6 +410,9 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
 
     /// Committed transform items, in global-to-local traversal order.
     private var _transformItems: [Item] = []
+
+    /// Derived mapping from coordinate-space values to transform-local tags.
+    private var _coordinateSpaceNode: CoordinateSpaceNode?
 
     /// Most recently appended position used to replace absolute placement.
     private var _positionAdjustment: CGSize = .zero
@@ -397,6 +437,12 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             components.append(String(describing: _positionTranslation))
         }
         return components.joined(separator: "; ")
+    }
+
+    static func == (lhs: ViewTransform, rhs: ViewTransform) -> Bool {
+        lhs._transformItems == rhs._transformItems &&
+            lhs._positionAdjustment == rhs._positionAdjustment &&
+            lhs._positionTranslation == rhs._positionTranslation
     }
 
     // Append / mutate methods
@@ -477,25 +523,35 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
     /// Marks the current position in the chain as a named coordinate space.
     mutating func appendCoordinateSpace(name: AnyHashable) {
         commitPositionTranslation()
-        _transformItems.append(.coordinateSpaceName(name))
+        _transformItems.append(.coordinateSpace(
+            resolveCoordinateSpaceTag(.named(name))
+        ))
     }
 
     /// Marks the current position in the chain as an internal coordinate space.
     mutating func appendCoordinateSpace(id: CoordinateSpace.ID) {
         commitPositionTranslation()
-        _transformItems.append(.coordinateSpaceID(id))
+        _transformItems.append(.coordinateSpace(
+            resolveCoordinateSpaceTag(.internalID(id))
+        ))
     }
 
     /// Marks the current position as a sized named coordinate space.
     mutating func appendSizedSpace(name: AnyHashable, size: CGSize) {
         commitPositionTranslation()
-        _transformItems.append(.sizedSpace(name: name, size: size))
+        _transformItems.append(.sizedSpace(
+            resolveCoordinateSpaceTag(.named(name)),
+            size: size
+        ))
     }
 
     /// Marks the current position as a sized internal coordinate space.
     mutating func appendSizedSpace(id: CoordinateSpace.ID, size: CGSize) {
         commitPositionTranslation()
-        _transformItems.append(.sizedSpaceID(id: id, size: size))
+        _transformItems.append(.sizedSpace(
+            resolveCoordinateSpaceTag(.internalID(id)),
+            size: size
+        ))
     }
 
     /// Folds a coordinate-boundary position and clears the position adjustment.
@@ -522,20 +578,21 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         to space: CoordinateSpace,
         points: inout A
     ) where A.Element == CGPoint {
-        switch space {
-        case .global:
+        guard let tag = coordinateSpaceTag(space) else {
             return
-        case .local:
+        }
+        if tag == .global {
+            return
+        }
+        if tag == .local {
             applyGlobalToLocal(points: &points)
             return
-        case .named(let name):
-            guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: name) else {
-                return
-            }
-            for item in _transformItems[...markerIndex] {
-                _applyTraversalItem(item, to: &points)
-            }
+        }
+        guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: tag) else {
             return
+        }
+        for item in _transformItems[...markerIndex] {
+            _applyTraversalItem(item, to: &points)
         }
     }
 
@@ -557,7 +614,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         to space: ScrollCoordinateSpace,
         points: inout A
     ) where A.Element == CGPoint {
-        guard let markerIndex = lastCoordinateSpaceMarkerIndex(matching: space.id) else {
+        guard let tag = coordinateSpaceTag(.internalID(space.id)),
+              let markerIndex = lastCoordinateSpaceMarkerIndex(matching: tag) else {
             convertGlobal(from: .local, points: &points)
             return
         }
@@ -624,20 +682,24 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
 
     var scrollCoordinateSpaces: [ScrollCoordinateSpace] {
         _transformItems.compactMap { item in
+            let tag: CoordinateSpaceTag
             switch item {
-            case .coordinateSpaceID(let id):
-                return ScrollCoordinateSpace(id: id)
-            case .sizedSpaceID(let id, _):
-                return ScrollCoordinateSpace(id: id)
+            case .coordinateSpace(let value), .sizedSpace(let value, _):
+                tag = value
             default:
                 return nil
             }
+            guard let id = coordinateSpace(for: tag)?.internalID else {
+                return nil
+            }
+            return ScrollCoordinateSpace(id: id)
         }
     }
 
     var scrollCoordinateSpaceSizes: [(ScrollCoordinateSpace, CGSize)] {
         _transformItems.compactMap { item in
-            guard case let .sizedSpaceID(id, size) = item,
+            guard case let .sizedSpace(tag, size) = item,
+                  let id = coordinateSpace(for: tag)?.internalID,
                   let space = ScrollCoordinateSpace(id: id) else {
                 return nil
             }
@@ -659,9 +721,12 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
     }
 
     func size(ofNamedCoordinateSpace name: AnyHashable) -> CGSize? {
+        guard let tag = coordinateSpaceTag(.named(name)) else {
+            return nil
+        }
         for item in _transformItems.reversed() {
             if case let .sizedSpace(candidate, size) = item,
-               candidate == name {
+               candidate == tag {
                 return size
             }
         }
@@ -740,35 +805,74 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         case .projectionTransform(let transform, let inverse):
             return .projectionTransform(transform, inverse: !inverse)
         case .scrollGeometry,
-             .coordinateSpaceName,
-             .coordinateSpaceID,
-             .sizedSpace,
-             .sizedSpaceID:
+             .coordinateSpace,
+             .sizedSpace:
             return item
         }
     }
 
-    private func lastCoordinateSpaceMarkerIndex(matching id: CoordinateSpace.ID) -> [Item].Index? {
-        for index in _transformItems.indices.reversed() {
-            switch _transformItems[index] {
-            case .coordinateSpaceID(let candidate),
-                 .sizedSpaceID(let candidate, _):
-                if candidate == id {
-                    return index
+    private func coordinateSpaceTag(
+        _ space: CoordinateSpace
+    ) -> CoordinateSpaceTag? {
+        switch space {
+        case .global:
+            return .global
+        case .local:
+            return .local
+        case .named:
+            var node = _coordinateSpaceNode
+            while let current = node {
+                if current.space == space {
+                    return CoordinateSpaceTag(base: current.depth)
                 }
-            default:
-                continue
+                node = current.next
             }
+            return nil
+        }
+    }
+
+    private mutating func resolveCoordinateSpaceTag(
+        _ space: CoordinateSpace
+    ) -> CoordinateSpaceTag {
+        if let tag = coordinateSpaceTag(space) {
+            return tag
+        }
+        let depth = (_coordinateSpaceNode?.depth ?? 0) + 1
+        _coordinateSpaceNode = CoordinateSpaceNode(
+            next: _coordinateSpaceNode,
+            space: space,
+            depth: depth
+        )
+        return CoordinateSpaceTag(base: depth)
+    }
+
+    private func coordinateSpace(
+        for tag: CoordinateSpaceTag
+    ) -> CoordinateSpace? {
+        if tag == .global {
+            return .global
+        }
+        if tag == .local {
+            return .local
+        }
+        var node = _coordinateSpaceNode
+        while let current = node {
+            if current.depth == tag.base {
+                return current.space
+            }
+            node = current.next
         }
         return nil
     }
 
-    private func lastCoordinateSpaceMarkerIndex(matching name: AnyHashable) -> [Item].Index? {
+    private func lastCoordinateSpaceMarkerIndex(
+        matching tag: CoordinateSpaceTag
+    ) -> [Item].Index? {
         for index in _transformItems.indices.reversed() {
             switch _transformItems[index] {
-            case .coordinateSpaceName(let candidate),
+            case .coordinateSpace(let candidate),
                  .sizedSpace(let candidate, _):
-                if candidate == name {
+                if candidate == tag {
                     return index
                 }
             default:
@@ -802,8 +906,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             }
 
         case .scrollGeometry,
-             .coordinateSpaceName, .coordinateSpaceID,
-             .sizedSpace, .sizedSpaceID:
+             .coordinateSpace,
+             .sizedSpace:
             // Geometry and coordinate-space items carry traversal metadata.
             break
         }
@@ -845,10 +949,8 @@ private extension ViewTransform.Item {
                 geometry = value
             }
 
-        case .coordinateSpaceName,
-             .coordinateSpaceID,
-             .sizedSpace,
-             .sizedSpaceID:
+        case .coordinateSpace,
+             .sizedSpace:
             break
         }
     }

@@ -23,6 +23,34 @@ extension CoordinateSpace {
     }
 }
 
+/// A transform-local identifier for a coordinate-space boundary.
+///
+/// Positive values refer to entries in a `ViewTransform` coordinate-space
+/// chain. Non-positive values are reserved for framework coordinate spaces.
+struct CoordinateSpaceTag: Equatable, Hashable, Sendable {
+    var base: Int
+
+    init(base: Int) {
+        self.base = base
+    }
+
+    static var local: CoordinateSpaceTag {
+        CoordinateSpaceTag(base: -1)
+    }
+
+    static var root: CoordinateSpaceTag {
+        CoordinateSpaceTag(base: 0)
+    }
+
+    static var global: CoordinateSpaceTag {
+        root
+    }
+
+    static var invalid: CoordinateSpaceTag {
+        CoordinateSpaceTag(base: -3)
+    }
+}
+
 enum ScrollCoordinateSpace: Equatable, Hashable, Sendable {
     case horizontal
     case vertical

@@ -3110,8 +3110,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
         transform.forEach(inverted: false) { item, _ in forward.append(item) }
         XCTAssertEqual(forward, [
             .translation(CGSize(width: 1, height: 2)),
-            .sizedSpaceID(
-                id: ScrollCoordinateSpace.content.id,
+            .sizedSpace(
+                CoordinateSpaceTag(base: 1),
                 size: CGSize(width: 20, height: 30)
             ),
             .translation(CGSize(width: -10, height: -15)),
@@ -3121,12 +3121,100 @@ final class ScrollViewSurfaceTests: XCTestCase {
         transform.forEach(inverted: true) { item, _ in inverted.append(item) }
         XCTAssertEqual(inverted, [
             .translation(CGSize(width: 10, height: 15)),
-            .sizedSpaceID(
-                id: ScrollCoordinateSpace.content.id,
+            .sizedSpace(
+                CoordinateSpaceTag(base: 1),
                 size: CGSize(width: 20, height: 30)
             ),
             .translation(CGSize(width: -1, height: -2)),
         ])
+    }
+
+    // ASSERTIONS coordinateSpaceTagFieldMetadataObserved coordinateSpaceTagDisassemblyObserved coordinateSpaceTagRuntimeObserved viewTransformItemFieldMetadataObserved
+    func testViewTransformCoordinateSpaceTagsUseOneTransformLocalChain() {
+        XCTAssertEqual(MemoryLayout<CoordinateSpaceTag>.size, 8)
+        XCTAssertEqual(MemoryLayout<ViewTransform>.size, 48)
+        XCTAssertEqual(CoordinateSpaceTag.local.base, -1)
+        XCTAssertEqual(CoordinateSpaceTag.root.base, 0)
+        XCTAssertEqual(CoordinateSpaceTag.global, .root)
+        XCTAssertEqual(CoordinateSpaceTag.invalid.base, -3)
+
+        let alpha = AnyHashable("alpha")
+        let scrollID = ScrollCoordinateSpace.all.id
+        var transform = ViewTransform.identity
+        transform.appendCoordinateSpace(name: alpha)
+        transform.appendSizedSpace(
+            name: alpha,
+            size: CGSize(width: 10, height: 20)
+        )
+        transform.appendCoordinateSpace(id: scrollID)
+        transform.appendSizedSpace(
+            id: scrollID,
+            size: CGSize(width: 30, height: 40)
+        )
+        transform.appendCoordinateSpace(name: AnyHashable(scrollID))
+
+        var items: [ViewTransform.Item] = []
+        transform.forEach(inverted: false) { item, _ in items.append(item) }
+        XCTAssertEqual(items, [
+            .coordinateSpace(CoordinateSpaceTag(base: 1)),
+            .sizedSpace(
+                CoordinateSpaceTag(base: 1),
+                size: CGSize(width: 10, height: 20)
+            ),
+            .coordinateSpace(CoordinateSpaceTag(base: 2)),
+            .sizedSpace(
+                CoordinateSpaceTag(base: 2),
+                size: CGSize(width: 30, height: 40)
+            ),
+            .coordinateSpace(CoordinateSpaceTag(base: 3)),
+        ])
+        XCTAssertEqual(
+            transform.size(ofNamedCoordinateSpace: alpha),
+            CGSize(width: 10, height: 20)
+        )
+        XCTAssertEqual(transform.scrollCoordinateSpaces, [.all, .all])
+        XCTAssertEqual(transform.scrollCoordinateSpaceSizes.count, 1)
+        XCTAssertEqual(transform.scrollCoordinateSpaceSizes[0].0, .all)
+        XCTAssertEqual(
+            transform.scrollCoordinateSpaceSizes[0].1,
+            CGSize(width: 30, height: 40)
+        )
+
+        var independent = ViewTransform.identity
+        independent.appendCoordinateSpace(name: AnyHashable("beta"))
+        var independentItems: [ViewTransform.Item] = []
+        independent.forEach(inverted: false) { item, _ in
+            independentItems.append(item)
+        }
+        XCTAssertEqual(independentItems, [
+            .coordinateSpace(CoordinateSpaceTag(base: 1)),
+        ])
+    }
+
+    func testViewTransformEqualityIgnoresUncommittedCoordinateSpaceNodes() {
+        var transform = ViewTransform.identity
+        var buffer = ViewTransform.UnsafeBuffer()
+        buffer.appendCoordinateSpace(
+            id: ScrollCoordinateSpace.content.id,
+            transform: &transform
+        )
+        buffer.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 20, height: 30),
+            transform: &transform
+        )
+
+        XCTAssertTrue(transform.isEmpty)
+        XCTAssertEqual(transform, .identity)
+
+        transform.append(movingContentsOf: &buffer)
+        var direct = ViewTransform.identity
+        direct.appendCoordinateSpace(id: ScrollCoordinateSpace.content.id)
+        direct.appendSizedSpace(
+            id: ScrollCoordinateSpace.content.id,
+            size: CGSize(width: 20, height: 30)
+        )
+        XCTAssertEqual(transform, direct)
     }
 
     // ASSERTIONS viewTransformBufferedAppendDisassemblyObserved viewTransformBufferedAppendObserved viewTransformCoordinateConversionRuntimeObserved
