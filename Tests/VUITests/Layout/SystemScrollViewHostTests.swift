@@ -1762,6 +1762,44 @@ final class SystemScrollViewHostTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS: lazyMultiAxisSectionGridRuntimeObserved
+    func testScrollViewAnimationOffsetComposesTopLeadingTargetAcrossBothAxes() {
+        let viewport = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let content = CGRect(x: 0, y: 0, width: 266, height: 1_100)
+
+        func offset(_ target: CGRect) -> CGPoint {
+            ScrollViewUtilities.animationOffset(
+                targetFrame: target,
+                anchor: .topLeading,
+                viewPortFrame: viewport,
+                contentFrame: content,
+                requiresVisibility: false
+            )
+        }
+
+        let first = offset(
+            CGRect(
+                x: 80,
+                y: 793.3809523809524,
+                width: 126,
+                height: 45
+            )
+        )
+        XCTAssertEqual(first.x, 80, accuracy: 0.000_001)
+        XCTAssertEqual(first.y, 793.3809523809524, accuracy: 0.000_001)
+
+        let next = offset(
+            CGRect(
+                x: 80,
+                y: 863.3809523809524,
+                width: 126,
+                height: 35
+            )
+        )
+        XCTAssertEqual(next.x, 80, accuracy: 0.000_001)
+        XCTAssertEqual(next.y, 863.3809523809524, accuracy: 0.000_001)
+    }
+
     func testScrollAnchorStorageUsesRoleDefaultAndRightToLeftAdjustment() {
         var anchors = ScrollAnchorStorage(defaultValue: .center)
         XCTAssertTrue(ScrollAnchorStorage().isEmpty)

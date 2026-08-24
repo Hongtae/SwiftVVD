@@ -227,6 +227,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         XCTAssertTrue(type(of: hGrid.tree.content.root) == LazyHGridLayout.self)
     }
 
+    // ASSERTIONS: lazyPinnedMultiAxisSectionGridPlacementOwnerObserved
     func testLazyLayoutRoleHierarchyMatchesSampledSurface() {
         let vStackLayout = LazyVStackLayout(
             base: _VStackLayout(alignment: .trailing, spacing: 7),
@@ -4100,6 +4101,239 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazyNestedSectionTargetIdentityObserved
+    func testNestedSectionTargetSubviewIDsPreserveNaturalForEachLanes() {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = SectionIDRecorder()
+
+        withCurrentTestSubgraph(host) {
+            let root = Group(sections: ForEach(0..<12, id: \.self) { section in
+                Section {
+                    Section {
+                        ForEach(0..<5, id: \.self) { row in
+                            Text("s\(section) r\(row)")
+                                .id(
+                                    NestedSectionTargetRowID(
+                                        section: section,
+                                        row: row
+                                    )
+                                )
+                        }
+                    } header: {
+                        Text("nested section \(section)")
+                    }
+                } header: {
+                    Text("section \(section)")
+                }
+            }) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            materializeViewList(root, graph: graph)
+
+            XCTAssertEqual(recorder.snapshots.count, 12)
+            let snapshot = recorder.snapshots[7]
+            XCTAssertEqual(snapshot.contentIDs.count, 6)
+            guard let headerID = snapshot.headerID else {
+                return XCTFail("expected section 7 outer header identity")
+            }
+            let outerHeader = headerID.explicitIDs
+            let nestedHeader = snapshot.contentIDs[0].explicitIDs
+            let targetRow = snapshot.contentIDs[5].explicitIDs
+
+            XCTAssertEqual(outerHeader.count, 1)
+            XCTAssertEqual(outerHeader[0].id.base as? Int, 7)
+            XCTAssertFalse(outerHeader[0].isUnary)
+
+            XCTAssertEqual(nestedHeader.count, 2)
+            XCTAssertTrue(nestedHeader[0].id.base is UniqueID)
+            XCTAssertFalse(nestedHeader[0].isUnary)
+            XCTAssertEqual(nestedHeader[1].id, outerHeader[0].id)
+            XCTAssertEqual(nestedHeader[1].reuseID, outerHeader[0].reuseID)
+            XCTAssertEqual(nestedHeader[1].owner, outerHeader[0].owner)
+
+            XCTAssertEqual(targetRow.count, 5)
+            XCTAssertEqual(
+                targetRow[0].id.base as? NestedSectionTargetRowID,
+                NestedSectionTargetRowID(section: 7, row: 4)
+            )
+            XCTAssertTrue(targetRow[0].isUnary)
+            XCTAssertEqual(targetRow[1].id.base as? Int, 4)
+            XCTAssertTrue(targetRow[1].isUnary)
+            XCTAssertTrue(targetRow[2].id.base is UniqueID)
+            XCTAssertFalse(targetRow[2].isUnary)
+            XCTAssertNotEqual(targetRow[2].id, nestedHeader[0].id)
+            XCTAssertNotEqual(targetRow[2].owner, nestedHeader[0].owner)
+            XCTAssertEqual(targetRow[3].id, nestedHeader[0].id)
+            XCTAssertEqual(targetRow[3].reuseID, nestedHeader[0].reuseID)
+            XCTAssertEqual(targetRow[3].owner, nestedHeader[0].owner)
+            XCTAssertFalse(targetRow[3].isUnary)
+            XCTAssertEqual(targetRow[4].id, outerHeader[0].id)
+            XCTAssertEqual(targetRow[4].reuseID, outerHeader[0].reuseID)
+            XCTAssertEqual(targetRow[4].owner, outerHeader[0].owner)
+            XCTAssertFalse(targetRow[4].isUnary)
+        }
+    }
+
+    // ASSERTIONS: lazyNestedSectionFooterIdentityObserved
+    func testNestedSectionFooterTargetFlattensAfterNaturalForEachRows() {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = SectionIDRecorder()
+
+        withCurrentTestSubgraph(host) {
+            let root = Group(sections: ForEach(0..<12, id: \.self) { section in
+                Section {
+                    Section {
+                        ForEach(0..<5, id: \.self) { row in
+                            Text("s\(section) r\(row)")
+                                .id(
+                                    NestedSectionTargetRowID(
+                                        section: section,
+                                        row: row
+                                    )
+                                )
+                        }
+                    } footer: {
+                        Text("nested footer \(section)")
+                    }
+                } header: {
+                    Text("section \(section)")
+                }
+            }) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            materializeViewList(root, graph: graph)
+
+            XCTAssertEqual(recorder.snapshots.count, 12)
+            let snapshot = recorder.snapshots[7]
+            XCTAssertEqual(snapshot.contentIDs.count, 6)
+            XCTAssertNil(snapshot.footerID)
+            guard let headerID = snapshot.headerID else {
+                return XCTFail("expected section 7 outer header identity")
+            }
+
+            let outerHeader = headerID.explicitIDs
+            let nestedFooter = snapshot.contentIDs[5].explicitIDs
+            let targetRow = snapshot.contentIDs[4].explicitIDs
+
+            XCTAssertEqual(outerHeader.count, 1)
+            XCTAssertEqual(outerHeader[0].id.base as? Int, 7)
+            XCTAssertFalse(outerHeader[0].isUnary)
+
+            // A nested footer is the final outer-content entry. It does not
+            // populate the enclosing section's footer region.
+            XCTAssertEqual(nestedFooter.count, 2)
+            XCTAssertTrue(nestedFooter[0].id.base is UniqueID)
+            XCTAssertFalse(nestedFooter[0].isUnary)
+            XCTAssertEqual(nestedFooter[1].id, outerHeader[0].id)
+            XCTAssertEqual(nestedFooter[1].reuseID, outerHeader[0].reuseID)
+            XCTAssertEqual(nestedFooter[1].owner, outerHeader[0].owner)
+
+            XCTAssertEqual(targetRow.count, 5)
+            XCTAssertEqual(
+                targetRow[0].id.base as? NestedSectionTargetRowID,
+                NestedSectionTargetRowID(section: 7, row: 4)
+            )
+            XCTAssertTrue(targetRow[0].isUnary)
+            XCTAssertEqual(targetRow[1].id.base as? Int, 4)
+            XCTAssertTrue(targetRow[1].isUnary)
+            XCTAssertTrue(targetRow[2].id.base is UniqueID)
+            XCTAssertFalse(targetRow[2].isUnary)
+            XCTAssertNotEqual(targetRow[2].id, nestedFooter[0].id)
+            XCTAssertNotEqual(targetRow[2].owner, nestedFooter[0].owner)
+            XCTAssertEqual(targetRow[3].id, nestedFooter[0].id)
+            XCTAssertEqual(targetRow[3].reuseID, nestedFooter[0].reuseID)
+            XCTAssertEqual(targetRow[3].owner, nestedFooter[0].owner)
+            XCTAssertFalse(targetRow[3].isUnary)
+            XCTAssertEqual(targetRow[4].id, outerHeader[0].id)
+            XCTAssertEqual(targetRow[4].reuseID, outerHeader[0].reuseID)
+            XCTAssertEqual(targetRow[4].owner, outerHeader[0].owner)
+            XCTAssertFalse(targetRow[4].isUnary)
+        }
+    }
+
+    // ASSERTIONS: lazyOuterSectionFooterNestedGridIdentityObserved
+    func testNestedSectionFooterTargetKeepsGenuineOuterFooterBoundary() {
+        let host = GraphHost()
+        let graph = host.data.graph
+        let recorder = SectionIDRecorder()
+
+        withCurrentTestSubgraph(host) {
+            let root = Group(sections: ForEach(0..<12, id: \.self) { section in
+                Section {
+                    Section {
+                        ForEach(0..<5, id: \.self) { row in
+                            Text("s\(section) r\(row)")
+                                .id(
+                                    NestedSectionTargetRowID(
+                                        section: section,
+                                        row: row
+                                    )
+                                )
+                        }
+                    } footer: {
+                        Text("nested footer \(section)")
+                    }
+                } header: {
+                    Text("section \(section)")
+                } footer: {
+                    Text("outer footer \(section)")
+                }
+            }) { sections in
+                SectionIDCaptureView(recorder: recorder, collection: sections)
+            }
+
+            materializeViewList(root, graph: graph)
+
+            XCTAssertEqual(recorder.snapshots.count, 12)
+            let snapshot = recorder.snapshots[7]
+            XCTAssertEqual(snapshot.contentIDs.count, 6)
+            guard let headerID = snapshot.headerID,
+                  let footerID = snapshot.footerID else {
+                return XCTFail("expected section 7 outer header/footer identities")
+            }
+
+            let outerHeader = headerID.explicitIDs
+            let outerFooter = footerID.explicitIDs
+            let nestedFooter = snapshot.contentIDs[5].explicitIDs
+            let targetRow = snapshot.contentIDs[4].explicitIDs
+
+            XCTAssertEqual(headerID._index, 0)
+            XCTAssertEqual(headerID.implicitID, 0)
+            XCTAssertEqual(footerID._index, 0)
+            XCTAssertEqual(footerID.implicitID, 1)
+            XCTAssertEqual(outerHeader.count, 1)
+            XCTAssertEqual(outerHeader[0].id.base as? Int, 7)
+            XCTAssertFalse(outerHeader[0].isUnary)
+            XCTAssertEqual(outerFooter, outerHeader)
+
+            // The nested footer remains the final content entry even when the
+            // enclosing section also owns a distinct footer region.
+            XCTAssertEqual(nestedFooter.count, 2)
+            XCTAssertTrue(nestedFooter[0].id.base is UniqueID)
+            XCTAssertFalse(nestedFooter[0].isUnary)
+            XCTAssertEqual(nestedFooter[1], outerHeader[0])
+
+            XCTAssertEqual(targetRow.count, 5)
+            XCTAssertEqual(
+                targetRow[0].id.base as? NestedSectionTargetRowID,
+                NestedSectionTargetRowID(section: 7, row: 4)
+            )
+            XCTAssertTrue(targetRow[0].isUnary)
+            XCTAssertEqual(targetRow[1].id.base as? Int, 4)
+            XCTAssertTrue(targetRow[1].isUnary)
+            XCTAssertTrue(targetRow[2].id.base is UniqueID)
+            XCTAssertFalse(targetRow[2].isUnary)
+            XCTAssertNotEqual(targetRow[2].id, nestedFooter[0].id)
+            XCTAssertNotEqual(targetRow[2].owner, nestedFooter[0].owner)
+            XCTAssertEqual(targetRow[3], nestedFooter[0])
+            XCTAssertEqual(targetRow[4], outerHeader[0])
+        }
+    }
+
     func testForEachSectionsBuildsContentFromSectionConfigurations() {
         let host = GraphHost()
         let graph = host.data.graph
@@ -4916,6 +5150,10 @@ final class LazyContainerSurfaceTests: XCTestCase {
     }
 
     // ASSERTIONS: lazySectionGridAsymmetricBoundaryTargetRecurrenceObserved
+    // ASSERTIONS: lazyPinnedSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyMultiAxisSectionGridCollectionStructureObserved
+    // ASSERTIONS: lazyMultiAxisSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyMultiAxisSectionGridEstimationObserved
     func testLazySectionGridAsymmetricIncompleteGroupUsesEstimatedThenExactBoundaryRecurrence() throws {
         let host = GraphHost()
 
@@ -4972,14 +5210,21 @@ final class LazyContainerSurfaceTests: XCTestCase {
             }
 
             let list: any ViewList = _ViewList_Group(lists: sectionEntries)
+            let columns = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
             let layout = LazyVGridLayout(
-                columns: Array(
-                    repeating: GridItem(.fixed(40), spacing: 3),
-                    count: 3
-                ),
+                columns: columns,
                 alignment: .leading,
                 spacing: 7,
                 pinnedViews: []
+            )
+            let pinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: .sectionHeaders
             )
             let cache = makeConcreteLazyGridCache(
                 host: host,
@@ -4999,6 +5244,15 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 containerLength: 100,
                 minorSize: 140
             )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionHeaders
+            )
             let incompleteGroupTarget = _ViewList_ID(
                 implicitID: 2_007
             ).elementID(at: 4).canonicalID
@@ -5015,6 +5269,14 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 ),
                 70
             )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                70
+            )
             XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 49)
             XCTAssertEqual(
                 layout.firstIndex(
@@ -5024,12 +5286,20 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 ),
                 75
             )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                75
+            )
 
             var minorSize = CGFloat(140)
             let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
             let estimatedLength = CGFloat(463) / 17
             let estimatedOrigin = CGFloat(794.4117647058823)
-            var stackCache = _LazyStack_Cache<LazyVGridLayout>(
+            let initialStackCache = _LazyStack_Cache<LazyVGridLayout>(
                 minor: MinorProperties(
                     count: minorGeometry.count,
                     size: minorSize,
@@ -5045,6 +5315,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
                     spacingToCount: [7: 13]
                 )
             )
+            var stackCache = initialStackCache
             let estimatedRect = try XCTUnwrap(
                 layout.boundingRect(
                     at: 70,
@@ -5057,9 +5328,31 @@ final class LazyContainerSurfaceTests: XCTestCase {
             XCTAssertEqual(estimatedRect.size.height, estimatedLength, accuracy: 0.000_001)
             XCTAssertEqual(estimatedRect.size.width, 140, accuracy: 0.000_001)
 
+            var pinnedStackCache = initialStackCache
+            let pinnedEstimatedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedEstimatedRect, estimatedRect)
+
             stackCache.placedIndices = 69..<72
             stackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
             stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let refinedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(refinedRect.origin.y, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.height, 45, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.width, 140, accuracy: 0.000_001)
             let nextSectionRect = try XCTUnwrap(
                 layout.boundingRect(
                     at: 75,
@@ -5075,6 +5368,1334 @@ final class LazyContainerSurfaceTests: XCTestCase {
             )
             XCTAssertEqual(nextSectionRect.size.height, 35, accuracy: 0.000_001)
             XCTAssertEqual(nextSectionRect.size.width, 140, accuracy: 0.000_001)
+
+            pinnedStackCache.placedIndices = 69..<72
+            pinnedStackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            pinnedStackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let pinnedRefinedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedRefinedRect, refinedRect)
+            let pinnedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedNextSectionRect, nextSectionRect)
+        }
+    }
+
+    // ASSERTIONS: lazyHorizontalSectionGridCollectionStructureObserved
+    // ASSERTIONS: lazyHorizontalSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyHorizontalSectionGridEstimationObserved
+    // ASSERTIONS: lazyPinnedHorizontalSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyPinnedHorizontalSectionGridEstimationObserved
+    func testLazyHorizontalSectionGridUsesMeasuredMajorAxisTargetGeometry() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let list = makeAsymmetricHorizontalSectionGridList(graph: graph)
+            let rows = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
+            let layout = LazyHGridLayout(
+                rows: rows,
+                alignment: .top,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let pinnedLayout = LazyHGridLayout(
+                rows: rows,
+                alignment: .top,
+                spacing: 7,
+                pinnedViews: .sectionHeaders
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .horizontal
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .horizontal,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .horizontal,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionHeaders
+            )
+            let incompleteGroupTarget = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 4).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 0).canonicalID
+
+            // Canonical traversal counts one header and five content entries
+            // per preceding section. Three-track layout traversal expands the
+            // header and the incomplete content group independently.
+            XCTAssertEqual(subviews.firstIndex(of: incompleteGroupTarget), 47)
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 49)
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                70
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                70
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                75
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                75
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedLength = CGFloat(463) / 17
+            let estimatedOrigin = CGFloat(794.4117647058823)
+            let initialStackCache = _LazyStack_Cache<LazyHGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [estimatedLength: 1],
+                    spacingToCount: [7: 1]
+                )
+            )
+            var stackCache = initialStackCache
+            let estimatedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                estimatedRect.origin.x,
+                estimatedOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                estimatedRect.size.width,
+                estimatedLength,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(estimatedRect.origin.y, 0, accuracy: 0.000_001)
+            XCTAssertEqual(estimatedRect.size.height, 140, accuracy: 0.000_001)
+
+            var pinnedStackCache = initialStackCache
+            let pinnedEstimatedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedEstimatedRect, estimatedRect)
+
+            // Exact traversal starts at the aligned row-3 slot. It refines the
+            // incomplete column to 45 points, then crosses spacing, the next
+            // 11-point header, and spacing before the next section target.
+            stackCache.placedIndices = 69..<72
+            stackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let refinedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(refinedRect.origin.x, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.width, 45, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.origin.y, 0, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.height, 140, accuracy: 0.000_001)
+
+            let nextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                nextSectionRect.origin.x,
+                estimatedOrigin + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(nextSectionRect.size.width, 35, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.origin.y, 0, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.size.height, 140, accuracy: 0.000_001)
+
+            // Header pinning is presentation-only. It must not change either
+            // the refined incomplete column or the next-section recurrence.
+            pinnedStackCache.placedIndices = 69..<72
+            pinnedStackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            pinnedStackCache.visibleExtent =
+                estimatedOrigin...(estimatedOrigin + 100)
+            let pinnedRefinedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedRefinedRect, refinedRect)
+            let pinnedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedNextSectionRect, nextSectionRect)
+        }
+    }
+
+    // ASSERTIONS: lazyNestedSectionGridCellPlacementObserved
+    // ASSERTIONS: lazyNestedSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyPinnedNestedSectionGridTargetGeometryObserved
+    func testLazyNestedSectionGridTargetKeepsFlattenedContentIndexAndBoundaryGeometry() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+
+            func region(
+                sizes: [CGSize],
+                implicitID: Int
+            ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+                let list: any ViewList = BaseViewList(
+                    elements: IndexedLayoutViewListElements(
+                        graph: graph,
+                        sizes: sizes
+                    ),
+                    implicitID: implicitID
+                )
+                return (list, graph.makeInput(value: list))
+            }
+
+            let bodyBaseHeights: [CGFloat] = [13, 31, 17, 43, 19]
+            let outerHeaderBaseHeights: [CGFloat] = [11, 23, 17, 29]
+            let nestedHeaderBaseHeights: [CGFloat] = [7, 19, 13, 25]
+            var sectionEntries: [(
+                list: any ViewList,
+                attribute: Attribute<any ViewList>
+            )] = []
+            for section in 0..<12 {
+                let outerHeader = region(
+                    sizes: [
+                        CGSize(
+                            width: 120,
+                            height: outerHeaderBaseHeights[
+                                section % outerHeaderBaseHeights.count
+                            ]
+                        ),
+                    ],
+                    implicitID: 1_000 + section
+                )
+                let sectionAdjustment = CGFloat((section % 3) * 2)
+                // The nested header is the first item in the outer section's
+                // flattened content. It consumes one collection slot and one
+                // grid cell; it does not create another section-header region.
+                let flattenedContent = region(
+                    sizes: [
+                        CGSize(
+                            width: 120,
+                            height: nestedHeaderBaseHeights[
+                                section % nestedHeaderBaseHeights.count
+                            ]
+                        ),
+                    ] + bodyBaseHeights.map {
+                        CGSize(width: 40, height: $0 + sectionAdjustment)
+                    },
+                    implicitID: 2_000 + section
+                )
+                let sectionList: any ViewList = _ViewList_Section(
+                    id: UInt32(section),
+                    base: _ViewList_Group(lists: [outerHeader, flattenedContent])
+                )
+                sectionEntries.append((
+                    sectionList,
+                    graph.makeInput(value: sectionList)
+                ))
+            }
+
+            let list: any ViewList = _ViewList_Group(lists: sectionEntries)
+            let columns = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
+            let layout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let pinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: .sectionHeaders
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionHeaders
+            )
+            let incompleteGroupTarget = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 5).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 1).canonicalID
+
+            // Style 2 counts seven concrete entries per preceding section:
+            // one outer header plus the nested header and five rows.
+            XCTAssertEqual(subviews.firstIndex(of: incompleteGroupTarget), 55)
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 58)
+            // Style 6 pads the outer header to three slots. The six flattened
+            // content entries already fill two complete minor groups.
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                71
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: incompleteGroupTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                71
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                76
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                76
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedLength = CGFloat(463) / 17
+            let estimatedOrigin = CGFloat(794.4117647058823)
+            let initialStackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [11: 4, 31: 5, 43: 4, 23: 4],
+                    spacingToCount: [7: 13]
+                )
+            )
+            var stackCache = initialStackCache
+            let estimatedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 71,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(estimatedRect.origin.y, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(estimatedRect.size.height, estimatedLength, accuracy: 0.000_001)
+            XCTAssertEqual(estimatedRect.size.width, 140, accuracy: 0.000_001)
+
+            var pinnedStackCache = initialStackCache
+            let pinnedEstimatedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 71,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedEstimatedRect, estimatedRect)
+
+            stackCache.placedIndices = 69..<72
+            stackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let refinedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 71,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(refinedRect.origin.y, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.height, 45, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.width, 140, accuracy: 0.000_001)
+
+            let nextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 76,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                nextSectionRect.origin.y,
+                estimatedOrigin + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(nextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.size.width, 140, accuracy: 0.000_001)
+
+            pinnedStackCache.placedIndices = 69..<72
+            pinnedStackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            pinnedStackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let pinnedRefinedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 71,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedRefinedRect, refinedRect)
+            let pinnedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 76,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedNextSectionRect, nextSectionRect)
+        }
+    }
+
+    // ASSERTIONS: lazyNestedSectionFooterGridCellPlacementObserved
+    // ASSERTIONS: lazyNestedSectionFooterGridTargetGeometryObserved
+    // ASSERTIONS: lazyPinnedNestedSectionFooterGridTargetGeometryObserved
+    // ASSERTIONS: lazyCombinedPinnedNestedSectionFooterGridTargetGeometryObserved
+    func testLazyNestedSectionFooterGridKeepsTrailingContentTargetGeometry() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let list = makeAsymmetricNestedFooterSectionGridList(graph: graph)
+            let columns = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
+            let layout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let pinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: .sectionFooters
+            )
+            let combinedPinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionFooters
+            )
+            let combinedPinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+
+            let targetRow = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 4).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 0).canonicalID
+
+            // Style 2 sees seven concrete entries per preceding section. The
+            // row-4 target precedes the nested footer in the current content
+            // list, while section 8 row 0 follows only its outer header.
+            XCTAssertEqual(subviews.firstIndex(of: targetRow), 54)
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 57)
+
+            // Style 6 pads the one-item outer header to a complete minor
+            // group. The six content entries already occupy two full groups.
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                70
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                70
+            )
+            XCTAssertEqual(
+                combinedPinnedLayout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext
+                ),
+                70
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                75
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                75
+            )
+            XCTAssertEqual(
+                combinedPinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext
+                ),
+                75
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedLength = CGFloat(463) / 17
+            let estimatedOrigin = CGFloat(794.4117647058823)
+            let initialStackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [11: 4, 31: 5, 43: 4, 23: 4],
+                    spacingToCount: [7: 13]
+                )
+            )
+            var stackCache = initialStackCache
+
+            let estimatedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                estimatedRect.origin.y,
+                estimatedOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                estimatedRect.size.height,
+                estimatedLength,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(estimatedRect.size.width, 140, accuracy: 0.000_001)
+
+            var pinnedStackCache = initialStackCache
+            let pinnedEstimatedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedEstimatedRect, estimatedRect)
+
+            var combinedPinnedStackCache = initialStackCache
+            let combinedPinnedEstimatedRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedEstimatedRect, estimatedRect)
+
+            // Nearby exact traversal starts at the aligned row-3 slot. The
+            // row-3, row-4, nested-footer group refines to its 45-point max.
+            stackCache.placedIndices = 69..<72
+            stackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let refinedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                refinedRect.origin.y,
+                estimatedOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(refinedRect.size.height, 45, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.width, 140, accuracy: 0.000_001)
+
+            let nextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                nextSectionRect.origin.y,
+                estimatedOrigin + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(nextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.size.width, 140, accuracy: 0.000_001)
+
+            pinnedStackCache.placedIndices = 69..<72
+            pinnedStackCache.placedExtent = (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            pinnedStackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let pinnedRefinedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedRefinedRect, refinedRect)
+            let pinnedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedNextSectionRect, nextSectionRect)
+
+            combinedPinnedStackCache.placedIndices = 69..<72
+            combinedPinnedStackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            combinedPinnedStackCache.visibleExtent =
+                estimatedOrigin...(estimatedOrigin + 100)
+            let combinedPinnedRefinedRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 70,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedRefinedRect, refinedRect)
+            let combinedPinnedNextSectionRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 75,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedNextSectionRect, nextSectionRect)
+        }
+    }
+
+    // ASSERTIONS: lazyPinnedOuterSectionFooterNestedGridTargetGeometryObserved
+    // ASSERTIONS: lazyCombinedPinnedOuterSectionFooterNestedGridTargetGeometryObserved
+    func testLazyOuterSectionFooterChangesBoundaryIndexesAndTargetRecurrence() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let list = makeAsymmetricNestedAndOuterFooterSectionGridList(
+                graph: graph
+            )
+            let columns = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
+            let layout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let pinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: .sectionFooters
+            )
+            let combinedPinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_600,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_600,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionFooters
+            )
+            let combinedPinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_600,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+
+            let targetRow = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 4).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 0).canonicalID
+
+            // Style 2 counts the genuine outer footer after each six-entry
+            // content region. Style 6 expands each one-item boundary to a full
+            // three-track group.
+            XCTAssertEqual(subviews.firstIndex(of: targetRow), 61)
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 65)
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                91
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                91
+            )
+            XCTAssertEqual(
+                combinedPinnedLayout.firstIndex(
+                    of: targetRow,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext
+                ),
+                91
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                99
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                99
+            )
+            XCTAssertEqual(
+                combinedPinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext
+                ),
+                99
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedOrigin = CGFloat(932.7142857142858)
+            let estimatedLength = CGFloat(167) / 7
+            let initialStackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [11: 2, 31: 3, 43: 1, 9: 1],
+                    spacingToCount: [7: 6]
+                )
+            )
+            var stackCache = initialStackCache
+            let estimatedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                estimatedRect.origin.y,
+                estimatedOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                estimatedRect.size.height,
+                estimatedLength,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(estimatedRect.size.width, 140, accuracy: 0.000_001)
+
+            var pinnedStackCache = initialStackCache
+            let pinnedEstimatedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedEstimatedRect, estimatedRect)
+            var combinedPinnedStackCache = initialStackCache
+            let combinedPinnedEstimatedRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedEstimatedRect, estimatedRect)
+
+            // Nearby exact traversal aligns to the row-3 slot. The next target
+            // then crosses the 27-point footer and 11-point next header.
+            stackCache.placedIndices = 90..<93
+            stackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            stackCache.visibleExtent = estimatedOrigin...(estimatedOrigin + 100)
+            let refinedRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(refinedRect.origin.y, estimatedOrigin, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.height, 45, accuracy: 0.000_001)
+            XCTAssertEqual(refinedRect.size.width, 140, accuracy: 0.000_001)
+
+            let nextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 99,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: stackCache
+                )
+            )
+            XCTAssertEqual(
+                nextSectionRect.origin.y,
+                estimatedOrigin + 45 + 7 + 27 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(nextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(nextSectionRect.size.width, 140, accuracy: 0.000_001)
+
+            pinnedStackCache.placedIndices = 90..<93
+            pinnedStackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            pinnedStackCache.visibleExtent =
+                estimatedOrigin...(estimatedOrigin + 100)
+            let pinnedRefinedRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedRefinedRect, refinedRect)
+            let pinnedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 99,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: pinnedStackCache
+                )
+            )
+            XCTAssertEqual(pinnedNextSectionRect, nextSectionRect)
+
+            // Header and footer pinning are presentation-only. Enabling both
+            // boundary roles cannot feed either rebased frame into target math.
+            combinedPinnedStackCache.placedIndices = 90..<93
+            combinedPinnedStackCache.placedExtent =
+                (estimatedOrigin - 7)...(estimatedOrigin + 45)
+            combinedPinnedStackCache.visibleExtent =
+                estimatedOrigin...(estimatedOrigin + 100)
+            let combinedPinnedRefinedRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 91,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedRefinedRect, refinedRect)
+            let combinedPinnedNextSectionRect = try XCTUnwrap(
+                combinedPinnedLayout.boundingRect(
+                    at: 99,
+                    subviews: subviews,
+                    context: combinedPinnedPlacementContext,
+                    cache: combinedPinnedStackCache
+                )
+            )
+            XCTAssertEqual(combinedPinnedNextSectionRect, nextSectionRect)
+        }
+    }
+
+    // ASSERTIONS: lazyTallNestedSectionGridCellPlacementObserved
+    // ASSERTIONS: lazyTallNestedSectionGridTargetGeometryObserved
+    // ASSERTIONS: lazyTallNestedSectionGridBoundedPredecessorObserved
+    // ASSERTIONS: lazyTallNestedSectionGridEstimationLifecycleObserved
+    // ASSERTIONS: lazyPinnedTallNestedSectionGridTargetGeometryObserved
+    func testLazyTallNestedHeaderChangesOnlyTraversedGroupGeometry() throws {
+        let host = GraphHost()
+
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let list = makeAsymmetricNestedSectionGridList(
+                graph: graph,
+                tallNestedHeader: (section: 7, height: 61)
+            )
+            let columns = Array(
+                repeating: GridItem(.fixed(40), spacing: 3),
+                count: 3
+            )
+            let layout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: []
+            )
+            let pinnedLayout = LazyVGridLayout(
+                columns: columns,
+                alignment: .leading,
+                spacing: 7,
+                pinnedViews: .sectionHeaders
+            )
+            let cache = makeConcreteLazyGridCache(
+                host: host,
+                layout: layout,
+                nearestScrollableAxes: .vertical
+            )
+            cache._list = graph.makeInput(value: list)
+            let context = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: context)
+            let placementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140
+            )
+            let pinnedPlacementContext = testLazyStackPlacementContext(
+                subviews: subviews,
+                axis: .vertical,
+                visible: CGFloat(0)...CGFloat(100),
+                visibleLength: 1_500,
+                containerLength: 100,
+                minorSize: 140,
+                pinnedViews: .sectionHeaders
+            )
+            let tallGroupTarget = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 1).canonicalID
+            let boundedLaterGroupTarget = _ViewList_ID(
+                implicitID: 2_007
+            ).elementID(at: 5).canonicalID
+            let nextSectionTarget = _ViewList_ID(
+                implicitID: 2_008
+            ).elementID(at: 1).canonicalID
+
+            XCTAssertEqual(subviews.firstIndex(of: tallGroupTarget), 51)
+            XCTAssertEqual(subviews.firstIndex(of: boundedLaterGroupTarget), 55)
+            XCTAssertEqual(subviews.firstIndex(of: nextSectionTarget), 58)
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: tallGroupTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                67
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: boundedLaterGroupTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                71
+            )
+            XCTAssertEqual(
+                layout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: placementContext
+                ),
+                76
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: tallGroupTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                67
+            )
+            XCTAssertEqual(
+                pinnedLayout.firstIndex(
+                    of: nextSectionTarget,
+                    subviews: subviews,
+                    context: pinnedPlacementContext
+                ),
+                76
+            )
+
+            var minorSize = CGFloat(140)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let estimatedLength = CGFloat(463) / 17
+            let firstGroupOrigin = CGFloat(760.1764705882352)
+            let laterGroupOrigin = CGFloat(794.4117647058823)
+            let initialStackCache = _LazyStack_Cache<LazyVGridLayout>(
+                minor: MinorProperties(
+                    count: minorGeometry.count,
+                    size: minorSize,
+                    geometry: minorGeometry.data
+                ),
+                placedIndices: 0..<12,
+                placedExtent: CGFloat(0)...CGFloat(115),
+                visibleExtent: CGFloat(0)...CGFloat(100),
+                visibleLength: 100,
+                containerLength: 100,
+                estimations: EstimationCache(
+                    lengthToCount: [11: 4, 31: 5, 43: 4, 23: 4],
+                    spacingToCount: [7: 13]
+                )
+            )
+
+            // A cold query knows only the rolling samples. The unmaterialized
+            // 61-point cell therefore does not alter the initial rectangle.
+            let coldTallGroupRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 67,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: initialStackCache
+                )
+            )
+            XCTAssertEqual(
+                coldTallGroupRect.origin.y,
+                firstGroupOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                coldTallGroupRect.size.height,
+                estimatedLength,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(coldTallGroupRect.size.width, 140, accuracy: 0.000_001)
+            let pinnedColdTallGroupRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 67,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: initialStackCache
+                )
+            )
+            XCTAssertEqual(pinnedColdTallGroupRect, coldTallGroupRect)
+
+            // Starting at the aligned first group measures the tall header as
+            // that group's maximum and carries the 28-point delta forward.
+            var measuredTallGroupCache = initialStackCache
+            measuredTallGroupCache.placedIndices = 66..<69
+            measuredTallGroupCache.placedExtent =
+                (firstGroupOrigin - 7)...(firstGroupOrigin + 61)
+            measuredTallGroupCache.visibleExtent =
+                firstGroupOrigin...(firstGroupOrigin + 100)
+            let measuredTallGroupRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 67,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: measuredTallGroupCache
+                )
+            )
+            XCTAssertEqual(
+                measuredTallGroupRect.origin.y,
+                firstGroupOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                measuredTallGroupRect.size.height,
+                61,
+                accuracy: 0.000_001
+            )
+            let shiftedNextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 76,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: measuredTallGroupCache
+                )
+            )
+            XCTAssertEqual(
+                shiftedNextSectionRect.origin.y,
+                firstGroupOrigin + 61 + 7 + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(shiftedNextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(shiftedNextSectionRect.size.width, 140, accuracy: 0.000_001)
+
+            // Header pinning is a presentation pass over placed subviews. It
+            // must not alter the exact target rectangle or the carried delta.
+            let pinnedMeasuredTallGroupRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 67,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: measuredTallGroupCache
+                )
+            )
+            XCTAssertEqual(pinnedMeasuredTallGroupRect, measuredTallGroupRect)
+            let pinnedShiftedNextSectionRect = try XCTUnwrap(
+                pinnedLayout.boundingRect(
+                    at: 76,
+                    subviews: subviews,
+                    context: pinnedPlacementContext,
+                    cache: measuredTallGroupCache
+                )
+            )
+            XCTAssertEqual(pinnedShiftedNextSectionRect, shiftedNextSectionRect)
+
+            // A later bounded query starts at the cached second group. It must
+            // not walk backward and retroactively measure the preceding cell.
+            var boundedLaterGroupCache = initialStackCache
+            boundedLaterGroupCache.placedIndices = 69..<72
+            boundedLaterGroupCache.placedExtent =
+                (laterGroupOrigin - 7)...(laterGroupOrigin + 45)
+            boundedLaterGroupCache.visibleExtent =
+                laterGroupOrigin...(laterGroupOrigin + 100)
+            let boundedLaterGroupRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 71,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: boundedLaterGroupCache
+                )
+            )
+            XCTAssertEqual(
+                boundedLaterGroupRect.origin.y,
+                laterGroupOrigin,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(
+                boundedLaterGroupRect.size.height,
+                45,
+                accuracy: 0.000_001
+            )
+            let unshiftedNextSectionRect = try XCTUnwrap(
+                layout.boundingRect(
+                    at: 76,
+                    subviews: subviews,
+                    context: placementContext,
+                    cache: boundedLaterGroupCache
+                )
+            )
+            XCTAssertEqual(
+                unshiftedNextSectionRect.origin.y,
+                laterGroupOrigin + 45 + 7 + 11 + 7,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(unshiftedNextSectionRect.size.height, 35, accuracy: 0.000_001)
+            XCTAssertEqual(unshiftedNextSectionRect.size.width, 140, accuracy: 0.000_001)
         }
     }
 
@@ -8153,6 +9774,1002 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazyPinnedNestedSectionFooterGridPresentationObserved
+    // ASSERTIONS: lazyPinnedNestedSectionFooterGridPlacementOwnerObserved
+    func testLazyPinnedNestedSectionFooterKeepsOrdinaryContentPosition() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, firstRow, _) = makeLazyCache(host: host, implicitID: 1)
+            var rows = [firstRow]
+            for implicitID in 2...5 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+            let (_, nestedFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 6
+            )
+            let (_, nextOuterHeader, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 7
+            )
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 8)
+            }
+            nestedFooter.section = LazyLayoutCacheSection(id: 8)
+            nextOuterHeader.section = LazyLayoutCacheSection(id: 9, isHeader: true)
+
+            let rowSizes = [
+                CGSize(width: 40, height: 17),
+                CGSize(width: 40, height: 35),
+                CGSize(width: 40, height: 21),
+                CGSize(width: 40, height: 47),
+                CGSize(width: 40, height: 23),
+            ]
+            let nestedFooterSize = CGSize(width: 120, height: 7)
+            let nextOuterHeaderSize = CGSize(width: 120, height: 23)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+            installSize(nestedFooterSize, on: nestedFooter)
+            installSize(nextOuterHeaderSize, on: nextOuterHeader)
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            // This seven-entry window matches the second native target. The
+            // nested footer is ordinary section-8 content, so footer-only
+            // presentation has no eligible footer index to rebase.
+            let natural = [
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 7, y: 872.3809523809524),
+                    index: 0
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 50, y: 863.3809523809524),
+                    index: 1
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 93, y: 870.3809523809524),
+                    index: 2
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 7, y: 905.3809523809524),
+                    index: 3
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 50, y: 917.3809523809524),
+                    index: 4
+                ),
+                placed(
+                    nestedFooter,
+                    size: nestedFooterSize,
+                    at: CGPoint(x: 53, y: 925.3809523809524),
+                    index: 5
+                ),
+                placed(
+                    nextOuterHeader,
+                    size: nextOuterHeaderSize,
+                    at: CGPoint(x: 10, y: 959.3809523809524),
+                    index: 6
+                ),
+            ]
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 863.5),
+                contentSize: CGSize(width: 140, height: 1_100),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            XCTAssertFalse(natural[5].isFooter)
+            XCTAssertFalse(natural[5].matches(.sectionFooters))
+            XCTAssertTrue(natural[6].isHeader)
+
+            var pinned = natural
+            pinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionFooters
+            )
+
+            XCTAssertEqual(pinned.count, 7)
+            XCTAssertEqual(pinned.map(\.placement.anchorPosition), naturalPositions)
+            XCTAssertEqual(
+                pinned[5].frame,
+                CGRect(
+                    x: 53,
+                    y: 925.3809523809524,
+                    width: 120,
+                    height: 7
+                )
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyPinnedOuterSectionFooterNestedGridPresentationObserved
+    // ASSERTIONS: lazyPinnedOuterSectionFooterNestedGridPlacementOwnerObserved
+    func testLazyPinnedOuterFooterMovesWithoutReclassifyingNestedFooter() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, firstRow, _) = makeLazyCache(host: host, implicitID: 1)
+            var rows = [firstRow]
+            for implicitID in 2...5 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+            let (_, nestedFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 6
+            )
+            let (_, outerFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 7
+            )
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 8)
+            }
+            nestedFooter.section = LazyLayoutCacheSection(id: 8)
+            outerFooter.section = LazyLayoutCacheSection(id: 8, isFooter: true)
+
+            let rowSizes = [
+                CGSize(width: 40, height: 17),
+                CGSize(width: 40, height: 35),
+                CGSize(width: 40, height: 21),
+                CGSize(width: 40, height: 47),
+                CGSize(width: 40, height: 23),
+            ]
+            let nestedFooterSize = CGSize(width: 120, height: 7)
+            let outerFooterSize = CGSize(width: 120, height: 9)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+            installSize(nestedFooterSize, on: nestedFooter)
+            installSize(outerFooterSize, on: outerFooter)
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            let natural = [
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 7, y: 1_044),
+                    index: 0
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 50, y: 1_035),
+                    index: 1
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 93, y: 1_042),
+                    index: 2
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 7, y: 1_077),
+                    index: 3
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 50, y: 1_089),
+                    index: 4
+                ),
+                placed(
+                    nestedFooter,
+                    size: nestedFooterSize,
+                    at: CGPoint(x: 53, y: 1_097),
+                    index: 5
+                ),
+                placed(
+                    outerFooter,
+                    size: outerFooterSize,
+                    at: CGPoint(x: 10, y: 1_131),
+                    index: 6
+                ),
+            ]
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 1_035),
+                contentSize: CGSize(width: 140, height: 1_500),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            XCTAssertFalse(natural[5].isFooter)
+            XCTAssertFalse(natural[5].matches(.sectionFooters))
+            XCTAssertTrue(natural[6].isFooter)
+            XCTAssertTrue(natural[6].matches(.sectionFooters))
+
+            var pinned = natural
+            pinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionFooters
+            )
+
+            XCTAssertEqual(pinned.count, 7)
+            XCTAssertEqual(
+                Array(pinned.dropLast()).map(\.placement.anchorPosition),
+                Array(naturalPositions.dropLast())
+            )
+            XCTAssertEqual(
+                pinned[5].frame,
+                CGRect(x: 53, y: 1_097, width: 120, height: 7)
+            )
+            XCTAssertEqual(
+                pinned[6].frame,
+                CGRect(x: 10, y: 1_126, width: 120, height: 9)
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyCombinedPinnedOuterSectionFooterNestedGridPresentationObserved
+    // ASSERTIONS: lazyCombinedPinnedOuterSectionFooterNestedGridPlacementOwnerObserved
+    func testLazyCombinedPinnedOuterHeaderAndFooterMoveIndependently() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, outerHeader, _) = makeLazyCache(
+                host: host,
+                implicitID: 1
+            )
+            var rows: [LazyLayoutCacheItem] = []
+            for implicitID in 2...6 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+            let (_, nestedFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 7
+            )
+            let (_, outerFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 8
+            )
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            outerHeader.section = LazyLayoutCacheSection(id: 8, isHeader: true)
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 8)
+            }
+            nestedFooter.section = LazyLayoutCacheSection(id: 8)
+            outerFooter.section = LazyLayoutCacheSection(id: 8, isFooter: true)
+
+            let outerHeaderSize = CGSize(width: 120, height: 11)
+            let rowSizes = [
+                CGSize(width: 40, height: 17),
+                CGSize(width: 40, height: 35),
+                CGSize(width: 40, height: 21),
+                CGSize(width: 40, height: 47),
+                CGSize(width: 40, height: 23),
+            ]
+            let nestedFooterSize = CGSize(width: 120, height: 7)
+            let outerFooterSize = CGSize(width: 120, height: 9)
+            installSize(outerHeaderSize, on: outerHeader)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+            installSize(nestedFooterSize, on: nestedFooter)
+            installSize(outerFooterSize, on: outerFooter)
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            // The combined window retains the current genuine header in
+            // addition to the seven footer-only entries. Each boundary keeps
+            // its own classification and moves on its own viewport edge.
+            let natural = [
+                placed(
+                    outerHeader,
+                    size: outerHeaderSize,
+                    at: CGPoint(x: 10, y: 1_017),
+                    index: 0
+                ),
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 7, y: 1_044),
+                    index: 1
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 50, y: 1_035),
+                    index: 2
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 93, y: 1_042),
+                    index: 3
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 7, y: 1_077),
+                    index: 4
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 50, y: 1_089),
+                    index: 5
+                ),
+                placed(
+                    nestedFooter,
+                    size: nestedFooterSize,
+                    at: CGPoint(x: 53, y: 1_097),
+                    index: 6
+                ),
+                placed(
+                    outerFooter,
+                    size: outerFooterSize,
+                    at: CGPoint(x: 10, y: 1_131),
+                    index: 7
+                ),
+            ]
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 1_035),
+                contentSize: CGSize(width: 140, height: 1_500),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            XCTAssertTrue(natural[0].isHeader)
+            XCTAssertFalse(natural[6].isFooter)
+            XCTAssertFalse(natural[6].matches(.sectionFooters))
+            XCTAssertTrue(natural[7].isFooter)
+
+            var footerPinned = natural
+            footerPinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionFooters
+            )
+
+            var combinedPinned = natural
+            combinedPinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+
+            XCTAssertEqual(combinedPinned.count, 8)
+            XCTAssertEqual(
+                combinedPinned[0].frame,
+                CGRect(x: 10, y: 1_035, width: 120, height: 11)
+            )
+            XCTAssertEqual(
+                Array(combinedPinned[1..<7]).map(\.placement.anchorPosition),
+                Array(naturalPositions[1..<7])
+            )
+            XCTAssertEqual(
+                combinedPinned[6].frame,
+                CGRect(x: 53, y: 1_097, width: 120, height: 7)
+            )
+            XCTAssertEqual(
+                combinedPinned[7].frame,
+                CGRect(x: 10, y: 1_126, width: 120, height: 9)
+            )
+            XCTAssertEqual(
+                Array(combinedPinned.dropFirst()).map(\.placement.anchorPosition),
+                Array(footerPinned.dropFirst()).map(\.placement.anchorPosition)
+            )
+            XCTAssertEqual(
+                footerPinned[0].placement.anchorPosition,
+                naturalPositions[0]
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyCombinedPinnedNestedSectionFooterGridPresentationObserved
+    // ASSERTIONS: lazyCombinedPinnedNestedSectionFooterGridPlacementOwnerObserved
+    func testLazyCombinedPinnedNestedSectionFooterMovesOnlyOuterHeader() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, currentOuterHeader, _) = makeLazyCache(
+                host: host,
+                implicitID: 1
+            )
+            var rows: [LazyLayoutCacheItem] = []
+            for implicitID in 2...6 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+            let (_, nestedFooter, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 7
+            )
+            let (_, nextOuterHeader, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 8
+            )
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            currentOuterHeader.section = LazyLayoutCacheSection(
+                id: 8,
+                isHeader: true
+            )
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 8)
+            }
+            nestedFooter.section = LazyLayoutCacheSection(id: 8)
+            nextOuterHeader.section = LazyLayoutCacheSection(id: 9, isHeader: true)
+
+            let currentOuterHeaderSize = CGSize(width: 120, height: 11)
+            let rowSizes = [
+                CGSize(width: 40, height: 17),
+                CGSize(width: 40, height: 35),
+                CGSize(width: 40, height: 21),
+                CGSize(width: 40, height: 47),
+                CGSize(width: 40, height: 23),
+            ]
+            let nestedFooterSize = CGSize(width: 120, height: 7)
+            let nextOuterHeaderSize = CGSize(width: 120, height: 23)
+            installSize(currentOuterHeaderSize, on: currentOuterHeader)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+            installSize(nestedFooterSize, on: nestedFooter)
+            installSize(nextOuterHeaderSize, on: nextOuterHeader)
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            // Header retention expands the second-target window to eight
+            // entries. The nested footer is still ordinary section content;
+            // enabling footer pinning must not turn it into a boundary entry.
+            let natural = [
+                placed(
+                    currentOuterHeader,
+                    size: currentOuterHeaderSize,
+                    at: CGPoint(x: 10, y: 845.3809523809524),
+                    index: 0
+                ),
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 7, y: 872.3809523809524),
+                    index: 1
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 50, y: 863.3809523809524),
+                    index: 2
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 93, y: 870.3809523809524),
+                    index: 3
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 7, y: 905.3809523809524),
+                    index: 4
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 50, y: 917.3809523809524),
+                    index: 5
+                ),
+                placed(
+                    nestedFooter,
+                    size: nestedFooterSize,
+                    at: CGPoint(x: 53, y: 925.3809523809524),
+                    index: 6
+                ),
+                placed(
+                    nextOuterHeader,
+                    size: nextOuterHeaderSize,
+                    at: CGPoint(x: 10, y: 959.3809523809524),
+                    index: 7
+                ),
+            ]
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 863.5),
+                contentSize: CGSize(width: 140, height: 1_100),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            XCTAssertTrue(natural[0].isHeader)
+            XCTAssertFalse(natural[6].isFooter)
+            XCTAssertFalse(natural[6].matches(.sectionFooters))
+            XCTAssertTrue(natural[7].isHeader)
+
+            var headerPinned = natural
+            headerPinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionHeaders
+            )
+
+            var combinedPinned = natural
+            combinedPinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: [.sectionHeaders, .sectionFooters]
+            )
+
+            XCTAssertEqual(combinedPinned.count, 8)
+            XCTAssertEqual(
+                combinedPinned.map(\.placement.anchorPosition),
+                headerPinned.map(\.placement.anchorPosition)
+            )
+            XCTAssertEqual(
+                combinedPinned[0].placement.anchorPosition,
+                CGPoint(x: 10, y: 863.5)
+            )
+            XCTAssertEqual(
+                Array(combinedPinned.dropFirst()).map(\.placement.anchorPosition),
+                Array(naturalPositions.dropFirst())
+            )
+            XCTAssertEqual(
+                combinedPinned[6].frame,
+                CGRect(
+                    x: 53,
+                    y: 925.3809523809524,
+                    width: 120,
+                    height: 7
+                )
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyPinnedNestedSectionGridPresentationObserved
+    // ASSERTIONS: lazyPinnedNestedSectionGridPlacementOwnerObserved
+    func testLazyPinnedNestedSectionKeepsFlattenedHeaderInOrdinaryContent() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, outerHeader, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, nestedHeader, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            var rows: [LazyLayoutCacheItem] = []
+            for implicitID in 3...7 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+            let (_, nextOuterHeader, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 8
+            )
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            outerHeader.section = LazyLayoutCacheSection(id: 8, isHeader: true)
+            nestedHeader.section = LazyLayoutCacheSection(id: 8)
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 8)
+            }
+            nextOuterHeader.section = LazyLayoutCacheSection(id: 9, isHeader: true)
+
+            let outerHeaderSize = CGSize(width: 120, height: 11)
+            let nestedHeaderSize = CGSize(width: 120, height: 7)
+            let rowSizes = [
+                CGSize(width: 40, height: 17),
+                CGSize(width: 40, height: 35),
+                CGSize(width: 40, height: 21),
+                CGSize(width: 40, height: 47),
+                CGSize(width: 40, height: 23),
+            ]
+            let nextOuterHeaderSize = CGSize(width: 120, height: 23)
+            installSize(outerHeaderSize, on: outerHeader)
+            installSize(nestedHeaderSize, on: nestedHeader)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+            installSize(nextOuterHeaderSize, on: nextOuterHeader)
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            // The nested header has already been flattened into the outer
+            // content region. Presentation pinning must read that section
+            // carrier without reclassifying visually header-like content.
+            let natural = [
+                placed(
+                    outerHeader,
+                    size: outerHeaderSize,
+                    at: CGPoint(x: 10, y: 845.3809523809524),
+                    index: 0
+                ),
+                placed(
+                    nestedHeader,
+                    size: nestedHeaderSize,
+                    at: CGPoint(x: -33, y: 877.3809523809524),
+                    index: 1
+                ),
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 50, y: 872.3809523809524),
+                    index: 2
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 93, y: 863.3809523809524),
+                    index: 3
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 7, y: 918.3809523809524),
+                    index: 4
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 50, y: 905.3809523809524),
+                    index: 5
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 93, y: 917.3809523809524),
+                    index: 6
+                ),
+                placed(
+                    nextOuterHeader,
+                    size: nextOuterHeaderSize,
+                    at: CGPoint(x: 10, y: 959.3809523809524),
+                    index: 7
+                ),
+            ]
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 863.5),
+                contentSize: CGSize(width: 140, height: 1_100),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            var unpinned = natural
+            unpinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: []
+            )
+            XCTAssertEqual(unpinned.map(\.placement.anchorPosition), naturalPositions)
+
+            var pinned = natural
+            pinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionHeaders
+            )
+
+            XCTAssertTrue(pinned[0].isHeader)
+            XCTAssertFalse(pinned[1].isHeader)
+            XCTAssertEqual(
+                pinned[0].placement.anchorPosition,
+                CGPoint(x: 10, y: 863.5)
+            )
+            XCTAssertEqual(
+                Array(pinned.dropFirst()).map(\.placement.anchorPosition),
+                Array(naturalPositions.dropFirst())
+            )
+            XCTAssertEqual(
+                pinned[1].frame,
+                CGRect(
+                    x: -33,
+                    y: 877.3809523809524,
+                    width: 120,
+                    height: 7
+                )
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyPinnedTallNestedSectionGridPresentationObserved
+    // ASSERTIONS: lazyPinnedTallNestedSectionGridPlacementOwnerObserved
+    func testLazyPinnedTallNestedHeaderKeepsOrdinaryWindowBounded() {
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let (cache, outerHeader, _) = makeLazyCache(host: host, implicitID: 1)
+            let (_, nestedHeader, _) = makeLazyCache(
+                host: host,
+                cache: cache,
+                implicitID: 2
+            )
+            var rows: [LazyLayoutCacheItem] = []
+            for implicitID in 3...7 {
+                let (_, row, _) = makeLazyCache(
+                    host: host,
+                    cache: cache,
+                    implicitID: implicitID
+                )
+                rows.append(row)
+            }
+
+            func installSize(_ size: CGSize, on item: LazyLayoutCacheItem) {
+                item.outputs = _ViewOutputs(
+                    layoutComputer: OptionalAttribute(graph.makeInput(value: testLayoutComputer(
+                        sizeThatFits: { _ in size }
+                    )))
+                )
+            }
+
+            outerHeader.section = LazyLayoutCacheSection(id: 7, isHeader: true)
+            nestedHeader.section = LazyLayoutCacheSection(id: 7)
+            for row in rows {
+                row.section = LazyLayoutCacheSection(id: 7)
+            }
+
+            let outerHeaderSize = CGSize(width: 120, height: 29)
+            let nestedHeaderSize = CGSize(width: 120, height: 61)
+            let rowSizes = [
+                CGSize(width: 40, height: 15),
+                CGSize(width: 40, height: 33),
+                CGSize(width: 40, height: 19),
+                CGSize(width: 40, height: 45),
+                CGSize(width: 40, height: 21),
+            ]
+            installSize(outerHeaderSize, on: outerHeader)
+            installSize(nestedHeaderSize, on: nestedHeader)
+            for (row, size) in zip(rows, rowSizes) {
+                installSize(size, on: row)
+            }
+
+            func placed(
+                _ item: LazyLayoutCacheItem,
+                size: CGSize,
+                at point: CGPoint,
+                index: Int
+            ) -> _LazyLayout_PlacedSubview {
+                _LazyLayout_PlacedSubview(
+                    item: item,
+                    placement: _Placement(proposedSize: size, at: point),
+                    index: index
+                )
+            }
+
+            // The 61-point first group fills the measured 100-point window
+            // before the next outer header is reached. These seven placements
+            // are therefore the complete pin-pass input for the first target.
+            let natural = [
+                placed(
+                    outerHeader,
+                    size: outerHeaderSize,
+                    at: CGPoint(x: 10, y: 723.1904761904761),
+                    index: 0
+                ),
+                placed(
+                    nestedHeader,
+                    size: nestedHeaderSize,
+                    at: CGPoint(x: -33, y: 759.1904761904761),
+                    index: 1
+                ),
+                placed(
+                    rows[0],
+                    size: rowSizes[0],
+                    at: CGPoint(x: 50, y: 782.1904761904761),
+                    index: 2
+                ),
+                placed(
+                    rows[1],
+                    size: rowSizes[1],
+                    at: CGPoint(x: 93, y: 773.1904761904761),
+                    index: 3
+                ),
+                placed(
+                    rows[2],
+                    size: rowSizes[2],
+                    at: CGPoint(x: 7, y: 840.1904761904761),
+                    index: 4
+                ),
+                placed(
+                    rows[3],
+                    size: rowSizes[3],
+                    at: CGPoint(x: 50, y: 827.1904761904761),
+                    index: 5
+                ),
+                placed(
+                    rows[4],
+                    size: rowSizes[4],
+                    at: CGPoint(x: 93, y: 839.1904761904761),
+                    index: 6
+                ),
+            ]
+            XCTAssertEqual(natural.count, 7)
+            let naturalPositions = natural.map(\.placement.anchorPosition)
+            let geometry = ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: 759),
+                contentSize: CGSize(width: 140, height: 1_100),
+                containerSize: CGSize(width: 140, height: 100)
+            )
+
+            var pinned = natural
+            pinned.pinSectionHeadersAndFooters(
+                geometry: geometry,
+                layoutDirection: .leftToRight,
+                axes: .vertical,
+                pinnedViews: .sectionHeaders
+            )
+
+            XCTAssertTrue(pinned[0].isHeader)
+            XCTAssertFalse(pinned[1].isHeader)
+            XCTAssertEqual(
+                pinned[0].placement.anchorPosition,
+                CGPoint(x: 10, y: 759)
+            )
+            XCTAssertEqual(
+                Array(pinned.dropFirst()).map(\.placement.anchorPosition),
+                Array(naturalPositions.dropFirst())
+            )
+            XCTAssertEqual(
+                pinned[1].frame,
+                CGRect(
+                    x: -33,
+                    y: 759.1904761904761,
+                    width: 120,
+                    height: 61
+                )
+            )
+        }
+    }
+
+    // ASSERTIONS: lazyPinnedSectionGridTargetPresentationObserved
+    // ASSERTIONS: lazyPinnedSectionGridPlacementOwnerObserved
+    // ASSERTIONS: lazyPinnedMultiAxisSectionGridTargetPresentationObserved
+    // ASSERTIONS: lazyPinnedMultiAxisSectionGridPlacementOwnerObserved
     func testLazyLayoutPlacedSubviewsPinSectionHeadersAndFootersWithinSectionBounds() {
         let host = GraphHost()
 
@@ -8206,8 +10823,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
 
             placed.pinSectionHeadersAndFooters(
                 geometry: ScrollGeometry(
-                    contentOffset: CGPoint(x: 0, y: 50),
-                    contentSize: CGSize(width: 80, height: 170),
+                    contentOffset: CGPoint(x: 20, y: 50),
+                    contentSize: CGSize(width: 100, height: 170),
                     containerSize: CGSize(width: 80, height: 80)
                 ),
                 layoutDirection: .leftToRight,
@@ -8215,6 +10832,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
                 pinnedViews: [.sectionHeaders, .sectionFooters]
             )
 
+            // A vertical grid keeps cross-axis placement natural even when
+            // its enclosing viewport has moved along both coordinates.
             XCTAssertEqual(placed[0].placement.anchorPosition, CGPoint(x: 0, y: 50))
             XCTAssertEqual(placed[1].placement.anchorPosition, CGPoint(x: 0, y: 40))
             XCTAssertEqual(placed[2].placement.anchorPosition, CGPoint(x: 0, y: 100))
@@ -8467,6 +11086,8 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazyPinnedHorizontalSectionGridTargetPresentationObserved
+    // ASSERTIONS: lazyPinnedHorizontalSectionGridPlacementOwnerObserved
     func testLazyLayoutHorizontalPinnedSectionHeaderDropsWhenNextHeaderPinsToLeadingEdge() {
         let host = GraphHost()
 
@@ -12632,6 +15253,7 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: lazyMultiAxisSectionGridTargetGeometryObserved
     func testLazyScrollableNonVisibleTargetUsesNearestContentCoordinateSpace() {
         let host = GraphHost()
 
@@ -13245,6 +15867,280 @@ final class LazyContainerSurfaceTests: XCTestCase {
         )
     }
 
+    private func makeAsymmetricHorizontalSectionGridList(
+        graph: _AGGraph
+    ) -> any ViewList {
+        func region(
+            sizes: [CGSize],
+            implicitID: Int
+        ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+            let list: any ViewList = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                ),
+                implicitID: implicitID
+            )
+            return (list, graph.makeInput(value: list))
+        }
+
+        let bodyBaseWidths: [CGFloat] = [13, 31, 17, 43, 19]
+        let headerBaseWidths: [CGFloat] = [11, 23, 17, 29]
+        var sectionEntries: [(
+            list: any ViewList,
+            attribute: Attribute<any ViewList>
+        )] = []
+
+        for section in 0..<12 {
+            let header = region(
+                sizes: [
+                    CGSize(
+                        width: headerBaseWidths[
+                            section % headerBaseWidths.count
+                        ],
+                        height: 120
+                    ),
+                ],
+                implicitID: 1_000 + section
+            )
+            let sectionAdjustment = CGFloat((section % 3) * 2)
+            let content = region(
+                sizes: bodyBaseWidths.map {
+                    CGSize(width: $0 + sectionAdjustment, height: 40)
+                },
+                implicitID: 2_000 + section
+            )
+            let sectionList: any ViewList = _ViewList_Section(
+                id: UInt32(section),
+                base: _ViewList_Group(lists: [header, content])
+            )
+            sectionEntries.append((
+                sectionList,
+                graph.makeInput(value: sectionList)
+            ))
+        }
+
+        return _ViewList_Group(lists: sectionEntries)
+    }
+
+    private func makeAsymmetricNestedSectionGridList(
+        graph: _AGGraph,
+        tallNestedHeader: (section: Int, height: CGFloat)? = nil
+    ) -> any ViewList {
+        func region(
+            sizes: [CGSize],
+            implicitID: Int
+        ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+            let list: any ViewList = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                ),
+                implicitID: implicitID
+            )
+            return (list, graph.makeInput(value: list))
+        }
+
+        let bodyBaseHeights: [CGFloat] = [13, 31, 17, 43, 19]
+        let outerHeaderBaseHeights: [CGFloat] = [11, 23, 17, 29]
+        let nestedHeaderBaseHeights: [CGFloat] = [7, 19, 13, 25]
+        var sectionEntries: [(
+            list: any ViewList,
+            attribute: Attribute<any ViewList>
+        )] = []
+
+        for section in 0..<12 {
+            let outerHeader = region(
+                sizes: [
+                    CGSize(
+                        width: 120,
+                        height: outerHeaderBaseHeights[
+                            section % outerHeaderBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 1_000 + section
+            )
+            let defaultNestedHeaderHeight = nestedHeaderBaseHeights[
+                section % nestedHeaderBaseHeights.count
+            ]
+            let nestedHeaderHeight: CGFloat
+            if let tallNestedHeader,
+               tallNestedHeader.section == section {
+                nestedHeaderHeight = tallNestedHeader.height
+            } else {
+                nestedHeaderHeight = defaultNestedHeaderHeight
+            }
+            let sectionAdjustment = CGFloat((section % 3) * 2)
+            // Keep one flattened content region so the height-only variant
+            // cannot change collection counts or section padding.
+            let flattenedContent = region(
+                sizes: [CGSize(width: 120, height: nestedHeaderHeight)]
+                    + bodyBaseHeights.map {
+                        CGSize(width: 40, height: $0 + sectionAdjustment)
+                    },
+                implicitID: 2_000 + section
+            )
+            let sectionList: any ViewList = _ViewList_Section(
+                id: UInt32(section),
+                base: _ViewList_Group(lists: [outerHeader, flattenedContent])
+            )
+            sectionEntries.append((
+                sectionList,
+                graph.makeInput(value: sectionList)
+            ))
+        }
+
+        return _ViewList_Group(lists: sectionEntries)
+    }
+
+    private func makeAsymmetricNestedFooterSectionGridList(
+        graph: _AGGraph
+    ) -> any ViewList {
+        func region(
+            sizes: [CGSize],
+            implicitID: Int
+        ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+            let list: any ViewList = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                ),
+                implicitID: implicitID
+            )
+            return (list, graph.makeInput(value: list))
+        }
+
+        let bodyBaseHeights: [CGFloat] = [13, 31, 17, 43, 19]
+        let outerHeaderBaseHeights: [CGFloat] = [11, 23, 17, 29]
+        let nestedFooterBaseHeights: [CGFloat] = [7, 19, 13, 25]
+        var sectionEntries: [(
+            list: any ViewList,
+            attribute: Attribute<any ViewList>
+        )] = []
+
+        for section in 0..<12 {
+            let outerHeader = region(
+                sizes: [
+                    CGSize(
+                        width: 120,
+                        height: outerHeaderBaseHeights[
+                            section % outerHeaderBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 1_000 + section
+            )
+            let sectionAdjustment = CGFloat((section % 3) * 2)
+            // Keep the nested footer in the same flattened content list as
+            // the rows. Its trailing position changes target indexes without
+            // giving it outer-footer section metadata.
+            let flattenedContent = region(
+                sizes: bodyBaseHeights.map {
+                    CGSize(width: 40, height: $0 + sectionAdjustment)
+                } + [
+                    CGSize(
+                        width: 120,
+                        height: nestedFooterBaseHeights[
+                            section % nestedFooterBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 2_000 + section
+            )
+            let sectionList: any ViewList = _ViewList_Section(
+                id: UInt32(section),
+                base: _ViewList_Group(lists: [outerHeader, flattenedContent])
+            )
+            sectionEntries.append((
+                sectionList,
+                graph.makeInput(value: sectionList)
+            ))
+        }
+
+        return _ViewList_Group(lists: sectionEntries)
+    }
+
+    private func makeAsymmetricNestedAndOuterFooterSectionGridList(
+        graph: _AGGraph
+    ) -> any ViewList {
+        func region(
+            sizes: [CGSize],
+            implicitID: Int
+        ) -> (list: any ViewList, attribute: Attribute<any ViewList>) {
+            let list: any ViewList = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: sizes
+                ),
+                implicitID: implicitID
+            )
+            return (list, graph.makeInput(value: list))
+        }
+
+        let bodyBaseHeights: [CGFloat] = [13, 31, 17, 43, 19]
+        let outerHeaderBaseHeights: [CGFloat] = [11, 23, 17, 29]
+        let nestedFooterBaseHeights: [CGFloat] = [7, 19, 13, 25]
+        let outerFooterBaseHeights: [CGFloat] = [9, 21, 15, 27]
+        var sectionEntries: [(
+            list: any ViewList,
+            attribute: Attribute<any ViewList>
+        )] = []
+
+        for section in 0..<12 {
+            let outerHeader = region(
+                sizes: [
+                    CGSize(
+                        width: 120,
+                        height: outerHeaderBaseHeights[
+                            section % outerHeaderBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 1_000 + section
+            )
+            let sectionAdjustment = CGFloat((section % 3) * 2)
+            let flattenedContent = region(
+                sizes: bodyBaseHeights.map {
+                    CGSize(width: 40, height: $0 + sectionAdjustment)
+                } + [
+                    CGSize(
+                        width: 120,
+                        height: nestedFooterBaseHeights[
+                            section % nestedFooterBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 2_000 + section
+            )
+            // A third region carries genuine footer metadata. Keep it separate
+            // from the flattened nested footer in the content region above.
+            let outerFooter = region(
+                sizes: [
+                    CGSize(
+                        width: 120,
+                        height: outerFooterBaseHeights[
+                            section % outerFooterBaseHeights.count
+                        ]
+                    ),
+                ],
+                implicitID: 3_000 + section
+            )
+            let sectionList: any ViewList = _ViewList_Section(
+                id: UInt32(section),
+                base: _ViewList_Group(
+                    lists: [outerHeader, flattenedContent, outerFooter]
+                )
+            )
+            sectionEntries.append((
+                sectionList,
+                graph.makeInput(value: sectionList)
+            ))
+        }
+
+        return _ViewList_Group(lists: sectionEntries)
+    }
+
     private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
         let environment = graph.makeInput(value: EnvironmentValues())
         let base = _GraphInputs(
@@ -13378,6 +16274,11 @@ private final class SectionIDRecorder {
     }
 
     var snapshots: [Snapshot] = []
+}
+
+private struct NestedSectionTargetRowID: Hashable {
+    var section: Int
+    var row: Int
 }
 
 private struct LazySectionProbeValueKey: ContainerValueKey {
