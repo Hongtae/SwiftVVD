@@ -6652,6 +6652,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         cache: inout Cache
     ) {
         let shouldAdoptMeasurements = cache.estimations.lengthToCount.isEmpty
+        var skipsFirstGroup = false
         let upperBound: Int
         if !cache.placedIndices.isEmpty,
            cache.minor == minor {
@@ -6659,6 +6660,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
             position = cache.placedExtent.lowerBound
             if index >= minor.count {
                 index -= minor.count
+                skipsFirstGroup = true
             }
             upperBound = cache.placedIndices.upperBound - index <= 1
                 ? cache.placedIndices.upperBound + minor.count
@@ -6674,6 +6676,7 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
                 return
             }
         }
+        let measurementBasePosition = position
 
         var currentSubviews: [_LazyLayout_Subview] = []
         var lastSubviews: [_LazyLayout_Subview]?
@@ -6684,17 +6687,23 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
             guard !currentSubviews.isEmpty else {
                 return
             }
-            let dimensions = lengthAndSpacing(
-                subviews: currentSubviews,
-                predecessors: lastSubviews,
-                minorGeometry: minor.geometry
-            )
-            position += dimensions.length + dimensions.spacing
-            measured.add(
-                length: dimensions.length,
-                spacing: lastSubviews == nil ? nil : dimensions.spacing,
-                count: 1
-            )
+            if skipsFirstGroup {
+                // The group immediately before a retained placed range seeds
+                // predecessor spacing without contributing another estimate.
+                skipsFirstGroup = false
+            } else {
+                let dimensions = lengthAndSpacing(
+                    subviews: currentSubviews,
+                    predecessors: lastSubviews,
+                    minorGeometry: minor.geometry
+                )
+                position += dimensions.length + dimensions.spacing
+                measured.add(
+                    length: dimensions.length,
+                    spacing: lastSubviews == nil ? nil : dimensions.spacing,
+                    count: 1
+                )
+            }
             index += minor.count
             lastSubviews = currentSubviews
             currentSubviews.removeAll(keepingCapacity: true)
@@ -6702,20 +6711,24 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
 
         func measureBoundary(_ subview: _LazyLayout_Subview) {
             flushMinorGroup()
-            let proposal: ProposedViewSize
-            switch Self.majorAxis {
-            case .horizontal:
-                proposal = ProposedViewSize(width: nil, height: minor.size)
-            case .vertical:
-                proposal = ProposedViewSize(width: minor.size, height: nil)
+            if skipsFirstGroup {
+                skipsFirstGroup = false
+            } else {
+                let proposal: ProposedViewSize
+                switch Self.majorAxis {
+                case .horizontal:
+                    proposal = ProposedViewSize(width: nil, height: minor.size)
+                case .vertical:
+                    proposal = ProposedViewSize(width: minor.size, height: nil)
+                }
+                let dimensions = subview.lengthAndSpacing(
+                    size: proposal,
+                    axis: Self.majorAxis,
+                    predecessor: lastSubviews?.last,
+                    uniformSpacing: spacing
+                )
+                position += dimensions.length + dimensions.spacing
             }
-            let dimensions = subview.lengthAndSpacing(
-                size: proposal,
-                axis: Self.majorAxis,
-                predecessor: lastSubviews?.last,
-                uniformSpacing: spacing
-            )
-            position += dimensions.length + dimensions.spacing
             index += minor.count
             lastSubviews = Array(repeating: subview, count: minor.count)
         }
@@ -6744,6 +6757,20 @@ extension LazyStack where Cache == _LazyStack_Cache<Self> {
         flushMinorGroup()
         if shouldAdoptMeasurements {
             cache.estimations.merge(measured)
+
+            // Rebase the measured displacement onto the newly adopted
+            // average. The aligned index remains in layout-index space, and
+            // an existing predecessor contributes spacing only between groups.
+            let average = cache.estimations.average
+            let group = cache.placedIndices.lowerBound / minor.count
+            let alignedLowerBound = group * minor.count
+            let averageSpacing = average.spacing ?? 0
+            var estimatedPrefix = CGFloat(alignedLowerBound)
+                * (average.length + averageSpacing)
+            if group >= 1, let spacing = average.spacing {
+                estimatedPrefix -= spacing
+            }
+            position += estimatedPrefix - measurementBasePosition
         }
     }
 

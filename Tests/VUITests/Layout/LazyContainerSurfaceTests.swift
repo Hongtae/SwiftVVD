@@ -643,6 +643,80 @@ final class LazyContainerSurfaceTests: XCTestCase {
         }
     }
 
+    func testLazyStackSizeThatFitsRebasesAdoptedEstimateFromPlacedPrefix() {
+        // ASSERTIONS: lazyEstimatePositionRebaseRuntimeObserved
+        // ASSERTIONS: lazyEstimatePositionRebaseLLDBObserved
+        // ASSERTIONS: lazyEstimatePositionRebaseDisassemblyObserved
+        let host = GraphHost()
+
+        host.data.withCurrent {
+            let graph = host.data.graph
+            let list = BaseViewList(
+                elements: IndexedLayoutViewListElements(
+                    graph: graph,
+                    sizes: Array(
+                        repeating: CGSize(width: 40, height: 20),
+                        count: 400
+                    )
+                )
+            )
+            let (cache, _, _) = makeLazyCache(
+                host: host,
+                implicitID: 99,
+                list: list
+            )
+            cache.items.removeAll()
+            cache.lru.invalidate()
+
+            let ruleContext = AnyRuleContext(
+                attribute: graph.makeInput(value: ()).identifier
+            )
+            let subviews = cache.subviews(context: ruleContext)
+            let sizeContext = _LazyLayout_SizeAndSpacingContext(
+                ruleContext: ruleContext,
+                environment: graph.makeInput(value: EnvironmentValues()),
+                containerSize: OptionalAttribute(
+                    graph.makeInput(value: ViewSize(width: 100, height: 140))
+                )
+            )
+            let layout = LazyVGridLayout(
+                columns: [
+                    GridItem(.fixed(40), spacing: 0),
+                    GridItem(.fixed(40), spacing: 0),
+                ],
+                alignment: .leading,
+                spacing: 5,
+                pinnedViews: []
+            )
+            var minorSize = CGFloat(100)
+            let minorGeometry = layout.minorGeometry(updatingSize: &minorSize)
+            let minor = MinorProperties<LazyVGridLayout>(
+                count: minorGeometry.count,
+                size: minorSize,
+                geometry: minorGeometry.data
+            )
+
+            let measured = layout.sizeThatFits(
+                proposedSize: ProposedViewSize(width: 100, height: 140),
+                subviews: subviews,
+                context: sizeContext,
+                cache: _LazyStack_Cache<LazyVGridLayout>(
+                    minor: minor,
+                    placedIndices: 300..<308,
+                    placedExtent: CGFloat(3_750)...CGFloat(3_850),
+                    visibleExtent: CGFloat(3_750)...CGFloat(3_850),
+                    visibleLength: 100,
+                    containerLength: 100
+                )
+            )
+
+            // The predecessor group seeds spacing but is not measured. Four
+            // groups contribute 100 points after the adopted average rebases
+            // index 300 to 7,495; the remaining 46 groups add 1,150 points.
+            XCTAssertEqual(measured, CGSize(width: 100, height: 8_745))
+        }
+    }
+
     func testHVGridMinorGeometryExpandsGridItemsIntoTrackGeometry() {
         let layout = LazyVGridLayout(
             columns: [
