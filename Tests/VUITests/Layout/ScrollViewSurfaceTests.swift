@@ -3415,6 +3415,64 @@ final class ScrollViewSurfaceTests: XCTestCase {
         ])
     }
 
+    // ASSERTIONS scrollCoordinateSpacePublicRuntimeObserved scrollCoordinateSpacePublicDisassemblyObserved
+    func testPublicScrollCoordinateSpaceFactoriesReuseScrollTransformIDs() {
+        let all: NamedCoordinateSpace = .scrollView
+        let horizontal: NamedCoordinateSpace = .scrollView(axis: .horizontal)
+        let vertical: NamedCoordinateSpace = .scrollView(axis: .vertical)
+        let userNamed: NamedCoordinateSpace = .named("all")
+
+        XCTAssertEqual(MemoryLayout<UniqueID>.size, 8)
+        XCTAssertEqual(UniqueID.invalid.value, 0)
+        XCTAssertEqual(MemoryLayout.size(ofValue: ScrollCoordinateSpace.all.id), 8)
+        XCTAssertEqual(MemoryLayout<CoordinateSpace.Name>.size, 41)
+        XCTAssertEqual(MemoryLayout<CoordinateSpace.Name>.stride, 48)
+        XCTAssertEqual(MemoryLayout<NamedCoordinateSpace>.size, 41)
+        XCTAssertEqual(MemoryLayout<NamedCoordinateSpace>.stride, 48)
+        XCTAssertEqual(MemoryLayout<CoordinateSpace>.size, 41)
+        XCTAssertEqual(MemoryLayout<CoordinateSpace>.stride, 48)
+
+        XCTAssertEqual(all.name, .id(ScrollCoordinateSpace.all.id))
+        XCTAssertEqual(horizontal.name, .id(ScrollCoordinateSpace.horizontal.id))
+        XCTAssertEqual(vertical.name, .id(ScrollCoordinateSpace.vertical.id))
+        XCTAssertEqual(userNamed.name, .name(AnyHashable("all")))
+        XCTAssertEqual(all.coordinateSpace.internalID, ScrollCoordinateSpace.all.id)
+        XCTAssertEqual(horizontal.coordinateSpace.internalID, ScrollCoordinateSpace.horizontal.id)
+        XCTAssertEqual(vertical.coordinateSpace.internalID, ScrollCoordinateSpace.vertical.id)
+        XCTAssertNil(userNamed.coordinateSpace.internalID)
+        XCTAssertNotEqual(all, horizontal)
+        XCTAssertNotEqual(all, vertical)
+        XCTAssertNotEqual(horizontal, vertical)
+
+        var transform = ViewTransform.identity
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.all.id,
+            size: CGSize(width: 100, height: 80)
+        )
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.horizontal.id,
+            size: CGSize(width: 90, height: 70)
+        )
+        transform.appendSizedSpace(
+            id: ScrollCoordinateSpace.vertical.id,
+            size: CGSize(width: 60, height: 50)
+        )
+
+        XCTAssertEqual(
+            transform.size(ofNamedCoordinateSpace: all.name),
+            CGSize(width: 100, height: 80)
+        )
+        XCTAssertEqual(
+            transform.size(ofNamedCoordinateSpace: horizontal.name),
+            CGSize(width: 90, height: 70)
+        )
+        XCTAssertEqual(
+            transform.size(ofNamedCoordinateSpace: vertical.name),
+            CGSize(width: 60, height: 50)
+        )
+        XCTAssertNil(transform.size(ofNamedCoordinateSpace: userNamed.name))
+    }
+
     // ASSERTIONS coordinateSpaceTagFieldMetadataObserved coordinateSpaceTagDisassemblyObserved coordinateSpaceTagRuntimeObserved viewTransformItemFieldMetadataObserved
     func testViewTransformCoordinateSpaceTagsUseOneTransformLocalChain() {
         XCTAssertEqual(MemoryLayout<CoordinateSpaceTag>.size, 8)
@@ -3455,7 +3513,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
             .coordinateSpace(CoordinateSpaceTag(base: 3)),
         ])
         XCTAssertEqual(
-            transform.size(ofNamedCoordinateSpace: alpha),
+            transform.size(ofNamedCoordinateSpace: .name(alpha)),
             CGSize(width: 10, height: 20)
         )
         XCTAssertEqual(transform.scrollCoordinateSpaces, [.all, .all])

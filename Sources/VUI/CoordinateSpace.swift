@@ -11,15 +11,40 @@ public enum CoordinateSpace {
     case global
     case local
     case named(AnyHashable)
+    @_spi(Internal)
+    case id(ID)
 }
 
 extension CoordinateSpace {
-    struct ID: Equatable, Hashable, Sendable {
-        let rawValue: UInt32
+    @_spi(Internal)
+    public struct ID: Equatable, Hashable, Sendable {
+        let value: UniqueID
 
-        init(rawValue: UInt32 = UInt32(truncatingIfNeeded: AGMakeUniqueID())) {
-            self.rawValue = rawValue
+        init(rawValue: UniqueID = UniqueID()) {
+            value = rawValue
         }
+    }
+
+    /// Keeps user-provided names distinct from generated framework identities.
+    enum Name: Equatable {
+        case name(AnyHashable)
+        case id(ID)
+
+        var space: CoordinateSpace {
+            switch self {
+            case let .name(name):
+                return .named(name)
+            case let .id(id):
+                return .id(id)
+            }
+        }
+    }
+
+    var internalID: ID? {
+        guard case let .id(id) = self else {
+            return nil
+        }
+        return id
     }
 }
 
@@ -58,32 +83,40 @@ enum ScrollCoordinateSpace: Equatable, Hashable, Sendable {
     case content
     case safeArea
 
+    // Each role owns one lazy process identity shared by its producers and
+    // every transform marker that resolves that role.
+    private static let horizontalID = CoordinateSpace.ID()
+    private static let verticalID = CoordinateSpace.ID()
+    private static let allID = CoordinateSpace.ID()
+    private static let contentID = CoordinateSpace.ID()
+    private static let safeAreaID = CoordinateSpace.ID()
+
     var id: CoordinateSpace.ID {
         switch self {
         case .horizontal:
-            return CoordinateSpace.ID(rawValue: UInt32.max - 0)
+            return Self.horizontalID
         case .vertical:
-            return CoordinateSpace.ID(rawValue: UInt32.max - 1)
+            return Self.verticalID
         case .all:
-            return CoordinateSpace.ID(rawValue: UInt32.max - 2)
+            return Self.allID
         case .content:
-            return CoordinateSpace.ID(rawValue: UInt32.max - 3)
+            return Self.contentID
         case .safeArea:
-            return CoordinateSpace.ID(rawValue: UInt32.max - 4)
+            return Self.safeAreaID
         }
     }
 
     init?(id: CoordinateSpace.ID) {
-        switch id.rawValue {
-        case UInt32.max - 0:
+        switch id {
+        case Self.horizontalID:
             self = .horizontal
-        case UInt32.max - 1:
+        case Self.verticalID:
             self = .vertical
-        case UInt32.max - 2:
+        case Self.allID:
             self = .all
-        case UInt32.max - 3:
+        case Self.contentID:
             self = .content
-        case UInt32.max - 4:
+        case Self.safeAreaID:
             self = .safeArea
         default:
             return nil
@@ -112,9 +145,13 @@ public protocol CoordinateSpaceProtocol {
 
 public struct NamedCoordinateSpace: CoordinateSpaceProtocol, Equatable {
     public var coordinateSpace: CoordinateSpace {
-        .named(name)
+        name.space
     }
-    let name: AnyHashable
+    var name: CoordinateSpace.Name
+
+    init(name: CoordinateSpace.Name) {
+        self.name = name
+    }
 }
 
 @available(*, unavailable)
@@ -178,7 +215,24 @@ private struct CoordinateSpaceTransform<Name: Hashable>: Rule {
 
 extension CoordinateSpaceProtocol where Self == NamedCoordinateSpace {
     public static func named(_ name: some Hashable) -> NamedCoordinateSpace {
-        NamedCoordinateSpace(name: name)
+        NamedCoordinateSpace(name: .name(AnyHashable(name)))
+    }
+
+    static func id(_ id: CoordinateSpace.ID) -> NamedCoordinateSpace {
+        NamedCoordinateSpace(name: .id(id))
+    }
+
+    public static func scrollView(axis: Axis) -> Self {
+        switch axis {
+        case .horizontal:
+            return id(ScrollCoordinateSpace.horizontal.id)
+        case .vertical:
+            return id(ScrollCoordinateSpace.vertical.id)
+        }
+    }
+
+    public static var scrollView: NamedCoordinateSpace {
+        id(ScrollCoordinateSpace.all.id)
     }
 }
 

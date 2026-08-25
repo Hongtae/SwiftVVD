@@ -235,26 +235,6 @@ extension CGSize {
     }
 }
 
-/// Distinguishes internal coordinate-space IDs from user-provided names while
-/// keeping the public `CoordinateSpace` surface unchanged.
-private struct CoordinateSpaceIDStorage: Hashable, Sendable {
-    var id: CoordinateSpace.ID
-}
-
-private extension CoordinateSpace {
-    static func internalID(_ id: CoordinateSpace.ID) -> CoordinateSpace {
-        .named(AnyHashable(CoordinateSpaceIDStorage(id: id)))
-    }
-
-    var internalID: CoordinateSpace.ID? {
-        guard case let .named(name) = self,
-              let storage = name.base as? CoordinateSpaceIDStorage else {
-            return nil
-        }
-        return storage.id
-    }
-}
-
 /// One immutable entry in a transform-local coordinate-space lookup chain.
 /// Copies of `ViewTransform` may share an existing tail and prepend new entries.
 private final class CoordinateSpaceNode: @unchecked Sendable {
@@ -378,7 +358,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             transform: inout ViewTransform
         ) {
             append(.coordinateSpace(
-                transform.resolveCoordinateSpaceTag(.internalID(id))
+                transform.resolveCoordinateSpaceTag(.id(id))
             ))
         }
 
@@ -388,7 +368,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             transform: inout ViewTransform
         ) {
             append(.sizedSpace(
-                transform.resolveCoordinateSpaceTag(.internalID(id)),
+                transform.resolveCoordinateSpaceTag(.id(id)),
                 size: size
             ))
         }
@@ -532,7 +512,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
     mutating func appendCoordinateSpace(id: CoordinateSpace.ID) {
         commitPositionTranslation()
         _transformItems.append(.coordinateSpace(
-            resolveCoordinateSpaceTag(.internalID(id))
+            resolveCoordinateSpaceTag(.id(id))
         ))
     }
 
@@ -549,7 +529,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
     mutating func appendSizedSpace(id: CoordinateSpace.ID, size: CGSize) {
         commitPositionTranslation()
         _transformItems.append(.sizedSpace(
-            resolveCoordinateSpaceTag(.internalID(id)),
+            resolveCoordinateSpaceTag(.id(id)),
             size: size
         ))
     }
@@ -614,7 +594,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         to space: ScrollCoordinateSpace,
         points: inout A
     ) where A.Element == CGPoint {
-        guard let tag = coordinateSpaceTag(.internalID(space.id)),
+        guard let tag = coordinateSpaceTag(.id(space.id)),
               let markerIndex = lastCoordinateSpaceMarkerIndex(matching: tag) else {
             convertGlobal(from: .local, points: &points)
             return
@@ -720,8 +700,8 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         return values
     }
 
-    func size(ofNamedCoordinateSpace name: AnyHashable) -> CGSize? {
-        guard let tag = coordinateSpaceTag(.named(name)) else {
+    func size(ofNamedCoordinateSpace name: CoordinateSpace.Name) -> CGSize? {
+        guard let tag = coordinateSpaceTag(name.space) else {
             return nil
         }
         for item in _transformItems.reversed() {
@@ -819,7 +799,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
             return .global
         case .local:
             return .local
-        case .named:
+        case .named, .id:
             var node = _coordinateSpaceNode
             while let current = node {
                 if current.space == space {
@@ -1180,12 +1160,12 @@ struct SafeAreaInsets: Equatable, Sendable {
     }
 
     init() {
-        self.init(space: CoordinateSpace.ID(rawValue: 0), elements: [])
+        self.init(space: CoordinateSpace.ID(rawValue: .invalid), elements: [])
     }
 
     init(_ insets: EdgeInsets) {
         self.init(
-            space: CoordinateSpace.ID(rawValue: 0),
+            space: CoordinateSpace.ID(rawValue: .invalid),
             elements: [Element(regions: .container, insets: insets, cornerInsets: nil)]
         )
     }

@@ -608,7 +608,7 @@ final class ContentTransitionHiddenSurfaceTests: XCTestCase {
 
             XCTAssertEqual(reset.value.globalPosition, CGPoint(x: 4, y: 6))
             XCTAssertEqual(
-                reset.value.size(ofNamedCoordinateSpace: AnyHashable("preserved")),
+                reset.value.size(ofNamedCoordinateSpace: .name(AnyHashable("preserved"))),
                 CGSize(width: 12, height: 18)
             )
             XCTAssertEqual(reset.value.translations, [CGSize(width: -4, height: -6)])
