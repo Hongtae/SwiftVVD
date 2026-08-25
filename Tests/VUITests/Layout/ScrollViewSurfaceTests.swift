@@ -1978,6 +1978,114 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollDisabledEnvironmentDisassemblyObserved
     }
 
+    func testScrollBounceEnvironmentSettersReplaceRolesIndependently() {
+        var environment = EnvironmentValues()
+
+        XCTAssertEqual(
+            environment.verticalScrollBounceBehavior.role,
+            ScrollBounceBehavior.automatic.role
+        )
+        XCTAssertEqual(
+            environment.horizontalScrollBounceBehavior.role,
+            ScrollBounceBehavior.automatic.role
+        )
+
+        environment.verticalScrollBounceBehavior = .always
+        XCTAssertEqual(
+            environment.verticalScrollBounceBehavior.role,
+            ScrollBounceBehavior.always.role
+        )
+        XCTAssertEqual(
+            environment.horizontalScrollBounceBehavior.role,
+            ScrollBounceBehavior.automatic.role
+        )
+
+        environment.horizontalScrollBounceBehavior = .basedOnSize
+        XCTAssertEqual(
+            environment.verticalScrollBounceBehavior.role,
+            ScrollBounceBehavior.always.role
+        )
+        XCTAssertEqual(
+            environment.horizontalScrollBounceBehavior.role,
+            ScrollBounceBehavior.basedOnSize.role
+        )
+        XCTAssertEqual(
+            environment.scrollEnvironmentStorage.properties.verticalBounceBehavior,
+            ScrollBounceBehavior.always.role
+        )
+        XCTAssertEqual(
+            environment.scrollEnvironmentStorage.properties.horizontalBounceBehavior,
+            ScrollBounceBehavior.basedOnSize.role
+        )
+
+        // ASSERTIONS: scrollBounceEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollBounceEnvironmentDisassemblyObserved
+    }
+
+    func testScrollBounceModifierReplacesSelectedAxesWithNearestOwner() {
+        let defaultRecorder = ScrollIndicatorEnvironmentRecorder()
+        let emptyRecorder = ScrollIndicatorEnvironmentRecorder()
+        let layeredRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let defaultView = ScrollIndicatorEnvironmentContent(recorder: defaultRecorder)
+                .scrollBounceBehavior(.always)
+            let defaultAttribute = graph.makeInput(value: defaultView)
+            _ = type(of: defaultView)._makeView(
+                view: _GraphValue(_attribute: defaultAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let emptyView = ScrollIndicatorEnvironmentContent(recorder: emptyRecorder)
+                .scrollBounceBehavior(.always, axes: [])
+            let emptyAttribute = graph.makeInput(value: emptyView)
+            _ = type(of: emptyView)._makeView(
+                view: _GraphValue(_attribute: emptyAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let layeredView = ScrollIndicatorEnvironmentContent(recorder: layeredRecorder)
+                .scrollBounceBehavior(.always, axes: .vertical)
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            let layeredAttribute = graph.makeInput(value: layeredView)
+            _ = type(of: layeredView)._makeView(
+                view: _GraphValue(_attribute: layeredAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertEqual(
+            defaultRecorder.properties.verticalBounceBehavior,
+            ScrollBounceBehavior.always.role
+        )
+        XCTAssertEqual(
+            defaultRecorder.properties.horizontalBounceBehavior,
+            ScrollBounceBehavior.automatic.role
+        )
+        XCTAssertEqual(
+            emptyRecorder.properties.verticalBounceBehavior,
+            ScrollBounceBehavior.automatic.role
+        )
+        XCTAssertEqual(
+            emptyRecorder.properties.horizontalBounceBehavior,
+            ScrollBounceBehavior.automatic.role
+        )
+        XCTAssertEqual(
+            layeredRecorder.properties.verticalBounceBehavior,
+            ScrollBounceBehavior.always.role
+        )
+        XCTAssertEqual(
+            layeredRecorder.properties.horizontalBounceBehavior,
+            ScrollBounceBehavior.basedOnSize.role
+        )
+
+        // ASSERTIONS: scrollBounceEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollBounceEnvironmentDisassemblyObserved
+    }
+
     func testScrollDisabledModifierCannotReenableDisabledAncestor() {
         let disabledRecorder = ScrollIndicatorEnvironmentRecorder()
         let enabledRecorder = ScrollIndicatorEnvironmentRecorder()

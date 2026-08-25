@@ -643,6 +643,34 @@ extension EnvironmentValues {
         set { self[ScrollEnvironmentKey.self] = newValue }
     }
 
+    public var verticalScrollBounceBehavior: ScrollBounceBehavior {
+        get {
+            ScrollBounceBehavior(
+                role: scrollEnvironmentStorage.properties.verticalBounceBehavior
+            )
+        }
+        set {
+            var properties = scrollEnvironmentStorage.properties
+            // Each axis publishes a fresh storage value without rewriting the other axis.
+            properties.verticalBounceBehavior = newValue.role
+            scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+        }
+    }
+
+    public var horizontalScrollBounceBehavior: ScrollBounceBehavior {
+        get {
+            ScrollBounceBehavior(
+                role: scrollEnvironmentStorage.properties.horizontalBounceBehavior
+            )
+        }
+        set {
+            var properties = scrollEnvironmentStorage.properties
+            // Each axis publishes a fresh storage value without rewriting the other axis.
+            properties.horizontalBounceBehavior = newValue.role
+            scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+        }
+    }
+
     public var isScrollEnabled: Bool {
         get { scrollEnvironmentStorage.properties.isEnabled }
         set {
@@ -650,6 +678,21 @@ extension EnvironmentValues {
             // A disabled ancestor remains disabled when a descendant requests scrolling.
             properties.isEnabled = properties.isEnabled && newValue
             scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+        }
+    }
+}
+
+private struct TransformScrollBounceBehavior: ScrollEnvironmentTransform {
+    var behavior: ScrollBounceBehavior.Role
+    var axes: Axis.Set
+
+    func update(properties: inout ScrollEnvironmentProperties) {
+        // The selected axes replace their inherited roles independently.
+        if axes.contains(.vertical) {
+            properties.verticalBounceBehavior = behavior
+        }
+        if axes.contains(.horizontal) {
+            properties.horizontalBounceBehavior = behavior
         }
     }
 }
@@ -677,6 +720,18 @@ private struct ScrollClipTransform: ScrollEnvironmentTransform {
 }
 
 extension View {
+    nonisolated public func scrollBounceBehavior(
+        _ behavior: ScrollBounceBehavior,
+        axes: Axis.Set = [.vertical]
+    ) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: TransformScrollBounceBehavior(
+                behavior: behavior.role,
+                axes: axes
+            )
+        ))
+    }
+
     nonisolated public func scrollDisabled(_ disabled: Bool) -> some View {
         modifier(TransformScrollStorageModifier(
             transform: ScrollEnabledTransform(isEnabled: !disabled)
