@@ -46,6 +46,10 @@ struct ScrollAnchorStorage: Equatable {
         anchors[role] ?? defaultValue ?? .zero
     }
 
+    mutating func updateRole(_ role: Role, anchor: UnitPoint) {
+        anchors[role] = anchor
+    }
+
     func adjustedAnchor(role: Role, layoutDirection: LayoutDirection) -> UnitPoint {
         let anchor = anchor(role: role)
         guard layoutDirection == .rightToLeft else {

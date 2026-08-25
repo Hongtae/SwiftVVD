@@ -141,6 +141,23 @@ public struct ScrollDismissesKeyboardMode: Hashable, Sendable {
     }
 }
 
+/// Selects which scroll lifecycle consumes a role-specific default anchor.
+public struct ScrollAnchorRole: Hashable, Sendable {
+    var role: ScrollAnchorStorage.Role
+
+    public static var initialOffset: ScrollAnchorRole {
+        ScrollAnchorRole(role: .initialOffset)
+    }
+
+    public static var sizeChanges: ScrollAnchorRole {
+        ScrollAnchorRole(role: .sizeChanges)
+    }
+
+    public static var alignment: ScrollAnchorRole {
+        ScrollAnchorRole(role: .alignment)
+    }
+}
+
 public struct ScrollBounceBehavior: Sendable {
     struct Role: Equatable, Hashable, Sendable {
         var rawValue: UInt8
@@ -743,6 +760,25 @@ private struct ScrollClipTransform: ScrollEnvironmentTransform {
 }
 
 extension View {
+    nonisolated public func defaultScrollAnchor(_ anchor: UnitPoint?) -> some View {
+        transformEnvironment(\.scrollAnchors) { anchors in
+            // A nil argument preserves inherited storage rather than resetting it.
+            guard let anchor else { return }
+            anchors.defaultValue = anchor
+        }
+    }
+
+    nonisolated public func defaultScrollAnchor(
+        _ anchor: UnitPoint?,
+        for role: ScrollAnchorRole
+    ) -> some View {
+        transformEnvironment(\.scrollAnchors) { anchors in
+            // Role entries override only their matching lifecycle consumer.
+            guard let anchor else { return }
+            anchors.updateRole(role.role, anchor: anchor)
+        }
+    }
+
     nonisolated public func scrollBounceBehavior(
         _ behavior: ScrollBounceBehavior,
         axes: Axis.Set = [.vertical]

@@ -546,6 +546,7 @@ private final class ScrollBehaviorEnvironmentRecorder {
 private final class ScrollIndicatorEnvironmentRecorder {
     var properties = ScrollEnvironmentProperties()
     var metrics = ScrollIndicatorMetricsStorage()
+    var anchors = ScrollAnchorStorage()
     var environment: Attribute<EnvironmentValues>?
 }
 
@@ -563,6 +564,7 @@ private struct ScrollIndicatorEnvironmentContent: View, TestPrimitiveView {
         let recorder = view._attribute.value.recorder
         recorder.properties = environment.scrollEnvironmentStorage.properties
         recorder.metrics = environment.scrollIndicatorMetrics
+        recorder.anchors = environment.scrollAnchors
         recorder.environment = environmentAttribute
         return _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 10, height: 10))
@@ -1957,6 +1959,78 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         // ASSERTIONS: scrollIndicatorVisibilityFocusedSurfaceObserved
         // ASSERTIONS: scrollIndicatorStyleConsumptionObserved
+    }
+
+    func testDefaultScrollAnchorRoleAndModifierPreserveIndependentStorageRoles() {
+        XCTAssertEqual(MemoryLayout<ScrollAnchorRole>.size, 1)
+        XCTAssertEqual(MemoryLayout<ScrollAnchorRole>.stride, 1)
+        XCTAssertEqual(Mirror(reflecting: ScrollAnchorRole.initialOffset).children.map(\.label), ["role"])
+        XCTAssertEqual(bytes(of: ScrollAnchorRole.initialOffset), [0])
+        XCTAssertEqual(bytes(of: ScrollAnchorRole.sizeChanges), [1])
+        XCTAssertEqual(bytes(of: ScrollAnchorRole.alignment), [2])
+
+        let combinedRecorder = ScrollIndicatorEnvironmentRecorder()
+        let inheritedNilRecorder = ScrollIndicatorEnvironmentRecorder()
+        let nearestRoleRecorder = ScrollIndicatorEnvironmentRecorder()
+        let legacyNilRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let combinedView = ScrollIndicatorEnvironmentContent(recorder: combinedRecorder)
+                .defaultScrollAnchor(.center)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.leading, for: .sizeChanges)
+                .defaultScrollAnchor(.bottomTrailing, for: .alignment)
+            let combinedAttribute = graph.makeInput(value: combinedView)
+            _ = type(of: combinedView)._makeView(
+                view: _GraphValue(_attribute: combinedAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let inheritedNilView = ScrollIndicatorEnvironmentContent(recorder: inheritedNilRecorder)
+                .defaultScrollAnchor(nil, for: .initialOffset)
+                .defaultScrollAnchor(.center)
+            let inheritedNilAttribute = graph.makeInput(value: inheritedNilView)
+            _ = type(of: inheritedNilView)._makeView(
+                view: _GraphValue(_attribute: inheritedNilAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let nearestRoleView = ScrollIndicatorEnvironmentContent(recorder: nearestRoleRecorder)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.center, for: .initialOffset)
+            let nearestRoleAttribute = graph.makeInput(value: nearestRoleView)
+            _ = type(of: nearestRoleView)._makeView(
+                view: _GraphValue(_attribute: nearestRoleAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let legacyNilView = ScrollIndicatorEnvironmentContent(recorder: legacyNilRecorder)
+                .defaultScrollAnchor(nil)
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+            let legacyNilAttribute = graph.makeInput(value: legacyNilView)
+            _ = type(of: legacyNilView)._makeView(
+                view: _GraphValue(_attribute: legacyNilAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertEqual(combinedRecorder.anchors.defaultValue, .center)
+        XCTAssertEqual(combinedRecorder.anchors.anchors, [
+            .initialOffset: .bottom,
+            .sizeChanges: .leading,
+            .alignment: .bottomTrailing,
+        ])
+        XCTAssertEqual(inheritedNilRecorder.anchors.defaultValue, .center)
+        XCTAssertTrue(inheritedNilRecorder.anchors.anchors.isEmpty)
+        XCTAssertEqual(nearestRoleRecorder.anchors.anchors, [.initialOffset: .bottom])
+        XCTAssertNil(nearestRoleRecorder.anchors.defaultValue)
+        XCTAssertEqual(legacyNilRecorder.anchors.anchors, [.initialOffset: .bottom])
+        XCTAssertNil(legacyNilRecorder.anchors.defaultValue)
+
+        // ASSERTIONS: scrollDefaultAnchorRuntimeObserved
+        // ASSERTIONS: scrollDefaultAnchorDisassemblyObserved
     }
 
     func testScrollEnabledEnvironmentSetterUsesInheritedConjunction() {
