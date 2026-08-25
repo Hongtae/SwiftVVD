@@ -1959,6 +1959,57 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollIndicatorStyleConsumptionObserved
     }
 
+    func testScrollEnabledEnvironmentSetterUsesInheritedConjunction() {
+        var environment = EnvironmentValues()
+
+        XCTAssertTrue(environment.isScrollEnabled)
+
+        environment.isScrollEnabled = false
+        XCTAssertFalse(environment.isScrollEnabled)
+
+        environment.isScrollEnabled = true
+        XCTAssertFalse(environment.isScrollEnabled)
+
+        var freshEnvironment = EnvironmentValues()
+        freshEnvironment.isScrollEnabled = true
+        XCTAssertTrue(freshEnvironment.isScrollEnabled)
+
+        // ASSERTIONS: scrollDisabledEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollDisabledEnvironmentDisassemblyObserved
+    }
+
+    func testScrollDisabledModifierCannotReenableDisabledAncestor() {
+        let disabledRecorder = ScrollIndicatorEnvironmentRecorder()
+        let enabledRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let disabledView = ScrollIndicatorEnvironmentContent(recorder: disabledRecorder)
+                .scrollDisabled(false)
+                .scrollDisabled(true)
+            let disabledAttribute = graph.makeInput(value: disabledView)
+            _ = type(of: disabledView)._makeView(
+                view: _GraphValue(_attribute: disabledAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let enabledView = ScrollIndicatorEnvironmentContent(recorder: enabledRecorder)
+                .scrollDisabled(false)
+            let enabledAttribute = graph.makeInput(value: enabledView)
+            _ = type(of: enabledView)._makeView(
+                view: _GraphValue(_attribute: enabledAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertFalse(disabledRecorder.properties.isEnabled)
+        XCTAssertTrue(enabledRecorder.properties.isEnabled)
+
+        // ASSERTIONS: scrollDisabledEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollDisabledEnvironmentDisassemblyObserved
+    }
+
     func testScrollIndicatorModifiersComposeStyleVisibilityAndMetricsByAxis() {
         let recorder = ScrollIndicatorEnvironmentRecorder()
         let graph = _AGGraph()

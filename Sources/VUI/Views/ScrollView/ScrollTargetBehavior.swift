@@ -642,6 +642,32 @@ extension EnvironmentValues {
         get { self[ScrollEnvironmentKey.self] }
         set { self[ScrollEnvironmentKey.self] = newValue }
     }
+
+    public var isScrollEnabled: Bool {
+        get { scrollEnvironmentStorage.properties.isEnabled }
+        set {
+            var properties = scrollEnvironmentStorage.properties
+            // A disabled ancestor remains disabled when a descendant requests scrolling.
+            properties.isEnabled = properties.isEnabled && newValue
+            scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+        }
+    }
+}
+
+private struct ScrollEnabledTransform: ScrollEnvironmentTransform {
+    var isEnabled: Bool
+
+    func update(properties: inout ScrollEnvironmentProperties) {
+        properties.isEnabled = properties.isEnabled && isEnabled
+    }
+}
+
+extension View {
+    nonisolated public func scrollDisabled(_ disabled: Bool) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: ScrollEnabledTransform(isEnabled: !disabled)
+        ))
+    }
 }
 
 public struct PagingScrollTargetBehavior: ScrollTargetBehavior {
