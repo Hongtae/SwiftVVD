@@ -285,6 +285,21 @@ public struct GeometryProxy {
         return CGRect(cornerPoints: points)
     }
 
+    /// Resolves this view's frame and clips it to each enclosing scroll
+    /// viewport before returning it in the requested coordinate space.
+    func frameClippedToScrollViews(
+        in coordinateSpace: CoordinateSpace
+    ) -> (frame: CGRect, exact: Bool) {
+        var transform = read(_transform)
+        transform.appendPosition(read(_position))
+        var frame = CGRect(origin: .zero, size: size)
+        let exact = frame.convertAndClipToScrollView(
+            to: coordinateSpace,
+            transform: transform
+        )
+        return (frame, exact)
+    }
+
     public var containerCornerInsets: RectangleCornerInsets {
         RectangleCornerInsets()
     }

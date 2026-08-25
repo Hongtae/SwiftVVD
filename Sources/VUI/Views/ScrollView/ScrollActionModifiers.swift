@@ -19,6 +19,22 @@ public struct ScrollPhaseChangeContext {
 }
 
 extension View {
+    nonisolated public func onScrollVisibilityChange(
+        threshold: Double = 0.5,
+        _ action: @escaping (Bool) -> Void
+    ) -> some View {
+        // Ordered comparisons intentionally map NaN and negative values to
+        // zero before applying the upper bound.
+        let nonnegativeThreshold = threshold >= 0 ? threshold : 0
+        let normalizedThreshold = nonnegativeThreshold > 1 ? 1 : nonnegativeThreshold
+        return modifier(
+            OnScrollVisibilityChangeModifier(
+                threshold: normalizedThreshold,
+                action: action
+            )
+        )
+    }
+
     public func onScrollPhaseChange(
         _ action: @escaping (ScrollPhase, ScrollPhase) -> Void
     ) -> some View {
@@ -58,6 +74,140 @@ extension View {
                 prefersLast: prefersLast
             )
         )
+    }
+}
+
+/// Keeps the direct geometry action active only while the modified view is
+/// attached to the live view graph.
+struct OnScrollVisibilityChangeModifier: ViewModifier {
+    var threshold: Double
+    var action: (Bool) -> Void
+    @State private var isActive = false
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(
+                OnScrollVisibilityGeometryAction(
+                    threshold: threshold,
+                    action: action,
+                    isActive: isActive
+                )
+            )
+            .onAppear {
+                isActive = true
+            }
+            .onDisappear {
+                isActive = false
+            }
+    }
+}
+
+/// Reads the modified view's own geometry inputs instead of requesting a
+/// scroll-container preference from its descendants.
+struct OnScrollVisibilityGeometryAction: UnaryViewModifier {
+    typealias Body = Never
+
+    var threshold: Double
+    var action: (Bool) -> Void
+    var isActive: Bool
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("OnScrollVisibilityGeometryAction._makeView called outside an active _AGGraph context.")
+        }
+
+        let binder: Attribute<Void> = graph.makeStatefulRule(
+            OnScrollVisibilityGeometryActionBinder(
+                _modifier: modifier._attribute,
+                _position: inputs.position,
+                _size: inputs.size,
+                _transform: inputs.transform,
+                _environment: inputs.base.cachedEnvironment.value.environment,
+                _safeAreaInsets: inputs.safeAreaInsets,
+                _phase: inputs.base.phase
+            )
+        )
+        binder.flags = .transactional
+        return body(_Graph(), inputs)
+    }
+
+    /// Retains the last delivered Boolean across ordinary geometry updates and
+    /// resets that comparison state when the view-graph phase is replaced.
+    struct OnScrollVisibilityGeometryActionBinder: StatefulRule {
+        typealias Value = Void
+
+        var _modifier: Attribute<OnScrollVisibilityGeometryAction>
+        var _position: Attribute<CGPoint>
+        var _size: Attribute<ViewSize>
+        var _transform: Attribute<ViewTransform>
+        var _environment: Attribute<EnvironmentValues>
+        var _safeAreaInsets: OptionalAttribute<SafeAreaInsets>
+        var _phase: Attribute<_GraphInputs.Phase>
+        var cycleDetector = UpdateCycleDetector()
+        var lastResetSeed: UInt32 = 0
+        var proxySeed: UInt32 = 0
+        var lastValue: Bool?
+
+        mutating func updateValue() {
+            let modifier = _modifier.value
+            guard modifier.isActive else {
+                if lastValue == true {
+                    enqueueAction(modifier.action, isVisible: false)
+                }
+                lastValue = nil
+                _AGGraph.setStatefulOutput(())
+                return
+            }
+
+            let phase = _phase.value
+            if lastResetSeed != phase.resetSeed {
+                lastResetSeed = phase.resetSeed
+                cycleDetector.reset()
+                lastValue = nil
+            }
+
+            proxySeed &+= 1
+            let proxy = GeometryProxy(
+                owner: context.attribute.identifier,
+                size: _size,
+                environment: _environment,
+                transform: _transform,
+                position: _position,
+                safeAreaInsets: _safeAreaInsets.attribute,
+                seed: proxySeed
+            )
+            let clippedFrame = proxy.frameClippedToScrollViews(in: .global).frame
+            let size = proxy.size
+            let widthFraction = clippedFrame.width / size.width
+            let heightFraction = clippedFrame.height / size.height
+            let visibleFraction = widthFraction < heightFraction
+                ? widthFraction
+                : heightFraction
+            let isVisible = modifier.threshold <= visibleFraction
+
+            guard lastValue != isVisible else {
+                _AGGraph.setStatefulOutput(())
+                return
+            }
+            lastValue = isVisible
+            if cycleDetector.dispatch(label: "onScrollVisibilityChange") {
+                enqueueAction(modifier.action, isVisible: isVisible)
+            }
+            _AGGraph.setStatefulOutput(())
+        }
+
+        private func enqueueAction(
+            _ action: @escaping (Bool) -> Void,
+            isVisible: Bool
+        ) {
+            Update.enqueueAction(reason: .scrollChanged) {
+                action(isVisible)
+            }
+        }
     }
 }
 

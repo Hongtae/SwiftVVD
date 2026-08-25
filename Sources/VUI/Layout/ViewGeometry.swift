@@ -940,6 +940,65 @@ private extension ViewTransform.Item {
 }
 
 extension CGRect {
+    /// Converts a local frame to global coordinates while intersecting every
+    /// scroll viewport encountered along the transform chain.
+    @discardableResult
+    mutating func convertAndClipToScrollView(
+        to coordinateSpace: CoordinateSpace,
+        transform: ViewTransform
+    ) -> Bool {
+        guard coordinateSpace == .global else {
+            fatalError("Scroll-clipped frame conversion currently requires global coordinates.")
+        }
+
+        var exact = true
+        transform.forEach(inverted: true) { item, _ in
+            switch item {
+            case let .translation(offset):
+                origin.x += offset.width
+                origin.y += offset.height
+
+            case let .affineTransform(affine, inverse):
+                let effective = inverse ? affine.inverted() : affine
+                let points = [
+                    CGPoint(x: minX, y: minY),
+                    CGPoint(x: maxX, y: minY),
+                    CGPoint(x: maxX, y: maxY),
+                    CGPoint(x: minX, y: maxY),
+                ].map { $0.applying(effective) }
+                self = CGRect(cornerPoints: points)
+                if effective.b != 0 || effective.c != 0 {
+                    exact = false
+                }
+
+            case let .projectionTransform(projection, inverse):
+                var effective = projection
+                if inverse, !effective.invert() {
+                    exact = false
+                    return
+                }
+                let points = [
+                    CGPoint(x: minX, y: minY),
+                    CGPoint(x: maxX, y: minY),
+                    CGPoint(x: maxX, y: maxY),
+                    CGPoint(x: minX, y: maxY),
+                ].map { $0.applying(effective) }
+                self = CGRect(cornerPoints: points)
+                exact = false
+
+            case let .scrollGeometry(geometry, _):
+                // Visibility is bounded by the viewport even when presentation
+                // clipping is disabled for overflowing content.
+                self = intersection(geometry.visibleRect)
+
+            case .coordinateSpace,
+                 .sizedSpace:
+                break
+            }
+        }
+        return exact
+    }
+
     func converted(to space: ScrollCoordinateSpace, using transform: ViewTransform) -> CGRect {
         var points = [
             CGPoint(x: minX, y: minY),

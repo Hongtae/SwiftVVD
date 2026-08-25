@@ -4461,6 +4461,290 @@ final class ScrollViewSurfaceTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS scrollVisibilityChangeRuntimeObserved
+    func testOnScrollVisibilityChangeStoresClampedModifierAndActivityState() {
+        func modifier<V: View>(from value: V) -> Any {
+            guard let modifier = Mirror(reflecting: value).children.first(where: {
+                $0.label == "modifier"
+            })?.value else {
+                XCTFail("expected ModifiedContent modifier storage")
+                return EmptyView()
+            }
+            return modifier
+        }
+
+        func threshold(in modifier: Any) -> Double? {
+            Mirror(reflecting: modifier).children.first(where: {
+                $0.label == "threshold"
+            })?.value as? Double
+        }
+
+        let ordinary = modifier(
+            from: EmptyView().onScrollVisibilityChange(threshold: 0.375) { _ in }
+        )
+        let aboveOne = modifier(
+            from: EmptyView().onScrollVisibilityChange(threshold: 1.1) { _ in }
+        )
+        let belowZero = modifier(
+            from: EmptyView().onScrollVisibilityChange(threshold: -0.1) { _ in }
+        )
+        let nan = modifier(
+            from: EmptyView().onScrollVisibilityChange(threshold: .nan) { _ in }
+        )
+
+        XCTAssertEqual(
+            Mirror(reflecting: ordinary).children.compactMap(\.label),
+            ["threshold", "action", "_isActive"]
+        )
+        XCTAssertEqual(threshold(in: ordinary), 0.375)
+        XCTAssertEqual(threshold(in: aboveOne), 1)
+        XCTAssertEqual(threshold(in: belowZero), 0)
+        XCTAssertEqual(threshold(in: nan), 0)
+
+        guard let activityState = Mirror(reflecting: ordinary).children.first(where: {
+            $0.label == "_isActive"
+        })?.value else {
+            XCTFail("expected activity State storage")
+            return
+        }
+        XCTAssertEqual(
+            Mirror(reflecting: activityState).children.first(where: {
+                $0.label == "_value"
+            })?.value as? Bool,
+            false
+        )
+    }
+
+    // ASSERTIONS scrollVisibilityChangeFieldMetadataObserved
+    // ASSERTIONS scrollVisibilityChangeDisassemblyObserved
+    func testScrollVisibilityGeometryActionUsesDirectTransactionalGeometryBinder() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let recorder = ScrollViewInputRecorder()
+            let modifier = graph.makeInput(
+                value: OnScrollVisibilityGeometryAction(
+                    threshold: 0.5,
+                    action: { _ in },
+                    isActive: true
+                )
+            )
+            let inputs = makeViewInputs(graph: graph)
+            _ = OnScrollVisibilityGeometryAction._makeView(
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: inputs
+            ) { _, childInputs in
+                ScrollViewRecordingContent._makeView(
+                    view: _GraphValue(
+                        _attribute: graph.makeInput(
+                            value: ScrollViewRecordingContent(recorder: recorder)
+                        )
+                    ),
+                    inputs: childInputs
+                )
+            }
+
+            XCTAssertFalse(recorder.sawScrollPhasePreferenceKey)
+            XCTAssertFalse(recorder.sawScrollGeometryPreferenceKey)
+
+            let binders = graph.attributeInfos.compactMap { rawID, info -> AGAttribute? in
+                guard let bodyType = info.body?.bodyType,
+                      String(reflecting: bodyType).contains(
+                        "OnScrollVisibilityGeometryActionBinder"
+                      ) else {
+                    return nil
+                }
+                return AGAttribute(rawValue: rawID)
+            }
+            XCTAssertEqual(binders.count, 1)
+            guard let binderID = binders.first,
+                  let node = graph.slots[Int(binderID.rawValue)].node else {
+                return
+            }
+            XCTAssertTrue(node.pointee.flags.contains(.transactional))
+            XCTAssertTrue(node.pointee.outputs.isEmpty)
+
+            let binder = OnScrollVisibilityGeometryAction
+                .OnScrollVisibilityGeometryActionBinder(
+                    _modifier: modifier,
+                    _position: inputs.position,
+                    _size: inputs.size,
+                    _transform: inputs.transform,
+                    _environment: inputs.base.cachedEnvironment.value.environment,
+                    _safeAreaInsets: inputs.safeAreaInsets,
+                    _phase: inputs.base.phase
+                )
+            XCTAssertEqual(Mirror(reflecting: binder).children.compactMap(\.label), [
+                "_modifier",
+                "_position",
+                "_size",
+                "_transform",
+                "_environment",
+                "_safeAreaInsets",
+                "_phase",
+                "cycleDetector",
+                "lastResetSeed",
+                "proxySeed",
+                "lastValue",
+            ])
+        }
+    }
+
+    // ASSERTIONS scrollVisibilityChangeRuntimeObserved
+    // ASSERTIONS scrollVisibilityChangeDisassemblyObserved
+    func testScrollVisibilityFrameAccumulatesNestedViewportClips() {
+        func makeTransform(outerLead: CGFloat) -> ViewTransform {
+            let viewport = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 100, height: 220),
+                contentInsets: EdgeInsets(),
+                containerSize: CGSize(width: 100, height: 100),
+                visibleRect: CGRect(x: 0, y: 0, width: 100, height: 100)
+            )
+            var transform = ViewTransform()
+            transform.appendScrollGeometry(viewport, isClipped: false)
+            transform.appendTranslation(CGSize(width: 0, height: -outerLead))
+            transform.appendScrollGeometry(viewport, isClipped: false)
+            return transform
+        }
+
+        var fortyPercent = CGRect(x: 0, y: 0, width: 80, height: 100)
+        XCTAssertTrue(
+            fortyPercent.convertAndClipToScrollView(
+                to: .global,
+                transform: makeTransform(outerLead: 60)
+            )
+        )
+        XCTAssertEqual(fortyPercent, CGRect(x: 0, y: 60, width: 80, height: 40))
+
+        var sixtyPercent = CGRect(x: 0, y: 0, width: 80, height: 100)
+        XCTAssertTrue(
+            sixtyPercent.convertAndClipToScrollView(
+                to: .global,
+                transform: makeTransform(outerLead: 40)
+            )
+        )
+        XCTAssertEqual(sixtyPercent, CGRect(x: 0, y: 40, width: 80, height: 60))
+    }
+
+    // ASSERTIONS scrollVisibilityChangeRuntimeObserved
+    func testScrollVisibilityBinderDeliversInitialChangesResetAndInactiveFalse() {
+        func makeTransform(outerLead: CGFloat) -> ViewTransform {
+            let viewport = ScrollGeometry(
+                contentOffset: .zero,
+                contentSize: CGSize(width: 100, height: 220),
+                contentInsets: EdgeInsets(),
+                containerSize: CGSize(width: 100, height: 100),
+                visibleRect: CGRect(x: 0, y: 0, width: 100, height: 100)
+            )
+            var transform = ViewTransform()
+            transform.appendScrollGeometry(viewport, isClipped: false)
+            transform.appendTranslation(CGSize(width: 0, height: -outerLead))
+            transform.appendScrollGeometry(viewport, isClipped: false)
+            return transform
+        }
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var calls: [Bool] = []
+            let modifier = graph.makeInput(
+                value: OnScrollVisibilityGeometryAction(
+                    threshold: 0.5,
+                    action: { calls.append($0) },
+                    isActive: true
+                )
+            )
+            let position = graph.makeInput(value: CGPoint.zero)
+            let size = graph.makeInput(
+                value: ViewSize(CGSize(width: 80, height: 100))
+            )
+            let transformInput = graph.makeInput(value: makeTransform(outerLead: 60))
+            let environment = graph.makeInput(value: EnvironmentValues.tracking())
+            let phase = graph.makeInput(value: _GraphInputs.Phase())
+            let binder: Attribute<Void> = graph.makeStatefulRule(
+                OnScrollVisibilityGeometryAction
+                    .OnScrollVisibilityGeometryActionBinder(
+                        _modifier: modifier,
+                        _position: position,
+                        _size: size,
+                        _transform: transformInput,
+                        _environment: environment,
+                        _safeAreaInsets: OptionalAttribute(),
+                        _phase: phase
+                    )
+            )
+
+            func evaluate(
+                expectedReason: CustomEventTrace.ActionEventType.Reason? = .scrollChanged
+            ) {
+                Update.begin()
+                _ = binder.value
+                if let expectedReason {
+                    XCTAssertEqual(Update.queuedActionReasons, [expectedReason])
+                } else {
+                    XCTAssertTrue(Update.queuedActionReasons.isEmpty)
+                }
+                Update.end()
+            }
+
+            evaluate()
+            XCTAssertEqual(calls, [false])
+
+            // A geometry invalidation that keeps the same Boolean must not
+            // enqueue a duplicate callback.
+            transformInput.setValue(makeTransform(outerLead: 61))
+            evaluate(expectedReason: nil)
+            XCTAssertEqual(calls, [false])
+
+            // Exactly half of the original height remains, and the threshold
+            // comparison is inclusive.
+            transformInput.setValue(makeTransform(outerLead: 50))
+            evaluate()
+            XCTAssertEqual(calls, [false, true])
+
+            var resetPhase = _GraphInputs.Phase()
+            resetPhase.resetSeed = 1
+            phase.setValue(resetPhase)
+            evaluate()
+            XCTAssertEqual(calls, [false, true, true])
+
+            modifier.setValue(
+                OnScrollVisibilityGeometryAction(
+                    threshold: 0.5,
+                    action: { calls.append($0) },
+                    isActive: false
+                )
+            )
+            evaluate()
+            XCTAssertEqual(calls, [false, true, true, false])
+
+            modifier.setValue(
+                OnScrollVisibilityGeometryAction(
+                    threshold: 0.5,
+                    action: { calls.append($0) },
+                    isActive: true
+                )
+            )
+            evaluate()
+            XCTAssertEqual(calls, [false, true, true, false, true])
+
+            // Threshold zero includes a zero-area viewport intersection.
+            transformInput.setValue(makeTransform(outerLead: 110))
+            modifier.setValue(
+                OnScrollVisibilityGeometryAction(
+                    threshold: 0,
+                    action: { calls.append($0) },
+                    isActive: true
+                )
+            )
+            evaluate(expectedReason: nil)
+            XCTAssertEqual(calls, [false, true, true, false, true])
+        }
+    }
+
     // ASSERTIONS scrollActionDispatcherTransactionalSchedulingObserved
     func testScrollActionModifiersCreateTransactionalDispatchersWithoutWrapperRules() {
         let graph = _AGGraph()
