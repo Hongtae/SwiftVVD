@@ -759,6 +759,29 @@ private struct ScrollClipTransform: ScrollEnvironmentTransform {
     }
 }
 
+private struct ScrollEdgeEffectStyleTransform: ScrollEnvironmentTransform {
+    var style: ScrollEdgeEffectStyle?
+    var hidden: Bool?
+    var edges: Edge.Set
+
+    func update(properties: inout ScrollEnvironmentProperties) {
+        if let style {
+            for edge in Edge.allCases where edges.contains(Edge.Set(edge)) {
+                // A style replaces the inherited value only for explicitly selected edges.
+                properties.edgeEffectStyle[edge] = style
+            }
+        }
+
+        if let hidden {
+            for edge in Edge.allCases where edges.contains(Edge.Set(edge)) {
+                // Once an ancestor hides an edge effect, descendants cannot reveal it.
+                properties.edgeEffectHidden[edge] =
+                    (properties.edgeEffectHidden[edge] ?? false) || hidden
+            }
+        }
+    }
+}
+
 extension View {
     nonisolated public func defaultScrollAnchor(_ anchor: UnitPoint?) -> some View {
         transformEnvironment(\.scrollAnchors) { anchors in
@@ -802,6 +825,32 @@ extension View {
             transform: ScrollClipTransform(
                 isEnabled: !disabled,
                 behavior: nil
+            )
+        ))
+    }
+
+    nonisolated public func scrollEdgeEffectStyle(
+        _ style: ScrollEdgeEffectStyle?,
+        for edges: Edge.Set
+    ) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: ScrollEdgeEffectStyleTransform(
+                style: style,
+                hidden: nil,
+                edges: edges
+            )
+        ))
+    }
+
+    nonisolated public func scrollEdgeEffectHidden(
+        _ hidden: Bool = true,
+        for edges: Edge.Set = .all
+    ) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: ScrollEdgeEffectStyleTransform(
+                style: nil,
+                hidden: hidden,
+                edges: edges
             )
         ))
     }

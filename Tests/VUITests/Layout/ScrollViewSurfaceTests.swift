@@ -2414,6 +2414,80 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollClipDisabledEnvironmentDisassemblyObserved
     }
 
+    func testScrollEdgeEffectModifiersTransformSelectedEdgesAndPreserveInheritance() {
+        let styleRecorder = ScrollIndicatorEnvironmentRecorder()
+        let nilStyleRecorder = ScrollIndicatorEnvironmentRecorder()
+        let hiddenRecorder = ScrollIndicatorEnvironmentRecorder()
+        let emptyRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        var inheritedProperties = ScrollEnvironmentProperties()
+        inheritedProperties.edgeEffectStyle[.leading] = .soft
+        inheritedProperties.edgeEffectHidden[.top] = true
+        var inheritedEnvironment = EnvironmentValues.tracking()
+        inheritedEnvironment.scrollEnvironmentStorage = ScrollEnvironmentStorage(
+            inheritedProperties
+        )
+
+        ref.withCurrent {
+            let styleView = ScrollIndicatorEnvironmentContent(recorder: styleRecorder)
+                .scrollEdgeEffectStyle(.hard, for: [.top, .trailing])
+                .scrollEdgeEffectStyle(.soft, for: [.top, .bottom])
+            let styleAttribute = graph.makeInput(value: styleView)
+            _ = type(of: styleView)._makeView(
+                view: _GraphValue(_attribute: styleAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let nilStyleView = ScrollIndicatorEnvironmentContent(recorder: nilStyleRecorder)
+                .scrollEdgeEffectStyle(nil, for: [.leading])
+            let nilStyleAttribute = graph.makeInput(value: nilStyleView)
+            _ = type(of: nilStyleView)._makeView(
+                view: _GraphValue(_attribute: nilStyleAttribute),
+                inputs: makeViewInputs(graph: graph, environment: inheritedEnvironment)
+            )
+
+            let hiddenView = ScrollIndicatorEnvironmentContent(recorder: hiddenRecorder)
+                .scrollEdgeEffectHidden(false, for: [.top, .bottom])
+            let hiddenAttribute = graph.makeInput(value: hiddenView)
+            _ = type(of: hiddenView)._makeView(
+                view: _GraphValue(_attribute: hiddenAttribute),
+                inputs: makeViewInputs(graph: graph, environment: inheritedEnvironment)
+            )
+
+            let emptyView = ScrollIndicatorEnvironmentContent(recorder: emptyRecorder)
+                .scrollEdgeEffectStyle(.hard, for: [])
+                .scrollEdgeEffectHidden(true, for: [])
+            let emptyAttribute = graph.makeInput(value: emptyView)
+            _ = type(of: emptyView)._makeView(
+                view: _GraphValue(_attribute: emptyAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        // The transform nearest the content wins on overlapping style edges.
+        XCTAssertEqual(styleRecorder.properties.edgeEffectStyle[.top], .hard)
+        XCTAssertEqual(styleRecorder.properties.edgeEffectStyle[.trailing], .hard)
+        XCTAssertEqual(styleRecorder.properties.edgeEffectStyle[.bottom], .soft)
+        XCTAssertNil(styleRecorder.properties.edgeEffectStyle[.leading])
+
+        // A nil style performs no write, preserving a value inherited from the parent.
+        XCTAssertEqual(nilStyleRecorder.properties.edgeEffectStyle[.leading], .soft)
+        XCTAssertEqual(nilStyleRecorder.properties.edgeEffectHidden[.top], true)
+
+        // Hidden state is monotonic, while a selected false edge is retained explicitly.
+        XCTAssertEqual(hiddenRecorder.properties.edgeEffectHidden[.top], true)
+        XCTAssertEqual(hiddenRecorder.properties.edgeEffectHidden[.bottom], false)
+        XCTAssertNotNil(hiddenRecorder.properties.edgeEffectHidden[.bottom])
+
+        XCTAssertTrue(emptyRecorder.properties.edgeEffectStyle.isEmpty)
+        XCTAssertTrue(emptyRecorder.properties.edgeEffectHidden.isEmpty)
+
+        // ASSERTIONS: scrollEdgeEffectEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollEdgeEffectEnvironmentDisassemblyObserved
+    }
+
     func testScrollIndicatorModifiersComposeStyleVisibilityAndMetricsByAxis() {
         let recorder = ScrollIndicatorEnvironmentRecorder()
         let graph = _AGGraph()
