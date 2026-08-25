@@ -96,26 +96,26 @@ extension EnvironmentValues {
 
 // MARK: - ResetScrollEnvironmentModifier
 
-// The current placeholder keeps the reset chain connected while the scroll
-// storage transform and its observation owner are introduced together.
+// This modifier keeps nested scroll containers from inheriting scroll-specific
+// environment policies that belong to their enclosing container.
 struct ResetScrollEnvironmentModifier: ViewModifier, EnvironmentModifier {
     static func makeEnvironment(
         modifier: Attribute<Self>,
         environment: inout EnvironmentValues
     ) {}
 
-    // AdditionalResetModifier resets: scrollAnchors, ScrollToTopGestureActionKey,
-    // ScrollContentBackgroundKey, popoverAutomaticallyDismissesWhenScrolledOutOfView
+    // AdditionalResetModifier also owns scroll-anchor, gesture, and popover
+    // reset values as those carriers become available.
     // ResetTransform resets ScrollEnvironmentProperties.
-    // The scroll-specific environment keys are owned by the scroll subsystem.
-    // Until those keys are available here, this reset modifier leaves inputs unchanged.
+    // Other unavailable reset channels remain unchanged for now.
     struct AdditionalResetModifier: ViewModifier, EnvironmentModifier {
         typealias Body = Never
         static func makeEnvironment(
             modifier: Attribute<Self>,
             environment: inout EnvironmentValues
         ) {
-            // Writes the scroll reset values once scroll environment storage is available.
+            // A nested scroll container starts with a fresh content-background policy.
+            environment.scrollContentBackground = ScrollContentBackground()
         }
     }
 

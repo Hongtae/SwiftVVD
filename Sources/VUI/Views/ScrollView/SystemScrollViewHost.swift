@@ -637,6 +637,13 @@ class HostingScrollView {
             render: (DisplayList, GraphicsContext) -> Void
         ) {
             let group = scrollView.host
+            // The background belongs to viewport chrome, before content offset
+            // translation and before overlay indicators are replayed.
+            renderContentBackground(
+                scrollView.scrollContentBackground,
+                viewportSize: group.bounds.size,
+                in: context
+            )
             var contentContext = context
             contentContext.translateBy(
                 x: -group.bounds.origin.x,
@@ -648,6 +655,23 @@ class HostingScrollView {
             }
             render(contents, contentContext)
             renderIndicators(group.indicatorLayout, in: context)
+        }
+
+        private func renderContentBackground(
+            _ background: ScrollContentBackground,
+            viewportSize: CGSize,
+            in context: GraphicsContext
+        ) {
+            guard background.visibility == .visible,
+                  viewportSize.width > 0,
+                  viewportSize.height > 0 else {
+                return
+            }
+            let style = background.style ?? AnyShapeStyle(BackgroundStyle())
+            context.fill(
+                Path(CGRect(origin: .zero, size: viewportSize)),
+                with: .style(style)
+            )
         }
 
         private func renderIndicators(
@@ -769,6 +793,7 @@ class HostingScrollView {
     private(set) var configuration = ScrollViewConfiguration()
     private(set) var properties = ScrollEnvironmentProperties()
     private(set) var contentMargins = ContentMarginProxy()
+    var scrollContentBackground = ScrollContentBackground()
     private(set) var environment = EnvironmentValues()
     private(set) var safeAreaInsets = EdgeInsets()
     private(set) var layoutDirection = LayoutDirection.leftToRight
@@ -3477,6 +3502,7 @@ struct UpdatedHostingScrollView: StatefulRule {
         }
         let trackedEnvironment = EnvironmentValues(rawEnvironment._plist, tracker: tracker)
         let margins = trackedEnvironment.contentMarginProxy
+        let contentBackground = trackedEnvironment.scrollContentBackground
 
         if let descendantAxes = _descendantScrollViewsAxes.attribute?.value {
             scrollView.updateDescendantScrollableAxes(descendantAxes)
@@ -3488,6 +3514,7 @@ struct UpdatedHostingScrollView: StatefulRule {
         if previous == nil || margins != oldMargins {
             scrollView.updateContentMargins(margins)
         }
+        scrollView.scrollContentBackground = contentBackground
         scrollView.adoptEnvironment(trackedEnvironment)
         scrollView.updateSafeArea(
             safeAreaInsets,

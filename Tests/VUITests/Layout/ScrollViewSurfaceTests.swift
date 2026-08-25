@@ -547,6 +547,7 @@ private final class ScrollIndicatorEnvironmentRecorder {
     var properties = ScrollEnvironmentProperties()
     var metrics = ScrollIndicatorMetricsStorage()
     var anchors = ScrollAnchorStorage()
+    var contentBackground = ScrollContentBackground()
     var environment: Attribute<EnvironmentValues>?
 }
 
@@ -565,6 +566,7 @@ private struct ScrollIndicatorEnvironmentContent: View, TestPrimitiveView {
         recorder.properties = environment.scrollEnvironmentStorage.properties
         recorder.metrics = environment.scrollIndicatorMetrics
         recorder.anchors = environment.scrollAnchors
+        recorder.contentBackground = environment.scrollContentBackground
         recorder.environment = environmentAttribute
         return _ViewOutputs(layoutComputer: OptionalAttribute(graph.makeRule {
             LayoutComputer.fixed(CGSize(width: 10, height: 10))
@@ -2031,6 +2033,99 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         // ASSERTIONS: scrollDefaultAnchorRuntimeObserved
         // ASSERTIONS: scrollDefaultAnchorDisassemblyObserved
+    }
+
+    func testScrollContentBackgroundModifierReplacesOnlyNearestVisibility() {
+        let directRecorder = ScrollIndicatorEnvironmentRecorder()
+        let layeredRecorder = ScrollIndicatorEnvironmentRecorder()
+        let preservedRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        var inheritedEnvironment = EnvironmentValues.tracking()
+        inheritedEnvironment.scrollContentBackground = ScrollContentBackground(
+            style: AnyShapeStyle(Color.green),
+            visibility: .automatic,
+            wantsWindowBackground: true
+        )
+
+        ref.withCurrent {
+            let directView = ScrollIndicatorEnvironmentContent(recorder: directRecorder)
+                .scrollContentBackground(.hidden)
+            let directAttribute = graph.makeInput(value: directView)
+            _ = type(of: directView)._makeView(
+                view: _GraphValue(_attribute: directAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let layeredView = ScrollIndicatorEnvironmentContent(recorder: layeredRecorder)
+                .scrollContentBackground(.visible)
+                .scrollContentBackground(.hidden)
+            let layeredAttribute = graph.makeInput(value: layeredView)
+            _ = type(of: layeredView)._makeView(
+                view: _GraphValue(_attribute: layeredAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let preservedView = ScrollIndicatorEnvironmentContent(recorder: preservedRecorder)
+                .scrollContentBackground(.visible)
+            let preservedAttribute = graph.makeInput(value: preservedView)
+            _ = type(of: preservedView)._makeView(
+                view: _GraphValue(_attribute: preservedAttribute),
+                inputs: makeViewInputs(
+                    graph: graph,
+                    environment: inheritedEnvironment
+                )
+            )
+        }
+
+        XCTAssertEqual(directRecorder.contentBackground.visibility, .hidden)
+        XCTAssertNil(directRecorder.contentBackground.style)
+        XCTAssertFalse(directRecorder.contentBackground.wantsWindowBackground)
+        XCTAssertEqual(layeredRecorder.contentBackground.visibility, .visible)
+        XCTAssertNotNil(preservedRecorder.contentBackground.style)
+        XCTAssertEqual(preservedRecorder.contentBackground.visibility, .visible)
+        XCTAssertTrue(preservedRecorder.contentBackground.wantsWindowBackground)
+
+        let defaultBackground = EnvironmentValues().scrollContentBackground
+        XCTAssertEqual(
+            Mirror(reflecting: defaultBackground).children.compactMap(\.label),
+            ["style", "visibility", "wantsWindowBackground"]
+        )
+        XCTAssertNil(defaultBackground.style)
+        XCTAssertEqual(defaultBackground.visibility, .automatic)
+        XCTAssertFalse(defaultBackground.wantsWindowBackground)
+
+        // ASSERTIONS: scrollContentBackgroundRuntimeObserved
+        // ASSERTIONS: scrollContentBackgroundDisassemblyObserved
+    }
+
+    func testScrollContentBackgroundResetStartsWithFreshCarrier() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var environment = EnvironmentValues.tracking()
+        environment.scrollContentBackground = ScrollContentBackground(
+            style: AnyShapeStyle(Color.green),
+            visibility: .visible,
+            wantsWindowBackground: true
+        )
+
+        ref.withCurrent {
+            let modifier = graph.makeInput(
+                value: ResetScrollEnvironmentModifier.AdditionalResetModifier()
+            )
+            ResetScrollEnvironmentModifier.AdditionalResetModifier.makeEnvironment(
+                modifier: modifier,
+                environment: &environment
+            )
+        }
+
+        XCTAssertNil(environment.scrollContentBackground.style)
+        XCTAssertEqual(environment.scrollContentBackground.visibility, .automatic)
+        XCTAssertFalse(environment.scrollContentBackground.wantsWindowBackground)
+
+        // ASSERTIONS: scrollContainerSupportModifiersObserved
+        // ASSERTIONS: scrollContentBackgroundDisassemblyObserved
     }
 
     func testScrollEnabledEnvironmentSetterUsesInheritedConjunction() {

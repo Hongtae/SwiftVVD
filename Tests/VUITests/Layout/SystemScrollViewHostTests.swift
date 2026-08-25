@@ -2926,6 +2926,9 @@ final class SystemScrollViewHostTests: XCTestCase {
             environmentValues.automaticContentMargins = OptionalEdgeInsets(
                 EdgeInsets(top: 7, leading: 8, bottom: 9, trailing: 10)
             )
+            environmentValues.scrollContentBackground = ScrollContentBackground(
+                visibility: .visible
+            )
             let environment = graph.makeInput(value: environmentValues)
             var propertiesValue = ScrollEnvironmentProperties(environment: environmentValues)
             propertiesValue.isClippingEnabled = false
@@ -2967,9 +2970,13 @@ final class SystemScrollViewHostTests: XCTestCase {
                 host.value.contentMargins.automatic,
                 OptionalEdgeInsets(EdgeInsets(top: 7, leading: 8, bottom: 9, trailing: 10))
             )
+            XCTAssertEqual(host.value.scrollContentBackground.visibility, .visible)
 
             environmentValues.automaticContentMargins = OptionalEdgeInsets(
                 EdgeInsets(top: 11, leading: 12, bottom: 13, trailing: 14)
+            )
+            environmentValues.scrollContentBackground = ScrollContentBackground(
+                visibility: .hidden
             )
             environment.setValue(environmentValues)
             propertiesValue.isEnabled = false
@@ -2980,6 +2987,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 host.value.contentMargins.automatic,
                 OptionalEdgeInsets(EdgeInsets(top: 11, leading: 12, bottom: 13, trailing: 14))
             )
+            XCTAssertEqual(host.value.scrollContentBackground.visibility, .hidden)
             XCTAssertEqual(host.value.pendingContext, HostingScrollViewUpdateContext(
                 contentOffset: CGPoint(x: 12, y: 34),
                 contentFrame: CGRect(x: 5, y: 6, width: 300, height: 400),
@@ -2987,6 +2995,8 @@ final class SystemScrollViewHostTests: XCTestCase {
                 offsetMode: .system,
                 safeInsets: insets
             ))
+
+            // ASSERTIONS: scrollContentBackgroundPlatformConsumerObserved
         }
     }
 
