@@ -1978,6 +1978,77 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollDisabledEnvironmentDisassemblyObserved
     }
 
+    func testScrollDismissesKeyboardEnvironmentSetterReplacesRole() {
+        var environment = EnvironmentValues()
+
+        XCTAssertEqual(
+            environment.scrollDismissesKeyboardMode.role,
+            ScrollDismissesKeyboardMode.automatic.role
+        )
+
+        environment.verticalScrollBounceBehavior = .always
+        environment.scrollDismissesKeyboardMode = .never
+        XCTAssertEqual(
+            environment.scrollDismissesKeyboardMode.role,
+            ScrollDismissesKeyboardMode.never.role
+        )
+        XCTAssertEqual(
+            environment.verticalScrollBounceBehavior.role,
+            ScrollBounceBehavior.always.role
+        )
+
+        environment.scrollDismissesKeyboardMode = .immediately
+        XCTAssertEqual(
+            environment.scrollDismissesKeyboardMode.role,
+            ScrollDismissesKeyboardMode.immediately.role
+        )
+        XCTAssertEqual(
+            environment.scrollEnvironmentStorage.properties.dismissKeyboardMode,
+            ScrollDismissesKeyboardMode.immediately.role
+        )
+
+        // ASSERTIONS: scrollDismissesKeyboardEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollDismissesKeyboardEnvironmentDisassemblyObserved
+    }
+
+    func testScrollDismissesKeyboardModifierUsesNearestContentRole() {
+        let directRecorder = ScrollIndicatorEnvironmentRecorder()
+        let layeredRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            let directView = ScrollIndicatorEnvironmentContent(recorder: directRecorder)
+                .scrollDismissesKeyboard(.interactively)
+            let directAttribute = graph.makeInput(value: directView)
+            _ = type(of: directView)._makeView(
+                view: _GraphValue(_attribute: directAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let layeredView = ScrollIndicatorEnvironmentContent(recorder: layeredRecorder)
+                .scrollDismissesKeyboard(.immediately)
+                .scrollDismissesKeyboard(.never)
+            let layeredAttribute = graph.makeInput(value: layeredView)
+            _ = type(of: layeredView)._makeView(
+                view: _GraphValue(_attribute: layeredAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+        }
+
+        XCTAssertEqual(
+            directRecorder.properties.dismissKeyboardMode,
+            ScrollDismissesKeyboardMode.interactively.role
+        )
+        XCTAssertEqual(
+            layeredRecorder.properties.dismissKeyboardMode,
+            ScrollDismissesKeyboardMode.immediately.role
+        )
+
+        // ASSERTIONS: scrollDismissesKeyboardEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollDismissesKeyboardEnvironmentDisassemblyObserved
+    }
+
     func testScrollBounceEnvironmentSettersReplaceRolesIndependently() {
         var environment = EnvironmentValues()
 

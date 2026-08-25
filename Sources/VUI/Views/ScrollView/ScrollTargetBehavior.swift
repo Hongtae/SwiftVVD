@@ -643,6 +643,20 @@ extension EnvironmentValues {
         set { self[ScrollEnvironmentKey.self] = newValue }
     }
 
+    public var scrollDismissesKeyboardMode: ScrollDismissesKeyboardMode {
+        get {
+            ScrollDismissesKeyboardMode(
+                role: scrollEnvironmentStorage.properties.dismissKeyboardMode
+            )
+        }
+        set {
+            var properties = scrollEnvironmentStorage.properties
+            // Replacing this policy preserves every unrelated scroll property.
+            properties.dismissKeyboardMode = newValue.role
+            scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
+        }
+    }
+
     public var verticalScrollBounceBehavior: ScrollBounceBehavior {
         get {
             ScrollBounceBehavior(
@@ -679,6 +693,15 @@ extension EnvironmentValues {
             properties.isEnabled = properties.isEnabled && newValue
             scrollEnvironmentStorage = ScrollEnvironmentStorage(properties)
         }
+    }
+}
+
+private struct DismissKeyboardTransform: ScrollEnvironmentTransform {
+    var mode: ScrollDismissesKeyboardMode.Role
+
+    func update(properties: inout ScrollEnvironmentProperties) {
+        // The closest transform replaces the inherited dismissal policy.
+        properties.dismissKeyboardMode = mode
     }
 }
 
@@ -744,6 +767,14 @@ extension View {
                 isEnabled: !disabled,
                 behavior: nil
             )
+        ))
+    }
+
+    nonisolated public func scrollDismissesKeyboard(
+        _ mode: ScrollDismissesKeyboardMode
+    ) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: DismissKeyboardTransform(mode: mode.role)
         ))
     }
 }
