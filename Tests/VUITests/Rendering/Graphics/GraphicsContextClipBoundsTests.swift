@@ -609,7 +609,8 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         )
     }
 
-    func testPlatformGroupUsesRootRendererTranslationAndViewportClipOnGPU() throws {
+    // ASSERTIONS scrollClipDisabledPlatformConsumerObserved
+    func testPlatformGroupUsesScrollEnvironmentPresentationClipOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
         }
@@ -636,19 +637,6 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
 
         let width = 16
         let height = 16
-        let queue = try XCTUnwrap(deviceContext.renderQueue())
-        let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
-        let context = try XCTUnwrap(GraphicsContext(
-            sceneResources: SceneResources(),
-            environment: EnvironmentValues(),
-            viewport: CGRect(x: 0, y: 0, width: width, height: height),
-            contentOffset: .zero,
-            contentScaleFactor: 1,
-            resolution: CGSize(width: width, height: height),
-            commandBuffer: commandBuffer
-        ))
-        context.clear(with: .clear)
-
         let contentBounds = CGRect(x: 0, y: 0, width: 12, height: 12)
         let viewportFrame = CGRect(x: 5, y: 4, width: 4, height: 3)
         var contents = DisplayList()
@@ -664,29 +652,53 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
             version: DisplayList.Version(value: 1)
         )
 
-        let renderer = DisplayList.GraphicsRenderer()
-        renderer.render(list: list, at: .zero, in: context)
-        try waitForCompletion(commandBuffer)
+        func renderedBounds() throws -> CGRect {
+            let queue = try XCTUnwrap(deviceContext.renderQueue())
+            let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
+            let context = try XCTUnwrap(GraphicsContext(
+                sceneResources: SceneResources(),
+                environment: EnvironmentValues(),
+                viewport: CGRect(x: 0, y: 0, width: width, height: height),
+                contentOffset: .zero,
+                contentScaleFactor: 1,
+                resolution: CGSize(width: width, height: height),
+                commandBuffer: commandBuffer
+            ))
+            context.clear(with: .clear)
 
-        let staging = try XCTUnwrap(
-            deviceContext.makeCPUAccessible(texture: context.backdrop)
-        )
-        let pointer = try XCTUnwrap(staging.contents())
-        let bytes = UnsafeRawBufferPointer(
-            start: pointer,
-            count: width * height * 4
-        )
-        var occupiedBounds = CGRect.null
-        for y in 0..<height {
-            for x in 0..<width where bytes[(y * width + x) * 4 + 3] > 0 {
-                occupiedBounds = occupiedBounds.union(
-                    CGRect(x: x, y: y, width: 1, height: 1)
-                )
+            let renderer = DisplayList.GraphicsRenderer()
+            renderer.render(list: list, at: .zero, in: context)
+            try waitForCompletion(commandBuffer)
+
+            let staging = try XCTUnwrap(
+                deviceContext.makeCPUAccessible(texture: context.backdrop)
+            )
+            let pointer = try XCTUnwrap(staging.contents())
+            let bytes = UnsafeRawBufferPointer(
+                start: pointer,
+                count: width * height * 4
+            )
+            var occupiedBounds = CGRect.null
+            for y in 0..<height {
+                for x in 0..<width where bytes[(y * width + x) * 4 + 3] > 0 {
+                    occupiedBounds = occupiedBounds.union(
+                        CGRect(x: x, y: y, width: 1, height: 1)
+                    )
+                }
             }
+            XCTAssertEqual(renderer.animatorCount, 0)
+            return occupiedBounds
         }
 
-        XCTAssertEqual(occupiedBounds, viewportFrame)
-        XCTAssertEqual(renderer.animatorCount, 0)
+        XCTAssertEqual(try renderedBounds(), viewportFrame)
+
+        var properties = ScrollEnvironmentProperties()
+        properties.isClippingEnabled = false
+        attachment.0.updateProperties(properties)
+        XCTAssertEqual(
+            try renderedBounds(),
+            CGRect(x: 3, y: 1, width: 12, height: 12)
+        )
     }
 
     // ASSERTIONS projectionNonAffineScrollPresentationObserved

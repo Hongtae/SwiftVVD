@@ -2010,6 +2010,62 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollDisabledEnvironmentDisassemblyObserved
     }
 
+    func testScrollClipDisabledModifierUsesInheritedConjunctionAndPreservesBehavior() {
+        let disabledRecorder = ScrollIndicatorEnvironmentRecorder()
+        let enabledRecorder = ScrollIndicatorEnvironmentRecorder()
+        let inheritedBehaviorRecorder = ScrollIndicatorEnvironmentRecorder()
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        var inheritedProperties = ScrollEnvironmentProperties()
+        inheritedProperties.clipDisabledBehavior = .expandsVisibleRegion
+        var inheritedEnvironment = EnvironmentValues.tracking()
+        inheritedEnvironment.scrollEnvironmentStorage = ScrollEnvironmentStorage(
+            inheritedProperties
+        )
+
+        ref.withCurrent {
+            let disabledView = ScrollIndicatorEnvironmentContent(recorder: disabledRecorder)
+                .scrollClipDisabled(false)
+                .scrollClipDisabled()
+            let disabledAttribute = graph.makeInput(value: disabledView)
+            _ = type(of: disabledView)._makeView(
+                view: _GraphValue(_attribute: disabledAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let enabledView = ScrollIndicatorEnvironmentContent(recorder: enabledRecorder)
+                .scrollClipDisabled(false)
+            let enabledAttribute = graph.makeInput(value: enabledView)
+            _ = type(of: enabledView)._makeView(
+                view: _GraphValue(_attribute: enabledAttribute),
+                inputs: makeViewInputs(graph: graph)
+            )
+
+            let inheritedBehaviorView = ScrollIndicatorEnvironmentContent(
+                recorder: inheritedBehaviorRecorder
+            )
+            .scrollClipDisabled()
+            let inheritedBehaviorAttribute = graph.makeInput(value: inheritedBehaviorView)
+            _ = type(of: inheritedBehaviorView)._makeView(
+                view: _GraphValue(_attribute: inheritedBehaviorAttribute),
+                inputs: makeViewInputs(graph: graph, environment: inheritedEnvironment)
+            )
+        }
+
+        XCTAssertFalse(disabledRecorder.properties.isClippingEnabled)
+        XCTAssertEqual(disabledRecorder.properties.clipDisabledBehavior, .automatic)
+        XCTAssertTrue(enabledRecorder.properties.isClippingEnabled)
+        XCTAssertFalse(inheritedBehaviorRecorder.properties.isClippingEnabled)
+        XCTAssertEqual(
+            inheritedBehaviorRecorder.properties.clipDisabledBehavior,
+            .expandsVisibleRegion
+        )
+
+        // ASSERTIONS: scrollClipDisabledEnvironmentRuntimeObserved
+        // ASSERTIONS: scrollClipDisabledEnvironmentDisassemblyObserved
+    }
+
     func testScrollIndicatorModifiersComposeStyleVisibilityAndMetricsByAxis() {
         let recorder = ScrollIndicatorEnvironmentRecorder()
         let graph = _AGGraph()

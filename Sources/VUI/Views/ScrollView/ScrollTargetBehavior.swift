@@ -662,10 +662,33 @@ private struct ScrollEnabledTransform: ScrollEnvironmentTransform {
     }
 }
 
+private struct ScrollClipTransform: ScrollEnvironmentTransform {
+    var isEnabled: Bool
+    var behavior: ScrollClipDisabledBehavior?
+
+    func update(properties: inout ScrollEnvironmentProperties) {
+        // A descendant cannot re-enable clipping after an ancestor disables it.
+        properties.isClippingEnabled = properties.isClippingEnabled && isEnabled
+        // A nil behavior preserves the clipping policy inherited from the parent.
+        if let behavior {
+            properties.clipDisabledBehavior = behavior
+        }
+    }
+}
+
 extension View {
     nonisolated public func scrollDisabled(_ disabled: Bool) -> some View {
         modifier(TransformScrollStorageModifier(
             transform: ScrollEnabledTransform(isEnabled: !disabled)
+        ))
+    }
+
+    nonisolated public func scrollClipDisabled(_ disabled: Bool = true) -> some View {
+        modifier(TransformScrollStorageModifier(
+            transform: ScrollClipTransform(
+                isEnabled: !disabled,
+                behavior: nil
+            )
         ))
     }
 }

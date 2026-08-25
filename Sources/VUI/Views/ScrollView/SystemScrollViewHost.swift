@@ -574,6 +574,7 @@ class HostingScrollView {
         weak var scrollView: HostingScrollView?
         private(set) var bounds = CGRect.zero
         private(set) var clipBounds = CGRect.zero
+        private(set) var isClippingEnabled = true
         private(set) var indicatorLayout = ScrollIndicatorLayout()
 
         func updateViewport(
@@ -586,6 +587,11 @@ class HostingScrollView {
             )
             bounds = viewport
             clipBounds = viewport
+        }
+
+        /// Applies the inherited scroll clipping policy at the presentation boundary.
+        func updateClipping(isEnabled: Bool) {
+            isClippingEnabled = isEnabled
         }
 
         func updateIndicators(_ layout: ScrollIndicatorLayout) {
@@ -632,7 +638,10 @@ class HostingScrollView {
                 x: -group.bounds.origin.x,
                 y: -group.bounds.origin.y
             )
-            contentContext.clip(to: Path(group.clipBounds))
+            // This group owns clipping for both the logical host and its content.
+            if group.isClippingEnabled {
+                contentContext.clip(to: Path(group.clipBounds))
+            }
             render(contents, contentContext)
             renderIndicators(group.indicatorLayout, in: context)
         }
@@ -980,6 +989,7 @@ class HostingScrollView {
         let flashesIndicators = properties.indicatorFlashSeed
             != self.properties.indicatorFlashSeed
         self.properties = properties
+        host.updateClipping(isEnabled: properties.isClippingEnabled)
         if flashesIndicators {
             revealOverlayIndicators()
         }

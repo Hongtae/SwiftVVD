@@ -2823,6 +2823,32 @@ final class SystemScrollViewHostTests: XCTestCase {
         }
     }
 
+    func testHostingScrollViewPropertiesControlPresentationClipping() {
+        let graph = _AGGraph()
+        let graphRef = _AGGraphContext(graph: graph)
+
+        graphRef.withCurrent {
+            let state = graph.makeInput(value: SystemScrollLayoutState())
+            let host = HostingScrollView(
+                graphRef: graphRef,
+                layoutState: state.asWeak()
+            )
+            var properties = ScrollEnvironmentProperties()
+
+            XCTAssertTrue(host.host.isClippingEnabled)
+
+            properties.isClippingEnabled = false
+            host.updateProperties(properties)
+            XCTAssertFalse(host.host.isClippingEnabled)
+
+            properties.isClippingEnabled = true
+            host.updateProperties(properties)
+            XCTAssertTrue(host.host.isClippingEnabled)
+
+            // ASSERTIONS: scrollClipDisabledPlatformConsumerObserved
+        }
+    }
+
     func testAdjustedStateAndUpdatedHostPreserveHostOriginatedState() {
         let graph = _AGGraph()
         let graphRef = _AGGraphContext(graph: graph)
