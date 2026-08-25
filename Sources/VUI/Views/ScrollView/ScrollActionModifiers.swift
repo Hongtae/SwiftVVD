@@ -19,6 +19,23 @@ public struct ScrollPhaseChangeContext {
 }
 
 extension View {
+    nonisolated public func onScrollTargetVisibilityChange<ID>(
+        idType: ID.Type,
+        threshold: Double = 0.5,
+        _ action: @escaping ([ID]) -> Void
+    ) -> some View where ID: Hashable {
+        // Ordered comparisons intentionally map NaN and negative values to
+        // zero before applying the upper bound.
+        let nonnegativeThreshold = threshold >= 0 ? threshold : 0
+        let normalizedThreshold = nonnegativeThreshold > 1 ? 1 : nonnegativeThreshold
+        return modifier(
+            ScrollTargetVisibilityChangeModifier(
+                threshold: normalizedThreshold,
+                action: action
+            )
+        )
+    }
+
     nonisolated public func onScrollVisibilityChange(
         threshold: Double = 0.5,
         _ action: @escaping (Bool) -> Void
@@ -74,6 +91,137 @@ extension View {
                 prefersLast: prefersLast
             )
         )
+    }
+}
+
+/// Keeps collection visibility tracking active only while the modified view
+/// remains attached to the live view graph.
+struct ScrollTargetVisibilityChangeModifier<ID: Hashable>: ViewModifier {
+    var threshold: Double
+    var action: ([ID]) -> Void
+    @State private var isActive = false
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(
+                PrimitiveTargetVisibilityModifier(
+                    isActive: isActive,
+                    threshold: threshold,
+                    action: action
+                )
+            )
+            .onAppear {
+                isActive = true
+            }
+            .onDisappear {
+                isActive = false
+            }
+    }
+}
+
+/// Requests collection-role preferences and owns the retained ID comparison
+/// state independently from view-local visibility callbacks.
+struct PrimitiveTargetVisibilityModifier<ID: Hashable>: UnaryViewModifier {
+    typealias Body = Never
+
+    var isActive: Bool
+    var threshold: Double
+    var action: ([ID]) -> Void
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("PrimitiveTargetVisibilityModifier._makeView called outside an active _AGGraph context.")
+        }
+
+        var contentInputs = inputs
+        contentInputs.preferences.keys.add(ScrollTargetRole.Key.self)
+        let outputs = body(_Graph(), contentInputs)
+
+        if let targetCollections = outputs.preferences.value(for: ScrollTargetRole.Key.self) {
+            let dispatcher: Attribute<Void> = graph.makeStatefulRule(
+                VisibilityActionDispatcher(
+                    _modifier: modifier._attribute,
+                    _targetCollection: Attribute(targetCollections)
+                )
+            )
+            dispatcher.flags = .transactional
+        }
+        return outputs
+    }
+
+    /// Retains the prior typed ID array and emits only changes while the
+    /// appearance-controlled modifier is active.
+    struct VisibilityActionDispatcher: StatefulRule {
+        typealias Value = Void
+
+        var _modifier: Attribute<PrimitiveTargetVisibilityModifier>
+        var _targetCollection: Attribute<ScrollTargetRole.Key.Value>
+        var wasActive = false
+        var cycleDetector = UpdateCycleDetector()
+        var oldResetSeed = UInt32.max
+        var oldVisibleIDs: [ID] = []
+
+        mutating func updateValue() {
+            let modifier = _modifier.value
+            if modifier.isActive {
+                if let visibleIDs = updatedVisibleIDs(),
+                   cycleDetector.dispatch(label: "onScrollTargetVisibilityChange") {
+                    enqueueAction(ids: visibleIDs)
+                }
+                wasActive = true
+            } else {
+                if wasActive {
+                    oldVisibleIDs = []
+                    enqueueAction(ids: [])
+                }
+                wasActive = false
+            }
+            _AGGraph.setStatefulOutput(())
+        }
+
+        private mutating func updatedVisibleIDs() -> [ID]? {
+            let threshold = _modifier.value.threshold
+            var visibleIDs: [ID] = []
+
+            // Each concrete collection owns its visible-subview order. The
+            // callback preserves both dictionary traversal and collection order.
+            for (_, collections) in _targetCollection.value {
+                for collection in collections {
+                    collection.forEachVisibleSubview { subview, _ in
+                        guard let id = subview.id.explicitID(for: ID.self) else {
+                            return
+                        }
+
+                        let frame = subview.frame
+                        var clippedFrame = frame
+                        clippedFrame.convertAndClipToScrollView(
+                            to: .global,
+                            transform: subview.transform
+                        )
+                        let originalArea = frame.width * frame.height
+                        let visibleArea = clippedFrame.width * clippedFrame.height
+                        let visibleFraction = visibleArea / originalArea
+                        if threshold <= visibleFraction {
+                            visibleIDs.append(id)
+                        }
+                    }
+                }
+            }
+
+            defer { oldVisibleIDs = visibleIDs }
+            return visibleIDs == oldVisibleIDs ? nil : visibleIDs
+        }
+
+        private func enqueueAction(ids: [ID]) {
+            let action = _modifier.value.action
+            Update.enqueueAction(reason: .scrollChanged) {
+                action(ids)
+            }
+        }
     }
 }
 

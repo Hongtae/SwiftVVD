@@ -34,6 +34,7 @@ private final class ScrollViewInputRecorder {
     var sawScrollableDescendantsAxesKey = false
     var sawScrollPhasePreferenceKey = false
     var sawScrollGeometryPreferenceKey = false
+    var sawScrollTargetRoleKey = false
     var scrollableAttribute: AGAttribute?
     var phaseStateAttribute: AGAttribute?
     var transform: Attribute<ViewTransform>?
@@ -91,6 +92,7 @@ private struct ScrollViewRecordingContent: View, TestPrimitiveView {
         )
         recorder.sawScrollPhasePreferenceKey = inputs.preferences.keys.contains(ScrollPhasePreferenceKey.self)
         recorder.sawScrollGeometryPreferenceKey = inputs.preferences.keys.contains(ScrollGeometryPreferenceKey.self)
+        recorder.sawScrollTargetRoleKey = inputs.preferences.keys.contains(ScrollTargetRole.Key.self)
         recorder.scrollableAttribute = inputs.scrollable.attribute?.identifier
         recorder.phaseStateAttribute = inputs.base.scrollPhaseState.attribute?.identifier
         recorder.transform = inputs.transform
@@ -361,6 +363,37 @@ private final class ScrollViewBehaviorCollection: ScrollableCollection {
 
     func mapFirstChild<A, B>(ofType type: A.Type, body: (A) -> B) -> B? {
         nil
+    }
+}
+
+private struct ScrollTargetVisibilityPreferenceContent: View, TestPrimitiveView {
+    var recorder: ScrollViewInputRecorder
+    var collection: ScrollViewBehaviorCollection
+
+    typealias Body = Never
+
+    static func _makeView(view: _GraphValue<Self>, inputs: _ViewInputs) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("ScrollTargetVisibilityPreferenceContent._makeView requires an active graph.")
+        }
+
+        let value = view._attribute.value
+        value.recorder.sawScrollTargetRoleKey = inputs.preferences.keys.contains(
+            ScrollTargetRole.Key.self
+        )
+        var outputs = _ViewOutputs()
+        if value.recorder.sawScrollTargetRoleKey {
+            let collections: Attribute<ScrollTargetRole.Key.Value> = graph.makeRule {
+                [
+                    .container: [value.collection as any ScrollableCollection],
+                ]
+            }
+            outputs.preferences.append(
+                ScrollTargetRole.Key.self,
+                node: collections.identifier
+            )
+        }
+        return outputs
     }
 }
 
@@ -4458,6 +4491,295 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
             XCTAssertFalse(geometryRecorder.sawScrollPhasePreferenceKey)
             XCTAssertTrue(geometryRecorder.sawScrollGeometryPreferenceKey)
+        }
+    }
+
+    // ASSERTIONS scrollTargetVisibilityChangeRuntimeObserved
+    func testOnScrollTargetVisibilityChangeStoresClampedModifierAndActivityState() {
+        func modifier<V: View>(from value: V) -> Any {
+            guard let modifier = Mirror(reflecting: value).children.first(where: {
+                $0.label == "modifier"
+            })?.value else {
+                XCTFail("expected ModifiedContent modifier storage")
+                return EmptyView()
+            }
+            return modifier
+        }
+
+        func threshold(in modifier: Any) -> Double? {
+            Mirror(reflecting: modifier).children.first(where: {
+                $0.label == "threshold"
+            })?.value as? Double
+        }
+
+        let ordinary = modifier(
+            from: EmptyView().onScrollTargetVisibilityChange(
+                idType: Int.self,
+                threshold: 0.375
+            ) { _ in }
+        )
+        let aboveOne = modifier(
+            from: EmptyView().onScrollTargetVisibilityChange(
+                idType: Int.self,
+                threshold: 1.1
+            ) { _ in }
+        )
+        let belowZero = modifier(
+            from: EmptyView().onScrollTargetVisibilityChange(
+                idType: Int.self,
+                threshold: -0.1
+            ) { _ in }
+        )
+        let nan = modifier(
+            from: EmptyView().onScrollTargetVisibilityChange(
+                idType: Int.self,
+                threshold: .nan
+            ) { _ in }
+        )
+
+        XCTAssertEqual(
+            Mirror(reflecting: ordinary).children.compactMap(\.label),
+            ["threshold", "action", "_isActive"]
+        )
+        XCTAssertEqual(threshold(in: ordinary), 0.375)
+        XCTAssertEqual(threshold(in: aboveOne), 1)
+        XCTAssertEqual(threshold(in: belowZero), 0)
+        XCTAssertEqual(threshold(in: nan), 0)
+
+        guard let activityState = Mirror(reflecting: ordinary).children.first(where: {
+            $0.label == "_isActive"
+        })?.value else {
+            XCTFail("expected activity State storage")
+            return
+        }
+        XCTAssertEqual(
+            Mirror(reflecting: activityState).children.first(where: {
+                $0.label == "_value"
+            })?.value as? Bool,
+            false
+        )
+    }
+
+    // ASSERTIONS scrollTargetVisibilityChangeFieldMetadataObserved
+    // ASSERTIONS scrollTargetVisibilityChangeDisassemblyObserved
+    func testScrollTargetVisibilityPrimitiveRequestsRolePreferenceAndCreatesTransactionalDispatcher() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            func dispatcherIDs() -> Set<UInt32> {
+                Set(graph.attributeInfos.compactMap { rawID, info in
+                    guard let bodyType = info.body?.bodyType,
+                          String(reflecting: bodyType).contains("VisibilityActionDispatcher") else {
+                        return nil
+                    }
+                    return rawID
+                })
+            }
+
+            let recorder = ScrollViewInputRecorder()
+            let collection = ScrollViewBehaviorCollection(subviews: [])
+            let primitive = graph.makeInput(
+                value: PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: true,
+                    threshold: 0.5,
+                    action: { _ in }
+                )
+            )
+            let content = graph.makeInput(
+                value: ScrollTargetVisibilityPreferenceContent(
+                    recorder: recorder,
+                    collection: collection
+                )
+            )
+            let outputs = PrimitiveTargetVisibilityModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: primitive),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, childInputs in
+                ScrollTargetVisibilityPreferenceContent._makeView(
+                    view: _GraphValue(_attribute: content),
+                    inputs: childInputs
+                )
+            }
+
+            XCTAssertTrue(recorder.sawScrollTargetRoleKey)
+            XCTAssertNotNil(outputs.preferences.value(for: ScrollTargetRole.Key.self))
+            let created = dispatcherIDs()
+            XCTAssertEqual(created.count, 1)
+            guard let rawID = created.first,
+                  let node = graph.slots[Int(rawID)].node else {
+                return
+            }
+            XCTAssertTrue(node.pointee.flags.contains(.transactional))
+            XCTAssertTrue(node.pointee.outputs.isEmpty)
+
+            let prior = created
+            let noPreferenceRecorder = ScrollViewInputRecorder()
+            let noPreferenceContent = graph.makeInput(
+                value: ScrollViewRecordingContent(recorder: noPreferenceRecorder)
+            )
+            _ = PrimitiveTargetVisibilityModifier<Int>._makeView(
+                modifier: _GraphValue(_attribute: primitive),
+                inputs: makeViewInputs(graph: graph)
+            ) { _, childInputs in
+                ScrollViewRecordingContent._makeView(
+                    view: _GraphValue(_attribute: noPreferenceContent),
+                    inputs: childInputs
+                )
+            }
+            XCTAssertTrue(noPreferenceRecorder.sawScrollTargetRoleKey)
+            XCTAssertEqual(dispatcherIDs(), prior)
+        }
+    }
+
+    // ASSERTIONS scrollTargetVisibilityChangeRuntimeObserved
+    // ASSERTIONS scrollTargetVisibilityChangeDisassemblyObserved
+    func testScrollTargetVisibilityDispatcherFiltersTypedIDsByVisibleAreaAndLifecycle() {
+        func subview(
+            id: AnyHashable,
+            frame: CGRect,
+            transform: ViewTransform
+        ) -> ScrollableCollectionSubview {
+            ScrollableCollectionSubview(
+                id: _ViewList_ID(explicitID: id),
+                frame: frame,
+                frameInContent: frame,
+                transform: transform
+            )
+        }
+
+        let viewport = ScrollGeometry(
+            contentOffset: .zero,
+            contentSize: CGSize(width: 160, height: 200),
+            contentInsets: EdgeInsets(),
+            containerSize: CGSize(width: 80, height: 100),
+            visibleRect: CGRect(x: 0, y: 0, width: 80, height: 100)
+        )
+        var transform = ViewTransform()
+        transform.appendScrollGeometry(viewport, isClipped: false)
+
+        let initialCollection = ScrollViewBehaviorCollection(subviews: [
+            subview(id: AnyHashable(10), frame: CGRect(x: 0, y: 0, width: 80, height: 40), transform: transform),
+            subview(id: AnyHashable("foreign"), frame: CGRect(x: 0, y: 40, width: 80, height: 40), transform: transform),
+            subview(id: AnyHashable(20), frame: CGRect(x: 0, y: 80, width: 80, height: 40), transform: transform),
+            subview(id: AnyHashable(30), frame: CGRect(x: 0, y: 81, width: 80, height: 40), transform: transform),
+            subview(id: AnyHashable(40), frame: CGRect(x: 0, y: 0, width: 160, height: 20), transform: transform),
+        ])
+
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+
+        ref.withCurrent {
+            var calls: [[Int]] = []
+            let modifier = graph.makeInput(
+                value: PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: true,
+                    threshold: 0.5,
+                    action: { calls.append($0) }
+                )
+            )
+            let targetCollections: Attribute<ScrollTargetRole.Key.Value> = graph.makeInput(
+                value: [
+                    .container: [initialCollection as any ScrollableCollection],
+                ]
+            )
+            let dispatcher: Attribute<Void> = graph.makeStatefulRule(
+                PrimitiveTargetVisibilityModifier<Int>.VisibilityActionDispatcher(
+                    _modifier: modifier,
+                    _targetCollection: targetCollections
+                )
+            )
+
+            func evaluate(
+                expectedReason: CustomEventTrace.ActionEventType.Reason? = .scrollChanged
+            ) {
+                Update.begin()
+                _ = dispatcher.value
+                if let expectedReason {
+                    XCTAssertEqual(Update.queuedActionReasons, [expectedReason])
+                } else {
+                    XCTAssertTrue(Update.queuedActionReasons.isEmpty)
+                }
+                Update.end()
+            }
+
+            evaluate()
+            XCTAssertEqual(calls, [[10, 20, 40]])
+
+            let changedCollection = ScrollViewBehaviorCollection(subviews: [
+                subview(id: AnyHashable(20), frame: CGRect(x: 0, y: 0, width: 80, height: 40), transform: transform),
+            ])
+            targetCollections.setValue([
+                .container: [changedCollection as any ScrollableCollection],
+            ])
+            evaluate()
+            XCTAssertEqual(calls, [[10, 20, 40], [20]])
+
+            let unchangedCollection = ScrollViewBehaviorCollection(subviews: [
+                subview(id: AnyHashable(20), frame: CGRect(x: 10, y: 10, width: 40, height: 40), transform: transform),
+            ])
+            targetCollections.setValue([
+                .container: [unchangedCollection as any ScrollableCollection],
+            ])
+            evaluate(expectedReason: nil)
+            XCTAssertEqual(calls, [[10, 20, 40], [20]])
+
+            modifier.setValue(
+                PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: false,
+                    threshold: 0.5,
+                    action: { calls.append($0) }
+                )
+            )
+            evaluate()
+            XCTAssertEqual(calls, [[10, 20, 40], [20], []])
+
+            modifier.setValue(
+                PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: false,
+                    threshold: 0.5,
+                    action: { calls.append($0) }
+                )
+            )
+            evaluate(expectedReason: nil)
+
+            let emptyCollection = ScrollViewBehaviorCollection(subviews: [])
+            targetCollections.setValue([
+                .container: [emptyCollection as any ScrollableCollection],
+            ])
+            modifier.setValue(
+                PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: true,
+                    threshold: 0.5,
+                    action: { calls.append($0) }
+                )
+            )
+            evaluate(expectedReason: nil)
+
+            modifier.setValue(
+                PrimitiveTargetVisibilityModifier<Int>(
+                    isActive: false,
+                    threshold: 0.5,
+                    action: { calls.append($0) }
+                )
+            )
+            evaluate()
+            XCTAssertEqual(calls, [[10, 20, 40], [20], [], []])
+
+            let storage = PrimitiveTargetVisibilityModifier<Int>.VisibilityActionDispatcher(
+                _modifier: modifier,
+                _targetCollection: targetCollections
+            )
+            XCTAssertEqual(Mirror(reflecting: storage).children.compactMap(\.label), [
+                "_modifier",
+                "_targetCollection",
+                "wasActive",
+                "cycleDetector",
+                "oldResetSeed",
+                "oldVisibleIDs",
+            ])
+            XCTAssertEqual(storage.oldResetSeed, .max)
+            XCTAssertEqual(storage.oldVisibleIDs, [])
         }
     }
 
