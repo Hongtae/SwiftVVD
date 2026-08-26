@@ -178,6 +178,19 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
 #endif
     }
 
+    var isStyled: Bool {
+        // Reuse localized rich-segment reconstruction so Markdown and retained
+        // Text arguments follow the same style classification as rendering.
+        resolve(table: nil, bundle: .main, locale: .current).contains { segment in
+            switch segment {
+            case let .attributedString(value):
+                value.isStyled
+            case let .text(value):
+                value.isStyled()
+            }
+        }
+    }
+
     private func foundationLocalizationValue() -> String.LocalizationValue {
         var interpolation = String.LocalizationValue.StringInterpolation(
             literalCapacity: key.count,

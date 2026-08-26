@@ -76,19 +76,19 @@ final class CommandsGraphTests: XCTestCase {
         let sharedID = UUID()
         let original = HashableCommandGroupPlacementWrapper(
             placement: CommandGroupPlacement(
-                name: Text("Original Name"),
+                Text("Original Name"),
                 id: sharedID
             )
         )
         let renamed = HashableCommandGroupPlacementWrapper(
             placement: CommandGroupPlacement(
-                name: Text("Renamed"),
+                Text("Renamed"),
                 id: sharedID
             )
         )
         let independent = HashableCommandGroupPlacementWrapper(
             placement: CommandGroupPlacement(
-                name: Text("Original Name"),
+                Text("Original Name"),
                 id: UUID()
             )
         )
@@ -534,6 +534,76 @@ final class CommandsGraphTests: XCTestCase {
         )
     }
 
+    func testCommandMenuNameStyleClassificationAndNontrappingResolution() throws {
+        // ASSERTIONS commandMenuUnstyledDiagnosticRuntimeObserved
+        let plainAttributed = AttributedString("Attributed")
+        var styledAttributed = plainAttributed
+        styledAttributed.foregroundColor = VUI.Color.red
+
+        let unstyled: [Text] = [
+            Text(verbatim: "Verbatim"),
+            Text("Localized"),
+            Text("Value \(7)"),
+            Text("Value \(Text(verbatim: "plain"))"),
+            Text(plainAttributed),
+            Text(verbatim: "Left") + Text(verbatim: "Right"),
+            Text(7, format: CommandMenuStringStyle()),
+            Text(7, format: CommandMenuPlainAttributedStyle()),
+            Text(7, format: CommandMenuStyledAttributedStyle()),
+            Text(
+                TimeDataSource<Date>.currentDate,
+                format: CommandMenuTimeDataStringStyle()
+            ),
+            Text(LocalizedStringResource("Resource")),
+        ]
+        let styled: [Text] = [
+            Text("**Markdown**"),
+            Text("Value \(Text(verbatim: "styled").bold())"),
+            Text(styledAttributed),
+            Text(verbatim: "Left").italic() + Text(verbatim: "Right"),
+            Text(verbatim: "Foreground").foregroundColor(nil),
+            Text(verbatim: "Bold").bold(false),
+            Text(Image(systemName: "star")),
+            Text(
+                TimeDataSource<Date>.currentDate,
+                format: CommandMenuTimeDataAttributedStyle()
+            ),
+            Text(LocalizedStringResource("**Resource**")),
+        ]
+
+        XCTAssertTrue(unstyled.allSatisfy { !$0.isStyled() })
+        XCTAssertTrue(styled.allSatisfy { $0.isStyled() })
+        XCTAssertEqual(Text.ResolveOptions.includeAccessibility.rawValue, 0x1)
+        XCTAssertEqual(Text.ResolveOptions.foregroundKeyColor.rawValue, 0x2)
+        XCTAssertEqual(Text.ResolveOptions.writeAuxiliaryMetadata.rawValue, 0x4)
+        XCTAssertEqual(Text.ResolveOptions.includeTransitions.rawValue, 0x8)
+        XCTAssertEqual(Text.ResolveOptions.disableLinkColor.rawValue, 0x10)
+        XCTAssertEqual(Text.ResolveOptions.allowsKeyColors.rawValue, 0x20)
+        XCTAssertEqual(Text.ResolveOptions.allowsTextSuffix.rawValue, 0x40)
+        XCTAssertEqual(
+            Text.ResolveOptions.includeSupportForRepeatedResolution.rawValue,
+            0x80
+        )
+        XCTAssertEqual(Text.ResolveOptions.ignoreMarkdown.rawValue, 0x100)
+
+        let styledName = try XCTUnwrap(styled.first)
+        var resolved = _ResolvedCommands()
+        CommandMenu(styledName) { Text("styled-item") }
+            ._resolve(into: &resolved)
+        XCTAssertEqual(
+            resolved.topLevelCommands.map(\.placement.name),
+            [styledName]
+        )
+        XCTAssertEqual(
+            textValues(
+                in: try XCTUnwrap(
+                    resolved.storage[try XCTUnwrap(resolved.topLevelCommands.first)]
+                ).result.viewContent
+            ),
+            [Text("styled-item")]
+        )
+    }
+
     func testCommandContentAnnotatesEveryPlatformItemWithItsOperation() throws {
         // ASSERTIONS commandPlatformItemOperationRuntimeObserved
         let operation = CommandGroup(after: .newItem) {
@@ -951,4 +1021,38 @@ private struct PlatformWindowPresentationHostTestApp: App {
         WindowGroup("Platform-window presentation host test") { EmptyView() }
             .defaultPresentationHostMode(.platformWindow)
     }
+}
+
+private struct CommandMenuStringStyle: FormatStyle {
+    func format(_ value: Int) -> String { "Value \(value)" }
+}
+
+private struct CommandMenuPlainAttributedStyle: FormatStyle {
+    func format(_ value: Int) -> AttributedString {
+        AttributedString("Value \(value)")
+    }
+}
+
+private struct CommandMenuStyledAttributedStyle: FormatStyle {
+    func format(_ value: Int) -> AttributedString {
+        var result = AttributedString("Value \(value)")
+        result.foregroundColor = VUI.Color.red
+        return result
+    }
+}
+
+private struct CommandMenuTimeDataStringStyle: DiscreteFormatStyle {
+    func format(_ value: Date) -> String { "Time" }
+    func discreteInput(before input: Date) -> Date? { nil }
+    func discreteInput(after input: Date) -> Date? { nil }
+    func locale(_ locale: Locale) -> CommandMenuTimeDataStringStyle { self }
+}
+
+private struct CommandMenuTimeDataAttributedStyle: DiscreteFormatStyle {
+    func format(_ value: Date) -> AttributedString {
+        AttributedString("Time")
+    }
+    func discreteInput(before input: Date) -> Date? { nil }
+    func discreteInput(after input: Date) -> Date? { nil }
+    func locale(_ locale: Locale) -> CommandMenuTimeDataAttributedStyle { self }
 }

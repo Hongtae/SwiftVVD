@@ -169,6 +169,9 @@ class AnyTextStorage: CustomDebugStringConvertible {
     func isEqual(to other: AnyTextStorage) -> Bool {
         self === other
     }
+    func isStyled(options: Text.ResolveOptions) -> Bool {
+        fatalError("This method should be overridden by subclasses.")
+    }
 }
 
 class AnyTextModifier {
@@ -178,6 +181,10 @@ class AnyTextModifier {
 
     func hashResolution(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(self))
+    }
+
+    func isStyled(options: Text.ResolveOptions) -> Bool {
+        true
     }
 }
 
@@ -323,6 +330,12 @@ private final class FormatStyleStorage: AnyTextStorage {
         guard let other = other as? FormatStyleStorage else { return false }
         return storage.isEqual(to: other.storage)
     }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        // General format-style storage is classified structurally. Formatting
+        // and inspection of the produced value happen later during resolution.
+        false
+    }
 }
 
 private final class LocalizedStringResourceStorage: AnyTextStorage {
@@ -352,6 +365,10 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
             return false
         }
         return resource == other.resource
+    }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        AttributedString(localized: resource).isStyled
     }
 }
 
@@ -387,6 +404,10 @@ private final class DateTextStorage: AnyTextStorage {
     override func isEqual(to other: AnyTextStorage) -> Bool {
         guard let other = other as? DateTextStorage else { return false }
         return storage == other.storage
+    }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        false
     }
 
     private func format(
@@ -874,6 +895,12 @@ where Source: _TimeDataFormattingSource,
             reducedLuminanceBudget == other.reducedLuminanceBudget
     }
 
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        // Live time storage differs from general format-style storage: its
+        // declared output family determines whether it carries rich text.
+        Format.Output.self == AttributedString.self
+    }
+
     override func contentHash(
         into hasher: inout Hasher,
         environment: EnvironmentValues,
@@ -1012,6 +1039,10 @@ class LocalizedTextStorage: AnyTextStorage {
         }
         return false
     }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        key.isStyled
+    }
 }
 
 class ConcatenatedTextStorage: AnyTextStorage {
@@ -1062,6 +1093,10 @@ class ConcatenatedTextStorage: AnyTextStorage {
         }
         return false
     }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        first.isStyled(options: options) || second.isStyled(options: options)
+    }
 }
 
 class AttachmentTextStorage: AnyTextStorage {
@@ -1104,6 +1139,10 @@ class AttachmentTextStorage: AnyTextStorage {
         }
         return false
     }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        true
+    }
 }
 
 public struct Text: Equatable, _AGTypeDescriptorEquatable {
@@ -1120,6 +1159,27 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             }
             return false
         }
+
+        func isStyled(options: ResolveOptions) -> Bool {
+            guard case let .anyTextStorage(storage) = self else { return false }
+            return storage.isStyled(options: options)
+        }
+    }
+
+    struct ResolveOptions: OptionSet {
+        let rawValue: Int
+
+        static let includeAccessibility = ResolveOptions(rawValue: 0x1)
+        static let foregroundKeyColor = ResolveOptions(rawValue: 0x2)
+        static let writeAuxiliaryMetadata = ResolveOptions(rawValue: 0x4)
+        static let includeTransitions = ResolveOptions(rawValue: 0x8)
+        static let disableLinkColor = ResolveOptions(rawValue: 0x10)
+        static let allowsKeyColors = ResolveOptions(rawValue: 0x20)
+        static let allowsTextSuffix = ResolveOptions(rawValue: 0x40)
+        static let includeSupportForRepeatedResolution = ResolveOptions(
+            rawValue: 0x80
+        )
+        static let ignoreMarkdown = ResolveOptions(rawValue: 0x100)
     }
 
     var storage: Storage
@@ -1274,9 +1334,36 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                 value.hashResolution(into: &hasher)
             }
         }
+
+        func isStyled(options: ResolveOptions) -> Bool {
+            // Every ordinary modifier is a style marker, including optional or
+            // Boolean payloads that are visually inactive. Boxed modifiers own
+            // their option-dependent classification.
+            guard case let .anyTextModifier(modifier) = self else { return true }
+            return modifier.isStyled(options: options)
+        }
     }
 
     var modifiers: [Modifier]
+
+    func isStyled(options: ResolveOptions = []) -> Bool {
+        storage.isStyled(options: options) || modifiers.contains {
+            $0.isStyled(options: options)
+        }
+    }
+
+    func assertUnstyled(
+        _ context: String,
+        options: ResolveOptions = []
+    ) {
+        // This advisory does not interrupt construction or resolution. Report
+        // every invalid use so attaching or detaching a debugger cannot change
+        // whether the issue is visible.
+        guard isStyled(options: options) else {
+            return
+        }
+        Log.warning("Only unstyled text can be used with \(context)")
+    }
 
     public init(
         _ key: LocalizedStringKey,

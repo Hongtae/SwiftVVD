@@ -84,6 +84,24 @@ extension AttributedString {
         if let value = attributes.tracking { self.tracking = value }
         if let value = attributes.baselineOffset { self.baselineOffset = value }
     }
+
+    var isStyled: Bool {
+        // Command labels classify the presence of supported run attributes;
+        // render-time precedence and whether an attribute looks inactive do
+        // not change this structural result.
+        runs.contains { run in
+            run.font != nil ||
+                run.foregroundColor != nil ||
+                run.backgroundColor != nil ||
+                run.strikethroughStyle != nil ||
+                run.underlineStyle != nil ||
+                run.kern != nil ||
+                run.tracking != nil ||
+                run.baselineOffset != nil ||
+                run.inlinePresentationIntent != nil ||
+                run.link != nil
+        }
+    }
 }
 
 private extension NSAttributedString.Key {
@@ -301,6 +319,10 @@ final class AttributedStringTextStorage: AnyTextStorage {
     override func isEqual(to other: AnyTextStorage) -> Bool {
         guard let other = other as? AttributedStringTextStorage else { return false }
         return str == other.str
+    }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        str.isStyled
     }
 }
 

@@ -30,6 +30,7 @@ public struct CommandMenu<Content>: Commands where Content: View {
         _ name: Text,
         @ViewBuilder content: () -> Content
     ) {
+        name.assertUnstyled("init(_:content:)")
         self.name = name
         self.content = content()
     }
@@ -67,7 +68,7 @@ public struct CommandMenu<Content>: Commands where Content: View {
     }
 
     public func _resolve(into resolved: inout _ResolvedCommands) {
-        let placement = CommandGroupPlacement(name: name, id: UUID())
+        let placement = CommandGroupPlacement(name, id: UUID())
         let operation = CommandOperation(
             mutation: .topLevel,
             placement: placement,
@@ -82,7 +83,7 @@ public struct CommandMenu<Content>: Commands where Content: View {
 
         var value: CommandsList {
             let menu = commandMenu.value
-            let placement = CommandGroupPlacement(name: menu.name, id: id)
+            let placement = CommandGroupPlacement(menu.name, id: id)
             let operation = CommandOperation(
                 mutation: .topLevel,
                 placement: placement,
