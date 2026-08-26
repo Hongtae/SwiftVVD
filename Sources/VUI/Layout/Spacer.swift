@@ -486,9 +486,14 @@ extension Divider: PrimitiveView, UnaryView {
                 dynamicStackOrientation: inputs[DynamicStackOrientation.self]
             )
         )
+        // The resolved style may contain another Divider. Hide the platform
+        // item preference from that visual subtree so only this outer
+        // semantic divider contributes a platform separator.
+        var childInputs = inputs
+        childInputs.preferences.keys.remove(PlatformItemList.Key.self)
         var outputs = ResolvedDivider._makeView(
             view: _GraphValue(_attribute: childAttr),
-            inputs: inputs
+            inputs: childInputs
         )
         if let provider = inputs.requestedDividerRepresentation,
            provider.shouldMakeRepresentation(inputs: inputs) {

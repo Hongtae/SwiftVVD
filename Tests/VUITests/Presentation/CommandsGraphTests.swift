@@ -534,6 +534,70 @@ final class CommandsGraphTests: XCTestCase {
         )
     }
 
+    func testResolvedCommandsMaterializesCanonicalAndCustomMainMenus() throws {
+        // ASSERTIONS commandsMainMenuMaterializationFieldMetadataObserved
+        // ASSERTIONS commandsMainMenuMaterializationDisassemblyObserved
+        // ASSERTIONS commandsMainMenuPlacementGroupingObserved
+        // ASSERTIONS commandsMainMenuContentBoundaryObserved
+        // ASSERTIONS commandsCurrentAppNameFallbackObserved
+        // ASSERTIONS commandsMainMenuMaterializationRuntimeObserved
+        var resolved = _ResolvedCommands()
+        CommandGroup(after: .appInfo) { Text("App Group") }
+            ._resolve(into: &resolved)
+        CommandGroup(after: .newItem) { Text("New Group") }
+            ._resolve(into: &resolved)
+        CommandGroup(after: .saveItem) { Text("Save Group") }
+            ._resolve(into: &resolved)
+        CommandGroup(after: .textFormatting) { Text("Format Group") }
+            ._resolve(into: &resolved)
+        CommandMenu("First Custom") { Text("Custom Group") }
+            ._resolve(into: &resolved)
+        CommandMenu("Empty Custom") { EmptyView() }
+            ._resolve(into: &resolved)
+        CommandGroup(after: .help) { Text("Help Group") }
+            ._resolve(into: &resolved)
+
+        let customIDs = resolved.topLevelCommands.map(\.placement.id)
+        let items = resolved.mainMenuItems(env: EnvironmentValues())
+
+        XCTAssertFalse(try XCTUnwrap(items.first).name.isEmpty)
+        XCTAssertEqual(Array(items.dropFirst().map(\.name)), [
+            "File",
+            "Format",
+            "View",
+            "First Custom",
+            "Empty Custom",
+            "Help",
+        ])
+        XCTAssertEqual(items.map(\.id), [
+            .app,
+            .file,
+            .format,
+            .view,
+            .custom(customIDs[0]),
+            .custom(customIDs[1]),
+            .help,
+        ])
+        XCTAssertEqual(items.map(\.groups.count), [1, 2, 1, 0, 1, 1, 1])
+
+        let fileList = platformItemList(
+            for: MainMenuItem.Content.item(items[1])
+        )
+        XCTAssertEqual(fileList.items.count, 3)
+        XCTAssertEqual(fileList.items[0].text?.string, "New Group")
+        if case .divider? = fileList.items[1].systemItem {
+            // The separator belongs between the two resolved placement groups.
+        } else {
+            XCTFail("expected a divider between command placement groups")
+        }
+        XCTAssertEqual(fileList.items[2].text?.string, "Save Group")
+
+        let emptyCustomList = platformItemList(
+            for: MainMenuItem.Content.item(items[5])
+        )
+        XCTAssertTrue(emptyCustomList.items.isEmpty)
+    }
+
     func testCommandMenuNameStyleClassificationAndNontrappingResolution() throws {
         // ASSERTIONS commandMenuUnstyledDiagnosticRuntimeObserved
         let plainAttributed = AttributedString("Attributed")
@@ -751,6 +815,60 @@ final class CommandsGraphTests: XCTestCase {
             }
         }
         return nil
+    }
+
+    private func platformItemList<Content: View>(
+        for content: Content
+    ) -> PlatformItemList {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: type(of: content),
+            content: content,
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+
+        return viewGraph.data.withCurrent {
+            AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                let graph = viewGraph.data.graph
+                let attribute = graph.makeInput(value: content)
+                let generator: Attribute<PlatformItemList> =
+                    graph.makeStatefulRule(
+                        PlatformItemListGenerator<
+                            AllPlatformItemListFlags,
+                            Content
+                        >(
+                            content: attribute,
+                            inputs: makeViewInputs(graph: graph),
+                            inputsIncludeGeometry: false
+                        )
+                    )
+                return generator.value
+            }
+        }
+    }
+
+    private func makeViewInputs(graph: _AGGraph) -> _ViewInputs {
+        _ViewInputs(
+            base: _GraphInputs(
+                time: graph.makeInput(value: Time(seconds: 0)),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: Transaction())
+            ),
+            customInputs: PropertyList(),
+            preferences: PreferencesInputs(
+                keys: PreferenceKeys(),
+                hostKeys: graph.makeInput(value: PreferenceKeys())
+            ),
+            transform: graph.makeInput(value: ViewTransform()),
+            position: graph.makeInput(value: CGPoint.zero),
+            containerPosition: graph.makeInput(value: CGPoint.zero),
+            size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+            safeAreaInsets: OptionalAttribute(),
+            containerSize: OptionalAttribute(),
+            stackOrientation: nil
+        )
     }
 }
 
