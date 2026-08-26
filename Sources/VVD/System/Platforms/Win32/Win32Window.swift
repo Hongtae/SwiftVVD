@@ -39,12 +39,14 @@ private func win32ErrorString(_ code: DWORD) -> String {
 }
 
 @inline(__always)
-private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
+private func dpiForWindow(_ hWnd: HWND) -> UINT {
     let dpi = GetDpiForWindow(hWnd)
-    if dpi != 0 {
-        return CGFloat(dpi) / 96.0
-    }
-    return 1.0
+    return dpi != 0 ? dpi : 96
+}
+
+@inline(__always)
+private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
+    CGFloat(dpiForWindow(hWnd)) / 96.0
 }
 
 // Timer settings.
@@ -481,6 +483,14 @@ final class Win32Window: Window {
         let modals = self.modalEntries.map { $0.window }
         let hWnd = self.hWnd
 
+        // windowMap retains only a weak reference, so the last owner may release
+        // an active window without calling close(). Balance the activation count
+        // before the asynchronous native-window cleanup loses this state.
+        if self.activated && hWnd != nil {
+            numActiveWindows -= 1
+            Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+        }
+
         Task { @MainActor in
             modals.forEach { $0.close() }
 
@@ -567,9 +577,10 @@ final class Win32Window: Window {
                 let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
                 let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
+                let dpi = dpiForWindow(hWnd)
 
                 var rc = RECT(left: 0, top: 0, right: LONG(w), bottom: LONG(h))
-                if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                if AdjustWindowRectExForDpi(&rc, style, menu, styleEx, dpi) {
                     let size: CGSize = CGSize(width: Int(w), height: Int(h))
                     self.contentBounds.size = size * (1.0 / self.contentScaleFactor)
 
@@ -660,6 +671,16 @@ final class Win32Window: Window {
             self.dropTarget = nil
 
             KillTimer(hWnd, updateKeyboardMouseTimerId)
+
+            // The HWND is removed from windowMap before the queued WM_CLOSE is
+            // dispatched, so a later WA_INACTIVE message cannot update this
+            // window's activation bookkeeping. Balance the count here while
+            // the last known activation state is still available.
+            if self.activated {
+                numActiveWindows -= 1
+                self.activated = false
+                Log.debug("VVD.numActiveWindows: \(numActiveWindows)")
+            }
             Self.windowMap.removeValue(forKey: hWnd)
 
             // Post WM_CLOSE to destroy window from DefWindowProc().
@@ -2142,21 +2163,29 @@ final class Win32Window: Window {
                 let style = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_STYLE))
                 let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
                 let menu: Bool = GetMenu(hWnd) != nil
+                let dpi = hWnd.map(dpiForWindow) ?? 96
+                let scaleFactor = CGFloat(dpi) / 96.0
 
                 var minSize = CGSize(width: 1, height: 1)
                 if let size = window.delegate?.minimumContentSize(window: window) {
                     minSize.width = size.width
                     minSize.height = size.height
                 }
-                var rc = RECT(left: 0, top: 0, right: LONG(max(minSize.width, 1)), bottom: LONG(max(minSize.height, 1)))
-                if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                // Delegate constraints use logical content coordinates, while
+                // MINMAXINFO requires physical window tracking sizes.
+                let minWidth = LONG(max((minSize.width * scaleFactor).rounded(.up), 1))
+                let minHeight = LONG(max((minSize.height * scaleFactor).rounded(.up), 1))
+                var rc = RECT(left: 0, top: 0, right: minWidth, bottom: minHeight)
+                if AdjustWindowRectExForDpi(&rc, style, menu, styleEx, dpi) {
                     let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
                     tmp.pointee.ptMinTrackSize.x = rc.right - rc.left
                     tmp.pointee.ptMinTrackSize.y = rc.bottom - rc.top
                 }
                 if let maxSize = window.delegate?.maximumContentSize(window: window) {
-                    rc = RECT(left: 0, top: 0, right: LONG(max(maxSize.width, 1)), bottom: LONG(max(maxSize.height, 1)))
-                    if AdjustWindowRectEx(&rc, style, menu, styleEx) {
+                    let maxWidth = LONG(max((maxSize.width * scaleFactor).rounded(.down), 1))
+                    let maxHeight = LONG(max((maxSize.height * scaleFactor).rounded(.down), 1))
+                    rc = RECT(left: 0, top: 0, right: maxWidth, bottom: maxHeight)
+                    if AdjustWindowRectExForDpi(&rc, style, menu, styleEx, dpi) {
                         let tmp: UnsafeMutablePointer<MINMAXINFO> = UnsafeMutablePointer<MINMAXINFO>(bitPattern: UInt(lParam))!
                         if maxSize.width > 0 {
                             tmp.pointee.ptMaxTrackSize.x = rc.right - rc.left
