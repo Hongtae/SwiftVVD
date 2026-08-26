@@ -15,6 +15,10 @@ class AppGraph<A: App>: @unchecked Sendable {
 
     let graph: _AGGraph
 
+    // Retains the ownership root for the scene graph and any dynamically
+    // selected command branches created beneath it.
+    let rootSubgraph: AGSubgraphRef
+
     // The SceneList.Key AG node produced by App.body._makeScene().
     // Read by AppWindowsController.syncWindowControllers (inside graph context)
     // to determine which windows to open/close.
@@ -35,55 +39,60 @@ class AppGraph<A: App>: @unchecked Sendable {
         var sceneList: Attribute<[SceneList.Item]>? = nil
         var commandsList: Attribute<CommandsList>? = nil
         var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
+        var rootSubgraph: AGSubgraphRef!
 
         _AGGraph.withCurrent(graph) {
-            // Root input nodes seed the graph inputs used while constructing
-            // the app's scene tree.
-            let timeAttr        = graph.makeInput(value: time)
-            let phaseAttr       = graph.makeInput(value: _GraphInputs.Phase())
-            let transactionAttr = graph.makeInput(value: Transaction())
-            let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
+            rootSubgraph = AGSubgraph()
+            AGSubgraph.withCurrent(rootSubgraph) {
+                // Root input nodes seed the graph inputs used while constructing
+                // the app's scene tree.
+                let timeAttr        = graph.makeInput(value: time)
+                let phaseAttr       = graph.makeInput(value: _GraphInputs.Phase())
+                let transactionAttr = graph.makeInput(value: Transaction())
+                let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
 
-            let graphInputs = _GraphInputs(
-                time: timeAttr,
-                phase: phaseAttr,
-                environment: envAttr,
-                transaction: transactionAttr
-            )
+                let graphInputs = _GraphInputs(
+                    time: timeAttr,
+                    phase: phaseAttr,
+                    environment: envAttr,
+                    transaction: transactionAttr
+                )
 
-            // Register preference keys so that scenes output them in _SceneOutputs.
-            var prefKeys = PreferenceKeys()
-            prefKeys.add(SceneList.Key.self)
-            prefKeys.add(CommandsList.Key.self)
-            prefKeys.add(WindowConfiguration.Override.Key.self)
-            let hostKeysAttr = graph.makeInput(value: prefKeys)
-            let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
+                // Register preference keys so that scenes output them in _SceneOutputs.
+                var prefKeys = PreferenceKeys()
+                prefKeys.add(SceneList.Key.self)
+                prefKeys.add(CommandsList.Key.self)
+                prefKeys.add(WindowConfiguration.Override.Key.self)
+                let hostKeysAttr = graph.makeInput(value: prefKeys)
+                let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
 
-            let sceneInputs = _SceneInputs(base: graphInputs, preferences: prefsInputs)
+                let sceneInputs = _SceneInputs(base: graphInputs, preferences: prefsInputs)
 
-            // Wire the root scene graph.
-            let bodyAttr  = graph.makeInput(value: app.body)
-            let sceneGraph = _GraphValue<A.Body>(_attribute: bodyAttr)
-            let outputs   = A.Body._makeScene(scene: sceneGraph, inputs: sceneInputs)
+                // Wire the root scene graph.
+                let bodyAttr  = graph.makeInput(value: app.body)
+                let sceneGraph = _GraphValue<A.Body>(_attribute: bodyAttr)
+                let outputs   = A.Body._makeScene(scene: sceneGraph, inputs: sceneInputs)
 
-            // Locate preference nodes in the outputs.
-            // SceneList.Key: TransformSceneListModifier uses replace semantics,
-            // so there is always exactly one entry — take it directly.
-            sceneList = outputs.preferences.values(for: SceneList.Key.self)
-                .last.map { Attribute($0) }
-            commandsList = outputs.preferences.value(for: CommandsList.Key.self)
-                .map { Attribute($0) }
+                // Locate preference nodes in the outputs.
+                // SceneList.Key: TransformSceneListModifier uses replace semantics,
+                // so there is always exactly one entry — take it directly.
+                sceneList = outputs.preferences.values(for: SceneList.Key.self)
+                    .last.map { Attribute($0) }
+                commandsList = outputs.preferences.value(for: CommandsList.Key.self)
+                    .map { Attribute($0) }
 
-            // Multiple modifiers may each append a window-configuration override
-            // (e.g. .updateFrameRate + .drawDebugInfo), so reduce all entries into
-            // one AG node using the stored _makeReduceRule.
-            configurationOverride = outputs.preferences.reducedValue(
-                for: WindowConfiguration.Override.Key.self,
-                in: graph
-            )
+                // Multiple modifiers may each append a window-configuration override
+                // (e.g. .updateFrameRate + .drawDebugInfo), so reduce all entries into
+                // one AG node using the stored _makeReduceRule.
+                configurationOverride = outputs.preferences.reducedValue(
+                    for: WindowConfiguration.Override.Key.self,
+                    in: graph
+                )
+            }
         }
 
         self.graph = graph
+        self.rootSubgraph = rootSubgraph
         self.sceneListAttr = sceneList
         self.commandsListAttr = commandsList
         self.windowConfigurationOverrideAttr = configurationOverride

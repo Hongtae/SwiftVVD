@@ -115,16 +115,95 @@ extension Scene {
 
 extension _ConditionalContent: Commands where TrueContent: Commands, FalseContent: Commands {
     nonisolated public static func _makeCommands(content: _GraphValue<Self>, inputs: _CommandsInputs) -> _CommandsOutputs {
-        fatalError()
+        guard let graph = _AGGraph.current else {
+            fatalError("_ConditionalContent._makeCommands called outside _AGGraph context")
+        }
+
+        let preferences = inputs.preferences.makeIndirectOutputs()
+        let outputs = _CommandsOutputs(preferences: preferences)
+        let provider = CommandsProvider(inputs: inputs, outputs: outputs)
+        let container: Attribute<Info> = graph.makeStatefulRule(
+            Container(
+                content: content._attribute,
+                provider: provider
+            )
+        )
+        outputs.preferences.setIndirectDependency(container.identifier)
+        return outputs
+    }
+
+    private struct CommandsProvider: ConditionalContentProvider {
+        var inputs: _CommandsInputs
+        var outputs: _CommandsOutputs
+
+        func detachOutputs() {
+            outputs.preferences.detachIndirectOutputs()
+        }
+
+        func attachOutputs(to childOutputs: _CommandsOutputs) {
+            childOutputs.preferences.attachIndirectOutputs(
+                to: outputs.preferences
+            )
+        }
+
+        func makeChildInputs() -> _CommandsInputs {
+            var childInputs = inputs
+            childInputs.base.copyCaches()
+            return childInputs
+        }
+
+        func makeTrueOutputs(
+            child: Attribute<TrueContent>,
+            inputs: _CommandsInputs
+        ) -> _CommandsOutputs {
+            TrueContent._makeCommands(
+                content: _GraphValue(_attribute: child),
+                inputs: inputs
+            )
+        }
+
+        func makeFalseOutputs(
+            child: Attribute<FalseContent>,
+            inputs: _CommandsInputs
+        ) -> _CommandsOutputs {
+            FalseContent._makeCommands(
+                content: _GraphValue(_attribute: child),
+                inputs: inputs
+            )
+        }
     }
     
     public typealias Body = Never
 }
 
 extension Optional: Commands where Wrapped: Commands {
-    public static func _makeCommands(content: _GraphValue<Optional<Wrapped>>, inputs: _CommandsInputs) -> _CommandsOutputs {
-        fatalError()
+    nonisolated public static func _makeCommands(content: _GraphValue<Self>, inputs: _CommandsInputs) -> _CommandsOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("Optional._makeCommands called outside _AGGraph context")
+        }
+        let child: Attribute<_ConditionalContent<Wrapped, EmptyCommands>> =
+            graph.makeRule(Child(_content: content._attribute))
+        return _ConditionalContent<Wrapped, EmptyCommands>._makeCommands(
+            content: _GraphValue(_attribute: child),
+            inputs: inputs
+        )
     }
+
+    private struct Child: Rule, AsyncAttribute {
+        var _content: Attribute<Wrapped?>
+
+        var value: _ConditionalContent<Wrapped, EmptyCommands> {
+            if let wrapped = _content.value {
+                return _ConditionalContent(
+                    storage: .trueContent(wrapped)
+                )
+            }
+            return _ConditionalContent(
+                storage: .falseContent(EmptyCommands())
+            )
+        }
+    }
+
     public typealias Body = Never
 }
 

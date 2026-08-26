@@ -126,6 +126,168 @@ final class CommandsGraphTests: XCTestCase {
         )
     }
 
+    func testCommandsCompositionGraphPreservesBranchesAndSourceOrder() throws {
+        // ASSERTIONS commandsCompositionGraphRuntimeObserved
+        let initial = AppGraph(app: InitialCommandsCompositionTestApp())
+        let (initialCommands, _) = try graphOutputs(from: initial)
+        XCTAssertEqual(commandFlagIDs(initialCommands), [1, 2, 5, 6, 7, 8])
+
+        let alternate = AppGraph(app: AlternateCommandsCompositionTestApp())
+        let (alternateCommands, _) = try graphOutputs(from: alternate)
+        XCTAssertEqual(commandFlagIDs(alternateCommands), [1, 3, 4, 5, 6, 7, 8])
+    }
+
+    func testConditionalCommandsRewireIndirectOutputWhenBranchChanges() throws {
+        // ASSERTIONS commandsConditionalOptionalGraphDisassemblyObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let root = AGSubgraphRef()
+            try AGSubgraphRef.withCurrent(root) {
+                typealias Conditional = _ConditionalContent<
+                    FlagCommands,
+                    FlagCommands
+                >
+                let source = graph.makeInput(
+                    value: Conditional(
+                        storage: .trueContent(FlagCommands(id: 11))
+                    )
+                )
+                let outputs = Conditional._makeCommands(
+                    content: _GraphValue(_attribute: source),
+                    inputs: makeCommandsInputs(graph: graph)
+                )
+                let listID = try XCTUnwrap(
+                    outputs.preferences.value(for: CommandsList.Key.self)
+                )
+                let list = Attribute<CommandsList>(listID)
+
+                XCTAssertEqual(commandFlagIDs(list.value), [11])
+
+                source.setValue(
+                    Conditional(
+                        storage: .trueContent(FlagCommands(id: 13))
+                    )
+                )
+                XCTAssertEqual(commandFlagIDs(list.value), [13])
+
+                source.setValue(
+                    Conditional(
+                        storage: .falseContent(FlagCommands(id: 12))
+                    )
+                )
+                XCTAssertEqual(commandFlagIDs(list.value), [12])
+            }
+        }
+    }
+
+    func testOptionalCommandsRewireIndirectOutputWhenPresenceChanges() throws {
+        // ASSERTIONS commandsConditionalOptionalGraphDisassemblyObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let root = AGSubgraphRef()
+            try AGSubgraphRef.withCurrent(root) {
+                let source = graph.makeInput(
+                    value: Optional<FlagCommands>.none
+                )
+                let outputs = Optional<FlagCommands>._makeCommands(
+                    content: _GraphValue(_attribute: source),
+                    inputs: makeCommandsInputs(graph: graph)
+                )
+                let listID = try XCTUnwrap(
+                    outputs.preferences.value(for: CommandsList.Key.self)
+                )
+                let list = Attribute<CommandsList>(listID)
+
+                XCTAssertEqual(commandFlagIDs(list.value), [])
+
+                source.setValue(FlagCommands(id: 21))
+                XCTAssertEqual(commandFlagIDs(list.value), [21])
+
+                source.setValue(nil)
+                XCTAssertEqual(commandFlagIDs(list.value), [])
+            }
+        }
+    }
+
+    func testCommandsBuilderSupportsObservedAritiesAndValueResolutionOrder() {
+        // ASSERTIONS commandsBuilderFixedArityRuntimeObserved
+        // ASSERTIONS commandsCompositionValueResolutionObserved
+        let trace = CommandResolutionTrace()
+        func command(_ id: Int) -> ResolvingCommands {
+            ResolvingCommands(id: id, trace: trace)
+        }
+
+        let arity2 = CommandsBuilder.buildBlock(command(1), command(2))
+        let arity3 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3)
+        )
+        let arity4 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4)
+        )
+        let arity5 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5)
+        )
+        let arity6 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6)
+        )
+        let arity7 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6), command(7)
+        )
+        let arity8 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6), command(7), command(8)
+        )
+        let arity9 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6), command(7), command(8), command(9)
+        )
+        let arity10 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6), command(7), command(8), command(9), command(10)
+        )
+
+        XCTAssertEqual([
+            tupleCommandArity(arity2),
+            tupleCommandArity(arity3),
+            tupleCommandArity(arity4),
+            tupleCommandArity(arity5),
+            tupleCommandArity(arity6),
+            tupleCommandArity(arity7),
+            tupleCommandArity(arity8),
+            tupleCommandArity(arity9),
+            tupleCommandArity(arity10),
+        ], Array(2...10))
+
+        var resolved = _ResolvedCommands()
+        arity10._resolve(into: &resolved)
+        XCTAssertEqual(trace.ids, Array(1...10))
+
+        trace.ids.removeAll()
+        Group {
+            command(21)
+            command(22)
+        }
+        ._resolve(into: &resolved)
+        XCTAssertEqual(trace.ids, [21, 22])
+    }
+
+    func testCommandsBuilderParameterPackExtendsPastObservedArityRange() {
+        let trace = CommandResolutionTrace()
+        func command(_ id: Int) -> ResolvingCommands {
+            ResolvingCommands(id: id, trace: trace)
+        }
+
+        let arity11 = CommandsBuilder.buildBlock(
+            command(1), command(2), command(3), command(4), command(5),
+            command(6), command(7), command(8), command(9), command(10),
+            command(11)
+        )
+
+        XCTAssertEqual(tupleCommandArity(arity11), 11)
+    }
+
     func testCommandsListResolutionPreservesItemOrderAndCollectsFlags() throws {
         // ASSERTIONS commandsListResolutionRuntimeObserved
         let first = CommandGroup(after: .newItem) { Text("first") }.change
@@ -312,6 +474,32 @@ final class CommandsGraphTests: XCTestCase {
         }
     }
 
+    private func tupleCommandArity(_ value: Any) -> Int {
+        guard let tuple = Mirror(reflecting: value).children.first(where: {
+            $0.label == "value"
+        })?.value else {
+            return 0
+        }
+        return Mirror(reflecting: tuple).children.count
+    }
+
+    private func makeCommandsInputs(graph: _AGGraph) -> _CommandsInputs {
+        var keys = PreferenceKeys()
+        keys.add(CommandsList.Key.self)
+        return _CommandsInputs(
+            base: _GraphInputs(
+                time: graph.makeInput(value: Time(seconds: 0)),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
+                environment: graph.makeInput(value: EnvironmentValues.tracking()),
+                transaction: graph.makeInput(value: Transaction())
+            ),
+            preferences: PreferencesInputs(
+                keys: keys,
+                hostKeys: graph.makeInput(value: keys)
+            )
+        )
+    }
+
     private func commandOperations(_ commands: CommandsList) -> [CommandOperation] {
         commands.items.compactMap { item in
             guard case let .operation(operation) = item.value else {
@@ -390,6 +578,55 @@ private struct FlagCommands: Commands {
     func _resolve(into resolved: inout _ResolvedCommands) {}
 }
 
+private final class CommandResolutionTrace {
+    var ids: [Int] = []
+}
+
+private struct ResolvingCommands: Commands {
+    var id: Int
+    var trace: CommandResolutionTrace
+
+    typealias Body = Never
+
+    func _resolve(into resolved: inout _ResolvedCommands) {
+        trace.ids.append(id)
+    }
+}
+
+private struct ComposedFlagCommands: Commands {
+    var selectsTrueBranch: Bool
+    var includesOptional: Bool
+
+    var body: some Commands {
+        FlagCommands(id: 1)
+
+        if selectsTrueBranch {
+            FlagCommands(id: 2)
+        } else {
+            FlagCommands(id: 3)
+        }
+
+        if includesOptional {
+            FlagCommands(id: 4)
+        }
+
+        Group {
+            FlagCommands(id: 5)
+            FlagCommands(id: 6)
+        }
+
+        ErasedFlagCommands()
+        FlagCommands(id: 8)
+    }
+}
+
+private struct ErasedFlagCommands: Commands {
+    var body: some Commands {
+        let erased: any Commands = FlagCommands(id: 7)
+        CommandsBuilder.buildLimitedAvailability(erased)
+    }
+}
+
 @propertyWrapper
 private struct IncrementingCommandProperty: DynamicProperty {
     var wrappedValue: Int
@@ -455,6 +692,34 @@ private struct CommandProducerTestApp: App {
             }
             .commands {
                 CommandGroup(replacing: .help) { Text("replacement-item") }
+            }
+    }
+}
+
+private struct InitialCommandsCompositionTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        WindowGroup("Commands composition test") { EmptyView() }
+            .commands {
+                ComposedFlagCommands(
+                    selectsTrueBranch: true,
+                    includesOptional: false
+                )
+            }
+    }
+}
+
+private struct AlternateCommandsCompositionTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        WindowGroup("Alternate commands composition test") { EmptyView() }
+            .commands {
+                ComposedFlagCommands(
+                    selectsTrueBranch: false,
+                    includesOptional: true
+                )
             }
     }
 }

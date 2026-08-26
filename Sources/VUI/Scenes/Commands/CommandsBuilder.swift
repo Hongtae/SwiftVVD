@@ -2,7 +2,7 @@
 //  File: CommandsBuilder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 @resultBuilder
@@ -32,8 +32,16 @@ extension CommandsBuilder {
     public static func buildEither<T, F>(second: F) -> _ConditionalContent<T, F> where T: Commands, F: Commands {
         _ConditionalContent<T, F>(storage: .falseContent(second))
     }
-    
-    public static func buildBlock<each Content>(_ content: repeat each Content) -> some Commands where repeat each Content: Commands {
+
+    public static func buildLimitedAvailability(
+        _ content: any Commands
+    ) -> some Commands {
+        LimitedAvailabilityCommandContent(erasing: content)
+    }
+
+    public static func buildBlock<each Content>(
+        _ content: repeat each Content
+    ) -> some Commands where repeat each Content: Commands {
         TupleCommandContent((repeat each content))
     }
 }

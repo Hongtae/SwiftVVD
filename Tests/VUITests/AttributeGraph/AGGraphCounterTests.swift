@@ -705,6 +705,29 @@ final class AGGraphCounterTests: XCTestCase {
         }
     }
 
+    func testSeededStatefulRuleStillPerformsInitialEvaluation() {
+        // ASSERTIONS commandsConditionalOptionalGraphDisassemblyObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = StatefulValueRecorder()
+
+        ref.withCurrent {
+            let source = graph.makeInput(value: 3)
+            let output = graph.makeStatefulRule(
+                ValuePublishingStatefulRule(source: source, recorder: recorder)
+            )
+
+            output.setValue(41)
+
+            XCTAssertEqual(output.value, 3)
+            XCTAssertEqual(recorder.hadValue, [true])
+
+            source.setValue(5)
+            XCTAssertEqual(output.value, 5)
+            XCTAssertEqual(recorder.hadValue, [true, true])
+        }
+    }
+
     func testObservedAttributeDestroyRunsOnceOnNodeRemoval() {
         let graph = _AGGraph()
         let ref = _AGGraphContext(graph: graph)

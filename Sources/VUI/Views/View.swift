@@ -529,7 +529,7 @@ public struct _ViewInputs {
     /// in a retained subgraph, so each child has an independent cache copy.
     /// Mutates self in place and gives the child a distinct cached-environment box.
     mutating func copyCaches() {
-        base.cachedEnvironment = MutableBox(base.cachedEnvironment.value)
+        base.copyCaches()
     }
 
     /// Creates placeholder outputs that can later be attached to concrete child outputs.

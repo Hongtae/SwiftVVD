@@ -1444,15 +1444,22 @@ extension _AGGraph {
     ) -> Bool {
         assert(_AGGraph.current === self)
         let index = Int(attribute.identifier.rawValue)
-        guard slots[index].node != nil else {
+        guard let node = slots[index].node else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
+        let seedsUnevaluatedNode =
+            node.pointee.value == nil && node.pointee.needsEvaluation
         if !updateValueStorage(
             newValue,
             for: attribute.identifier,
-            in: slots[index].node!
+            in: node
         ) {
             return false
+        }
+        // A fallback value breaks first-read cycles but must not replace the
+        // node's initial body evaluation and dependency discovery.
+        if seedsUnevaluatedNode {
+            node.pointee.forceEvaluation = true
         }
         slots[index].node!.pointee.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction
@@ -1489,12 +1496,19 @@ extension _AGGraph {
         guard let node = slots[index].node else {
             fatalError("setValue called on AGAttribute @\(attribute.identifier.rawValue) that does not exist.")
         }
+        let seedsUnevaluatedNode =
+            node.pointee.value == nil && node.pointee.needsEvaluation
         if !updateValueStorage(
             newValue,
             for: attribute.identifier,
             in: node
         ) {
             return false
+        }
+        // A fallback value breaks first-read cycles but must not replace the
+        // node's initial body evaluation and dependency discovery.
+        if seedsUnevaluatedNode {
+            node.pointee.forceEvaluation = true
         }
         slots[index].node!.pointee.valueVersion &+= 1
         let transactionToPropagate = transaction.isEmpty ? nil : transaction

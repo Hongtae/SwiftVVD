@@ -248,6 +248,12 @@ public struct _GraphInputs: GraphReusable {
         mergedInputs = []
     }
 
+    /// Forks reference-backed caches before a retained child graph is built.
+    /// Attribute identities and ordinary graph inputs remain shared.
+    mutating func copyCaches() {
+        cachedEnvironment = MutableBox(cachedEnvironment.value)
+    }
+
     // Base-channel subscript stores in customInputs (PropertyList).
     subscript<T: GraphInput>(_ key: T.Type) -> T.Value {
         get { customInputs.value(forKey: key) }
