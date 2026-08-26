@@ -1996,6 +1996,71 @@ final class ScrollViewSurfaceTests: XCTestCase {
         // ASSERTIONS: scrollIndicatorStyleConsumptionObserved
     }
 
+    @MainActor
+    func testScrollInputBehaviorPreservesCarrierLayoutAndViewIdentity() {
+        let behaviors: [(ScrollInputBehavior, UInt8)] = [
+            (.automatic, 0),
+            (.enabled, 1),
+            (.disabled, 2),
+        ]
+        XCTAssertEqual(MemoryLayout<ScrollInputBehavior>.size, 1)
+        XCTAssertEqual(MemoryLayout<ScrollInputBehavior>.stride, 1)
+        XCTAssertEqual(MemoryLayout<ScrollInputBehavior>.alignment, 1)
+        for (index, item) in behaviors.enumerated() {
+            XCTAssertEqual(bytes(of: item.0), [item.1])
+            XCTAssertEqual(
+                Mirror(reflecting: item.0).children.compactMap(\.label),
+                ["storage"]
+            )
+            for (otherIndex, other) in behaviors.enumerated() {
+                XCTAssertEqual(item.0 == other.0, index == otherIndex)
+            }
+        }
+
+        // Public input-kind producers are unavailable on this target. These
+        // values exercise only the already-observed private carrier cases.
+        let lookHorizontal = unsafeBitCast(
+            (UInt8(1), UInt8(0), UInt8(0)),
+            to: ScrollInputKind.self
+        )
+        let lookVertical = unsafeBitCast(
+            (UInt8(2), UInt8(0), UInt8(0)),
+            to: ScrollInputKind.self
+        )
+        let handGestureShortcut = unsafeBitCast(
+            (UInt8(0), UInt8(0), UInt8(1)),
+            to: ScrollInputKind.self
+        )
+        XCTAssertEqual(MemoryLayout<ScrollInputKind>.size, 3)
+        XCTAssertEqual(MemoryLayout<ScrollInputKind>.stride, 3)
+        XCTAssertEqual(MemoryLayout<ScrollInputKind>.alignment, 1)
+        XCTAssertEqual(
+            Mirror(reflecting: lookHorizontal).children.compactMap(\.label),
+            ["storage"]
+        )
+        XCTAssertEqual(lookHorizontal, lookHorizontal)
+        XCTAssertNotEqual(lookHorizontal, lookVertical)
+        XCTAssertNotEqual(lookHorizontal, handGestureShortcut)
+
+        let configured = EmptyView().scrollInputBehavior(
+            .disabled,
+            for: lookHorizontal
+        )
+        let layered = configured.scrollInputBehavior(
+            .enabled,
+            for: handGestureShortcut
+        )
+        XCTAssertEqual(String(reflecting: type(of: configured)), "VUI.EmptyView")
+        XCTAssertEqual(String(reflecting: type(of: layered)), "VUI.EmptyView")
+        XCTAssertTrue(Mirror(reflecting: configured).children.isEmpty)
+        XCTAssertTrue(Mirror(reflecting: layered).children.isEmpty)
+
+        // ASSERTIONS: scrollInputBehaviorCarrierRuntimeObserved
+        // ASSERTIONS: scrollInputBehaviorMacOSIdentityObserved
+        // ASSERTIONS: scrollInputBehaviorControlFlowObserved
+        // ASSERTIONS: scrollInputKindMacOSUnavailableObserved
+    }
+
     func testDefaultScrollAnchorRoleAndModifierPreserveIndependentStorageRoles() {
         XCTAssertEqual(MemoryLayout<ScrollAnchorRole>.size, 1)
         XCTAssertEqual(MemoryLayout<ScrollAnchorRole>.stride, 1)
