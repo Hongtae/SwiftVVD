@@ -440,6 +440,13 @@ class WindowController: WindowDelegate,
         set {
             _sceneConfiguration = newValue
             windowContext?.sceneConfiguration = newValue
+
+            // Scene configuration supplies the root default. View-level
+            // presentation-specific environment values can still override it.
+            environment.defaultPresentationHostMode =
+                newValue.defaultPresentationHostMode
+            viewGraph.valuesNeedingUpdate.insert(.environment)
+            viewChangedWhileDrawing = true
         }
     }
     var endSessionOnWindowClosed: Bool { true }

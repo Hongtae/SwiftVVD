@@ -505,15 +505,19 @@ final class MenuControlResponder: MultiViewResponder,
         activeSession = session
         setMenuOpen(true)
 
+        let presentationEnvironment = environment.value
+        let usesPlatformWindow = presentationEnvironment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        )
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
-                                               environment: environment.value.untrackedCopy(),
+                                               environment: presentationEnvironment.untrackedCopy(),
                                                viewPhase: viewPhase,
                                                scene: parent.scene,
                                                anchor: presentationAnchor(),
                                                items: initialItems,
                                                actions: actions,
-                                               usesPlatformWindow: environment.value.presentationChildUsingPlatformWindow,
+                                               usesPlatformWindow: usesPlatformWindow,
                                                session: session)
         session.root = ctrl
         actions.openSubmenu = { [weak ctrl] item, origin in

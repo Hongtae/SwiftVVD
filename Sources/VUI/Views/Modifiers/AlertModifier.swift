@@ -238,7 +238,9 @@ struct MakeAlertStorage<Actions: View, Message: View>: StatefulRule {
             isPresented: m.isPresented,
             severity: severity,
             onDismiss: nil,
-            usesPlatformWindow: environment.modalSessionUsingPlatformWindow
+            usesPlatformWindow: environment.resolvedUsesPlatformWindow(
+                \.modalSessionUsingPlatformWindow
+            )
         )
         let storage = AlertStorage(
             preference: pref,

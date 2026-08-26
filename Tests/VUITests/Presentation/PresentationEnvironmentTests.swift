@@ -2,6 +2,85 @@ import XCTest
 @testable import VUI
 
 final class PresentationEnvironmentTests: XCTestCase {
+    func testScenePresentationHostDefaultAllowsDedicatedOverrides() {
+        var environment = EnvironmentValues()
+
+        XCTAssertEqual(environment.defaultPresentationHostMode, .overlay)
+        XCTAssertNil(environment.modalSessionUsingPlatformWindow)
+        XCTAssertNil(environment.presentationChildUsingPlatformWindow)
+        XCTAssertFalse(environment.resolvedUsesPlatformWindow())
+        XCTAssertFalse(environment.resolvedUsesPlatformWindow(
+            \.modalSessionUsingPlatformWindow
+        ))
+        XCTAssertFalse(environment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        ))
+
+        environment.defaultPresentationHostMode = .platformWindow
+        XCTAssertNil(environment.modalSessionUsingPlatformWindow)
+        XCTAssertNil(environment.presentationChildUsingPlatformWindow)
+        XCTAssertTrue(environment.resolvedUsesPlatformWindow())
+        XCTAssertTrue(environment.resolvedUsesPlatformWindow(
+            \.modalSessionUsingPlatformWindow
+        ))
+        XCTAssertTrue(environment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        ))
+
+        environment.modalSessionUsingPlatformWindow = false
+        XCTAssertEqual(environment.modalSessionUsingPlatformWindow, false)
+        XCTAssertNil(environment.presentationChildUsingPlatformWindow)
+        XCTAssertFalse(environment.resolvedUsesPlatformWindow(
+            \.modalSessionUsingPlatformWindow
+        ))
+        XCTAssertTrue(environment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        ))
+
+        environment.presentationChildUsingPlatformWindow = false
+        XCTAssertEqual(environment.presentationChildUsingPlatformWindow, false)
+        XCTAssertFalse(environment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        ))
+        XCTAssertTrue(environment.resolvedUsesPlatformWindow())
+    }
+
+    @MainActor
+    func testSceneConfigurationSeedsRootPresentationHostDefault() {
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PresentationHostMode.self)
+            )
+        )
+        controller.environment.modalSessionUsingPlatformWindow = false
+
+        var configuration = WindowSceneConfiguration()
+        configuration.defaultPresentationHostMode = .platformWindow
+        controller.sceneConfiguration = configuration
+        controller.viewGraph.updateOutputs(at: .zero)
+
+        let graphEnvironment = controller.viewGraph.data.withCurrent {
+            controller.viewGraph.envAttr?.value
+        }
+        guard let graphEnvironment else {
+            XCTFail("The root ViewGraph must expose its environment input.")
+            return
+        }
+        XCTAssertEqual(
+            graphEnvironment.modalSessionUsingPlatformWindow,
+            false
+        )
+        XCTAssertNil(
+            graphEnvironment.presentationChildUsingPlatformWindow
+        )
+        XCTAssertEqual(
+            graphEnvironment.defaultPresentationHostMode,
+            .platformWindow
+        )
+    }
+
     @MainActor
     func testSheetContentInheritsAndTracksEnvironmentAtPresentationSite() {
         var isPresented: Binding<Bool>?

@@ -8,7 +8,6 @@ final class AlertPropertyTrackerTests: XCTestCase {
 
         _AGGraph.withCurrent(graph) {
             var environment = EnvironmentValues.tracking()
-            environment.modalSessionUsingPlatformWindow = false
             let environmentAttr = graph.makeInput(value: environment)
             let modifierAttr = graph.makeInput(
                 value: alertModifier(isPresented: binding(to: presentation))
@@ -39,15 +38,30 @@ final class AlertPropertyTrackerTests: XCTestCase {
 
             var preference = alertPreference(from: storageAttr)
             XCTAssertEqual(preference?.usesPlatformWindow, false)
+            XCTAssertNil(environment.modalSessionUsingPlatformWindow)
             XCTAssertFalse(tracker.hasDifferentUsedValues(environment._plist))
 
-            environment.modalSessionUsingPlatformWindow = true
+            environment.defaultPresentationHostMode = .platformWindow
             XCTAssertTrue(tracker.hasDifferentUsedValues(environment._plist))
             environmentAttr.setValue(environment)
 
             preference = alertPreference(from: storageAttr)
             XCTAssertEqual(preference?.usesPlatformWindow, true)
             XCTAssertFalse(tracker.hasDifferentUsedValues(environment._plist))
+
+            environment.modalSessionUsingPlatformWindow = false
+            XCTAssertTrue(tracker.hasDifferentUsedValues(environment._plist))
+            environmentAttr.setValue(environment)
+
+            preference = alertPreference(from: storageAttr)
+            XCTAssertEqual(preference?.usesPlatformWindow, false)
+            XCTAssertFalse(tracker.hasDifferentUsedValues(environment._plist))
+
+            environment.defaultPresentationHostMode = .overlay
+            XCTAssertFalse(
+                tracker.hasDifferentUsedValues(environment._plist),
+                "An explicit modal override must stop tracking the Scene default."
+            )
         }
     }
 

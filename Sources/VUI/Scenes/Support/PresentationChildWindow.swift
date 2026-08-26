@@ -659,11 +659,12 @@ class PopupWindowController: PresentationChildWindowController, @unchecked Senda
 }
 
 private struct PresentationChildUsingPlatformWindow: EnvironmentKey {
-    static let defaultValue: Bool = false
+    // nil means use the Scene root's default presentation host.
+    static let defaultValue: Bool? = nil
 }
 
 extension EnvironmentValues {
-    public var presentationChildUsingPlatformWindow: Bool {
+    public var presentationChildUsingPlatformWindow: Bool? {
         get { self[PresentationChildUsingPlatformWindow.self] }
         set { self[PresentationChildUsingPlatformWindow.self] = newValue }
     }

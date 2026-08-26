@@ -53,6 +53,12 @@ enum SceneList {
 
     // Item is one window entry reported by a Scene through SceneList.Key.
     struct Item {
+        struct Options: OptionSet {
+            let rawValue: UInt8
+
+            static let commandsRemoved = Options(rawValue: 1 << 0)
+        }
+
         // Classifies which controller registry the window belongs to.
         // Keep controller and presentation buckets separate during scene updates.
         enum Kind {
@@ -70,6 +76,9 @@ enum SceneList {
 
         // Creation-time window hints from scene modifiers.
         var sceneConfiguration = WindowSceneConfiguration()
+
+        // Carries scene-level host decisions alongside the window entry.
+        var options: Options = []
 
         // Factory called once by AppWindowsController when it decides to open this window.
         // Captured at _makeScene time. Holds AG graph cursors for the content view.

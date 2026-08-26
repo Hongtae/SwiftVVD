@@ -241,10 +241,13 @@ final class ContextMenuResponder: DefaultLayoutViewResponder {
             self?.activeSession = nil
         }
         activeSession = session
-        let usesPlatformWindow = environment.value.presentationChildUsingPlatformWindow
+        let presentationEnvironment = environment.value
+        let usesPlatformWindow = presentationEnvironment.resolvedUsesPlatformWindow(
+            \.presentationChildUsingPlatformWindow
+        )
         let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
                                                                                 actions: actions),
-                                               environment: environment.value.untrackedCopy(),
+                                               environment: presentationEnvironment.untrackedCopy(),
                                                viewPhase: viewPhase,
                                                scene: parent.scene,
                                                anchor: location,

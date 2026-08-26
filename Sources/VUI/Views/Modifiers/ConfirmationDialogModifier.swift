@@ -226,7 +226,9 @@ struct MakeConfirmationDialog<Actions: View, Message: View>: StatefulRule {
             messageItemList: messageList,
             isPresented: m.isPresented,
             onDismiss: nil,
-            usesPlatformWindow: environment.modalSessionUsingPlatformWindow
+            usesPlatformWindow: environment.resolvedUsesPlatformWindow(
+                \.modalSessionUsingPlatformWindow
+            )
         )
         let storage = ConfirmationDialog(
             preference: pref,

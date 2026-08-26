@@ -141,7 +141,9 @@ struct CoreSheetPresentationModifier<AnchorProvider: SheetAnchorProvider>: Envir
         let placement = placement
         let drawsBackground = drawsBackground
         let activeInspector = activeInspector
-        let usesPlatformWindow = environment.modalSessionUsingPlatformWindow
+        let usesPlatformWindow = environment.resolvedUsesPlatformWindow(
+            \.modalSessionUsingPlatformWindow
+        )
 
         return anchorProvider.preferenceTransformModifier { value, transaction in
             let namespaceID = namespace.wrappedValue

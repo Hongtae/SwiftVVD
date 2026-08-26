@@ -17,4 +17,10 @@ struct WindowSceneConfiguration {
     // Requested initial position expressed as a UnitPoint on screen.
     // nil means let the platform decide.
     var defaultPosition: UnitPoint? = nil
+
+    // Selects the command-menu presenter for this scene root window.
+    var commandMenuPresentationStyle: CommandMenuPresentationStyle = .window
+
+    // Seeds the default host choice for transient presentation children.
+    var defaultPresentationHostMode: PresentationHostMode = .overlay
 }

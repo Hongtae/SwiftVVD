@@ -20,6 +20,10 @@ class AppGraph<A: App>: @unchecked Sendable {
     // to determine which windows to open/close.
     let sceneListAttr: Attribute<[SceneList.Item]>?
 
+    // The ordered command operations produced by scene command modifiers.
+    // Platform hosts may resolve this node into their native menu model.
+    let commandsListAttr: Attribute<CommandsList>?
+
     // The window-configuration override AG node produced by scene modifiers
     // (.updateFrameRate, .drawDebugInfo). Re-evaluated on every sync and
     // applied to all live WindowControllers.
@@ -29,6 +33,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         let graph = _AGGraph()
         let time = Time(seconds: 0)
         var sceneList: Attribute<[SceneList.Item]>? = nil
+        var commandsList: Attribute<CommandsList>? = nil
         var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
 
         _AGGraph.withCurrent(graph) {
@@ -49,6 +54,7 @@ class AppGraph<A: App>: @unchecked Sendable {
             // Register preference keys so that scenes output them in _SceneOutputs.
             var prefKeys = PreferenceKeys()
             prefKeys.add(SceneList.Key.self)
+            prefKeys.add(CommandsList.Key.self)
             prefKeys.add(WindowConfiguration.Override.Key.self)
             let hostKeysAttr = graph.makeInput(value: prefKeys)
             let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -65,6 +71,8 @@ class AppGraph<A: App>: @unchecked Sendable {
             // so there is always exactly one entry — take it directly.
             sceneList = outputs.preferences.values(for: SceneList.Key.self)
                 .last.map { Attribute($0) }
+            commandsList = outputs.preferences.value(for: CommandsList.Key.self)
+                .map { Attribute($0) }
 
             // Multiple modifiers may each append a window-configuration override
             // (e.g. .updateFrameRate + .drawDebugInfo), so reduce all entries into
@@ -77,6 +85,7 @@ class AppGraph<A: App>: @unchecked Sendable {
 
         self.graph = graph
         self.sceneListAttr = sceneList
+        self.commandsListAttr = commandsList
         self.windowConfigurationOverrideAttr = configurationOverride
     }
 }

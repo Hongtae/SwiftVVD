@@ -824,11 +824,12 @@ final class ModalWindowController: WindowController, @unchecked Sendable {
 }
 
 private struct ModalSessionUsingPlatformWindow: EnvironmentKey {
-    static let defaultValue: Bool = false
+    // nil means use the Scene root's default presentation host.
+    static let defaultValue: Bool? = nil
 }
 
 extension EnvironmentValues {
-    public var modalSessionUsingPlatformWindow: Bool {
+    public var modalSessionUsingPlatformWindow: Bool? {
         get { self[ModalSessionUsingPlatformWindow.self] }
         set { self[ModalSessionUsingPlatformWindow.self] = newValue }
     }
