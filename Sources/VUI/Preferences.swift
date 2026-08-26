@@ -27,6 +27,18 @@ extension PreferenceKey where Self.Value: ExpressibleByNilLiteral {
     public static var defaultValue: Self.Value { nil }
 }
 
+protocol PreferenceKeyVisitor {
+    mutating func visit<K: PreferenceKey>(key: K.Type)
+}
+
+extension PreferenceKey {
+    static func visitKey<Visitor: PreferenceKeyVisitor>(
+        _ visitor: inout Visitor
+    ) {
+        visitor.visit(key: Self.self)
+    }
+}
+
 /// A weak graph reference to a preference value produced by delayed content.
 public struct _PreferenceValue<Key> where Key: PreferenceKey {
     let attribute: WeakAttribute<Key.Value>
@@ -441,12 +453,30 @@ struct PreferenceValues: CustomStringConvertible {
     }
 }
 
+private struct PairPreferenceCombiner<A: PreferenceKey>: Rule, AsyncAttribute {
+    var attributes: (Attribute<A.Value>, Attribute<A.Value>)
+
+    var value: A.Value {
+        var value = attributes.0.value
+        A.reduce(value: &value) { attributes.1.value }
+        return value
+    }
+}
+
 struct PreferenceCombiner<A: PreferenceKey>: Rule, AsyncAttribute,
     CustomStringConvertible
 {
     typealias Value = A.Value
 
     var attributes: [WeakAttribute<A.Value>] = []
+
+    init(attributes: [Attribute<A.Value>]) {
+        self.attributes = attributes.map { $0.asWeak() }
+    }
+
+    init(attributes: [WeakAttribute<A.Value>] = []) {
+        self.attributes = attributes
+    }
 
     mutating func add(_ attribute: WeakAttribute<A.Value>) {
         attributes.append(attribute)
@@ -1097,6 +1127,48 @@ struct PreferencesOutputs {
             ))
         }
         return result
+    }
+}
+
+struct MultiPreferenceCombinerVisitor: PreferenceKeyVisitor {
+    var outputs: [PreferencesOutputs]
+    var result: PreferencesOutputs
+
+    mutating func visit<K: PreferenceKey>(key: K.Type) {
+        let attributes: [Attribute<K.Value>] = outputs.compactMap { output in
+            output.value(for: key).map { Attribute<K.Value>($0) }
+        }
+
+        // Preserve the producer attribute when no reduction is needed and use
+        // fixed pair storage before falling back to the general combiner.
+        switch attributes.count {
+        case 0:
+            result.setValue(nil, for: key)
+        case 1:
+            result.setValue(attributes[0].identifier, for: key)
+        case 2:
+            guard let graph = _AGGraph.current else {
+                fatalError(
+                    "MultiPreferenceCombinerVisitor evaluated outside AG context."
+                )
+            }
+            let combined: Attribute<K.Value> = graph.makeRule(
+                PairPreferenceCombiner<K>(
+                    attributes: (attributes[0], attributes[1])
+                )
+            )
+            result.setValue(combined.identifier, for: key)
+        default:
+            guard let graph = _AGGraph.current else {
+                fatalError(
+                    "MultiPreferenceCombinerVisitor evaluated outside AG context."
+                )
+            }
+            let combined: Attribute<K.Value> = graph.makeRule(
+                PreferenceCombiner<K>(attributes: attributes)
+            )
+            result.setValue(combined.identifier, for: key)
+        }
     }
 }
 

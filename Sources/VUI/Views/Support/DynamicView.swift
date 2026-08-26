@@ -5,13 +5,57 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-protocol ProtocolDescriptor {}
+@_silgen_name("swift_conformsToProtocolCommon")
+private func _runtimeConformance(
+    _ type: UnsafeRawPointer,
+    _ descriptor: UnsafeRawPointer
+) -> UnsafeRawPointer?
+
+protocol ProtocolDescriptor {
+    static var descriptor: UnsafeRawPointer { get }
+}
+
+extension ProtocolDescriptor {
+    static func conformance(of type: Any.Type) -> TypeConformance<Self>? {
+        let metadata = unsafeBitCast(type, to: UnsafeRawPointer.self)
+        guard let conformance = _runtimeConformance(metadata, descriptor) else {
+            return nil
+        }
+        return TypeConformance(
+            storage: (type: type, conformance: conformance)
+        )
+    }
+}
 
 protocol ConditionalProtocolDescriptor: ProtocolDescriptor {}
 
-protocol TupleDescriptor: ProtocolDescriptor {}
+protocol TupleDescriptor: ProtocolDescriptor {
+    static var typeCache: [ObjectIdentifier: TupleTypeDescription<Self>] {
+        get set
+    }
+}
 
-struct ViewDescriptor: ConditionalProtocolDescriptor, TupleDescriptor {}
+extension TupleDescriptor {
+    static func tupleDescription(_ type: Any.Type) -> TupleTypeDescription<Self> {
+        let identifier = ObjectIdentifier(type)
+        if let cached = typeCache[identifier] {
+            return cached
+        }
+        let description = TupleTypeDescription<Self>(type)
+        typeCache[identifier] = description
+        return description
+    }
+}
+
+struct ViewDescriptor: ConditionalProtocolDescriptor, TupleDescriptor {
+    nonisolated(unsafe) static var typeCache: [
+        ObjectIdentifier: TupleTypeDescription<ViewDescriptor>
+    ] = [:]
+
+    static var descriptor: UnsafeRawPointer {
+        _protocolDescriptor(of: (any View).self)
+    }
+}
 
 protocol ViewTypeVisitor {
     mutating func visit<V>(type: V.Type) where V: View
@@ -20,9 +64,111 @@ protocol ViewTypeVisitor {
 struct TypeConformance<Descriptor> {
     var storage: (type: Any.Type, conformance: UnsafeRawPointer)
 
-    init(_ type: Any.Type) {
-        storage = (type, UnsafeRawPointer(bitPattern: 1)!)
+    init(storage: (type: Any.Type, conformance: UnsafeRawPointer)) {
+        self.storage = storage
     }
+
+    var type: Any.Type {
+        storage.type
+    }
+
+    var conformance: UnsafeRawPointer {
+        storage.conformance
+    }
+
+    var metadata: UnsafeRawPointer {
+        unsafeBitCast(storage.type, to: UnsafeRawPointer.self)
+    }
+
+    /// Rebuilds an existential metatype from its metadata and witness table.
+    func unsafeExistentialMetatype<T>(_ type: T.Type) -> T {
+        precondition(
+            MemoryLayout<T>.size == MemoryLayout.size(ofValue: storage),
+            "The requested existential metatype has an unexpected layout."
+        )
+        return unsafeBitCast(storage, to: T.self)
+    }
+}
+
+extension TypeConformance where Descriptor: ProtocolDescriptor {
+    init(_ type: Any.Type) {
+        guard let conformance = Descriptor.conformance(of: type) else {
+            preconditionFailure("\(type) does not conform to the described protocol.")
+        }
+        self = conformance
+    }
+}
+
+struct TupleTypeDescription<Descriptor> {
+    var contentTypes: [(Int, TypeConformance<Descriptor>)]
+}
+
+extension TupleTypeDescription where Descriptor: TupleDescriptor {
+    init(_ type: Any.Type) {
+        if _MetadataKind(type) != .tuple {
+            contentTypes = Descriptor.conformance(of: type).map { [(0, $0)] }
+                ?? []
+            return
+        }
+
+        // Keep logical element indices here. Projection converts an index to
+        // the storage offset only when the concrete tuple is accessed.
+        var contentTypes: [(Int, TypeConformance<Descriptor>)] = []
+        var index = 0
+        _forEachField(of: type) { _, _, fieldType in
+            if let conformance = Descriptor.conformance(of: fieldType) {
+                contentTypes.append((index, conformance))
+            }
+            index += 1
+            return true
+        }
+        self.contentTypes = contentTypes
+    }
+}
+
+/// Returns the stored-field offset for a tuple element index.
+func tupleElementOffset(of type: Any.Type, at targetIndex: Int) -> Int {
+    guard _MetadataKind(type) == .tuple else {
+        precondition(targetIndex == 0)
+        return 0
+    }
+
+    var index = 0
+    var result: Int?
+    _forEachField(of: type) { _, offset, _ in
+        defer { index += 1 }
+        guard index == targetIndex else { return true }
+        result = offset
+        return false
+    }
+    guard let result else {
+        preconditionFailure("Tuple element index \(targetIndex) is out of bounds.")
+    }
+    return result
+}
+
+/// Extracts the sole Swift protocol descriptor from existential metadata.
+func _protocolDescriptor(of existentialType: Any.Type) -> UnsafeRawPointer {
+    let metadata = unsafeBitCast(
+        existentialType,
+        to: UnsafeRawPointer.self
+    )
+    let wordSize = MemoryLayout<UInt>.size
+    let protocolCount = metadata.load(
+        fromByteOffset: wordSize + MemoryLayout<UInt32>.size,
+        as: UInt32.self
+    )
+    precondition(protocolCount == 1)
+
+    let storedReference = metadata.load(
+        fromByteOffset: wordSize + 2 * MemoryLayout<UInt32>.size,
+        as: UInt.self
+    )
+    precondition(storedReference & 1 == 0)
+    guard let descriptor = UnsafeRawPointer(bitPattern: storedReference) else {
+        preconditionFailure("The existential protocol descriptor is missing.")
+    }
+    return descriptor
 }
 
 struct ConditionalTypeDescriptor<Descriptor> {
@@ -39,7 +185,7 @@ struct ConditionalTypeDescriptor<Descriptor> {
     var storage: Storage
     var count: Int
 
-    static func atom(_ type: Any.Type) -> Self {
+    static func atom(_ type: Any.Type) -> Self where Descriptor: ProtocolDescriptor {
         Self(storage: .atom(TypeConformance(type)), count: 1)
     }
 }

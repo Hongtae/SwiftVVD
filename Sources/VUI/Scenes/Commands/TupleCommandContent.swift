@@ -7,6 +7,32 @@
 
 import Foundation
 
+protocol CommandsTypeVisitor {
+    mutating func visit<Content: Commands>(type: Content.Type)
+}
+
+struct CommandsDescriptor: TupleDescriptor {
+    nonisolated(unsafe) static var typeCache: [
+        ObjectIdentifier: TupleTypeDescription<CommandsDescriptor>
+    ] = [:]
+
+    static var descriptor: UnsafeRawPointer {
+        _protocolDescriptor(of: (any Commands).self)
+    }
+}
+
+extension TypeConformance where Descriptor == CommandsDescriptor {
+    func visitType<Visitor: CommandsTypeVisitor>(
+        visitor: UnsafeMutablePointer<Visitor>
+    ) {
+        let commandType = unsafeExistentialMetatype((any Commands.Type).self)
+        func visit<Content: Commands>(_ type: Content.Type) {
+            visitor.pointee.visit(type: type)
+        }
+        _openExistential(commandType, do: visit)
+    }
+}
+
 @usableFromInline
 struct TupleCommandContent<T>: Commands {
     @usableFromInline
@@ -16,25 +42,38 @@ struct TupleCommandContent<T>: Commands {
     
     @usableFromInline
     static func _makeCommands(content: _GraphValue<Self>, inputs: _CommandsInputs) -> _CommandsOutputs {
-        guard let graph = _AGGraph.current else {
+        guard _AGGraph.current != nil else {
             fatalError("TupleCommandContent._makeCommands called outside _AGGraph context")
         }
 
+        let description = CommandsDescriptor.tupleDescription(T.self)
         var visitor = MakeList(
             content: content,
             inputs: inputs,
             offset: 0,
             outputs: []
         )
-        for field in commandFields {
-            visitor.offset = field.offset
-            visitor.visit(field.type)
+        for (index, conformance) in description.contentTypes {
+            visitor.offset = tupleElementOffset(of: T.self, at: index)
+            withUnsafeMutablePointer(to: &visitor) {
+                conformance.visitType(visitor: $0)
+            }
+        }
+
+        // Child-only outputs must not escape this tuple. Fold exactly the keys
+        // requested by the parent command graph.
+        var combiner = MultiPreferenceCombinerVisitor(
+            outputs: visitor.outputs.map(\.preferences),
+            result: PreferencesOutputs()
+        )
+        for key in inputs.preferences.keys {
+            func visit<Key: PreferenceKey>(_ key: Key.Type) {
+                Key.visitKey(&combiner)
+            }
+            _openExistential(key, do: visit)
         }
         return _CommandsOutputs(
-            preferences: PreferencesOutputs.merge(
-                visitor.outputs.map(\.preferences),
-                in: graph
-            )
+            preferences: combiner.result
         )
     }
     
@@ -45,10 +84,13 @@ struct TupleCommandContent<T>: Commands {
     
     @usableFromInline
     func _resolve(into resolved: inout _ResolvedCommands) {
+        let description = CommandsDescriptor.tupleDescription(T.self)
         var visitor = Visitor(content: value, resolved: resolved, offset: 0)
-        for field in Self.commandFields {
-            visitor.offset = field.offset
-            visitor.visit(field.type)
+        for (index, conformance) in description.contentTypes {
+            visitor.offset = tupleElementOffset(of: T.self, at: index)
+            withUnsafeMutablePointer(to: &visitor) {
+                conformance.visitType(visitor: $0)
+            }
         }
         resolved = visitor.resolved
     }
@@ -60,13 +102,13 @@ struct TupleCommandContent<T>: Commands {
 }
 
 private extension TupleCommandContent {
-    struct MakeList {
+    struct MakeList: CommandsTypeVisitor {
         var content: _GraphValue<TupleCommandContent<T>>
         var inputs: _CommandsInputs
         var offset: Int
         var outputs: [_CommandsOutputs]
 
-        mutating func visit<Content: Commands>(_ type: Content.Type) {
+        mutating func visit<Content: Commands>(type: Content.Type) {
             let child = _GraphValue<Content>(
                 _attribute: content._attribute.unsafeOffset(
                     at: offset,
@@ -79,12 +121,12 @@ private extension TupleCommandContent {
         }
     }
 
-    struct Visitor {
+    struct Visitor: CommandsTypeVisitor {
         var content: T
         var resolved: _ResolvedCommands
         var offset: Int
 
-        mutating func visit<Content: Commands>(_ type: Content.Type) {
+        mutating func visit<Content: Commands>(type: Content.Type) {
             withUnsafeBytes(of: content) { bytes in
                 let child = bytes.baseAddress!
                     .advanced(by: offset)
@@ -93,23 +135,5 @@ private extension TupleCommandContent {
                 child._resolve(into: &resolved)
             }
         }
-    }
-
-    /// Concrete command fields and their byte offsets in the stored tuple.
-    static var commandFields: [
-        (offset: Int, type: any Commands.Type)
-    ] {
-        if let commandType = T.self as? any Commands.Type {
-            return [(offset: 0, type: commandType)]
-        }
-
-        var fields: [(offset: Int, type: any Commands.Type)] = []
-        _forEachField(of: T.self) { _, offset, fieldType in
-            if let commandType = fieldType as? any Commands.Type {
-                fields.append((offset: offset, type: commandType))
-            }
-            return true
-        }
-        return fields
     }
 }

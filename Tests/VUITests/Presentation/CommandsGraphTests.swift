@@ -288,6 +288,140 @@ final class CommandsGraphTests: XCTestCase {
         XCTAssertEqual(tupleCommandArity(arity11), 11)
     }
 
+    func testCommandsTupleDescriptionCachesConformancesInSourceOrder() {
+        // ASSERTIONS commandsTupleHelperRuntimeObserved
+        typealias Content = (
+            FlagCommands,
+            ResolvingCommands,
+            EmptyCommands
+        )
+
+        let description = CommandsDescriptor.tupleDescription(Content.self)
+        XCTAssertEqual(description.contentTypes.map(\.0), [0, 1, 2])
+        XCTAssertEqual(
+            description.contentTypes.map { ObjectIdentifier($0.1.type) },
+            [
+                ObjectIdentifier(FlagCommands.self),
+                ObjectIdentifier(ResolvingCommands.self),
+                ObjectIdentifier(EmptyCommands.self),
+            ]
+        )
+        XCTAssertTrue(description.contentTypes.allSatisfy {
+            UInt(bitPattern: $0.1.conformance) != 1
+        })
+        XCTAssertTrue(description.contentTypes.allSatisfy {
+            $0.1.metadata == unsafeBitCast(
+                $0.1.type,
+                to: UnsafeRawPointer.self
+            )
+        })
+        XCTAssertEqual(
+            CommandsDescriptor.typeCache[ObjectIdentifier(Content.self)]?
+                .contentTypes.count,
+            3
+        )
+        XCTAssertNil(CommandsDescriptor.conformance(of: Int.self))
+
+        var visitor = RecordingCommandsTypeVisitor()
+        for (_, conformance) in description.contentTypes {
+            withUnsafeMutablePointer(to: &visitor) {
+                conformance.visitType(visitor: $0)
+            }
+        }
+        XCTAssertEqual(visitor.types.map(ObjectIdentifier.init), [
+            ObjectIdentifier(FlagCommands.self),
+            ObjectIdentifier(ResolvingCommands.self),
+            ObjectIdentifier(EmptyCommands.self),
+        ])
+    }
+
+    func testMultiPreferenceCombinerPreservesSingleIdentityAndPairOrder() throws {
+        // ASSERTIONS commandsTupleHelperRuntimeObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let first = graph.makeInput(value: [1])
+            let second = graph.makeInput(value: [2])
+            var firstOutput = PreferencesOutputs()
+            firstOutput.append(
+                CommandTuplePreferenceKey.self,
+                node: first.identifier
+            )
+            var secondOutput = PreferencesOutputs()
+            secondOutput.append(
+                CommandTuplePreferenceKey.self,
+                node: second.identifier
+            )
+
+            func combine(_ outputs: [PreferencesOutputs]) -> PreferencesOutputs {
+                var visitor = MultiPreferenceCombinerVisitor(
+                    outputs: outputs,
+                    result: PreferencesOutputs()
+                )
+                CommandTuplePreferenceKey.visitKey(&visitor)
+                return visitor.result
+            }
+
+            XCTAssertNil(
+                combine([]).value(for: CommandTuplePreferenceKey.self)
+            )
+
+            let single = try XCTUnwrap(
+                combine([firstOutput]).value(
+                    for: CommandTuplePreferenceKey.self
+                )
+            )
+            XCTAssertEqual(single, first.identifier)
+
+            let pair = try XCTUnwrap(
+                combine([firstOutput, secondOutput]).value(
+                    for: CommandTuplePreferenceKey.self
+                )
+            )
+            XCTAssertNotEqual(pair, first.identifier)
+            XCTAssertNotEqual(pair, second.identifier)
+            XCTAssertEqual(Attribute<[Int]>(pair).value, [1, 2])
+        }
+    }
+
+    func testTupleCommandsFoldOnlyRequestedPreferencesInSourceOrder() throws {
+        // ASSERTIONS commandsTupleHelperRuntimeObserved
+        let graph = _AGGraph()
+        try _AGGraph.withCurrent(graph) {
+            let tuple = TupleCommandContent((
+                RawPreferenceCommands(value: 1),
+                RawPreferenceCommands(value: 2),
+                RawPreferenceCommands(value: 3)
+            ))
+            let source = graph.makeInput(value: tuple)
+
+            let unrequested = TupleCommandContent._makeCommands(
+                content: _GraphValue(_attribute: source),
+                inputs: makeCommandsInputs(graph: graph)
+            )
+            XCTAssertNil(
+                unrequested.preferences.value(
+                    for: CommandTuplePreferenceKey.self
+                )
+            )
+
+            var requestedKeys = PreferenceKeys()
+            requestedKeys.add(CommandTuplePreferenceKey.self)
+            let requested = TupleCommandContent._makeCommands(
+                content: _GraphValue(_attribute: source),
+                inputs: makeCommandsInputs(
+                    graph: graph,
+                    keys: requestedKeys
+                )
+            )
+            let value = try XCTUnwrap(
+                requested.preferences.value(
+                    for: CommandTuplePreferenceKey.self
+                )
+            )
+            XCTAssertEqual(Attribute<[Int]>(value).value, [1, 2, 3])
+        }
+    }
+
     func testCommandsListResolutionPreservesItemOrderAndCollectsFlags() throws {
         // ASSERTIONS commandsListResolutionRuntimeObserved
         let first = CommandGroup(after: .newItem) { Text("first") }.change
@@ -483,9 +617,14 @@ final class CommandsGraphTests: XCTestCase {
         return Mirror(reflecting: tuple).children.count
     }
 
-    private func makeCommandsInputs(graph: _AGGraph) -> _CommandsInputs {
-        var keys = PreferenceKeys()
-        keys.add(CommandsList.Key.self)
+    private func makeCommandsInputs(
+        graph: _AGGraph,
+        keys: PreferenceKeys? = nil
+    ) -> _CommandsInputs {
+        var requestedKeys = keys ?? PreferenceKeys()
+        if keys == nil {
+            requestedKeys.add(CommandsList.Key.self)
+        }
         return _CommandsInputs(
             base: _GraphInputs(
                 time: graph.makeInput(value: Time(seconds: 0)),
@@ -494,8 +633,8 @@ final class CommandsGraphTests: XCTestCase {
                 transaction: graph.makeInput(value: Transaction())
             ),
             preferences: PreferencesInputs(
-                keys: keys,
-                hostKeys: graph.makeInput(value: keys)
+                keys: requestedKeys,
+                hostKeys: graph.makeInput(value: requestedKeys)
             )
         )
     }
@@ -591,6 +730,50 @@ private struct ResolvingCommands: Commands {
     func _resolve(into resolved: inout _ResolvedCommands) {
         trace.ids.append(id)
     }
+}
+
+private struct RecordingCommandsTypeVisitor: CommandsTypeVisitor {
+    var types: [Any.Type] = []
+
+    mutating func visit<Content: Commands>(type: Content.Type) {
+        types.append(type)
+    }
+}
+
+private enum CommandTuplePreferenceKey: PreferenceKey {
+    static let defaultValue: [Int] = []
+
+    static func reduce(value: inout [Int], nextValue: () -> [Int]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct RawPreferenceCommands: Commands {
+    var value: Int
+
+    typealias Body = Never
+
+    static func _makeCommands(
+        content: _GraphValue<Self>,
+        inputs: _CommandsInputs
+    ) -> _CommandsOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "RawPreferenceCommands._makeCommands called outside AG context."
+            )
+        }
+        let value: Attribute<[Int]> = graph.makeRule {
+            [content._attribute.value.value]
+        }
+        var preferences = PreferencesOutputs()
+        preferences.append(
+            CommandTuplePreferenceKey.self,
+            node: value.identifier
+        )
+        return _CommandsOutputs(preferences: preferences)
+    }
+
+    func _resolve(into resolved: inout _ResolvedCommands) {}
 }
 
 private struct ComposedFlagCommands: Commands {
