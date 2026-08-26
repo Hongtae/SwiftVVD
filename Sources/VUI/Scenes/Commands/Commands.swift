@@ -2,7 +2,7 @@
 //  File: Commands.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public protocol Commands {
@@ -90,6 +90,21 @@ public struct EmptyCommands: Commands {
 }
 
 public struct _ResolvedCommands {
+    var topLevelCommands: [HashableCommandGroupPlacementWrapper]
+    var storage: [HashableCommandGroupPlacementWrapper: CommandAccumulator]
+    var flags: Set<CommandFlag>
+
+    init() {
+        topLevelCommands = []
+        storage = [:]
+        flags = []
+    }
+
+    subscript(
+        placement: CommandGroupPlacement
+    ) -> CommandAccumulator? {
+        storage[HashableCommandGroupPlacementWrapper(placement: placement)]
+    }
 }
 
 extension Scene {

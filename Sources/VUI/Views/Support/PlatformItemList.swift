@@ -53,6 +53,7 @@ struct PlatformItemList {
         var menuIndicatorVisibility: Visibility?
         var controlSize: ControlSize?
         var toggleState: ToggleState?
+        var commandOperation: CommandOperation?
         var scaleDownMenuImage: Bool
         var tint: Color?
 
@@ -107,6 +108,7 @@ struct PlatformItemList {
             menuIndicatorVisibility = nil
             controlSize = nil
             toggleState = nil
+            commandOperation = nil
             scaleDownMenuImage = false
             tint = nil
         }

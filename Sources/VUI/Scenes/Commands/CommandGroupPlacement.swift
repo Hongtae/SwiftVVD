@@ -13,9 +13,13 @@ public struct CommandGroupPlacement: @unchecked Sendable {
     let name: Text
     let id: UUID
 
+    init(name: Text, id: UUID) {
+        self.name = name
+        self.id = id
+    }
+
     private init(_ name: String) {
-        self.name = Text(verbatim: name)
-        self.id = UUID()
+        self.init(name: Text(verbatim: name), id: UUID())
     }
 
     public static let appInfo = CommandGroupPlacement("App Info")
