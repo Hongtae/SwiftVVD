@@ -12,7 +12,7 @@ struct ContextMenuLabSheet: View {
     @State private var contextMenuLiveCount = 0
 
     private var contextMenusUsePlatformWindows: Bool {
-        currentSheetUsesPlatformWindow && usesPlatformPresentationWindows
+        currentSheetUsesPlatformWindow == true && usesPlatformPresentationWindows
     }
 
     var body: some View {
@@ -27,7 +27,7 @@ struct ContextMenuLabSheet: View {
                     set: { usesPlatformPresentationWindows = $0 }
                 )
             )
-            .disabled(!currentSheetUsesPlatformWindow)
+            .disabled(currentSheetUsesPlatformWindow != true)
 
             HStack {
                 menu("Menu Action") {

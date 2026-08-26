@@ -29,7 +29,7 @@ struct ModalPopupLabSheet: View {
     @State private var result = ""
 
     private var childPresentationsUsePlatformWindows: Bool {
-        currentSheetUsesPlatformWindow && usesPlatformPresentationWindows
+        currentSheetUsesPlatformWindow == true && usesPlatformPresentationWindows
     }
 
     var body: some View {
@@ -48,7 +48,7 @@ struct ModalPopupLabSheet: View {
                     set: { usesPlatformPresentationWindows = $0 }
                 )
             )
-            .disabled(!currentSheetUsesPlatformWindow)
+            .disabled(currentSheetUsesPlatformWindow != true)
 
             Button("Open Nested Sheet") {
                 showNestedSheet = true
