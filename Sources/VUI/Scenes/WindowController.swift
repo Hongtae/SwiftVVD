@@ -30,6 +30,15 @@ class WindowController: WindowDelegate,
 
     typealias AttachWindow = @MainActor (any PlatformWindow) -> Void
 
+    // App-level command operations and their root materialization environment
+    // remain owned by one source graph. Static scene roots share this carrier;
+    // presentation children never receive it through inherited values.
+    struct RootCommandsSource: @unchecked Sendable {
+        let graph: _AGGraph
+        let commandsList: Attribute<CommandsList>?
+        let environment: Attribute<EnvironmentValues>
+    }
+
     // This resolver is the one-shot boundary between graph evaluation and
     // platform-window work. The caller invokes it while the child graph's
     // update lane owns graph access. A resolver must therefore instantiate the
@@ -428,6 +437,7 @@ class WindowController: WindowDelegate,
     var viewGraph: ViewGraph { _viewGraph }
     private var _viewGraph: ViewGraph!
     private weak var crossGraphSourceGraph: _AGGraph?
+    private(set) var rootCommandsSource: RootCommandsSource?
 
     var date: Date  // latest platform frame timestamp
 
@@ -674,11 +684,12 @@ class WindowController: WindowDelegate,
     init<Content: View>(content: _GraphValue<Content>,
                         title: _GraphValue<Text>? = nil,
                         style: PlatformWindowStyle = .genericWindow,
-                        scene: WindowKey) {
+                        scene: WindowKey,
+                        environment: EnvironmentValues = .tracking()) {
         self._titleGraph = title
         self._style = style
         let environmentWrapper = ViewGraphHostEnvironmentWrapper()
-        environmentWrapper.environment = EnvironmentValues.tracking()
+        environmentWrapper.environment = environment.trackingCopy()
         self.environmentWrapper = environmentWrapper
         self.sceneResources = SceneResources()
         self.windowContext = nil
@@ -701,7 +712,7 @@ class WindowController: WindowDelegate,
             rootViewType: Content.self,
             content: contentValue,
             rendererHost: self,
-            initialEnvironment: environment,
+            initialEnvironment: self.environment,
             features: [HostViewGraph()]
         )
         self.crossGraphSourceGraph = nil
@@ -718,6 +729,26 @@ class WindowController: WindowDelegate,
         // delegate (ViewGraphHostDelegate): not wired yet. Root input attributes
         // are updated directly through ViewGraphRootValueUpdater for now.
         // self.viewGraph.delegate = self
+    }
+
+    func setRootCommandsSource(_ source: RootCommandsSource?) {
+        precondition(
+            parentWindow == nil,
+            "Only static scene roots can own the app command source."
+        )
+        rootCommandsSource = source
+    }
+
+    func setRootSceneEnvironment(_ sceneEnvironment: EnvironmentValues) {
+        precondition(
+            parentWindow == nil,
+            "Only static scene roots can receive a scene environment."
+        )
+        environment = sceneEnvironment.trackingCopy()
+        environment.defaultPresentationHostMode =
+            sceneConfiguration.defaultPresentationHostMode
+        installContentScaleFactorOverrideAction()
+        viewChangedWhileDrawing = true
     }
 
     init<Content: View>(content: Content,

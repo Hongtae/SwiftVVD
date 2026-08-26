@@ -50,10 +50,20 @@ class AppWindowsController: @unchecked Sendable {
     // and applies runtime window configuration overrides to all live controllers.
     // Must be called from outside an AG context; internally activates `graph`
     // to pull-evaluate the AG nodes.
-    func syncWindowControllers(sceneListAttr: Attribute<[SceneList.Item]>?,
-                               configurationOverrideAttr: Attribute<WindowConfiguration.Override>? = nil,
-                               in graph: _AGGraph) {
+    func syncWindowControllers(
+        sceneListAttr: Attribute<[SceneList.Item]>?,
+        commandsListAttr: Attribute<CommandsList>?,
+        rootEnvironmentAttr: Attribute<EnvironmentValues>,
+        configurationOverrideAttr: Attribute<WindowConfiguration.Override>? = nil,
+        in graph: _AGGraph
+    ) {
         guard let attr = sceneListAttr else { return }
+
+        let rootCommandsSource = WindowController.RootCommandsSource(
+            graph: graph,
+            commandsList: commandsListAttr,
+            environment: rootEnvironmentAttr
+        )
 
         _AGGraph.withCurrent(graph) {
             let items = attr.value
@@ -62,7 +72,7 @@ class AppWindowsController: @unchecked Sendable {
             // Open: create a controller for each newly-appearing item.
             for item in items {
                 let makeWC = {
-                    let wc = item.makeController()
+                    let wc = item.makeController(item.environment)
                     wc.sceneConfiguration = item.sceneConfiguration
                     return wc
                 }
@@ -97,6 +107,13 @@ class AppWindowsController: @unchecked Sendable {
             // An absent preference removes any override left by a previous sync.
             let configurationOverride = configurationOverrideAttr?.value ?? .init()
             for windowController in allWindowControllers {
+                if let item = items.first(where: {
+                    $0.windowKey == windowController.scene
+                }) {
+                    windowController.sceneConfiguration = item.sceneConfiguration
+                    windowController.setRootSceneEnvironment(item.environment)
+                }
+                windowController.setRootCommandsSource(rootCommandsSource)
                 windowController.configurationOverride = configurationOverride
             }
         }

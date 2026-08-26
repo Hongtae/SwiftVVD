@@ -7,6 +7,9 @@
 
 /// Selects how a scene presents its command menu.
 public enum CommandMenuPresentationStyle: Equatable, Sendable {
+    /// Uses the system menu on macOS and the window menu on other platforms.
+    case automatic
+
     /// Presents the menu inside each scene window using the framework renderer.
     case window
 

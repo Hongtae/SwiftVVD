@@ -80,11 +80,20 @@ enum SceneList {
         // Carries scene-level host decisions alongside the window entry.
         var options: Options = []
 
-        // Factory called once by AppWindowsController when it decides to open this window.
-        // Captured at _makeScene time. Holds AG graph cursors for the content view.
-        var makeController: () -> WindowController
+        // Snapshot of the environment at this scene root. The app-root command
+        // materialization environment is stored separately by AppGraph.
+        var environment = EnvironmentValues()
 
-        init(windowKey: WindowKey, kind: Kind = .main, makeController: @escaping () -> WindowController) {
+        // Factory called once by AppWindowsController when it decides to open this window.
+        // The environment snapshot is supplied at creation so the independent
+        // ViewGraph starts with the same scene inputs that produced this item.
+        var makeController: (EnvironmentValues) -> WindowController
+
+        init(
+            windowKey: WindowKey,
+            kind: Kind = .main,
+            makeController: @escaping (EnvironmentValues) -> WindowController
+        ) {
             self.windowKey = windowKey
             self.kind = kind
             self.makeController = makeController

@@ -699,7 +699,7 @@ final class CommandsGraphTests: XCTestCase {
         }
         XCTAssertEqual(
             try XCTUnwrap(defaultScenes.first).sceneConfiguration.commandMenuPresentationStyle,
-            .window
+            .automatic
         )
         XCTAssertEqual(
             try XCTUnwrap(defaultScenes.first).sceneConfiguration.defaultPresentationHostMode,
@@ -715,13 +715,85 @@ final class CommandsGraphTests: XCTestCase {
             .platform
         )
 
+        let windowGraph = AppGraph(app: WindowCommandMenuStyleTestApp())
+        let windowScenes = try _AGGraph.withCurrent(windowGraph.graph) {
+            try XCTUnwrap(windowGraph.sceneListAttr).value
+        }
+        XCTAssertEqual(
+            try XCTUnwrap(windowScenes.first).sceneConfiguration.commandMenuPresentationStyle,
+            .window
+        )
+
         let popupGraph = AppGraph(app: PlatformWindowPresentationHostTestApp())
         let popupScenes = try _AGGraph.withCurrent(popupGraph.graph) {
             try XCTUnwrap(popupGraph.sceneListAttr).value
         }
         let popupConfiguration = try XCTUnwrap(popupScenes.first).sceneConfiguration
-        XCTAssertEqual(popupConfiguration.commandMenuPresentationStyle, .window)
+        XCTAssertEqual(popupConfiguration.commandMenuPresentationStyle, .automatic)
         XCTAssertEqual(popupConfiguration.defaultPresentationHostMode, .platformWindow)
+    }
+
+    func testStaticSceneRootsShareAppCommandsAndKeepSceneEnvironments() throws {
+        // ASSERTIONS commandsRootSceneAggregationRuntimeObserved
+        // ASSERTIONS commandsRootEnvironmentSeparationRuntimeObserved
+        // ASSERTIONS commandsRemovedRootRetainsAppAggregationRuntimeObserved
+        let appGraph = AppGraph(app: RootCommandsSourceTestApp())
+        let windowsController = AppWindowsController()
+        windowsController.syncWindowControllers(
+            sceneListAttr: appGraph.sceneListAttr,
+            commandsListAttr: appGraph.commandsListAttr,
+            rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            in: appGraph.graph
+        )
+
+        let roots = windowsController.allWindowControllers
+        XCTAssertEqual(roots.count, 3)
+        XCTAssertEqual(
+            Set(roots.map { $0.environment.rootCommandsProbeValue }),
+            ["first-scene", "second-scene", "removed-scene"]
+        )
+
+        let expectedCommands = try XCTUnwrap(appGraph.commandsListAttr)
+        for root in roots {
+            let source = try XCTUnwrap(root.rootCommandsSource)
+            XCTAssertTrue(source.graph === appGraph.graph)
+            XCTAssertEqual(source.commandsList?.identifier, expectedCommands.identifier)
+            try _AGGraph.withCurrent(source.graph) {
+                XCTAssertEqual(
+                    commandFlagIDs(try XCTUnwrap(source.commandsList).value),
+                    [101, 102]
+                )
+                XCTAssertEqual(
+                    source.environment.value.rootCommandsProbeValue,
+                    "app-root"
+                )
+            }
+        }
+    }
+
+    func testPresentationChildrenDoNotInheritRootCommandsSource() throws {
+        let appGraph = AppGraph(app: RootCommandsSourceTestApp())
+        let windowsController = AppWindowsController()
+        windowsController.syncWindowControllers(
+            sceneListAttr: appGraph.sceneListAttr,
+            commandsListAttr: appGraph.commandsListAttr,
+            rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            in: appGraph.graph
+        )
+        let root = try XCTUnwrap(windowsController.allWindowControllers.first)
+        XCTAssertNotNil(root.rootCommandsSource)
+
+        let child = PresentationChildWindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .dialog,
+                sceneID: SceneID(RootCommandsChildContent.self)
+            ),
+            usesPlatformWindow: false
+        )
+        XCTAssertNil(child.rootCommandsSource)
+        child.parentWindow = root
+        XCTAssertNil(child.rootCommandsSource)
     }
 
     private func graphOutputs<A: App>(
@@ -905,6 +977,31 @@ private struct FlagCommands: Commands {
     func _resolve(into resolved: inout _ResolvedCommands) {}
 }
 
+private struct RootCommandsProbeEnvironmentKey: EnvironmentKey {
+    static var defaultValue: String { "app-root" }
+}
+
+private extension EnvironmentValues {
+    var rootCommandsProbeValue: String {
+        get { self[RootCommandsProbeEnvironmentKey.self] }
+        set { self[RootCommandsProbeEnvironmentKey.self] = newValue }
+    }
+}
+
+private struct FirstRootCommandsContent: View {
+    var body: some View { EmptyView() }
+}
+
+private struct SecondRootCommandsContent: View {
+    var body: some View { EmptyView() }
+}
+
+private struct RemovedRootCommandsContent: View {
+    var body: some View { EmptyView() }
+}
+
+private struct RootCommandsChildContent {}
+
 private final class CommandResolutionTrace {
     var ids: [Int] = []
 }
@@ -1038,6 +1135,30 @@ private struct OrderedCommandsTestApp: App {
     }
 }
 
+private struct RootCommandsSourceTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        Window("First root", id: "first-root") {
+            FirstRootCommandsContent()
+        }
+        .commands { FlagCommands(id: 101) }
+        .environment(\.rootCommandsProbeValue, "first-scene")
+
+        Window("Second root", id: "second-root") {
+            SecondRootCommandsContent()
+        }
+        .commands { FlagCommands(id: 102) }
+        .environment(\.rootCommandsProbeValue, "second-scene")
+
+        Window("Removed root", id: "removed-root") {
+            RemovedRootCommandsContent()
+        }
+        .commandsRemoved()
+        .environment(\.rootCommandsProbeValue, "removed-scene")
+    }
+}
+
 private struct DynamicCommandsTestApp: App {
     init() {}
 
@@ -1129,6 +1250,15 @@ private struct PlatformCommandMenuStyleTestApp: App {
     var body: some Scene {
         WindowGroup("Platform command-menu style test") { EmptyView() }
             .commandMenuPresentationStyle(.platform)
+    }
+}
+
+private struct WindowCommandMenuStyleTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        WindowGroup("Window command-menu style test") { EmptyView() }
+            .commandMenuPresentationStyle(.window)
     }
 }
 

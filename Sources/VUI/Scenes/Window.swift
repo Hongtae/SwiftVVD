@@ -48,14 +48,23 @@ struct SingleWindowScene<Content>: _PrimitiveScene where Content: View {
         let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
         let contentGraph = scene[\.content]
         let titleGraph = scene[\.title]
-        let item = SceneList.Item(windowKey: windowKey, kind: .single) {
-            WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
+        let sceneEnvironment = inputs.base.cachedEnvironment.value.environment
+        let item = SceneList.Item(windowKey: windowKey, kind: .single) { environment in
+            WindowController(
+                content: contentGraph,
+                title: titleGraph,
+                scene: windowKey,
+                environment: environment
+            )
         }
-        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule { [item] in [item] }
+        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule {
+            var item = item
+            item.environment = sceneEnvironment.value
+            return [item]
+        }
 
         var outputs = PreferencesOutputs()
         outputs.append(SceneList.Key.self, node: itemsAttr.identifier)
         return _SceneOutputs(preferences: outputs)
     }
 }
-

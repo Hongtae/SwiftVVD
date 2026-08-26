@@ -79,8 +79,14 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
         let windowKey = WindowKey(namespace: .app, sceneID: SceneID(Content.self, index: 0))
         let contentGraph = scene[\.content]
         let titleGraph = scene[\.title]
-        let item = SceneList.Item(windowKey: windowKey, kind: .main) {
-            let wc = WindowController(content: contentGraph, title: titleGraph, scene: windowKey)
+        let sceneEnvironment = inputs.base.cachedEnvironment.value.environment
+        let item = SceneList.Item(windowKey: windowKey, kind: .main) { environment in
+            let wc = WindowController(
+                content: contentGraph,
+                title: titleGraph,
+                scene: windowKey,
+                environment: environment
+            )
             var configuration = wc.baseConfiguration
             configuration.backgroundColor = BackendColor(
                 rgba8: .init(r: 255, g: 255, b: 241, a: 255)
@@ -88,7 +94,11 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
             wc.baseConfiguration = configuration
             return wc
         }
-        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule { [item] in [item] }
+        let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule {
+            var item = item
+            item.environment = sceneEnvironment.value
+            return [item]
+        }
 
         var outputs = PreferencesOutputs()
         outputs.append(SceneList.Key.self, node: itemsAttr.identifier)

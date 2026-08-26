@@ -19,7 +19,8 @@ struct WindowSceneConfiguration {
     var defaultPosition: UnitPoint? = nil
 
     // Selects the command-menu presenter for this scene root window.
-    var commandMenuPresentationStyle: CommandMenuPresentationStyle = .window
+    // The root presenter resolves automatic only when it chooses its host.
+    var commandMenuPresentationStyle: CommandMenuPresentationStyle = .automatic
 
     // Seeds the default host choice for transient presentation children.
     var defaultPresentationHostMode: PresentationHostMode = .overlay

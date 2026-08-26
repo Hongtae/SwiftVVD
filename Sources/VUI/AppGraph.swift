@@ -28,6 +28,11 @@ class AppGraph<A: App>: @unchecked Sendable {
     // Platform hosts may resolve this node into their native menu model.
     let commandsListAttr: Attribute<CommandsList>?
 
+    // The app-root environment remains separate from environments applied by
+    // individual scenes. Command-menu hosts materialize their root views from
+    // this source while command producers retain their own scene inputs.
+    let rootEnvironmentAttr: Attribute<EnvironmentValues>
+
     // The window-configuration override AG node produced by scene modifiers
     // (.updateFrameRate, .drawDebugInfo). Re-evaluated on every sync and
     // applied to all live WindowControllers.
@@ -39,6 +44,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         var sceneList: Attribute<[SceneList.Item]>? = nil
         var commandsList: Attribute<CommandsList>? = nil
         var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
+        var rootEnvironment: Attribute<EnvironmentValues>!
         var rootSubgraph: AGSubgraphRef!
 
         _AGGraph.withCurrent(graph) {
@@ -50,6 +56,7 @@ class AppGraph<A: App>: @unchecked Sendable {
                 let phaseAttr       = graph.makeInput(value: _GraphInputs.Phase())
                 let transactionAttr = graph.makeInput(value: Transaction())
                 let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
+                rootEnvironment = envAttr
 
                 let graphInputs = _GraphInputs(
                     time: timeAttr,
@@ -95,6 +102,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         self.rootSubgraph = rootSubgraph
         self.sceneListAttr = sceneList
         self.commandsListAttr = commandsList
+        self.rootEnvironmentAttr = rootEnvironment
         self.windowConfigurationOverrideAttr = configurationOverride
     }
 }
