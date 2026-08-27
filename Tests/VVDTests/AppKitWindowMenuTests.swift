@@ -155,5 +155,122 @@ final class AppKitWindowMenuTests: XCTestCase {
         XCTAssertEqual(refreshDelegate.requestedMenuIDs.count, 1)
         XCTAssertEqual(refreshDelegate.requestedMenuIDs[0], "window")
     }
+
+    @MainActor
+    func testSnapshotRefreshPreservesNativeIdentityAndUpdatesContents() throws {
+        var originalActionCount = 0
+        var refreshedActionCount = 0
+        let window = try XCTUnwrap(
+            makeWindow(name: "MenuIdentity", style: [.title], delegate: nil)
+        )
+        defer { window.close() }
+
+        let controller = try XCTUnwrap(
+            window.menuController as? AppKitWindowMenuController
+        )
+        controller.setMenu(WindowMenu {
+            WindowMenu.Menu(id: "window", title: "Window", role: .window) {
+                WindowMenu.Item(
+                    id: "open",
+                    title: "Open",
+                    isEnabled: false
+                ) {
+                    originalActionCount += 1
+                }
+                WindowMenu.Menu(id: "recent", title: "Recent") {
+                    WindowMenu.Item(id: "document", title: "Document")
+                }
+            }
+        })
+
+        let application = NSApplication.shared
+        let root = try XCTUnwrap(application.mainMenu)
+        let rootItem = try XCTUnwrap(root.items.first)
+        let windowMenu = try XCTUnwrap(application.windowsMenu)
+        let openItem = try XCTUnwrap(
+            windowMenu.items.first {
+                $0.identifier?.rawValue == "open"
+            }
+        )
+        let recentItem = try XCTUnwrap(
+            windowMenu.items.first {
+                $0.identifier?.rawValue == "recent"
+            }
+        )
+        let recentMenu = try XCTUnwrap(recentItem.submenu)
+        let documentItem = try XCTUnwrap(recentMenu.items.first)
+
+        // This is the refresh sequence used after NSMenuDelegate reports that
+        // a visible menu needs updated semantic state.
+        controller.menuNeedsUpdate(windowMenu)
+        controller.setMenu(WindowMenu {
+            WindowMenu.Menu(
+                id: "window",
+                title: "Workspace",
+                role: .window,
+                usesPlatformItemValidation: true
+            ) {
+                WindowMenu.Menu(id: "recent", title: "Recent Documents") {
+                    WindowMenu.Item(id: "document", title: "Project.vvd")
+                }
+                WindowMenu.Item(
+                    id: "open",
+                    title: "Open Project…",
+                    state: .on,
+                    shortcut: WindowMenu.Shortcut(
+                        "p",
+                        modifiers: [.command, .shift]
+                    )
+                ) {
+                    refreshedActionCount += 1
+                }
+                WindowMenu.Element.separator
+                WindowMenu.Item(id: "close", title: "Close")
+            }
+        })
+
+        let refreshedRoot = try XCTUnwrap(application.mainMenu)
+        let refreshedWindowMenu = try XCTUnwrap(application.windowsMenu)
+        XCTAssertTrue(refreshedRoot === root)
+        XCTAssertTrue(refreshedRoot.items.first === rootItem)
+        XCTAssertTrue(refreshedWindowMenu === windowMenu)
+        XCTAssertEqual(rootItem.title, "Workspace")
+        XCTAssertEqual(refreshedWindowMenu.title, "Workspace")
+        XCTAssertTrue(refreshedWindowMenu.autoenablesItems)
+
+        let refreshedRecentItem = try XCTUnwrap(
+            refreshedWindowMenu.items.first {
+                $0.identifier?.rawValue == "recent"
+            }
+        )
+        let refreshedOpenItem = try XCTUnwrap(
+            refreshedWindowMenu.items.first {
+                $0.identifier?.rawValue == "open"
+            }
+        )
+        XCTAssertTrue(refreshedRecentItem === recentItem)
+        XCTAssertTrue(refreshedRecentItem.submenu === recentMenu)
+        XCTAssertTrue(recentMenu.items.first === documentItem)
+        XCTAssertEqual(recentItem.title, "Recent Documents")
+        XCTAssertEqual(documentItem.title, "Project.vvd")
+        XCTAssertTrue(refreshedOpenItem === openItem)
+        XCTAssertEqual(openItem.title, "Open Project…")
+        XCTAssertEqual(openItem.state, .on)
+        XCTAssertTrue(openItem.isEnabled)
+        XCTAssertEqual(openItem.keyEquivalent, "p")
+        XCTAssertTrue(openItem.keyEquivalentModifierMask.contains(.command))
+        XCTAssertTrue(openItem.keyEquivalentModifierMask.contains(.shift))
+        XCTAssertEqual(
+            refreshedWindowMenu.items.map(\.identifier?.rawValue),
+            ["recent", "open", nil, "close"]
+        )
+
+        let action = try XCTUnwrap(openItem.action)
+        XCTAssertTrue(
+            application.sendAction(action, to: openItem.target, from: openItem)
+        )
+        XCTAssertEqual(originalActionCount, 0)
+        XCTAssertEqual(refreshedActionCount, 1)
+    }
 }
 #endif

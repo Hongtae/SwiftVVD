@@ -139,10 +139,21 @@ private final class AppKitWindowMenuCoordinator: NSObject {
         activeController = controller
 
         let application = NSApplication.shared
-        application.mainMenu = tree.root
-        application.windowsMenu = tree.windowMenu
-        application.helpMenu = tree.helpMenu
-        application.servicesMenu = tree.servicesMenu
+        // Reassigning the active NSMenu while AppKit is tracking one of its
+        // submenus ends that tracking session. Preserve the installed root and
+        // role menus when a controller publishes an updated snapshot.
+        if application.mainMenu !== tree.root {
+            application.mainMenu = tree.root
+        }
+        if application.windowsMenu !== tree.windowMenu {
+            application.windowsMenu = tree.windowMenu
+        }
+        if application.helpMenu !== tree.helpMenu {
+            application.helpMenu = tree.helpMenu
+        }
+        if application.servicesMenu !== tree.servicesMenu {
+            application.servicesMenu = tree.servicesMenu
+        }
     }
 
     private func clearApplicationMenu(
@@ -204,7 +215,7 @@ final class AppKitWindowMenuController: NSObject,
 
     private var menuRegistrations: [ObjectIdentifier: MenuRegistration] = [:]
     // NSMenuItem does not own a durable Swift closure. Keep Objective-C targets
-    // alive for exactly the lifetime of the native tree built from a snapshot.
+    // alive for exactly the lifetime of the currently applied snapshot.
     private var actionTargets: [AppKitWindowMenuActionTarget] = []
 
     init(window: NSWindow) {
@@ -216,6 +227,9 @@ final class AppKitWindowMenuController: NSObject,
 
         guard let menu else {
             AppKitWindowMenuCoordinator.shared.unregister(self)
+            if let tree = nativeMenuTree {
+                detachNativeMenu(tree.root)
+            }
             nativeMenuTree = nil
             menuRegistrations.removeAll()
             actionTargets.removeAll()
@@ -223,14 +237,35 @@ final class AppKitWindowMenuController: NSObject,
         }
 
         menuRegistrations.removeAll(keepingCapacity: true)
-        actionTargets.removeAll(keepingCapacity: true)
+        var nextActionTargets: [AppKitWindowMenuActionTarget] = []
 
-        nativeMenuTree = makeNativeMenuTree(menu)
+        if var tree = nativeMenuTree {
+            tree.windowMenu = nil
+            tree.helpMenu = nil
+            tree.servicesMenu = nil
+            register(tree.root, id: nil)
+            updateNativeElements(
+                menu.menus.map { .submenu($0) },
+                in: tree.root,
+                tree: &tree,
+                actionTargets: &nextActionTargets
+            )
+            nativeMenuTree = tree
+        } else {
+            nativeMenuTree = makeNativeMenuTree(
+                menu,
+                actionTargets: &nextActionTargets
+            )
+        }
+        actionTargets = nextActionTargets
         AppKitWindowMenuCoordinator.shared.controllerDidChange(self)
     }
 
     func invalidate() {
         AppKitWindowMenuCoordinator.shared.unregister(self)
+        if let tree = nativeMenuTree {
+            detachNativeMenu(tree.root)
+        }
         nativeMenuTree = nil
         menuRegistrations.removeAll()
         actionTargets.removeAll()
@@ -243,26 +278,31 @@ final class AppKitWindowMenuController: NSObject,
         delegate?.windowMenuController(self, needsUpdateMenu: id)
     }
 
-    private func makeNativeMenuTree(_ snapshot: WindowMenu) -> NativeMenuTree {
+    private func makeNativeMenuTree(
+        _ snapshot: WindowMenu,
+        actionTargets: inout [AppKitWindowMenuActionTarget]
+    ) -> NativeMenuTree {
         let root = NSMenu(title: "")
         root.autoenablesItems = false
         register(root, id: nil)
 
         var tree = NativeMenuTree(root: root)
-        for menu in snapshot.menus {
-            let nativeItem = makeNativeMenuItem(for: menu)
-            let nativeMenu = makeNativeMenu(menu, tree: &tree)
-            nativeItem.submenu = nativeMenu
-            root.addItem(nativeItem)
-        }
+        updateNativeElements(
+            snapshot.menus.map { .submenu($0) },
+            in: root,
+            tree: &tree,
+            actionTargets: &actionTargets
+        )
         return tree
     }
 
-    private func makeNativeMenu(
-        _ menu: WindowMenu.Menu,
-        tree: inout NativeMenuTree
-    ) -> NSMenu {
-        let nativeMenu = NSMenu(title: menu.title)
+    private func updateNativeMenu(
+        _ nativeMenu: NSMenu,
+        from menu: WindowMenu.Menu,
+        tree: inout NativeMenuTree,
+        actionTargets: inout [AppKitWindowMenuActionTarget]
+    ) {
+        nativeMenu.title = menu.title
         nativeMenu.autoenablesItems = menu.usesPlatformItemValidation
         register(nativeMenu, id: menu.id)
 
@@ -277,28 +317,161 @@ final class AppKitWindowMenuController: NSObject,
             break
         }
 
-        for element in menu.elements {
-            switch element {
-            case let .item(item):
-                nativeMenu.addItem(makeNativeMenuItem(for: item))
-            case let .submenu(submenu):
-                let nativeItem = makeNativeMenuItem(for: submenu)
-                nativeItem.submenu = makeNativeMenu(submenu, tree: &tree)
-                nativeMenu.addItem(nativeItem)
-            case .separator:
-                nativeMenu.addItem(.separator())
-            }
-        }
-        return nativeMenu
+        updateNativeElements(
+            menu.elements,
+            in: nativeMenu,
+            tree: &tree,
+            actionTargets: &actionTargets
+        )
     }
 
-    private func makeNativeMenuItem(for item: WindowMenu.Item) -> NSMenuItem {
+    /// Reconciles a complete semantic snapshot without replacing native menu
+    /// objects that AppKit may currently be tracking. Explicit IDs are stable
+    /// identities; anonymous elements are reusable only at the same position.
+    private func updateNativeElements(
+        _ elements: [WindowMenu.Element],
+        in nativeMenu: NSMenu,
+        tree: inout NativeMenuTree,
+        actionTargets: inout [AppKitWindowMenuActionTarget]
+    ) {
+        for (index, element) in elements.enumerated() {
+            let nativeItem: NSMenuItem
+            if let matchedIndex = matchingNativeItemIndex(
+                for: element,
+                in: nativeMenu,
+                startingAt: index
+            ) {
+                nativeItem = nativeMenu.items[matchedIndex]
+                if matchedIndex != index {
+                    nativeMenu.removeItem(at: matchedIndex)
+                    nativeMenu.insertItem(nativeItem, at: index)
+                }
+            } else {
+                nativeItem = makeEmptyNativeMenuItem(for: element)
+                nativeMenu.insertItem(nativeItem, at: index)
+            }
+
+            updateNativeMenuItem(
+                nativeItem,
+                from: element,
+                tree: &tree,
+                actionTargets: &actionTargets
+            )
+        }
+
+        while nativeMenu.numberOfItems > elements.count {
+            let index = nativeMenu.numberOfItems - 1
+            let nativeItem = nativeMenu.items[index]
+            nativeMenu.removeItem(at: index)
+            detachNativeMenuItem(nativeItem)
+        }
+    }
+
+    private func matchingNativeItemIndex(
+        for element: WindowMenu.Element,
+        in nativeMenu: NSMenu,
+        startingAt index: Int
+    ) -> Int? {
+        guard index < nativeMenu.numberOfItems else { return nil }
+
+        let id = elementID(element)
+        if id == nil {
+            return nativeItem(nativeMenu.items[index], matches: element)
+                ? index
+                : nil
+        }
+
+        return (index..<nativeMenu.numberOfItems).first {
+            nativeItem(nativeMenu.items[$0], matches: element)
+        }
+    }
+
+    private func nativeItem(
+        _ nativeItem: NSMenuItem,
+        matches element: WindowMenu.Element
+    ) -> Bool {
+        switch element {
+        case let .item(item):
+            return !nativeItem.isSeparatorItem
+                && nativeItem.submenu == nil
+                && nativeItem.identifier?.rawValue == item.id
+        case let .submenu(menu):
+            return !nativeItem.isSeparatorItem
+                && nativeItem.submenu != nil
+                && nativeItem.identifier?.rawValue == menu.id
+        case .separator:
+            return nativeItem.isSeparatorItem
+        }
+    }
+
+    private func elementID(_ element: WindowMenu.Element) -> WindowMenu.ID? {
+        switch element {
+        case let .item(item): item.id
+        case let .submenu(menu): menu.id
+        case .separator: nil
+        }
+    }
+
+    private func makeEmptyNativeMenuItem(
+        for element: WindowMenu.Element
+    ) -> NSMenuItem {
+        switch element {
+        case .item:
+            return NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        case .submenu:
+            let nativeItem = NSMenuItem(
+                title: "",
+                action: nil,
+                keyEquivalent: ""
+            )
+            nativeItem.submenu = NSMenu(title: "")
+            return nativeItem
+        case .separator:
+            return .separator()
+        }
+    }
+
+    private func updateNativeMenuItem(
+        _ nativeItem: NSMenuItem,
+        from element: WindowMenu.Element,
+        tree: inout NativeMenuTree,
+        actionTargets: inout [AppKitWindowMenuActionTarget]
+    ) {
+        switch element {
+        case let .item(item):
+            updateNativeMenuItem(
+                nativeItem,
+                from: item,
+                actionTargets: &actionTargets
+            )
+        case let .submenu(menu):
+            updateNativeMenuItem(nativeItem, from: menu)
+            let submenu: NSMenu
+            if let current = nativeItem.submenu {
+                submenu = current
+            } else {
+                submenu = NSMenu(title: menu.title)
+                nativeItem.submenu = submenu
+            }
+            updateNativeMenu(
+                submenu,
+                from: menu,
+                tree: &tree,
+                actionTargets: &actionTargets
+            )
+        case .separator:
+            break
+        }
+    }
+
+    private func updateNativeMenuItem(
+        _ nativeItem: NSMenuItem,
+        from item: WindowMenu.Item,
+        actionTargets: inout [AppKitWindowMenuActionTarget]
+    ) {
         let shortcut = item.shortcut.map(nativeShortcut) ?? ("", [])
-        let nativeItem = NSMenuItem(
-            title: item.title,
-            action: nil,
-            keyEquivalent: shortcut.0
-        )
+        nativeItem.title = item.title
+        nativeItem.keyEquivalent = shortcut.0
         nativeItem.keyEquivalentModifierMask = shortcut.1
         nativeItem.isEnabled = item.isEnabled
         nativeItem.isHidden = item.isHidden
@@ -308,14 +481,16 @@ final class AppKitWindowMenuController: NSObject,
             item.allowsShortcutWhenHidden
         nativeItem.state = nativeState(item.state)
         nativeItem.toolTip = item.toolTip
-        if let id = item.id {
-            nativeItem.identifier = NSUserInterfaceItemIdentifier(id)
+        nativeItem.identifier = item.id.map {
+            NSUserInterfaceItemIdentifier($0)
         }
         nativeItem.image = makeNativeImage(
             item.image,
             isTemplate: item.imageIsTemplate,
             scalesToFit: item.scalesImageToFit
         )
+        nativeItem.target = nil
+        nativeItem.action = nil
 
         if let action = item.action {
             let target = AppKitWindowMenuActionTarget(action: action)
@@ -325,26 +500,43 @@ final class AppKitWindowMenuController: NSObject,
                 AppKitWindowMenuActionTarget.performMenuAction(_:)
             )
         }
-        return nativeItem
     }
 
-    private func makeNativeMenuItem(for menu: WindowMenu.Menu) -> NSMenuItem {
-        let nativeItem = NSMenuItem(
-            title: menu.title,
-            action: nil,
-            keyEquivalent: ""
-        )
+    private func updateNativeMenuItem(
+        _ nativeItem: NSMenuItem,
+        from menu: WindowMenu.Menu
+    ) {
+        nativeItem.title = menu.title
+        nativeItem.keyEquivalent = ""
+        nativeItem.keyEquivalentModifierMask = []
         nativeItem.isEnabled = menu.isEnabled
         nativeItem.isHidden = menu.isHidden
-        if let id = menu.id {
-            nativeItem.identifier = NSUserInterfaceItemIdentifier(id)
+        nativeItem.identifier = menu.id.map {
+            NSUserInterfaceItemIdentifier($0)
         }
         nativeItem.image = makeNativeImage(
             menu.image,
             isTemplate: menu.imageIsTemplate,
             scalesToFit: menu.scalesImageToFit
         )
-        return nativeItem
+        nativeItem.target = nil
+        nativeItem.action = nil
+    }
+
+    private func detachNativeMenuItem(_ nativeItem: NSMenuItem) {
+        if let submenu = nativeItem.submenu {
+            detachNativeMenu(submenu)
+        }
+        nativeItem.target = nil
+        nativeItem.action = nil
+    }
+
+    private func detachNativeMenu(_ nativeMenu: NSMenu) {
+        nativeMenu.delegate = nil
+        menuRegistrations[ObjectIdentifier(nativeMenu)] = nil
+        for nativeItem in nativeMenu.items {
+            detachNativeMenuItem(nativeItem)
+        }
     }
 
     private func register(_ menu: NSMenu, id: WindowMenu.ID?) {

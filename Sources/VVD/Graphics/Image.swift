@@ -2,13 +2,13 @@
 //  File: Image.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVDHelper
 
-public enum ImagePixelFormat {
+public enum ImagePixelFormat: Sendable {
     case invalid            
     case r8             //  1 byte  per pixel, uint8
     case rg8            //  2 bytes per pixel, uint8
@@ -269,7 +269,7 @@ private typealias WriteFunction = (_: UnsafeMutableRawBufferPointer, _: Int, _: 
 }
 
 
-public struct Image {
+public struct Image: Sendable {
     public let width: Int
     public let height: Int
 

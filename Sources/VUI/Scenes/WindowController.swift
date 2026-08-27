@@ -39,6 +39,11 @@ class WindowController: WindowDelegate,
         let environment: Attribute<EnvironmentValues>
     }
 
+    private struct ResolvedRootCommands {
+        var items: [MainMenuItem]
+        var environment: EnvironmentValues
+    }
+
     // This resolver is the one-shot boundary between graph evaluation and
     // platform-window work. The caller invokes it while the child graph's
     // update lane owns graph access. A resolver must therefore instantiate the
@@ -438,6 +443,8 @@ class WindowController: WindowDelegate,
     private var _viewGraph: ViewGraph!
     private weak var crossGraphSourceGraph: _AGGraph?
     private(set) var rootCommandsSource: RootCommandsSource?
+    private var resolvedRootCommands: ResolvedRootCommands?
+    var platformCommandMenuPresenter: PlatformCommandMenuPresenter?
 
     var date: Date  // latest platform frame timestamp
 
@@ -457,6 +464,7 @@ class WindowController: WindowDelegate,
                 newValue.defaultPresentationHostMode
             viewGraph.valuesNeedingUpdate.insert(.environment)
             viewChangedWhileDrawing = true
+            updateRootCommandMenuPresenter()
         }
     }
     var endSessionOnWindowClosed: Bool { true }
@@ -737,6 +745,54 @@ class WindowController: WindowDelegate,
             "Only static scene roots can own the app command source."
         )
         rootCommandsSource = source
+        if let source {
+            precondition(
+                _AGGraph.current == source.graph,
+                "The app command source must be resolved by its owning graph."
+            )
+            var resolved = _ResolvedCommands()
+            source.commandsList?.value.resolveOperations(into: &resolved)
+            let environment = source.environment.value
+            resolvedRootCommands = ResolvedRootCommands(
+                items: resolved.mainMenuItems(env: environment),
+                environment: environment
+            )
+        } else {
+            resolvedRootCommands = nil
+        }
+        updateRootCommandMenuPresenter()
+    }
+
+    private func updateRootCommandMenuPresenter() {
+        guard parentWindow == nil,
+              sceneConfiguration.commandMenuPresentationStyle
+                .resolvedForRootPresenter == .platform,
+              let resolvedRootCommands else {
+            platformCommandMenuPresenter?.invalidate()
+            platformCommandMenuPresenter = nil
+            return
+        }
+
+        let presenter: PlatformCommandMenuPresenter
+        if let current = platformCommandMenuPresenter {
+            presenter = current
+        } else {
+            presenter = PlatformCommandMenuPresenter(owner: self)
+            platformCommandMenuPresenter = presenter
+        }
+        presenter.update(
+            items: resolvedRootCommands.items,
+            environment: resolvedRootCommands.environment
+        )
+
+        Task { @MainActor [weak self, weak presenter] in
+            guard let self, let presenter,
+                  self.platformCommandMenuPresenter === presenter,
+                  let window = self.window else {
+                return
+            }
+            presenter.attach(to: window)
+        }
     }
 
     func setRootSceneEnvironment(_ sceneEnvironment: EnvironmentValues) {
@@ -892,6 +948,7 @@ class WindowController: WindowDelegate,
                 }
             }
             self.onWindowCreated(window)
+            self.platformCommandMenuPresenter?.attach(to: window)
         }
         return window
     }
@@ -1274,6 +1331,8 @@ class WindowController: WindowDelegate,
                 }
             }
         }
+
+        platformCommandMenuPresenter?.update(at: currentTimestamp)
 
         let updateChangedIDs = updateChangeSet.ids(for: viewGraph.data.graph)
         var clockIDs: Set<AGAttribute> = [

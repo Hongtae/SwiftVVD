@@ -2,10 +2,10 @@
 //  File: GraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public protocol GraphicsDevice {
+public protocol GraphicsDevice: Sendable {
     var name: String { get }
 
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue?

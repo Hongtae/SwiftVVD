@@ -9,12 +9,14 @@ import Foundation
 
 /// A platform-neutral snapshot of the system menu associated with a window.
 ///
-/// System menu backends replace the complete snapshot atomically. This keeps
+/// System menu backends consume each complete snapshot atomically. This keeps
 /// ownership of platform menu handles and action callbacks inside the backend
-/// instead of exposing incremental native mutations to callers.
-public struct WindowMenu {
+/// instead of exposing incremental native mutations to callers. A backend may
+/// reconcile snapshots onto stable native handles when its platform requires
+/// object identity to survive an update.
+public struct WindowMenu: Sendable {
     public typealias ID = String
-    public typealias Action = @MainActor () -> Void
+    public typealias Action = @MainActor @Sendable () -> Void
 
     /// A semantic role used by platforms that expose special menu locations.
     public enum Role: Sendable, Hashable {
@@ -67,7 +69,7 @@ public struct WindowMenu {
         }
     }
 
-    public struct Item {
+    public struct Item: Sendable {
         public var id: ID?
         public var title: String
         /// A mnemonic used by platforms with keyboard-access menu labels.
@@ -156,13 +158,13 @@ public struct WindowMenu {
         }
     }
 
-    public indirect enum Element {
+    public indirect enum Element: Sendable {
         case item(Item)
         case submenu(Menu)
         case separator
     }
 
-    public struct Menu {
+    public struct Menu: Sendable {
         public var id: ID?
         public var title: String
         public var role: Role
