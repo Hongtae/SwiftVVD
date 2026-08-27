@@ -42,6 +42,8 @@ struct ScrollViewLabSheet: View {
     @State private var usesLazyContent = false
     @State private var usesContentMargins = false
     @State private var showsIndicators = true
+    @State private var usesFixedAreaIndicators = false
+    @State private var showsViewportBorder = true
     @State private var transformsViewport = false
     @State private var animatesRequests = false
     @State private var geometry = ScrollLabGeometry()
@@ -96,6 +98,15 @@ struct ScrollViewLabSheet: View {
                     }
                     modeButton("Indicators", selected: showsIndicators) {
                         showsIndicators.toggle()
+                    }
+                    modeButton(
+                        "Fixed Bars",
+                        selected: usesFixedAreaIndicators
+                    ) {
+                        usesFixedAreaIndicators.toggle()
+                    }
+                    modeButton("Border", selected: showsViewportBorder) {
+                        showsViewportBorder.toggle()
                     }
                     modeButton("Transform", selected: transformsViewport) {
                         transformsViewport.toggle()
@@ -166,9 +177,10 @@ struct ScrollViewLabSheet: View {
                 .font(.system(size: 22, weight: .semibold))
             Text(
                 String(
-                    format: "Host %d · %@ · phase %@ · offset (%.1f, %.1f) · velocity (%.1f, %.1f)",
+                    format: "Host %d · %@ · %@ bars · phase %@ · offset (%.1f, %.1f) · velocity (%.1f, %.1f)",
                     hostGeneration,
                     axis.title,
+                    usesFixedAreaIndicators ? "fixed" : "overlay",
                     phase.debugDescription,
                     geometry.contentOffset.x,
                     geometry.contentOffset.y,
@@ -198,14 +210,19 @@ struct ScrollViewLabSheet: View {
         ScrollView(axis.axes, showsIndicators: showsIndicators) {
             scrollContent
         }
+        .scrollIndicatorStyle(
+            usesFixedAreaIndicators ? .fixedArea : .overlay
+        )
         .contentMargins(
             usesContentMargins ? 18 : 0,
             for: .scrollContent
         )
+        // Mark the measured ScrollView viewport before the outer fixed frame.
+        // A one-axis ScrollView keeps its content size on the non-scrolling axis.
+        .border(showsViewportBorder ? Color.blue : Color.clear, width: 2)
         .frame(width: 700, height: 360)
         .scaleEffect(transformsViewport ? 0.94 : 1)
         .rotationEffect(.degrees(transformsViewport ? 1.5 : 0))
-        .border(Color.blue, width: 2)
         .onScrollGeometryChange(for: ScrollLabGeometry.self) { value in
             ScrollLabGeometry(
                 contentOffset: value.contentOffset,
