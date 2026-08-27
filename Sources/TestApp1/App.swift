@@ -20,6 +20,7 @@ struct TestApp1: App {
             forInactiveState: 30,
             renderingMode: .continuousWithDisplaySync
         )
+        .commandMenuPresentationStyle(.window)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("About Command Lab") {
