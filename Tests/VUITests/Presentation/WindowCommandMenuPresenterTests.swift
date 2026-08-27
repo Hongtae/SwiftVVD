@@ -24,6 +24,249 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         )
     }
 
+    func testAccessKeysPreferTheFirstUnusedTitleCharacter() {
+        let presenter = WindowCommandMenuPresenter()
+        presenter.update(
+            items: [
+                MainMenuItem(name: "File", id: .file, groups: []),
+                MainMenuItem(name: "Format", id: .format, groups: []),
+                MainMenuItem(name: "Edit", id: .edit, groups: []),
+            ],
+            environment: EnvironmentValues(),
+            hostEnvironment: EnvironmentValues(),
+            sceneResources: SceneResources()
+        )
+
+        XCTAssertEqual(presenter.accessKey(for: .file), "F")
+        XCTAssertEqual(presenter.accessKey(for: .format), "o")
+        XCTAssertEqual(presenter.accessKey(for: .edit), "E")
+    }
+
+    func testRendererShortcutUsesPortableModifierSymbols() {
+        let shortcut = KeyboardShortcut(
+            "R",
+            modifiers: [.control, .option, .shift, .command]
+        )
+        let names = menuKeyboardShortcutSymbolNames(
+            for: shortcut.modifiers
+        )
+
+        XCTAssertEqual(names, [
+            "keyboard.control",
+            "keyboard.option",
+            "keyboard.shift",
+            "keyboard.command",
+        ])
+        for name in names {
+            XCTAssertNotNil(SymbolAssetCatalog.resolve(
+                name: name,
+                variableValue: nil,
+                bundle: nil
+            ))
+        }
+        XCTAssertEqual(shortcut.displayLabel, "Ctrl+Alt+Shift+Cmd+R")
+    }
+
+    @MainActor
+    func testKeyboardRoutesNestedShortcutsAndTraversesTheMenuBar() throws {
+        let previousAppContext = appContext
+        appContext = WindowCommandMenuTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var disabledInvocations = 0
+        var nestedInvocations = 0
+        let fileID = MainMenuItem.Identifier.file
+        let editID = MainMenuItem.Identifier.edit
+        let shortcut = KeyboardShortcut(
+            "R",
+            modifiers: [.command, .shift]
+        )
+        let presenter = WindowCommandMenuPresenter()
+        let environment = EnvironmentValues()
+        presenter.update(
+            items: [
+                MainMenuItem(
+                    name: "File",
+                    id: fileID,
+                    groups: [
+                        CommandAccumulator.Result(
+                            viewContent: AnyView(TupleView((
+                                Button("Disabled") {
+                                    disabledInvocations += 1
+                                }
+                                .keyboardShortcut(shortcut)
+                                .disabled(true),
+                                Button("File Action") {},
+                                Menu("Nested") {
+                                    Button("Run") {
+                                        nestedInvocations += 1
+                                    }
+                                    .keyboardShortcut(shortcut)
+                                }
+                            )))
+                        ),
+                    ]
+                ),
+                MainMenuItem(
+                    name: "Edit",
+                    id: editID,
+                    groups: [
+                        CommandAccumulator.Result(
+                            viewContent: AnyView(TupleView((
+                                Button("Edit Action") {},
+                                Button("Second Edit Action") {}
+                            )))
+                        ),
+                    ]
+                ),
+            ],
+            environment: environment,
+            hostEnvironment: environment,
+            sceneResources: SceneResources()
+        )
+
+        let controller = WindowController(
+            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            environment: environment,
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Self.self)
+            )
+        )
+        controller.setWindowCommandMenuPresenter(presenter)
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 320, height: 208),
+            redraw: &redraw
+        ) { _, _ in }
+
+        let shortcutDown = keyboardEvent(
+            .keyDown,
+            key: .r,
+            text: "R",
+            modifiers: [.command, .shift]
+        )
+        XCTAssertTrue(
+            presenter.handleKeyboardEvent(shortcutDown, in: controller)
+        )
+        XCTAssertEqual(disabledInvocations, 0)
+        XCTAssertEqual(nestedInvocations, 1)
+        XCTAssertTrue(presenter.handleKeyboardEvent(
+            keyboardEvent(
+                .keyUp,
+                key: .r,
+                text: "R",
+                modifiers: [.command, .shift]
+            ),
+            in: controller
+        ))
+
+        XCTAssertTrue(presenter.handleKeyboardEvent(
+            keyboardEvent(.keyDown, key: .f10, modifiers: [.function]),
+            in: controller
+        ))
+        XCTAssertTrue(presenter.keyboardMenuIsActive)
+        XCTAssertEqual(presenter.keyboardSelectedItemID, fileID)
+
+        let responders = try menuResponders(in: controller)
+        let fileResponder = try XCTUnwrap(responders[fileID])
+        let editResponder = try XCTUnwrap(responders[editID])
+        XCTAssertFalse(fileResponder.menuIsOpen)
+
+        XCTAssertTrue(presenter.handleKeyboardEvent(
+            keyboardEvent(.keyDown, key: .down),
+            in: controller
+        ))
+        XCTAssertTrue(fileResponder.menuIsOpen)
+
+        let filePopup = try XCTUnwrap(
+            firstMenuPopup(in: controller)
+        )
+        let firstFileSelection = try XCTUnwrap(
+            filePopup.keyboardSelectionID
+        )
+        XCTAssertTrue(filePopup.handleKeyboardEvent(
+            event: keyboardEvent(.keyDown, key: .down),
+            at: filePopup.currentTimestamp
+        ))
+        XCTAssertNotEqual(filePopup.keyboardSelectionID, firstFileSelection)
+        XCTAssertTrue(filePopup.handleKeyboardEvent(
+            event: keyboardEvent(.keyDown, key: .right),
+            at: filePopup.currentTimestamp
+        ))
+        let nestedPopup = try XCTUnwrap(firstMenuPopup(in: filePopup))
+        XCTAssertNotNil(nestedPopup.keyboardSelectionID)
+        XCTAssertTrue(nestedPopup.handleKeyboardEvent(
+            event: keyboardEvent(.keyDown, key: .r),
+            at: nestedPopup.currentTimestamp
+        ))
+        XCTAssertEqual(nestedInvocations, 2)
+        XCTAssertFalse(fileResponder.menuIsOpen)
+        XCTAssertFalse(presenter.keyboardMenuIsActive)
+
+        XCTAssertTrue(presenter.handleKeyboardEvent(
+            keyboardEvent(.keyDown, key: .f10, modifiers: [.function]),
+            in: controller
+        ))
+        XCTAssertTrue(presenter.handleKeyboardEvent(
+            keyboardEvent(.keyDown, key: .down),
+            in: controller
+        ))
+        XCTAssertTrue(fileResponder.menuIsOpen)
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            key: .right
+        )))
+        XCTAssertFalse(fileResponder.menuIsOpen)
+        XCTAssertTrue(editResponder.menuIsOpen)
+        XCTAssertEqual(presenter.keyboardSelectedItemID, editID)
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            key: .escape
+        )))
+        XCTAssertFalse(editResponder.menuIsOpen)
+        XCTAssertTrue(presenter.keyboardMenuIsActive)
+        XCTAssertEqual(presenter.keyboardSelectedItemID, editID)
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            key: .escape
+        )))
+        XCTAssertFalse(presenter.keyboardMenuIsActive)
+        XCTAssertNil(presenter.keyboardSelectedItemID)
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            key: .f,
+            modifiers: [.option]
+        )))
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyUp,
+            key: .f,
+            modifiers: [.option]
+        )))
+        XCTAssertTrue(fileResponder.menuIsOpen)
+        XCTAssertEqual(presenter.keyboardSelectedItemID, fileID)
+        let accessKeyPopup = try XCTUnwrap(firstMenuPopup(in: controller))
+        let firstAccessKeySelection = try XCTUnwrap(
+            accessKeyPopup.keyboardSelectionID
+        )
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            key: .down
+        )))
+        XCTAssertNotEqual(
+            accessKeyPopup.keyboardSelectionID,
+            firstAccessKeySelection
+        )
+        controller.dismissAllPresentationChildren()
+    }
+
     @MainActor
     func testRendererMenuUsesRootResponderPopupAndMaterializationEnvironment()
         throws
@@ -160,6 +403,52 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
 
     private func responderTree(_ responder: ViewResponder) -> [ViewResponder] {
         [responder] + responder.children.flatMap(responderTree)
+    }
+
+    private func menuResponders(
+        in controller: WindowController
+    ) throws -> [MainMenuItem.Identifier: MenuControlResponder] {
+        let root = try XCTUnwrap(
+            controller.viewGraph.responderNode as? MultiViewResponder
+        )
+        return Dictionary(uniqueKeysWithValues: responderTree(root).compactMap {
+            responder -> (MainMenuItem.Identifier, MenuControlResponder)? in
+            guard let menu = responder as? MenuControlResponder,
+                  let id = menu.menuBarItemIdentifier?.base
+                    as? MainMenuItem.Identifier else {
+                return nil
+            }
+            return (id, menu)
+        })
+    }
+
+    private func keyboardEvent(
+        _ type: KeyboardEventType,
+        key: VirtualKey,
+        text: String = "",
+        modifiers: KeyboardModifierFlags = []
+    ) -> KeyboardEvent {
+        KeyboardEvent(
+            type: type,
+            window: nil,
+            deviceID: 7,
+            key: key,
+            text: text,
+            isRepeat: false,
+            modifiers: modifiers
+        )
+    }
+
+    private func firstMenuPopup(
+        in controller: WindowController
+    ) -> ContextMenuWindowController? {
+        var result: ContextMenuWindowController?
+        controller.forEachPresentationChild { child in
+            if result == nil {
+                result = child as? ContextMenuWindowController
+            }
+        }
+        return result
     }
 
     private func globalFrame(_ responder: MenuControlResponder) -> CGRect {

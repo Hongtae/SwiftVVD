@@ -500,6 +500,7 @@ class ViewGraph: ViewGraphHost {
     // Outputs requested at init time.
     var requestedOutputs: Outputs
     private var featureBuffer = ViewGraphFeatureBuffer()
+    private var focusedValuesFeature: FocusedValuesViewGraph?
     var preferenceBridge: PreferenceBridge?
     private(set) var preferenceValueOutlets: [(key: any PreferenceKey.Type, value: AGAttribute)] = []
     private(set) var hostPreferenceKeys: Attribute<PreferenceKeys>?
@@ -579,6 +580,12 @@ class ViewGraph: ViewGraphHost {
     func setContainerSize(_ size: ViewSize) {
         data.withCurrent {
             containerSizeAttr?.setValue(size)
+        }
+    }
+
+    func setFocusedValues(_ values: FocusedValues) {
+        data.withCurrent {
+            focusedValuesFeature?.setFocusedValues(values)
         }
     }
 
@@ -911,6 +918,11 @@ class ViewGraph: ViewGraphHost {
         // Wire rendererHost before capturing and instantiating root outputs.
         self.rendererHost = rendererHost
         featureBuffer.append(HitTestBindingFeature())
+        if requestedOutputs.contains(.focus) {
+            let feature = FocusedValuesViewGraph()
+            focusedValuesFeature = feature
+            featureBuffer.append(feature)
+        }
         for feature in features {
             featureBuffer.append(feature)
         }

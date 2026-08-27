@@ -518,6 +518,7 @@ final class ContextMenuPopupActions {
     var openSubmenu: ((ContextMenuPresentationItem, CGPoint) -> Void)?
     var closeSubmenus: (() -> Void)?
     var dismiss: (() -> Void)?
+    var pointerInteractionBegan: (() -> Void)?
 }
 
 struct ContextMenuSubmenuPlacement {
@@ -529,6 +530,11 @@ struct ContextMenuSubmenuPlacement {
 // deactivate/move dismissal policy; this subclass only owns menu-session state,
 // submenu fan-out, and context-menu-specific teardown.
 final class ContextMenuWindowController: PopupWindowController, @unchecked Sendable {
+    private struct KeyboardStream: Hashable {
+        var deviceID: Int
+        var key: VirtualKey
+    }
+
     // Window diagnostics occupy the same upper-left region as transient menu
     // content. Menu popup trees inherit every other window policy, but remove
     // the parent's debug override at this boundary. Leaving the field nil is
@@ -568,9 +574,13 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private let popupActions: ContextMenuPopupActions
     private let menuSession: ContextMenuPresentationSession
     private let submenuPlacement: ContextMenuSubmenuPlacement?
+    private let allowsParentKeyboardTraversal: Bool
     private var menuItems: [ContextMenuPresentationItem]
     private var openedSubmenuID: ContextMenuPresentationItem.ID?
     private weak var openedSubmenu: ContextMenuWindowController?
+    private(set) var keyboardSelectionID:
+        ContextMenuPresentationItem.ID?
+    private var consumedKeyboardStreams: Set<KeyboardStream> = []
 
     init<Content: View>(content: Content,
          environment: EnvironmentValues,
@@ -581,11 +591,15 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
          actions: ContextMenuPopupActions,
          usesPlatformWindow: Bool,
          session: ContextMenuPresentationSession,
-         submenuPlacement: ContextMenuSubmenuPlacement? = nil) {
+         submenuPlacement: ContextMenuSubmenuPlacement? = nil,
+         keyboardSelectionID: ContextMenuPresentationItem.ID? = nil,
+         allowsParentKeyboardTraversal: Bool = false) {
         self.popupActions = actions
         self.menuSession = session
         self.submenuPlacement = submenuPlacement
+        self.allowsParentKeyboardTraversal = allowsParentKeyboardTraversal
         self.menuItems = items
+        self.keyboardSelectionID = keyboardSelectionID
         let frame = CGRect(origin: anchor, size: .zero)
         super.init(content: content,
                    environment: environment,
@@ -593,6 +607,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
                    scene: scene,
                    usesPlatformWindow: usesPlatformWindow,
                    frameInParent: frame)
+        popupActions.pointerInteractionBegan = { [weak self] in
+            self?.setKeyboardSelection(nil)
+        }
 
         // A platform popup clears its rectangular render target with the menu
         // surface color. Window shape, border, and shadow remain the platform's
@@ -605,7 +622,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
 
     func openSubmenu(
         _ item: ContextMenuPresentationItem,
-        at origin: CGPoint
+        at origin: CGPoint,
+        selectsFirstItem: Bool = false
     ) {
         // Hover callbacks are queued Update actions. A primary row action ends
         // tracking before invoking its closure, but a hover action from the
@@ -622,6 +640,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
             guard let submenu = openedSubmenu,
                   submenu.parentWindow === self else {
                 fatalError("ContextMenuWindowController.openSubmenu lost its active submenu")
+            }
+            if selectsFirstItem {
+                submenu.selectFirstKeyboardItem()
             }
             // The platform finishes ordering the clicked parent after this
             // callback. Reassert the existing submenu on the next main-actor
@@ -643,8 +664,15 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         dismissAllPresentationChildren()
 
         let actions = ContextMenuPopupActions()
-        let child = ContextMenuWindowController(content: ContextMenuPopupView(items: item.children,
-                                                                              actions: actions),
+        let initialKeyboardSelectionID = selectsFirstItem
+            ? contextMenuKeyboardSelectableItems(item.children).first?.id
+            : nil
+        let child = ContextMenuWindowController(content: contextMenuPopupContent(
+                                                    items: item.children,
+                                                    actions: actions,
+                                                    keyboardSelectionID:
+                                                        initialKeyboardSelectionID
+                                                ),
                                                 environment: environment.untrackedCopy(),
                                                 viewPhase: viewPhase,
                                                 scene: scene,
@@ -653,7 +681,11 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
                                                 actions: actions,
                                                 usesPlatformWindow: prefersPlatformWindowPresentation,
                                                 session: menuSession,
-                                                submenuPlacement: ContextMenuSubmenuPlacement(fallbackRightOrigin: origin))
+                                                submenuPlacement: ContextMenuSubmenuPlacement(fallbackRightOrigin: origin),
+                                                keyboardSelectionID:
+                                                    initialKeyboardSelectionID,
+                                                allowsParentKeyboardTraversal:
+                                                    allowsParentKeyboardTraversal)
         openedSubmenu = child
         actions.openSubmenu = { [weak child] item, origin in
             child?.openSubmenu(item, at: origin)
@@ -667,6 +699,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         addPresentationChild(child: child) { [weak child] attach in
             child?.resolvePresentationWindowAttachment(attach)
         }
+        replaceMenuContent(with: menuItems)
     }
 
     override func presentationFrame(forContentSize size: CGSize) -> CGRect {
@@ -726,14 +759,26 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     // refresh instead of rebuilding the whole menu presentation.
     func replaceMenuItems(_ items: [ContextMenuPresentationItem]) {
         menuItems = items
+        if let keyboardSelectionID,
+           !contextMenuKeyboardSelectableItems(items).contains(where: {
+               $0.id == keyboardSelectionID
+           }) {
+            self.keyboardSelectionID = contextMenuKeyboardSelectableItems(
+                items
+            ).first?.id
+        }
         replaceMenuContent(with: items)
         refreshOpenedSubmenu()
     }
 
     func closeSubmenus() {
+        let hadSubmenu = openedSubmenuID != nil || openedSubmenu != nil
         openedSubmenuID = nil
         openedSubmenu = nil
         dismissAllPresentationChildren()
+        if hadSubmenu {
+            replaceMenuContent(with: menuItems)
+        }
     }
 
     private func replaceMenuContent(
@@ -741,8 +786,12 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     ) {
         guard let contentAttr else { return }
         let graph = viewGraph.graph
-        let content = UnsafeBox(AnyView(contextMenuPopupContent(items: items,
-                                                                actions: popupActions)))
+        let content = UnsafeBox(AnyView(contextMenuPopupContent(
+            items: items,
+            actions: popupActions,
+            keyboardSelectionID: keyboardSelectionID,
+            presentedSubmenuID: openedSubmenuID
+        )))
         // Replace child root content through the child graph inbox. The source
         // graph may be evaluating the item list when this refresh is requested.
         graph.inbox.enqueue {
@@ -762,6 +811,244 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
             return
         }
         openedSubmenu?.replaceMenuItems(item.children)
+    }
+
+    override func handleKeyboardEvent(
+        event: KeyboardEvent,
+        at time: Time
+    ) -> Bool {
+        let stream = KeyboardStream(
+            deviceID: event.deviceID,
+            key: event.key
+        )
+        if event.type == .keyUp,
+           consumedKeyboardStreams.remove(stream) != nil {
+            return true
+        }
+
+        // Let the deepest open submenu own the key before this popup examines
+        // its own selection. Popup rows use the semantic item model for this
+        // route, so the inherited responder dispatch remains only a fallback
+        // when no submenu tree is active.
+        let routedToSubmenu = openedSubmenu != nil
+        if openedSubmenu?.handleKeyboardEvent(event: event, at: time) == true {
+            return true
+        }
+        if event.type == .keyDown,
+           handleMenuKeyboardEvent(event) {
+            consumedKeyboardStreams.insert(stream)
+            return true
+        }
+        if routedToSubmenu {
+            return false
+        }
+        return super.handleKeyboardEvent(event: event, at: time)
+    }
+
+    private func handleMenuKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+        let navigationModifiers = event.modifiers.subtracting([
+            .capsLock,
+            .numericPad,
+            .function,
+        ])
+        if navigationModifiers.isEmpty {
+            switch event.key {
+            case .up:
+                return moveKeyboardSelection(by: -1)
+            case .down:
+                return moveKeyboardSelection(by: 1)
+            case .home:
+                return selectKeyboardItem(at: .first)
+            case .end:
+                return selectKeyboardItem(at: .last)
+            case .return, .enter, .space:
+                return activateKeyboardSelection()
+            case .right:
+                if openSelectedKeyboardSubmenu() {
+                    return true
+                }
+                return allowsParentKeyboardTraversal
+                    ? forwardMenuBoundaryKeyboardEvent(event)
+                    : true
+            case .left:
+                if let parent = parentWindow
+                    as? ContextMenuWindowController {
+                    parent.closeKeyboardSubmenu(self)
+                    return true
+                }
+                return allowsParentKeyboardTraversal
+                    ? forwardMenuBoundaryKeyboardEvent(event)
+                    : true
+            case .escape:
+                if let parent = parentWindow
+                    as? ContextMenuWindowController {
+                    parent.closeKeyboardSubmenu(self)
+                    return true
+                }
+                if allowsParentKeyboardTraversal {
+                    return forwardMenuBoundaryKeyboardEvent(event)
+                }
+                menuSession.dismissAll()
+                return true
+            default:
+                break
+            }
+        }
+
+        let accessModifiers = navigationModifiers.subtracting(.shift)
+        guard accessModifiers.isEmpty,
+              let character = event.key.shortcutCharacter
+                ?? event.text.first,
+              let item = keyboardItem(forAccessKey: character) else {
+            return false
+        }
+        setKeyboardSelection(item.id)
+        if item.isMenu && !item.children.isEmpty {
+            openSubmenu(
+                item,
+                at: keyboardSubmenuOrigin(for: item),
+                selectsFirstItem: true
+            )
+            return true
+        }
+        return activateKeyboardSelection()
+    }
+
+    private enum KeyboardSelectionEdge {
+        case first
+        case last
+    }
+
+    private func selectKeyboardItem(
+        at edge: KeyboardSelectionEdge
+    ) -> Bool {
+        let items = contextMenuKeyboardSelectableItems(menuItems)
+        guard let item = edge == .first ? items.first : items.last else {
+            return false
+        }
+        closeSubmenus()
+        setKeyboardSelection(item.id)
+        return true
+    }
+
+    private func selectFirstKeyboardItem() {
+        _ = selectKeyboardItem(at: .first)
+    }
+
+    private func moveKeyboardSelection(by offset: Int) -> Bool {
+        let items = contextMenuKeyboardSelectableItems(menuItems)
+        guard !items.isEmpty else { return false }
+        let index = keyboardSelectionID.flatMap { selectedID in
+            items.firstIndex(where: { $0.id == selectedID })
+        } ?? (offset > 0 ? -1 : 0)
+        let nextIndex = (index + offset + items.count) % items.count
+        closeSubmenus()
+        setKeyboardSelection(items[nextIndex].id)
+        return true
+    }
+
+    private func setKeyboardSelection(
+        _ id: ContextMenuPresentationItem.ID?
+    ) {
+        guard keyboardSelectionID != id else { return }
+        keyboardSelectionID = id
+        replaceMenuContent(with: menuItems)
+    }
+
+    private func activateKeyboardSelection() -> Bool {
+        guard let item = selectedKeyboardItem else { return false }
+        if item.isMenu && !item.children.isEmpty {
+            openSubmenu(
+                item,
+                at: keyboardSubmenuOrigin(for: item),
+                selectsFirstItem: true
+            )
+            return true
+        }
+        guard let action = item.item.selectionBehavior?.onSelect else {
+            return false
+        }
+        closeSubmenus()
+        Update.enqueueAction { [weak menuSession] in
+            action()
+            menuSession?.dismissAll()
+        }
+        return true
+    }
+
+    private func openSelectedKeyboardSubmenu() -> Bool {
+        guard let item = selectedKeyboardItem,
+              item.isMenu,
+              !item.children.isEmpty else {
+            return false
+        }
+        openSubmenu(
+            item,
+            at: keyboardSubmenuOrigin(for: item),
+            selectsFirstItem: true
+        )
+        return true
+    }
+
+    private var selectedKeyboardItem: ContextMenuPresentationItem? {
+        guard let keyboardSelectionID else { return nil }
+        return contextMenuKeyboardSelectableItems(menuItems).first {
+            $0.id == keyboardSelectionID
+        }
+    }
+
+    private func keyboardItem(
+        forAccessKey character: Character
+    ) -> ContextMenuPresentationItem? {
+        let items = contextMenuKeyboardSelectableItems(menuItems)
+        let accessKeys = resolvedMenuAccessKeys(for: items.map { item in
+            (
+                id: item.id,
+                title: (item.item.label ?? item.item.text)?.string ?? ""
+            )
+        })
+        return items.first { item in
+            accessKeys[item.id].map {
+                menuCharactersAreEquivalent($0, character)
+            } == true
+        }
+    }
+
+    private func keyboardSubmenuOrigin(
+        for selectedItem: ContextMenuPresentationItem
+    ) -> CGPoint {
+        var y = contextMenuPopupPanelPadding
+        for item in contextMenuPopupRenderedItems(menuItems) {
+            if item.id == selectedItem.id { break }
+            y += item.isDivider
+                ? contextMenuPopupDividerHeight
+                : contextMenuPopupRowHeight
+        }
+        let provisionalPopupWidth = contextMenuPopupPlainTitleOrigin
+            + contextMenuPopupTrailingGap
+            + contextMenuPopupSubmenuIndicatorWidth
+            + contextMenuPopupTrailingPadding
+        return CGPoint(
+            x: provisionalPopupWidth - contextMenuPopupSubmenuOverlap,
+            y: y
+        )
+    }
+
+    private func closeKeyboardSubmenu(
+        _ child: ContextMenuWindowController
+    ) {
+        guard openedSubmenu === child else { return }
+        closeSubmenus()
+    }
+
+    private func forwardMenuBoundaryKeyboardEvent(
+        _ event: KeyboardEvent
+    ) -> Bool {
+        var owner = parentWindow
+        while let menu = owner as? ContextMenuWindowController {
+            owner = menu.parentWindow
+        }
+        return owner?.handleMenuBoundaryKeyboardEvent(event) == true
     }
 
 
@@ -1130,9 +1417,18 @@ private struct ContextMenuSubmenuIndicatorShape: Shape {
     }
 }
 
-func contextMenuPopupContent(items: [ContextMenuPresentationItem],
-                             actions: ContextMenuPopupActions) -> some View {
-    ContextMenuPopupView(items: items, actions: actions)
+func contextMenuPopupContent(
+    items: [ContextMenuPresentationItem],
+    actions: ContextMenuPopupActions,
+    keyboardSelectionID: ContextMenuPresentationItem.ID? = nil,
+    presentedSubmenuID: ContextMenuPresentationItem.ID? = nil
+) -> some View {
+    ContextMenuPopupView(
+        items: items,
+        actions: actions,
+        keyboardSelectionID: keyboardSelectionID,
+        presentedSubmenuID: presentedSubmenuID
+    )
 }
 
 private func contextMenuPopupRenderedItems(
@@ -1157,13 +1453,27 @@ private func contextMenuPopupRenderedItems(
     return result
 }
 
+func contextMenuKeyboardSelectableItems(
+    _ items: [ContextMenuPresentationItem]
+) -> [ContextMenuPresentationItem] {
+    contextMenuPopupRenderedItems(items).filter { item in
+        !item.isDivider
+            && !item.isSectionHeader
+            && !item.item.isHidden
+            && item.item.isEnabled
+    }
+}
+
 private struct ContextMenuPopupView: View {
     let items: [ContextMenuPresentationItem]
     let actions: ContextMenuPopupActions
+    let keyboardSelectionID: ContextMenuPresentationItem.ID?
+    let presentedSubmenuID: ContextMenuPresentationItem.ID?
     @State private var activeSubmenuID: ContextMenuPresentationItem.ID?
 
     var body: some View {
-        let activeSubmenuID = activeSubmenuID.flatMap { id in
+        let candidateSubmenuID = presentedSubmenuID ?? activeSubmenuID
+        let activeSubmenuID = candidateSubmenuID.flatMap { id in
             items.contains { item in
                 item.id == id
                     && item.item.isEnabled
@@ -1174,8 +1484,12 @@ private struct ContextMenuPopupView: View {
         ContextMenuPopupPanel(
             items: items,
             activeItemID: activeSubmenuID,
+            keyboardSelectionID: keyboardSelectionID,
             dismiss: {
                 actions.dismiss?()
+            },
+            pointerInteractionBegan: {
+                actions.pointerInteractionBegan?()
             },
             openSubmenu: { item, origin in
                 guard item.item.isEnabled,
@@ -1200,7 +1514,9 @@ private struct ContextMenuPopupView: View {
 private struct ContextMenuPopupPanel: View {
     let items: [ContextMenuPresentationItem]
     let activeItemID: ContextMenuPresentationItem.ID?
+    let keyboardSelectionID: ContextMenuPresentationItem.ID?
     let dismiss: () -> Void
+    let pointerInteractionBegan: () -> Void
     let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
     private var renderedItems: [ContextMenuPresentationItem] {
@@ -1209,6 +1525,14 @@ private struct ContextMenuPopupPanel: View {
     private var rowLayouts:
         [ContextMenuPresentationItem.ID: ContextMenuPopupLayout] {
         ContextMenuPopupLayout.makeRowLayouts(for: renderedItems)
+    }
+    private var accessKeys:
+        [ContextMenuPresentationItem.ID: Character] {
+        resolvedMenuAccessKeys(for: renderedItems.compactMap { item in
+            guard !item.isDivider, !item.isSectionHeader else { return nil }
+            let title = (item.item.label ?? item.item.text)?.string ?? ""
+            return (id: item.id, title: title)
+        })
     }
 
     private func rowTopOffset(
@@ -1238,13 +1562,21 @@ private struct ContextMenuPopupPanel: View {
     var body: some View {
         let renderedItems = self.renderedItems
         let rowLayouts = self.rowLayouts
+        let accessKeys = self.accessKeys
         ContextMenuPopupColumnLayout {
             ForEach(renderedItems) { item in
                 ContextMenuPopupRow(item: item,
                                     layout: rowLayouts[item.id] ?? .empty,
                                     isSubmenuOpen: activeItemID == item.id,
+                                    isKeyboardSelected:
+                                        keyboardSelectionID == item.id,
+                                    accessKey: accessKeys[item.id],
+                                    showsAccessKey:
+                                        keyboardSelectionID != nil,
                                     submenuOrigin: submenuOrigin(for: item),
                                     dismiss: dismiss,
+                                    pointerInteractionBegan:
+                                        pointerInteractionBegan,
                                     openSubmenu: openSubmenu,
                                     clearSubmenus: clearSubmenus)
             }
@@ -1258,8 +1590,12 @@ private struct ContextMenuPopupRow: View {
     let item: ContextMenuPresentationItem
     let layout: ContextMenuPopupLayout
     let isSubmenuOpen: Bool
+    let isKeyboardSelected: Bool
+    let accessKey: Character?
+    let showsAccessKey: Bool
     let submenuOrigin: CGPoint
     let dismiss: () -> Void
+    let pointerInteractionBegan: () -> Void
     let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
     @State private var isPressed = false
@@ -1277,11 +1613,8 @@ private struct ContextMenuPopupRow: View {
         item.item.toggleState == .on
     }
 
-    private var shortcutLabel: String? {
-        guard let keyboardShortcut = item.item.keyboardShortcut else {
-            return nil
-        }
-        return keyboardShortcut.displayLabel
+    private var shortcut: KeyboardShortcut? {
+        item.item.keyboardShortcut
     }
 
     private var rowBackground: Color {
@@ -1309,7 +1642,12 @@ private struct ContextMenuPopupRow: View {
               item.item.isEnabled else {
             return false
         }
-        return isHovered || isPressed || (isSubmenuOpen && hasSubmenu)
+        if showsAccessKey {
+            return isKeyboardSelected || (isSubmenuOpen && hasSubmenu)
+        }
+        return isHovered
+            || isPressed
+            || (isSubmenuOpen && hasSubmenu)
     }
 
     var body: some View {
@@ -1319,7 +1657,7 @@ private struct ContextMenuPopupRow: View {
                 .frame(height: contextMenuPopupDividerHeight)
         } else {
             ContextMenuPopupRowLayout(layout: layout,
-                                      hasShortcut: shortcutLabel != nil,
+                                      hasShortcut: shortcut != nil,
                                       hasSubmenu: hasSubmenu,
                                       isSectionHeader: isSectionHeader) {
                 if layout.showsStateColumn {
@@ -1350,11 +1688,11 @@ private struct ContextMenuPopupRow: View {
                     Color.clear
                         .frame(width: 0, height: 0)
                 }
-                platformItemText(item.item)
+                menuItemTitle
                     .font(isSectionHeader ? .system(size: contextMenuPopupSectionHeaderFontSize) : nil)
                     .fixedSize(horizontal: true, vertical: false)
-                if let shortcutLabel {
-                    Text(shortcutLabel)
+                if let shortcut {
+                    MenuKeyboardShortcutLabel(shortcut: shortcut)
                         .fixedSize(horizontal: true, vertical: false)
                 } else {
                     Color.clear
@@ -1381,6 +1719,9 @@ private struct ContextMenuPopupRow: View {
                     return
                 }
                 isPressed = pressing
+                if pressing {
+                    pointerInteractionBegan()
+                }
                 if pressing, item.item.isEnabled, hasSubmenu {
                     openSubmenu(item, submenuOrigin)
                 }
@@ -1415,6 +1756,7 @@ private struct ContextMenuPopupRow: View {
                 }
                 isHovered = hovering
                 guard hovering else { return }
+                pointerInteractionBegan()
                 if hasSubmenu {
                     openSubmenu(item, submenuOrigin)
                 } else {
@@ -1423,5 +1765,17 @@ private struct ContextMenuPopupRow: View {
             }
             .environment(\.isEnabled, item.item.isEnabled)
         }
+    }
+
+    private var menuItemTitle: Text {
+        guard showsAccessKey,
+              let title = (item.item.label ?? item.item.text)?.string else {
+            return platformItemText(item.item)
+        }
+        return menuAccessKeyText(
+            title,
+            accessKey: accessKey,
+            showsAccessKey: true
+        )
     }
 }

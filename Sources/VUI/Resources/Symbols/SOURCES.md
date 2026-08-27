@@ -1,9 +1,11 @@
 # Portable Symbol Sources
 
 The SVG assets in this directory are derived from the shared canonical
-Material Design Icons source tree:
+Material Design Icons source trees:
 
 `External/google/material-design-icons/src/<category>/<source-name>/<style>/24px.svg`
+
+`External/google/material-design-icons/symbols/web/<source-name>/<style>/<source-name>_24px.svg`
 
 The bundled copies are covered by `NOTICE` and `LICENSE-APACHE-2.0.txt`.
 
@@ -42,10 +44,14 @@ The bundled copies are covered by `NOTICE` and `LICENSE-APACHE-2.0.txt`.
 | `file.svg` | `editor/insert_drive_file/materialiconsoutlined/24px.svg` |
 | `file.fill.svg` | `editor/insert_drive_file/materialicons/24px.svg` |
 | `filter.svg` | `content/filter_list/materialicons/24px.svg` |
-| `heart.svg` | `action/favorite_border/materialicons/24px.svg` |
-| `heart.fill.svg` | `action/favorite/materialicons/24px.svg` |
 | `help.svg` | `action/help_outline/materialicons/24px.svg` |
 | `help.fill.svg` | `action/help/materialicons/24px.svg` |
+| `heart.svg` | `action/favorite_border/materialicons/24px.svg` |
+| `heart.fill.svg` | `action/favorite/materialicons/24px.svg` |
+| `keyboard.command.svg` | `symbols/web/keyboard_command_key/materialsymbolsoutlined/keyboard_command_key_24px.svg` |
+| `keyboard.control.svg` | `symbols/web/keyboard_control_key/materialsymbolsoutlined/keyboard_control_key_24px.svg` |
+| `keyboard.option.svg` | `symbols/web/keyboard_option_key/materialsymbolsoutlined/keyboard_option_key_24px.svg` |
+| `keyboard.shift.svg` | `symbols/web/shift/materialsymbolsoutlined/shift_24px.svg` |
 | `lock.open.svg` | `action/lock_open/materialiconsoutlined/24px.svg` |
 | `lock.open.fill.svg` | `action/lock_open/materialicons/24px.svg` |
 | `more.horizontal.svg` | `navigation/more_horiz/materialicons/24px.svg` |

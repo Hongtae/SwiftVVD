@@ -60,6 +60,7 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
 
     private var item: MainMenuItem
     private var rootEnvironment: EnvironmentValues
+    private var rootFocusedValues: FocusedValues
     private var storage: ViewGraph!
 
     let sceneResources = SceneResources()
@@ -68,9 +69,14 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
     var renderingPhase = ViewRenderingPhase()
     var externalUpdateCount = 0
 
-    init(item: MainMenuItem, environment: EnvironmentValues) {
+    init(
+        item: MainMenuItem,
+        environment: EnvironmentValues,
+        focusedValues: FocusedValues = FocusedValues()
+    ) {
         self.item = item
         self.rootEnvironment = environment
+        self.rootFocusedValues = focusedValues
 
         let graph = ViewGraph(
             replaceableContent: RootView(itemContent: .item(item)),
@@ -86,6 +92,9 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
         graph.updateDelegate = self
         graph.viewDelegate = self
         graph.graphDelegate = self
+        if focusedValues != FocusedValues() {
+            graph.valuesNeedingUpdate.insert(.focusedValues)
+        }
     }
 
     var viewGraph: ViewGraph {
@@ -98,16 +107,32 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
 
     func update(
         item: MainMenuItem,
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        focusedValues: FocusedValues = FocusedValues()
     ) {
         self.item = item
         rootEnvironment = environment
-        let dirty: ViewGraphRootValues = [.rootView, .environment]
+        var dirty: ViewGraphRootValues = [.rootView, .environment]
+        if rootFocusedValues != focusedValues {
+            rootFocusedValues = focusedValues
+            dirty.insert(.focusedValues)
+        }
 
         // ViewGraphHost consumes the graph's dirty mask when outputs update.
         // Keep replacement deferred by publishing both values to that mask;
         // the delegate callbacks below perform the actual input writes.
         storage.valuesNeedingUpdate.formUnion(dirty)
+        storage.setNeedsUpdate(
+            mayDeferUpdate: true,
+            values: dirty
+        )
+    }
+
+    func updateFocusedValues(_ focusedValues: FocusedValues) {
+        guard rootFocusedValues != focusedValues else { return }
+        rootFocusedValues = focusedValues
+        let dirty = ViewGraphRootValues.focusedValues
+        storage.valuesNeedingUpdate.insert(dirty)
         storage.setNeedsUpdate(
             mayDeferUpdate: true,
             values: dirty
@@ -150,4 +175,7 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
     func updateSize() {}
     func updateSafeArea() {}
     func updateContainerSize() {}
+    func updateFocusedValues() {
+        storage.setFocusedValues(rootFocusedValues)
+    }
 }

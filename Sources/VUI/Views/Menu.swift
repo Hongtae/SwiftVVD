@@ -173,9 +173,13 @@ struct MenuControlModifier<MenuContent>: ViewModifier, MultiViewModifier where M
     let content: MenuContent
     var primaryAction: (() -> Void)? = nil
     var menuIndicatorWidth: CGFloat = 0
+    // Renderer-owned menu bars use this identity to coordinate keyboard
+    // navigation with the same responder that owns pointer presentation.
+    var menuBarItemIdentifier: AnyHashable? = nil
     var onMenuOpenChanged: ((Bool) -> Void)? = nil
     var onPrimaryPressingChanged: ((Bool) -> Void)? = nil
     var onMenuPressingChanged: ((Bool) -> Void)? = nil
+    var onKeyboardMenuStateChanged: ((Bool, Bool) -> Void)? = nil
     var onPresentationChanged: ((Bool) -> Void)? = nil
 }
 
@@ -307,9 +311,12 @@ struct MenuControlResponderFilter<MenuContent: View>: StatefulRule {
         responder.isEnabled = environment.isEnabled
         responder.primaryAction = modifier.primaryAction
         responder.menuIndicatorWidth = modifier.menuIndicatorWidth
+        responder.menuBarItemIdentifier = modifier.menuBarItemIdentifier
         responder.onMenuOpenChanged = modifier.onMenuOpenChanged
         responder.onPrimaryPressingChanged = modifier.onPrimaryPressingChanged
         responder.onMenuPressingChanged = modifier.onMenuPressingChanged
+        responder.onKeyboardMenuStateChanged =
+            modifier.onKeyboardMenuStateChanged
         responder.onPresentationChanged = modifier.onPresentationChanged
 
         let childrenChanged = isInitialValue
@@ -347,9 +354,11 @@ final class MenuControlResponder: MultiViewResponder,
     var isEnabled: Bool?
     var primaryAction: (() -> Void)?
     var menuIndicatorWidth: CGFloat = 0
+    var menuBarItemIdentifier: AnyHashable?
     var onMenuOpenChanged: ((Bool) -> Void)?
     var onPrimaryPressingChanged: ((Bool) -> Void)?
     var onMenuPressingChanged: ((Bool) -> Void)?
+    var onKeyboardMenuStateChanged: ((Bool, Bool) -> Void)?
     var onPresentationChanged: ((Bool) -> Void)?
 
     private var isMenuOpen = false
@@ -397,6 +406,13 @@ final class MenuControlResponder: MultiViewResponder,
 
     var menuIsOpen: Bool {
         isMenuOpen
+    }
+
+    func updateKeyboardMenuState(
+        isSelected: Bool,
+        showsAccessKeys: Bool
+    ) {
+        onKeyboardMenuStateChanged?(isSelected, showsAccessKeys)
     }
 
     func acceptsEventType(_ eventType: Any.Type) -> Bool {
@@ -465,7 +481,10 @@ final class MenuControlResponder: MultiViewResponder,
         }
     }
 
-    func present(from parent: WindowController) {
+    func present(
+        from parent: WindowController,
+        selectsFirstItem: Bool = false
+    ) {
         guard isEnabled != false else { return }
         guard let graph = _AGGraph.current else {
             fatalError("MenuControlResponder.present called outside AG context")
@@ -481,6 +500,9 @@ final class MenuControlResponder: MultiViewResponder,
         let initialItems = contextMenuPresentationItems(
             itemList.value.menuItems
         )
+        let initialKeyboardSelectionID = selectsFirstItem
+            ? contextMenuKeyboardSelectableItems(initialItems).first?.id
+            : nil
         let liveContentSubgraph = AGSubgraph()
         AGSubgraph.withCurrent(liveContentSubgraph) {
             graph.makeSideEffectRule { [weak session] in
@@ -509,8 +531,12 @@ final class MenuControlResponder: MultiViewResponder,
         let usesPlatformWindow = presentationEnvironment.resolvedUsesPlatformWindow(
             \.presentationChildUsingPlatformWindow
         )
-        let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(items: initialItems,
-                                                                                actions: actions),
+        let ctrl = ContextMenuWindowController(content: contextMenuPopupContent(
+                                                   items: initialItems,
+                                                   actions: actions,
+                                                   keyboardSelectionID:
+                                                       initialKeyboardSelectionID
+                                               ),
                                                environment: presentationEnvironment.untrackedCopy(),
                                                viewPhase: viewPhase,
                                                scene: parent.scene,
@@ -518,7 +544,11 @@ final class MenuControlResponder: MultiViewResponder,
                                                items: initialItems,
                                                actions: actions,
                                                usesPlatformWindow: usesPlatformWindow,
-                                               session: session)
+                                               session: session,
+                                               keyboardSelectionID:
+                                                   initialKeyboardSelectionID,
+                                               allowsParentKeyboardTraversal:
+                                                   menuBarItemIdentifier != nil)
         session.root = ctrl
         actions.openSubmenu = { [weak ctrl] item, origin in
             ctrl?.openSubmenu(item, at: origin)

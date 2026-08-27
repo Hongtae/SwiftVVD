@@ -5,6 +5,8 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import VVD
+
 public struct EventModifiers: OptionSet, Sendable, Hashable {
     public let rawValue: Int
 
@@ -46,6 +48,102 @@ public struct KeyEquivalent: Sendable, Hashable {
     public static let tab = KeyEquivalent("\t")
     public static let space = KeyEquivalent(" ")
     public static let `return` = KeyEquivalent("\r")
+}
+
+extension KeyEquivalent {
+    init?(platformEvent event: VVD.KeyboardEvent) {
+        if let character = event.text.first ?? event.key.shortcutCharacter {
+            self.init(character)
+            return
+        }
+        switch event.key {
+        case .escape: self = .escape
+        case .tab: self = .tab
+        case .space: self = .space
+        case .return, .enter: self = .return
+        case .backspace: self = .delete
+        case .delete: self = .deleteForward
+        case .home: self = .home
+        case .end: self = .end
+        case .pageUp: self = .pageUp
+        case .pageDown: self = .pageDown
+        case .up: self = .upArrow
+        case .down: self = .downArrow
+        case .left: self = .leftArrow
+        case .right: self = .rightArrow
+        default: return nil
+        }
+    }
+}
+
+extension EventModifiers {
+    init(platformFlags flags: VVD.KeyboardModifierFlags) {
+        self = []
+        if flags.contains(.capsLock) { insert(.capsLock) }
+        if flags.contains(.shift) { insert(.shift) }
+        if flags.contains(.control) { insert(.control) }
+        if flags.contains(.option) { insert(.option) }
+        if flags.contains(.command) { insert(.command) }
+        if flags.contains(.numericPad) { insert(.numericPad) }
+        if flags.contains(.function) { insert(.function) }
+    }
+}
+
+extension VVD.VirtualKey {
+    var shortcutCharacter: Character? {
+        switch self {
+        case .a: return "a"
+        case .b: return "b"
+        case .c: return "c"
+        case .d: return "d"
+        case .e: return "e"
+        case .f: return "f"
+        case .g: return "g"
+        case .h: return "h"
+        case .i: return "i"
+        case .j: return "j"
+        case .k: return "k"
+        case .l: return "l"
+        case .m: return "m"
+        case .n: return "n"
+        case .o: return "o"
+        case .p: return "p"
+        case .q: return "q"
+        case .r: return "r"
+        case .s: return "s"
+        case .t: return "t"
+        case .u: return "u"
+        case .v: return "v"
+        case .w: return "w"
+        case .x: return "x"
+        case .y: return "y"
+        case .z: return "z"
+        case .num0, .pad0: return "0"
+        case .num1, .pad1: return "1"
+        case .num2, .pad2: return "2"
+        case .num3, .pad3: return "3"
+        case .num4, .pad4: return "4"
+        case .num5, .pad5: return "5"
+        case .num6, .pad6: return "6"
+        case .num7, .pad7: return "7"
+        case .num8, .pad8: return "8"
+        case .num9, .pad9: return "9"
+        case .period, .padPeriod: return "."
+        case .comma: return ","
+        case .slash, .padSlash: return "/"
+        case .accentTilde: return "`"
+        case .semicolon: return ";"
+        case .quote: return "'"
+        case .backslash: return "\\"
+        case .equal, .padEqual: return "="
+        case .hyphen, .padMinus: return "-"
+        case .padAsterisk: return "*"
+        case .padPlus: return "+"
+        case .openBracket: return "["
+        case .closeBracket: return "]"
+        default: return nil
+        }
+    }
 }
 
 extension KeyEquivalent: ExpressibleByExtendedGraphemeClusterLiteral {

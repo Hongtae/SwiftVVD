@@ -76,6 +76,7 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
     private var entries: [Entry] = []
     private var invalidEntryIDs: Set<MainMenuItem.Identifier> = []
     private var materializationEnvironment = EnvironmentValues()
+    private var focusedValues = FocusedValues()
     private var conversionTask: Task<Void, Never>?
 
     init(owner: WindowController) {
@@ -86,21 +87,30 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
 
     func update(
         items: [MainMenuItem],
-        environment: EnvironmentValues
+        environment: EnvironmentValues,
+        focusedValues: FocusedValues? = nil
     ) {
+        if let focusedValues {
+            self.focusedValues = focusedValues
+        }
         var previous = Dictionary(
             uniqueKeysWithValues: entries.map { ($0.item.id, $0) }
         )
         entries = items.map { item in
             if var entry = previous.removeValue(forKey: item.id) {
                 entry.item = item
-                entry.host.update(item: item, environment: environment)
+                entry.host.update(
+                    item: item,
+                    environment: environment,
+                    focusedValues: self.focusedValues
+                )
                 return entry
             }
 
             let host = MainMenuItemHost(
                 item: item,
-                environment: environment
+                environment: environment,
+                focusedValues: self.focusedValues
             )
             host.delegate = self
             return Entry(item: item, host: host, cachedItems: nil)
@@ -111,6 +121,15 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
 
         materializationEnvironment = environment.untrackedCopy()
         invalidEntryIDs = Set(items.map(\.id))
+    }
+
+    func updateFocusedValues(_ focusedValues: FocusedValues) {
+        guard self.focusedValues != focusedValues else { return }
+        self.focusedValues = focusedValues
+        for entry in entries {
+            entry.host.updateFocusedValues(focusedValues)
+            invalidEntryIDs.insert(entry.item.id)
+        }
     }
 
     @MainActor

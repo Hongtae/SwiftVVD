@@ -86,6 +86,21 @@ final class MainMenuItemHostTests: XCTestCase {
         XCTAssertEqual(firstTitle(in: host.menuItems()), "Updated")
     }
 
+    func testHostRematerializesContentWhenFocusedValuesChange() {
+        // ASSERTIONS commandsMenuHostFocusInvalidationObserved
+        let host = MainMenuItemHost(
+            item: makeItem(content: AnyView(FocusedMenuButton())),
+            environment: EnvironmentValues(),
+            focusedValues: makeFocusedValues("Root")
+        )
+
+        XCTAssertEqual(firstTitle(in: host.menuItems()), "Root")
+
+        host.updateFocusedValues(makeFocusedValues("Presentation"))
+
+        XCTAssertEqual(firstTitle(in: host.menuItems()), "Presentation")
+    }
+
     private func makeItem(
         id: MainMenuItem.Identifier = .custom(UUID()),
         content: AnyView
@@ -102,6 +117,41 @@ final class MainMenuItemHostTests: XCTestCase {
             return nil
         }
         return (item.label ?? item.text)?.string
+    }
+
+    private func makeFocusedValues(_ title: String) -> FocusedValues {
+        FocusedValues(
+            resolving: FocusedValueList(
+                items: [
+                    FocusedValueList.Item(
+                        version: DisplayList.Version(forUpdate: ()),
+                        isFocused: true,
+                        update: { values in
+                            values.menuHostFocusedTitle = title
+                        }
+                    )
+                ]
+            )
+        )
+    }
+}
+
+private struct MenuHostFocusedTitleKey: FocusedValueKey {
+    typealias Value = String
+}
+
+private extension FocusedValues {
+    var menuHostFocusedTitle: String? {
+        get { self[MenuHostFocusedTitleKey.self] }
+        set { self[MenuHostFocusedTitleKey.self] = newValue }
+    }
+}
+
+private struct FocusedMenuButton: View {
+    @FocusedValue(\.menuHostFocusedTitle) private var title
+
+    var body: some View {
+        Button(title ?? "nil") {}
     }
 }
 

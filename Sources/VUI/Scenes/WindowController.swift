@@ -24,6 +24,7 @@ class WindowController: WindowDelegate,
                         ViewGraphDelegate,
                         GraphDelegate,
                         EventGraphHost, EventBindingManagerDelegate,
+                        FocusedValueListHost,
                         @unchecked Sendable {
 
     // MARK: - Types
@@ -254,110 +255,17 @@ class WindowController: WindowDelegate,
         )
     }
 
-    private func keyCharacter(for key: VirtualKey) -> Character? {
-        switch key {
-        case .a: return "a"
-        case .b: return "b"
-        case .c: return "c"
-        case .d: return "d"
-        case .e: return "e"
-        case .f: return "f"
-        case .g: return "g"
-        case .h: return "h"
-        case .i: return "i"
-        case .j: return "j"
-        case .k: return "k"
-        case .l: return "l"
-        case .m: return "m"
-        case .n: return "n"
-        case .o: return "o"
-        case .p: return "p"
-        case .q: return "q"
-        case .r: return "r"
-        case .s: return "s"
-        case .t: return "t"
-        case .u: return "u"
-        case .v: return "v"
-        case .w: return "w"
-        case .x: return "x"
-        case .y: return "y"
-        case .z: return "z"
-        case .num0, .pad0: return "0"
-        case .num1, .pad1: return "1"
-        case .num2, .pad2: return "2"
-        case .num3, .pad3: return "3"
-        case .num4, .pad4: return "4"
-        case .num5, .pad5: return "5"
-        case .num6, .pad6: return "6"
-        case .num7, .pad7: return "7"
-        case .num8, .pad8: return "8"
-        case .num9, .pad9: return "9"
-        case .period, .padPeriod: return "."
-        case .comma: return ","
-        case .slash, .padSlash: return "/"
-        case .accentTilde: return "`"
-        case .semicolon: return ";"
-        case .quote: return "'"
-        case .backslash: return "\\"
-        case .equal, .padEqual: return "="
-        case .hyphen, .padMinus: return "-"
-        case .padAsterisk: return "*"
-        case .padPlus: return "+"
-        case .openBracket: return "["
-        case .closeBracket: return "]"
-        default: return nil
-        }
-    }
-
-    private func keyEquivalent(for event: KeyboardEvent) -> KeyEquivalent? {
-        if let character = event.text.first {
-            return KeyEquivalent(character)
-        }
-        if let character = keyCharacter(for: event.key) {
-            return KeyEquivalent(character)
-        }
-        switch event.key {
-        case .escape: return .escape
-        case .tab: return .tab
-        case .space: return .space
-        case .return, .enter: return .return
-        case .backspace: return .delete
-        case .delete: return .deleteForward
-        case .home: return .home
-        case .end: return .end
-        case .pageUp: return .pageUp
-        case .pageDown: return .pageDown
-        case .up: return .upArrow
-        case .down: return .downArrow
-        case .left: return .leftArrow
-        case .right: return .rightArrow
-        default: return nil
-        }
-    }
-
     private func keyCharacters(for event: KeyboardEvent) -> String {
         if !event.text.isEmpty {
             return event.text
         }
-        if let character = keyCharacter(for: event.key) {
+        if let character = event.key.shortcutCharacter {
             return String(character)
         }
         if event.key == .space {
             return " "
         }
         return ""
-    }
-
-    private func eventModifiers(from flags: KeyboardModifierFlags) -> EventModifiers {
-        var modifiers: EventModifiers = []
-        if flags.contains(.capsLock) { modifiers.insert(.capsLock) }
-        if flags.contains(.shift) { modifiers.insert(.shift) }
-        if flags.contains(.control) { modifiers.insert(.control) }
-        if flags.contains(.option) { modifiers.insert(.option) }
-        if flags.contains(.command) { modifiers.insert(.command) }
-        if flags.contains(.numericPad) { modifiers.insert(.numericPad) }
-        if flags.contains(.function) { modifiers.insert(.function) }
-        return modifiers
     }
 
     private func keyEventPhase(for event: KeyboardEvent) -> EventPhase? {
@@ -392,12 +300,12 @@ class WindowController: WindowDelegate,
     private func keyEvent(from event: KeyboardEvent) -> KeyEvent? {
         guard let phase = keyEventPhase(for: event) else { return nil }
         let stringValue = keyCharacters(for: event)
-        let key = keyEquivalent(for: event)
+        let key = KeyEquivalent(platformEvent: event)
         return KeyEvent(
             phase: phase,
             timestamp: currentTimestamp,
             binding: nil,
-            modifiers: eventModifiers(from: event.modifiers),
+            modifiers: EventModifiers(platformFlags: event.modifiers),
             keys: key.map { String($0.character) } ?? stringValue,
             stringValue: stringValue,
             keyID: AnyHashable(key ?? KeyEquivalent("\0"))
@@ -450,6 +358,16 @@ class WindowController: WindowDelegate,
     private var rootPlatformMenuCapability: Bool?
     // MainActor-owned because changing it also mutates the platform window.
     private var windowCommandMenuGeometryApplied = false
+
+    private struct FocusedValuesState: @unchecked Sendable {
+        var local = FocusedValues()
+        var resolved = FocusedValues()
+    }
+    private let focusedValuesState = Mutex(FocusedValuesState())
+
+    var resolvedFocusedValues: FocusedValues {
+        focusedValuesState.withLock { $0.resolved }
+    }
 
     var date: Date  // latest platform frame timestamp
 
@@ -824,7 +742,8 @@ class WindowController: WindowDelegate,
         }
         presenter.update(
             items: resolvedRootCommands.items,
-            environment: resolvedRootCommands.environment
+            environment: resolvedRootCommands.environment,
+            focusedValues: resolvedFocusedValues
         )
 
         if selection == .pendingPlatformCapability {
@@ -843,7 +762,7 @@ class WindowController: WindowDelegate,
         }
     }
 
-    private func setWindowCommandMenuPresenter(
+    func setWindowCommandMenuPresenter(
         _ presenter: WindowCommandMenuPresenter?
     ) {
         let visibilityChanged = (windowCommandMenuPresenter != nil)
@@ -858,6 +777,55 @@ class WindowController: WindowDelegate,
                 )
             }
         }
+    }
+
+    func focusedValueListDidChange(_ list: FocusedValueList) {
+        let values = FocusedValues(resolving: list)
+        let changed = focusedValuesState.withLock { state in
+            guard state.local != values else { return false }
+            state.local = values
+            return true
+        }
+        if changed {
+            // Preference delivery occurs while the root graph is evaluating.
+            // Resolve and republish the value on the input lane so the same
+            // graph is never invalidated reentrantly from its output rule.
+            scheduleFocusedValuesRecompute()
+        }
+    }
+
+    private func recomputeFocusedValues() {
+        var values = focusedValuesState.withLock { $0.local }
+        if let modalValues: FocusedValues = modalChildren.withLock({ entries in
+            guard let first = entries.first, first.initiated else {
+                return nil
+            }
+            return first.controller.resolvedFocusedValues
+        }) {
+            values.override(with: modalValues)
+        }
+
+        let changed = focusedValuesState.withLock { state in
+            guard state.resolved != values else { return false }
+            state.resolved = values
+            return true
+        }
+        guard changed else { return }
+
+        viewGraph.valuesNeedingUpdate.insert(.focusedValues)
+        viewGraph.setNeedsUpdate(
+            mayDeferUpdate: true,
+            values: .focusedValues
+        )
+        platformCommandMenuPresenter?.updateFocusedValues(values)
+        parentWindow?.scheduleFocusedValuesRecompute()
+    }
+
+    private func scheduleFocusedValuesRecompute() {
+        enqueueInputAction { [weak self] in
+            self?.recomputeFocusedValues()
+        }
+        requestUpdate(after: 0)
     }
 
     @MainActor
@@ -1782,7 +1750,15 @@ class WindowController: WindowDelegate,
 
     // MARK: - Input Handling
 
-    private var _lastKeyboardEventHandler: ObjectIdentifier? = nil
+    private struct KeyboardEventHandlerStream: Hashable {
+        var handlerID: ObjectIdentifier
+        var deviceID: Int
+        var key: VirtualKey
+    }
+
+    // Preserve key-down/key-up ownership without letting an unrelated next key
+    // bypass a newly opened presentation child.
+    private var _lastKeyboardEventHandler: KeyboardEventHandlerStream? = nil
     private var _lastMouseEventHandler: ObjectIdentifier? = nil
 
     @discardableResult
@@ -1790,10 +1766,24 @@ class WindowController: WindowDelegate,
         handleKeyboardEvent(event: event, at: currentTimestamp)
     }
 
+    func handleMenuBoundaryKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+        windowCommandMenuPresenter?.handleKeyboardEvent(
+            event,
+            in: self,
+            isMenuBoundary: true
+        ) == true
+    }
+
     @discardableResult
     func handleKeyboardEvent(event: KeyboardEvent, at time: Time) -> Bool {
         let handleEvent = { (event: KeyboardEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
+            if self.windowCommandMenuPresenter?.handleKeyboardEvent(
+                event,
+                in: self
+            ) == true {
+                return true
+            }
             self.contextMenuRecognizer.handleKeyboardEvent(event)
             var keyConsumed = false
             if let keyEvent = self.keyEvent(from: event) {
@@ -1820,13 +1810,21 @@ class WindowController: WindowDelegate,
         handlers.append((id: ObjectIdentifier(self), action: handleEvent))
 
         if let _lastKeyboardEventHandler,
-           let index = handlers.firstIndex(where: { _lastKeyboardEventHandler == $0.id }) {
+           _lastKeyboardEventHandler.deviceID == event.deviceID,
+           _lastKeyboardEventHandler.key == event.key,
+           let index = handlers.firstIndex(where: {
+               _lastKeyboardEventHandler.handlerID == $0.id
+           }) {
             let tmp = handlers.remove(at: index)
             handlers.insert(tmp, at: 0)
         }
         for handler in handlers {
             if handler.action(event) {
-                _lastKeyboardEventHandler = handler.id
+                _lastKeyboardEventHandler = KeyboardEventHandlerStream(
+                    handlerID: handler.id,
+                    deviceID: event.deviceID,
+                    key: event.key
+                )
                 return true
             }
         }
@@ -2663,7 +2661,9 @@ class WindowController: WindowDelegate,
     func updateTransform()         {}  // Transform root input is not wired yet.
     func updateFocusStore()        {}  // Focus store is not wired yet.
     func updateFocusedItem()       {}  // Focused item is not wired yet.
-    func updateFocusedValues()     {}  // Focused values are not wired yet.
+    func updateFocusedValues() {
+        viewGraph.setFocusedValues(resolvedFocusedValues)
+    }
     func updateAccessibilityEnvironment() {}  // Accessibility root input is not wired yet.
 
     // MARK: - Presentation Child / Modal Management (nested structure)
@@ -2974,6 +2974,7 @@ class WindowController: WindowDelegate,
                                   deviceID: 0,
                                   isTopMost: false,
                                   at: self.currentTimestamp)
+            recomputeFocusedValues()
         }
     }
 
@@ -2988,6 +2989,7 @@ class WindowController: WindowDelegate,
                                   deviceID: 0,
                                   isTopMost: false,
                                   at: self.currentTimestamp)
+            self.recomputeFocusedValues()
         }
     }
 
@@ -3078,6 +3080,9 @@ class WindowController: WindowDelegate,
         // Preference-driven: clean up binding + onDismiss.
         e.session.cleanup(reason: reason, notifyDismiss: !e.dismissCallbackDelivered)
 
+        if wasFirst {
+            scheduleFocusedValuesRecompute()
+        }
         if wasFirst { _showNextInQueue() }
     }
 
@@ -3103,6 +3108,9 @@ class WindowController: WindowDelegate,
             // First entry was active and uses byParent. Queued entries were never shown and use cancelled.
             let reason: ModalDismissReason = (i == 0) ? .byParent : .cancelled
             entry.session.cleanup(reason: reason)
+        }
+        if !entries.isEmpty {
+            scheduleFocusedValuesRecompute()
         }
     }
 
