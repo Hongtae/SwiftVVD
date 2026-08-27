@@ -237,6 +237,9 @@ public protocol Window: AnyObject {
     
     var title: String { get set }
 
+    /// The platform system-menu capability for this window, when supported.
+    var menuController: (any WindowMenuController)? { get }
+
     var delegate: WindowDelegate? { get }
 
     init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any])
@@ -305,6 +308,8 @@ extension Window {
 
     public func enableTextInput(_: Bool, forDeviceID: Int) {}
     public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
+
+    public var menuController: (any WindowMenuController)? { nil }
 
     public var canPresentModalWindow: Bool { false }
     public var modalWindows: [any Window] { [] }

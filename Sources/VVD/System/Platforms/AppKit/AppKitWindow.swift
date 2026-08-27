@@ -59,7 +59,22 @@ final class AppKitWindow: Window {
 
     private var window: NSWindow?
     private var view: AppKitView?
+    private var _menuController: AppKitWindowMenuController?
     var nsView: NSView? { view as? NSView }
+
+    var menuController: (any WindowMenuController)? {
+        guard let window else {
+            return nil
+        }
+        // The controller retains the current snapshot, native callback targets,
+        // and delegate relationship, so its identity must remain window-stable.
+        if let _menuController {
+            return _menuController
+        }
+        let controller = AppKitWindowMenuController(window: window)
+        _menuController = controller
+        return controller
+    }
 
     var origin: CGPoint {
         get {
@@ -281,6 +296,9 @@ final class AppKitWindow: Window {
 
     func close() {
         if let window {
+            _menuController?.invalidate()
+            _menuController = nil
+
             // close all modal windows
             let entries = self.modalWindowQueue
             self.modalWindowQueue.removeAll()
