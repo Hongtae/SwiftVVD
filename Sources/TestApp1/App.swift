@@ -20,5 +20,30 @@ struct TestApp1: App {
             forInactiveState: 30,
             renderingMode: .continuousWithDisplaySync
         )
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("About Command Lab") {
+                    print("Command Lab: About")
+                }
+            }
+
+            CommandMenu("Command Lab") {
+                Button("Run Menu Action", systemImage: "play") {
+                    print("Command Lab: Run Menu Action")
+                }
+                .keyboardShortcut("R", modifiers: [.command, .shift])
+
+                Menu("Nested Commands") {
+                    Button("Nested Action") {
+                        print("Command Lab: Nested Action")
+                    }
+                }
+
+                Divider()
+
+                Button("Disabled Action") {}
+                    .disabled(true)
+            }
+        }
     }
 }
