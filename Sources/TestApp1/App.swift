@@ -10,11 +10,14 @@ struct TestApp1: App {
         }
         .defaultSize(width: 860, height: 700)
         .defaultPosition(.zero)
-        .drawDebugInfo(.frameInfo,
-                       .updateTiming,
-                       .queue,
-                       .appState,
-                       .windowState)
+        .drawDebugInfo(
+            .frameInfo,
+            .updateTiming,
+            .queue,
+            .appState,
+            .windowState,
+            position: .init(x: 5, y: 33)
+        )
         .updateFrameRate(
             forActiveState: 60,
             forInactiveState: 30,
