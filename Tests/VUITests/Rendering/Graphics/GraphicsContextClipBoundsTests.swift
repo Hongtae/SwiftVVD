@@ -1235,7 +1235,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
             )
             host.updateProperties(properties)
             host.updateIndicatorPresentation(
-                outerSize: CGSize(width: 6, height: 4),
+                outerSize: CGSize(width: 12, height: 10),
                 metrics: ScrollIndicatorMetricsStorage(
                     vertical: ScrollIndicatorMetrics(
                         thickness: 2,
@@ -1253,8 +1253,8 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
             return (host, HostingScrollView.PlatformContainer(scrollView: host))
         }
 
-        let width = 12
-        let height = 10
+        let width = 16
+        let height = 14
         let queue = try XCTUnwrap(deviceContext.renderQueue())
         let commandBuffer = try XCTUnwrap(queue.makeCommandBuffer())
         let context = try XCTUnwrap(GraphicsContext(
@@ -1269,7 +1269,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         context.clear(with: .clear)
 
         let contentBounds = CGRect(x: 0, y: 0, width: 4, height: 8)
-        let outerFrame = CGRect(x: 2, y: 2, width: 6, height: 4)
+        let outerFrame = CGRect(x: 2, y: 2, width: 12, height: 10)
         var contents = DisplayList()
         contents.appendItem(bounds: contentBounds) { context in
             context.fill(Path(contentBounds), with: .color(.red))
@@ -1300,9 +1300,9 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         }
 
         XCTAssertEqual(pixel(x: 3, y: 3), [255, 56, 60, 255])
-        XCTAssertEqual(pixel(x: 7, y: 2), [0, 0, 0, 12])
-        XCTAssertEqual(pixel(x: 7, y: 3), [0, 0, 0, 73])
-        XCTAssertEqual(pixel(x: 8, y: 3), [0, 0, 0, 0])
+        XCTAssertEqual(pixel(x: 10, y: 5), [0, 0, 0, 73])
+        XCTAssertEqual(pixel(x: 10, y: 6), [0, 0, 0, 133])
+        XCTAssertEqual(pixel(x: 11, y: 6), [0, 0, 0, 0])
     }
 
     func testPlatformGroupUsesLiveViewportWithoutRebuildingDisplayListOnGPU() throws {

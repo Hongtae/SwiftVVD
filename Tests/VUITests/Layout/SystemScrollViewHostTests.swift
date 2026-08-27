@@ -39,20 +39,24 @@ final class SystemScrollViewHostTests: XCTestCase {
             overlayOpacity: 0
         )
 
-        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 90, height: 74))
+        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 84, height: 68))
         XCTAssertEqual(
             layout.reservedInsets,
-            EdgeInsets(top: 0, leading: 0, bottom: 6, trailing: 10)
+            EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 16)
         )
-        XCTAssertEqual(layout.horizontal?.trackFrame, CGRect(x: 0, y: 74, width: 90, height: 6))
-        XCTAssertEqual(layout.horizontal?.thumbFrame, CGRect(x: 31.5, y: 74, width: 27, height: 6))
+        XCTAssertEqual(layout.horizontal?.trackFrame, CGRect(x: 3, y: 71, width: 78, height: 6))
+        let horizontal = try XCTUnwrap(layout.horizontal)
+        XCTAssertEqual(horizontal.thumbFrame.minX, 30.3, accuracy: 0.001)
+        XCTAssertEqual(horizontal.thumbFrame.minY, 71, accuracy: 0.001)
+        XCTAssertEqual(horizontal.thumbFrame.width, 21.84, accuracy: 0.001)
+        XCTAssertEqual(horizontal.thumbFrame.height, 6, accuracy: 0.001)
         let vertical = try XCTUnwrap(layout.vertical)
-        XCTAssertEqual(vertical.trackFrame, CGRect(x: 90, y: 0, width: 10, height: 74))
-        XCTAssertEqual(vertical.thumbFrame.minY, 23.31, accuracy: 0.001)
-        XCTAssertEqual(vertical.thumbFrame.height, 27.38, accuracy: 0.001)
+        XCTAssertEqual(vertical.trackFrame, CGRect(x: 87, y: 3, width: 10, height: 62))
+        XCTAssertEqual(vertical.thumbFrame.minY, 22.53, accuracy: 0.001)
+        XCTAssertEqual(vertical.thumbFrame.height, 21.08, accuracy: 0.001)
         XCTAssertNil(vertical.proximityFrame)
         XCTAssertEqual(vertical.trackOpacity, 1)
-        XCTAssertEqual(layout.cornerFrame, CGRect(x: 90, y: 74, width: 10, height: 6))
+        XCTAssertEqual(layout.cornerFrame, CGRect(x: 84, y: 68, width: 16, height: 12))
     }
 
     func testFixedAreaNeverHidesIndicatorWithoutReleasingReservedViewport() {
@@ -78,8 +82,8 @@ final class SystemScrollViewHostTests: XCTestCase {
             overlayOpacity: 1
         )
 
-        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 68, height: 60))
-        XCTAssertEqual(layout.reservedInsets.trailing, 12)
+        XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 62, height: 60))
+        XCTAssertEqual(layout.reservedInsets.trailing, 18)
         XCTAssertNil(layout.vertical)
     }
 
@@ -112,12 +116,181 @@ final class SystemScrollViewHostTests: XCTestCase {
         XCTAssertEqual(layout.viewportFrame, CGRect(x: 0, y: 0, width: 100, height: 50))
         XCTAssertEqual(layout.reservedInsets, EdgeInsets())
         let horizontal = try XCTUnwrap(layout.horizontal)
-        XCTAssertEqual(horizontal.trackFrame, CGRect(x: 0, y: 44, width: 100, height: 6))
-        XCTAssertEqual(horizontal.thumbFrame.minX, 46.666, accuracy: 0.001)
+        XCTAssertEqual(horizontal.trackFrame, CGRect(x: 3, y: 41, width: 94, height: 6))
+        XCTAssertEqual(horizontal.thumbFrame.minX, 45.666, accuracy: 0.001)
         XCTAssertEqual(horizontal.thumbFrame.width, 30)
         XCTAssertEqual(horizontal.trackOpacity, 0)
         XCTAssertEqual(horizontal.opacity, 0.4)
         XCTAssertFalse(horizontal.isFixedArea)
+    }
+
+    // ASSERTIONS scrollIndicatorPresentationGeometryObserved
+    func testDefaultScrollIndicatorMetricsResolveByPresentationStyle() throws {
+        let configuration = ScrollViewConfiguration(axes: .vertical)
+
+        func layout(
+            style: ScrollIndicatorStyle,
+            metrics: ScrollIndicatorMetricsStorage = ScrollIndicatorMetricsStorage(),
+            contentOffset: CGPoint = .zero,
+            contentHeight: CGFloat = 240,
+            expansion: CGFloat = 0
+        ) -> ScrollIndicatorLayout {
+            var properties = ScrollEnvironmentProperties()
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: style
+            )
+            return ScrollIndicatorLayout.make(
+                outerSize: CGSize(width: 100, height: 80),
+                contentOffset: contentOffset,
+                contentSize: CGSize(width: 100, height: contentHeight),
+                contentInsets: EdgeInsets(),
+                configuration: configuration,
+                properties: properties,
+                metrics: metrics,
+                layoutDirection: .leftToRight,
+                overlayOpacity: 1,
+                expansion: ScrollIndicatorExpansion(vertical: expansion)
+            )
+        }
+
+        let automatic = layout(style: .automatic)
+        let collapsedOverlay = layout(style: .overlay)
+        let expandedOverlay = layout(style: .overlay, expansion: 1)
+        let fixedArea = layout(style: .fixedArea)
+
+        XCTAssertEqual(automatic.vertical?.trackFrame, collapsedOverlay.vertical?.trackFrame)
+        XCTAssertEqual(
+            collapsedOverlay.vertical?.trackFrame,
+            CGRect(x: 91, y: 3, width: 6, height: 74)
+        )
+        XCTAssertEqual(
+            expandedOverlay.vertical?.trackFrame,
+            CGRect(x: 86, y: 3, width: 11, height: 74)
+        )
+        XCTAssertEqual(
+            expandedOverlay.vertical?.proximityFrame,
+            CGRect(x: 84, y: 3, width: 15, height: 74)
+        )
+        XCTAssertEqual(
+            fixedArea.vertical?.trackFrame,
+            CGRect(x: 86, y: 3, width: 11, height: 74)
+        )
+        XCTAssertEqual(fixedArea.reservedInsets.trailing, 17)
+        XCTAssertEqual(fixedArea.viewportFrame.width, 83)
+
+        let minimumAutomatic = layout(
+            style: .automatic,
+            contentHeight: 2_000
+        )
+        let minimumOverlay = layout(
+            style: .overlay,
+            contentHeight: 2_000
+        )
+        let minimumFixedArea = layout(
+            style: .fixedArea,
+            contentHeight: 2_000
+        )
+        XCTAssertEqual(minimumAutomatic.vertical?.thumbFrame.height, 26)
+        XCTAssertEqual(minimumOverlay.vertical?.thumbFrame.height, 26)
+        XCTAssertEqual(minimumFixedArea.vertical?.thumbFrame.height, 20)
+
+        let trailingOverlay = layout(
+            style: .overlay,
+            contentOffset: CGPoint(x: 0, y: 160)
+        )
+        XCTAssertEqual(collapsedOverlay.vertical?.thumbFrame.minY, 3)
+        XCTAssertEqual(trailingOverlay.vertical?.thumbFrame.maxY, 77)
+
+        let customMetrics = ScrollIndicatorMetricsStorage(
+            vertical: ScrollIndicatorMetrics(
+                thickness: 7,
+                minimumThumbLength: 24
+            )
+        )
+        let customFixedArea = layout(
+            style: .fixedArea,
+            metrics: customMetrics,
+            contentHeight: 2_000
+        )
+        let customOverlay = layout(
+            style: .overlay,
+            metrics: customMetrics,
+            contentHeight: 2_000
+        )
+        XCTAssertEqual(customFixedArea.vertical?.trackFrame.width, 7)
+        XCTAssertEqual(customFixedArea.reservedInsets.trailing, 13)
+        XCTAssertEqual(customFixedArea.vertical?.thumbFrame.height, 24)
+        XCTAssertEqual(customOverlay.vertical?.thumbFrame.height, 24)
+
+        let zeroThicknessFixedArea = layout(
+            style: .fixedArea,
+            metrics: ScrollIndicatorMetricsStorage(
+                vertical: ScrollIndicatorMetrics(
+                    thickness: 0,
+                    minimumThumbLength: 24
+                )
+            )
+        )
+        XCTAssertEqual(zeroThicknessFixedArea.reservedInsets.trailing, 0)
+    }
+
+    func testPresentationMetricsDriveSharedIndicatorGeometry() throws {
+        let configuration = ScrollViewConfiguration(axes: .vertical)
+        let presentation = ScrollIndicatorPresentationMetrics(
+            overlayThickness: 10,
+            overlayMinimumThumbLength: 30,
+            fixedAreaThickness: 14,
+            fixedAreaMinimumThumbLength: 28,
+            trackSideInset: 4,
+            trackEndInset: 5,
+            overlayExpansion: 6,
+            overlayProximityPadding: 3
+        )
+        let metrics = ScrollIndicatorMetricsStorage(presentation: presentation)
+
+        func layout(
+            style: ScrollIndicatorStyle,
+            expansion: CGFloat = 0
+        ) -> ScrollIndicatorLayout {
+            var properties = ScrollEnvironmentProperties()
+            properties.verticalIndicator = ScrollIndicatorConfiguration(
+                visibility: .visible,
+                style: style
+            )
+            return ScrollIndicatorLayout.make(
+                outerSize: CGSize(width: 120, height: 100),
+                contentOffset: .zero,
+                contentSize: CGSize(width: 120, height: 400),
+                contentInsets: EdgeInsets(),
+                configuration: configuration,
+                properties: properties,
+                metrics: metrics,
+                layoutDirection: .leftToRight,
+                overlayOpacity: 1,
+                expansion: ScrollIndicatorExpansion(vertical: expansion)
+            )
+        }
+
+        let overlay = layout(style: .overlay, expansion: 1)
+        XCTAssertEqual(
+            overlay.vertical?.trackFrame,
+            CGRect(x: 100, y: 5, width: 16, height: 90)
+        )
+        XCTAssertEqual(
+            overlay.vertical?.proximityFrame,
+            CGRect(x: 97, y: 5, width: 22, height: 90)
+        )
+        XCTAssertEqual(overlay.vertical?.thumbFrame.height, 30)
+
+        let fixedArea = layout(style: .fixedArea)
+        XCTAssertEqual(fixedArea.reservedInsets.trailing, 22)
+        XCTAssertEqual(fixedArea.viewportFrame.width, 98)
+        XCTAssertEqual(
+            fixedArea.vertical?.trackFrame,
+            CGRect(x: 102, y: 5, width: 14, height: 90)
+        )
+        XCTAssertEqual(fixedArea.vertical?.thumbFrame.height, 28)
     }
 
     // ASSERTIONS scrollIndicatorPresentationGeometryObserved scrollIndicatorSkinRuntimeObserved
@@ -170,42 +343,42 @@ final class SystemScrollViewHostTests: XCTestCase {
         )
 
         XCTAssertEqual(collapsed.horizontal?.trackFrame, CGRect(
-            x: 0,
-            y: 74,
-            width: 100,
+            x: 3,
+            y: 71,
+            width: 94,
             height: 6
         ))
         XCTAssertEqual(expanded.horizontal?.trackFrame, CGRect(
-            x: 0,
-            y: 69,
-            width: 100,
+            x: 3,
+            y: 66,
+            width: 94,
             height: 11
         ))
         XCTAssertEqual(expanded.horizontal?.proximityFrame, CGRect(
-            x: 0,
-            y: 65,
-            width: 100,
+            x: 3,
+            y: 64,
+            width: 94,
             height: 15
         ))
         XCTAssertEqual(collapsed.horizontal?.trackOpacity, 0)
         XCTAssertEqual(expanded.horizontal?.trackOpacity, 1)
         XCTAssertEqual(collapsed.vertical?.trackFrame, CGRect(
-            x: 92,
-            y: 0,
+            x: 89,
+            y: 3,
             width: 8,
-            height: 80
+            height: 74
         ))
         XCTAssertEqual(expanded.vertical?.trackFrame, CGRect(
-            x: 87,
-            y: 0,
+            x: 84,
+            y: 3,
             width: 13,
-            height: 80
+            height: 74
         ))
         XCTAssertEqual(expanded.vertical?.proximityFrame, CGRect(
-            x: 83,
-            y: 0,
+            x: 82,
+            y: 3,
             width: 17,
-            height: 80
+            height: 74
         ))
         XCTAssertEqual(collapsed.vertical?.trackOpacity, 0)
         XCTAssertEqual(expanded.vertical?.trackOpacity, 1)
@@ -229,9 +402,9 @@ final class SystemScrollViewHostTests: XCTestCase {
             overlayOpacity: 1,
             expansion: ScrollIndicatorExpansion(vertical: 1)
         )
-        XCTAssertEqual(rtl.vertical?.trackFrame.minX, 0)
+        XCTAssertEqual(rtl.vertical?.trackFrame.minX, 3)
         XCTAssertEqual(rtl.vertical?.trackFrame.width, 13)
-        XCTAssertEqual(rtl.vertical?.proximityFrame?.minX, 0)
+        XCTAssertEqual(rtl.vertical?.proximityFrame?.minX, 1)
         XCTAssertEqual(rtl.vertical?.proximityFrame?.width, 17)
     }
 
@@ -281,19 +454,19 @@ final class SystemScrollViewHostTests: XCTestCase {
             offset: CGPoint(x: -25, y: -25),
             direction: .leftToRight
         )
-        XCTAssertEqual(normalStart.horizontal?.thumbFrame.width, 40)
-        XCTAssertEqual(normalStart.vertical?.thumbFrame.height, 40)
+        XCTAssertEqual(normalStart.horizontal?.thumbFrame.width, 37.6)
+        XCTAssertEqual(normalStart.vertical?.thumbFrame.height, 37.6)
         XCTAssertEqual(overscrolledStart.horizontal?.thumbFrame, CGRect(
-            x: 0,
-            y: 92,
-            width: 30,
+            x: 3,
+            y: 89,
+            width: 28.2,
             height: 8
         ))
         XCTAssertEqual(overscrolledStart.vertical?.thumbFrame, CGRect(
-            x: 92,
-            y: 0,
+            x: 89,
+            y: 3,
             width: 8,
-            height: 30
+            height: 28.2
         ))
 
         let overscrolledEnd = layout(
@@ -301,16 +474,16 @@ final class SystemScrollViewHostTests: XCTestCase {
             direction: .leftToRight
         )
         XCTAssertEqual(overscrolledEnd.horizontal?.thumbFrame, CGRect(
-            x: 70,
-            y: 92,
-            width: 30,
+            x: 68.8,
+            y: 89,
+            width: 28.2,
             height: 8
         ))
         XCTAssertEqual(overscrolledEnd.vertical?.thumbFrame, CGRect(
-            x: 92,
-            y: 70,
+            x: 89,
+            y: 68.8,
             width: 8,
-            height: 30
+            height: 28.2
         ))
 
         let fullyOverscrolled = layout(
@@ -318,14 +491,14 @@ final class SystemScrollViewHostTests: XCTestCase {
             direction: .leftToRight
         )
         XCTAssertEqual(fullyOverscrolled.horizontal?.thumbFrame, CGRect(
-            x: 80,
-            y: 92,
+            x: 77,
+            y: 89,
             width: 20,
             height: 8
         ))
         XCTAssertEqual(fullyOverscrolled.vertical?.thumbFrame, CGRect(
-            x: 92,
-            y: 0,
+            x: 89,
+            y: 3,
             width: 8,
             height: 20
         ))
@@ -338,10 +511,10 @@ final class SystemScrollViewHostTests: XCTestCase {
             offset: CGPoint(x: 175, y: 0),
             direction: .rightToLeft
         )
-        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.minX, 70)
-        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.maxX, 100)
-        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.minX, 0)
-        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.maxX, 30)
+        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.minX, 68.8)
+        XCTAssertEqual(rtlStart.horizontal?.thumbFrame.maxX, 97)
+        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.minX, 3)
+        XCTAssertEqual(rtlEnd.horizontal?.thumbFrame.maxX, 31.2)
     }
 
     func testOverlayScrollIndicatorRequiresOverflowAndPresentationPermission() {
@@ -441,6 +614,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 viewportSize: CGSize(width: 90, height: 100)
             )
             let thumb = try XCTUnwrap(host.host.indicatorLayout.vertical?.thumbFrame)
+            let track = try XCTUnwrap(host.host.indicatorLayout.vertical?.trackFrame)
             let start = CGPoint(x: thumb.midX, y: thumb.midY)
             XCTAssertEqual(
                 host.scrollIndicatorInteractionPart(at: start),
@@ -454,9 +628,10 @@ final class SystemScrollViewHostTests: XCTestCase {
             XCTAssertEqual(host.currentPhaseState.phase, .interacting)
             XCTAssertEqual(host.currentPhaseState.velocity, .zero)
 
+            let halfTravel = (track.height - thumb.height) / 2
             host.updateScrollIndicatorInteraction(at: CGPoint(
                 x: -200,
-                y: start.y + 40
+                y: start.y + halfTravel
             ))
             XCTAssertEqual(
                 host.makeLayoutState().contentOffset.y,
@@ -482,6 +657,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 layoutDirection: .rightToLeft
             )
             let thumb = try XCTUnwrap(host.host.indicatorLayout.horizontal?.thumbFrame)
+            let track = try XCTUnwrap(host.host.indicatorLayout.horizontal?.trackFrame)
             let start = CGPoint(x: thumb.midX, y: thumb.midY)
             XCTAssertTrue(host.beginScrollIndicatorInteraction(
                 .thumb(.horizontal),
@@ -489,8 +665,9 @@ final class SystemScrollViewHostTests: XCTestCase {
                 time: Time(seconds: 1)
             ))
 
+            let halfTravel = (track.width - thumb.width) / 2
             host.updateScrollIndicatorInteraction(at: CGPoint(
-                x: start.x - 40,
+                x: start.x - halfTravel,
                 y: -100
             ))
             XCTAssertEqual(
@@ -624,6 +801,8 @@ final class SystemScrollViewHostTests: XCTestCase {
                 responders.value.first as? HostingScrollViewResponder
             )
             let thumb = try XCTUnwrap(host.host.indicatorLayout.vertical?.thumbFrame)
+            let track = try XCTUnwrap(host.host.indicatorLayout.vertical?.trackFrame)
+            let halfTravel = (track.height - thumb.height) / 2
             let start = CGPoint(
                 x: position.value.x + thumb.midX,
                 y: position.value.y + thumb.midY
@@ -652,13 +831,13 @@ final class SystemScrollViewHostTests: XCTestCase {
 
             let outside = CGPoint(
                 x: position.value.x - 200,
-                y: position.value.y + thumb.midY + 40
+                y: position.value.y + thumb.midY + halfTravel
             )
             let active = ScrollEvent(
                 timestamp: Time(seconds: 1.1),
                 phase: .active,
                 binding: nil,
-                translation: CGSize(width: -200, height: 40),
+                translation: CGSize(width: -200, height: halfTravel),
                 modifiers: [],
                 hitTestLocation: outside
             )
@@ -677,7 +856,7 @@ final class SystemScrollViewHostTests: XCTestCase {
                 timestamp: Time(seconds: 1.2),
                 phase: .ended,
                 binding: nil,
-                translation: CGSize(width: -200, height: 40),
+                translation: CGSize(width: -200, height: halfTravel),
                 modifiers: [],
                 hitTestLocation: outside
             )

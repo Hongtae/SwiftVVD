@@ -3366,13 +3366,13 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let geometry = try XCTUnwrap(
                 Attribute<[ScrollGeometryState]>(geometryID).value.first?.geometry
             )
-            XCTAssertEqual(geometry.containerSize, CGSize(width: 90, height: 74))
+            XCTAssertEqual(geometry.containerSize, CGSize(width: 84, height: 68))
             XCTAssertEqual(geometry.contentSize, CGSize(width: 300, height: 400))
 
             let layout = try XCTUnwrap(outputs._layoutComputer.attribute).value
             XCTAssertEqual(
                 layout.sizeThatFits(.unspecified),
-                CGSize(width: 310, height: 406)
+                CGSize(width: 316, height: 412)
             )
 
             let displayID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
@@ -3385,10 +3385,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let hostLayout = try XCTUnwrap(
                 factory.platformGroupContainer as? HostingScrollView.PlatformGroupContainer
             ).indicatorLayout
-            XCTAssertEqual(hostLayout.viewportFrame, CGRect(x: 0, y: 0, width: 90, height: 74))
-            XCTAssertEqual(hostLayout.horizontal?.trackFrame, CGRect(x: 0, y: 74, width: 90, height: 6))
-            XCTAssertEqual(hostLayout.vertical?.trackFrame, CGRect(x: 90, y: 0, width: 10, height: 74))
-            XCTAssertEqual(hostLayout.cornerFrame, CGRect(x: 90, y: 74, width: 10, height: 6))
+            XCTAssertEqual(hostLayout.viewportFrame, CGRect(x: 0, y: 0, width: 84, height: 68))
+            XCTAssertEqual(hostLayout.horizontal?.trackFrame, CGRect(x: 3, y: 71, width: 78, height: 6))
+            XCTAssertEqual(hostLayout.vertical?.trackFrame, CGRect(x: 87, y: 3, width: 10, height: 62))
+            XCTAssertEqual(hostLayout.cornerFrame, CGRect(x: 84, y: 68, width: 16, height: 12))
         }
     }
 

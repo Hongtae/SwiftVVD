@@ -604,12 +604,26 @@ class HostingScrollView {
     }
 
     final class PlatformContainer: PlatformGroupFactory {
-        /// The flat backend skin keeps the native semantic track role while
-        /// leaving platform material rendering out of the logical scroll host.
-        private static let indicatorTrackStyle = OffsetShapeStyle(
-            base: SystemColorsStyle(),
-            offset: 4
-        )
+        /// Built-in drawing values remain local until a common control-theme
+        /// contract defines how host-rendered controls obtain their appearance.
+        private enum IndicatorDrawingDefaults {
+            static let trackStyle = OffsetShapeStyle(
+                base: SystemColorsStyle(),
+                offset: 4
+            )
+            static let thumbBodyColor = Color.secondary
+            static let lightOverlayOutlineColor = Color.white.opacity(0.15)
+            static let darkOutlineColor = Color.black.opacity(0.20)
+            static let maximumOutlineWidth: CGFloat = 1
+            static let outlineWidthFraction: CGFloat = 0.25
+
+            static func outlineWidth(for frame: CGRect) -> CGFloat {
+                min(
+                    maximumOutlineWidth,
+                    min(frame.width, frame.height) * outlineWidthFraction
+                )
+            }
+        }
 
         let scrollView: HostingScrollView
         private(set) var safeAreaInsets = EdgeInsets()
@@ -685,7 +699,7 @@ class HostingScrollView {
                 trackContext.opacity *= indicator.trackOpacity
                 trackContext.fill(
                     Path(indicator.trackFrame),
-                    with: .style(Self.indicatorTrackStyle)
+                    with: .style(IndicatorDrawingDefaults.trackStyle)
                 )
             }
             if let cornerFrame = layout.cornerFrame {
@@ -698,7 +712,7 @@ class HostingScrollView {
                     cornerContext.opacity *= opacity
                     cornerContext.fill(
                         Path(cornerFrame),
-                        with: .style(Self.indicatorTrackStyle)
+                        with: .style(IndicatorDrawingDefaults.trackStyle)
                     )
                 }
             }
@@ -723,12 +737,12 @@ class HostingScrollView {
             ) else {
                 context.fill(
                     Capsule().path(in: frame),
-                    with: .color(.secondary)
+                    with: .color(IndicatorDrawingDefaults.thumbBodyColor)
                 )
                 return
             }
 
-            let borderWidth = min(1, min(frame.width, frame.height) / 4)
+            let borderWidth = IndicatorDrawingDefaults.outlineWidth(for: frame)
             context.fill(
                 Capsule().path(in: frame),
                 with: .color(outlineColor)
@@ -737,7 +751,7 @@ class HostingScrollView {
             guard bodyFrame.width > 0, bodyFrame.height > 0 else { return }
             context.fill(
                 Capsule().path(in: bodyFrame),
-                with: .color(.secondary)
+                with: .color(IndicatorDrawingDefaults.thumbBodyColor)
             )
         }
 
@@ -747,9 +761,11 @@ class HostingScrollView {
         ) -> Color? {
             switch colorScheme {
             case .light:
-                indicator.isFixedArea ? nil : .white.opacity(0.15)
+                indicator.isFixedArea
+                    ? nil
+                    : IndicatorDrawingDefaults.lightOverlayOutlineColor
             case .dark:
-                .black.opacity(0.20)
+                IndicatorDrawingDefaults.darkOutlineColor
             }
         }
     }

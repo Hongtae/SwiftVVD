@@ -7,20 +7,66 @@
 
 import Foundation
 
+/// Collects the layout values shared by indicator presentation geometry.
+///
+/// Layout, drawing admission, hover admission, and pointer interaction resolve
+/// the same value so a later theme integration has one metric injection point.
+struct ScrollIndicatorPresentationMetrics: Equatable, Hashable, Sendable {
+    static let defaultValue: ScrollIndicatorPresentationMetrics = {
+        let axisMetrics = ScrollIndicatorMetrics()
+        return ScrollIndicatorPresentationMetrics(
+            overlayThickness: axisMetrics.thickness,
+            overlayMinimumThumbLength: axisMetrics.minimumThumbLength,
+            fixedAreaThickness: 11,
+            fixedAreaMinimumThumbLength: 20,
+            trackSideInset: 3,
+            trackEndInset: 3,
+            overlayExpansion: 5,
+            overlayProximityPadding: 2
+        )
+    }()
+
+    var overlayThickness: CGFloat
+    var overlayMinimumThumbLength: CGFloat
+    var fixedAreaThickness: CGFloat
+    var fixedAreaMinimumThumbLength: CGFloat
+    var trackSideInset: CGFloat
+    var trackEndInset: CGFloat
+    var overlayExpansion: CGFloat
+    var overlayProximityPadding: CGFloat
+
+    var resolved: ScrollIndicatorPresentationMetrics {
+        ScrollIndicatorPresentationMetrics(
+            overlayThickness: Self.resolvedLength(overlayThickness),
+            overlayMinimumThumbLength:
+                Self.resolvedLength(overlayMinimumThumbLength),
+            fixedAreaThickness: Self.resolvedLength(fixedAreaThickness),
+            fixedAreaMinimumThumbLength:
+                Self.resolvedLength(fixedAreaMinimumThumbLength),
+            trackSideInset: Self.resolvedLength(trackSideInset),
+            trackEndInset: Self.resolvedLength(trackEndInset),
+            overlayExpansion: Self.resolvedLength(overlayExpansion),
+            overlayProximityPadding: Self.resolvedLength(overlayProximityPadding)
+        )
+    }
+
+    private static func resolvedLength(_ value: CGFloat) -> CGFloat {
+        value.isFinite ? max(value, 0) : 0
+    }
+}
+
 /// Geometry settings shared by overlay and fixed-area scroll indicators.
 public struct ScrollIndicatorMetrics: Equatable, Hashable, Sendable {
     public var thickness: CGFloat
     public var minimumThumbLength: CGFloat
 
     public init(
-        thickness: CGFloat = 8,
-        minimumThumbLength: CGFloat = 24
+        thickness: CGFloat = 6,
+        minimumThumbLength: CGFloat = 26
     ) {
         self.thickness = thickness
         self.minimumThumbLength = minimumThumbLength
     }
-
-    static let defaultValue = ScrollIndicatorMetrics()
 
     var resolved: ScrollIndicatorMetrics {
         ScrollIndicatorMetrics(
@@ -36,16 +82,63 @@ public struct ScrollIndicatorMetrics: Equatable, Hashable, Sendable {
 
 /// Stores independent indicator metrics for each scroll axis in the environment.
 struct ScrollIndicatorMetricsStorage: Equatable, Sendable {
-    var horizontal = ScrollIndicatorMetrics.defaultValue
-    var vertical = ScrollIndicatorMetrics.defaultValue
+    private(set) var presentation: ScrollIndicatorPresentationMetrics
+    private(set) var horizontal: ScrollIndicatorMetrics
+    private(set) var vertical: ScrollIndicatorMetrics
+    private var hasCustomHorizontalMetrics: Bool
+    private var hasCustomVerticalMetrics: Bool
+
+    init(
+        presentation: ScrollIndicatorPresentationMetrics =
+            .defaultValue,
+        horizontal: ScrollIndicatorMetrics? = nil,
+        vertical: ScrollIndicatorMetrics? = nil
+    ) {
+        let presentation = presentation.resolved
+        let defaultAxisMetrics = ScrollIndicatorMetrics(
+            thickness: presentation.overlayThickness,
+            minimumThumbLength: presentation.overlayMinimumThumbLength
+        )
+        self.presentation = presentation
+        self.horizontal = horizontal ?? defaultAxisMetrics
+        self.vertical = vertical ?? defaultAxisMetrics
+        self.hasCustomHorizontalMetrics = horizontal != nil
+        self.hasCustomVerticalMetrics = vertical != nil
+    }
 
     mutating func set(_ metrics: ScrollIndicatorMetrics, axes: Axis.Set) {
         if axes.contains(.horizontal) {
             horizontal = metrics
+            hasCustomHorizontalMetrics = true
         }
         if axes.contains(.vertical) {
             vertical = metrics
+            hasCustomVerticalMetrics = true
         }
+    }
+
+    /// Resolves presentation-specific framework defaults without replacing
+    /// explicitly configured axis metrics, which override either presentation.
+    func resolved(
+        for axis: Axis,
+        style: ScrollIndicatorStyle
+    ) -> ScrollIndicatorMetrics {
+        var metrics: ScrollIndicatorMetrics
+        let hasCustomMetrics: Bool
+        switch axis {
+        case .horizontal:
+            metrics = horizontal.resolved
+            hasCustomMetrics = hasCustomHorizontalMetrics
+        case .vertical:
+            metrics = vertical.resolved
+            hasCustomMetrics = hasCustomVerticalMetrics
+        }
+        if !hasCustomMetrics, style.value == .legacy {
+            metrics.thickness = presentation.fixedAreaThickness
+            metrics.minimumThumbLength =
+                presentation.fixedAreaMinimumThumbLength
+        }
+        return metrics
     }
 }
 
@@ -102,12 +195,6 @@ struct ScrollIndicatorLayout: Equatable {
         var isFixedArea: Bool
     }
 
-    /// Overlay expansion adds an absolute amount without changing the configured
-    /// collapsed thickness. The edge-anchored proximity span is four points wider
-    /// than the fully expanded cross-axis band.
-    static let overlayExpansionDelta: CGFloat = 5
-    static let overlayProximityPadding: CGFloat = 2
-
     var viewportFrame = CGRect.zero
     var reservedInsets = EdgeInsets()
     var horizontal: Indicator?
@@ -119,16 +206,31 @@ struct ScrollIndicatorLayout: Equatable {
         properties: ScrollEnvironmentProperties,
         metrics: ScrollIndicatorMetricsStorage
     ) -> EdgeInsets {
-        EdgeInsets(
+        let horizontalMetrics = metrics.resolved(
+            for: .horizontal,
+            style: properties.horizontalIndicator.style
+        )
+        let verticalMetrics = metrics.resolved(
+            for: .vertical,
+            style: properties.verticalIndicator.style
+        )
+        let presentation = metrics.presentation
+        return EdgeInsets(
             top: 0,
             leading: 0,
             bottom: configuration.axes.contains(.horizontal)
                 && properties.horizontalIndicator.style.value == .legacy
-                    ? metrics.horizontal.resolved.thickness
+                    ? fixedAreaSpan(
+                        drawThickness: horizontalMetrics.thickness,
+                        sideInset: presentation.trackSideInset
+                    )
                     : 0,
             trailing: configuration.axes.contains(.vertical)
                 && properties.verticalIndicator.style.value == .legacy
-                    ? metrics.vertical.resolved.thickness
+                    ? fixedAreaSpan(
+                        drawThickness: verticalMetrics.thickness,
+                        sideInset: presentation.trackSideInset
+                    )
                     : 0
         )
     }
@@ -146,14 +248,10 @@ struct ScrollIndicatorLayout: Equatable {
         expansion: ScrollIndicatorExpansion = ScrollIndicatorExpansion()
     ) -> ScrollIndicatorLayout {
         let outerSize = resolvedSize(outerSize)
-        let resolvedMetrics = ScrollIndicatorMetricsStorage(
-            horizontal: metrics.horizontal.resolved,
-            vertical: metrics.vertical.resolved
-        )
         let requestedInsets = reservedInsets(
             configuration: configuration,
             properties: properties,
-            metrics: resolvedMetrics
+            metrics: metrics
         )
         let horizontalThickness = min(requestedInsets.bottom, outerSize.height)
         let verticalThickness = min(requestedInsets.trailing, outerSize.width)
@@ -171,6 +269,7 @@ struct ScrollIndicatorLayout: Equatable {
         )
         let visibleContentSize = viewportFrame.size.inset(by: contentInsets)
         let opacity = resolvedOpacity(overlayOpacity)
+        let presentation = metrics.presentation
 
         var layout = ScrollIndicatorLayout(
             viewportFrame: viewportFrame,
@@ -183,33 +282,49 @@ struct ScrollIndicatorLayout: Equatable {
         )
 
         if configuration.axes.contains(.horizontal) {
-            let metrics = resolvedMetrics.horizontal
-            let trackFrame: CGRect
+            let metrics = metrics.resolved(
+                for: .horizontal,
+                style: properties.horizontalIndicator.style
+            )
+            let crossAxisFrame: CGRect
             if fixedHorizontal {
-                trackFrame = CGRect(
+                let thickness = min(metrics.thickness, horizontalThickness)
+                let inset = max((horizontalThickness - thickness) / 2, 0)
+                crossAxisFrame = CGRect(
                     x: viewportFrame.minX,
-                    y: viewportFrame.maxY,
+                    y: viewportFrame.maxY + inset,
                     width: viewportFrame.width,
-                    height: horizontalThickness
+                    height: thickness
                 )
             } else {
+                let inset = min(
+                    presentation.trackSideInset,
+                    viewportFrame.height / 2
+                )
                 let thickness = overlayThickness(
                     collapsed: metrics.thickness,
-                    available: viewportFrame.height,
-                    expansion: expansion.horizontal
+                    available: max(viewportFrame.height - inset * 2, 0),
+                    expansion: expansion.horizontal,
+                    expansionDelta: presentation.overlayExpansion
                 )
-                trackFrame = CGRect(
+                crossAxisFrame = CGRect(
                     x: viewportFrame.minX,
-                    y: viewportFrame.maxY - thickness,
+                    y: viewportFrame.maxY - inset - thickness,
                     width: viewportFrame.width,
                     height: thickness
                 )
             }
+            let trackFrame = insetTrackEnds(
+                crossAxisFrame,
+                axis: .horizontal,
+                inset: presentation.trackEndInset
+            )
             let proximityFrame = fixedHorizontal ? nil : overlayProximityFrame(
                 axis: .horizontal,
                 viewportFrame: viewportFrame,
                 collapsedThickness: metrics.thickness,
-                layoutDirection: layoutDirection
+                layoutDirection: layoutDirection,
+                presentation: presentation
             )
             layout.horizontal = makeIndicator(
                 axis: .horizontal,
@@ -229,35 +344,53 @@ struct ScrollIndicatorLayout: Equatable {
         }
 
         if configuration.axes.contains(.vertical) {
-            let metrics = resolvedMetrics.vertical
-            let trackFrame: CGRect
+            let metrics = metrics.resolved(
+                for: .vertical,
+                style: properties.verticalIndicator.style
+            )
+            let crossAxisFrame: CGRect
             if fixedVertical {
-                trackFrame = CGRect(
-                    x: layoutDirection == .rightToLeft ? 0 : viewportFrame.maxX,
+                let thickness = min(metrics.thickness, verticalThickness)
+                let inset = max((verticalThickness - thickness) / 2, 0)
+                crossAxisFrame = CGRect(
+                    x: layoutDirection == .rightToLeft
+                        ? inset
+                        : viewportFrame.maxX + inset,
                     y: viewportFrame.minY,
-                    width: verticalThickness,
+                    width: thickness,
                     height: viewportFrame.height
                 )
             } else {
+                let inset = min(
+                    presentation.trackSideInset,
+                    viewportFrame.width / 2
+                )
                 let thickness = overlayThickness(
                     collapsed: metrics.thickness,
-                    available: viewportFrame.width,
-                    expansion: expansion.vertical
+                    available: max(viewportFrame.width - inset * 2, 0),
+                    expansion: expansion.vertical,
+                    expansionDelta: presentation.overlayExpansion
                 )
-                trackFrame = CGRect(
+                crossAxisFrame = CGRect(
                     x: layoutDirection == .rightToLeft
-                        ? viewportFrame.minX
-                        : viewportFrame.maxX - thickness,
+                        ? viewportFrame.minX + inset
+                        : viewportFrame.maxX - inset - thickness,
                     y: viewportFrame.minY,
                     width: thickness,
                     height: viewportFrame.height
                 )
             }
+            let trackFrame = insetTrackEnds(
+                crossAxisFrame,
+                axis: .vertical,
+                inset: presentation.trackEndInset
+            )
             let proximityFrame = fixedVertical ? nil : overlayProximityFrame(
                 axis: .vertical,
                 viewportFrame: viewportFrame,
                 collapsedThickness: metrics.thickness,
-                layoutDirection: layoutDirection
+                layoutDirection: layoutDirection,
+                presentation: presentation
             )
             layout.vertical = makeIndicator(
                 axis: .vertical,
@@ -436,48 +569,97 @@ struct ScrollIndicatorLayout: Equatable {
     private static func overlayThickness(
         collapsed: CGFloat,
         available: CGFloat,
-        expansion: CGFloat
+        expansion: CGFloat,
+        expansionDelta: CGFloat
     ) -> CGFloat {
         guard collapsed > 0, available > 0 else { return 0 }
         let progress = resolvedExpansion(expansion)
-        return min(collapsed + overlayExpansionDelta * progress, available)
+        return min(collapsed + expansionDelta * progress, available)
     }
 
     private static func resolvedExpansion(_ expansion: CGFloat) -> CGFloat {
         min(max(expansion.isFinite ? expansion : 0, 0), 1)
     }
 
+    /// Fixed-area reservation includes equal gutters around a nonempty draw band.
+    private static func fixedAreaSpan(
+        drawThickness: CGFloat,
+        sideInset: CGFloat
+    ) -> CGFloat {
+        drawThickness > 0 ? drawThickness + sideInset * 2 : 0
+    }
+
+    /// Insets only the scrolling axis. The cross-axis band has already been
+    /// positioned independently for overlay or fixed-area presentation.
+    private static func insetTrackEnds(
+        _ frame: CGRect,
+        axis: Axis,
+        inset requestedInset: CGFloat
+    ) -> CGRect {
+        switch axis {
+        case .horizontal:
+            let inset = min(requestedInset, frame.width / 2)
+            return frame.insetBy(dx: inset, dy: 0)
+        case .vertical:
+            let inset = min(requestedInset, frame.height / 2)
+            return frame.insetBy(dx: 0, dy: inset)
+        }
+    }
+
     private static func overlayProximityFrame(
         axis: Axis,
         viewportFrame: CGRect,
         collapsedThickness: CGFloat,
-        layoutDirection: LayoutDirection
+        layoutDirection: LayoutDirection,
+        presentation: ScrollIndicatorPresentationMetrics
     ) -> CGRect? {
         guard collapsedThickness > 0 else { return nil }
         let requestedThickness = collapsedThickness
-            + overlayExpansionDelta
-            + overlayProximityPadding * 2
+            + presentation.overlayExpansion
+            + presentation.overlayProximityPadding * 2
         switch axis {
         case .horizontal:
-            let thickness = min(requestedThickness, viewportFrame.height)
+            let edgeInset = min(
+                max(
+                    presentation.trackSideInset
+                        - presentation.overlayProximityPadding,
+                    0
+                ),
+                viewportFrame.height / 2
+            )
+            let thickness = min(
+                requestedThickness,
+                max(viewportFrame.height - edgeInset * 2, 0)
+            )
             guard thickness > 0 else { return nil }
-            return CGRect(
+            return insetTrackEnds(CGRect(
                 x: viewportFrame.minX,
-                y: viewportFrame.maxY - thickness,
+                y: viewportFrame.maxY - edgeInset - thickness,
                 width: viewportFrame.width,
                 height: thickness
-            )
+            ), axis: .horizontal, inset: presentation.trackEndInset)
         case .vertical:
-            let thickness = min(requestedThickness, viewportFrame.width)
+            let edgeInset = min(
+                max(
+                    presentation.trackSideInset
+                        - presentation.overlayProximityPadding,
+                    0
+                ),
+                viewportFrame.width / 2
+            )
+            let thickness = min(
+                requestedThickness,
+                max(viewportFrame.width - edgeInset * 2, 0)
+            )
             guard thickness > 0 else { return nil }
-            return CGRect(
+            return insetTrackEnds(CGRect(
                 x: layoutDirection == .rightToLeft
-                    ? viewportFrame.minX
-                    : viewportFrame.maxX - thickness,
+                    ? viewportFrame.minX + edgeInset
+                    : viewportFrame.maxX - edgeInset - thickness,
                 y: viewportFrame.minY,
                 width: thickness,
                 height: viewportFrame.height
-            )
+            ), axis: .vertical, inset: presentation.trackEndInset)
         }
     }
 
