@@ -25,6 +25,32 @@ extension CommandMenuPresentationStyle {
             return self
         }
     }
+
+    func rootPresenterSelection(
+        platformControllerAvailable: Bool?
+    ) -> RootCommandMenuPresenterSelection {
+        switch resolvedForRootPresenter {
+        case .automatic:
+            fatalError("Automatic must resolve before presenter selection.")
+        case .window:
+            return .window
+        case .platform:
+            switch platformControllerAvailable {
+            case true:
+                return .platform
+            case false:
+                return .window
+            case nil:
+                return .pendingPlatformCapability
+            }
+        }
+    }
+}
+
+enum RootCommandMenuPresenterSelection: Equatable {
+    case pendingPlatformCapability
+    case window
+    case platform
 }
 
 // Owns the semantic menu hosts for one static Scene root. The Commands list

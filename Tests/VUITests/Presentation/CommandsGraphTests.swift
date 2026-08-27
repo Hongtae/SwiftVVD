@@ -771,6 +771,37 @@ final class CommandsGraphTests: XCTestCase {
         }
     }
 
+    func testWindowCommandMenuStyleInstallsRendererPresenterOnStaticRoot()
+        throws
+    {
+        // ASSERTIONS commandsRootContentLayoutObserved
+        let appGraph = AppGraph(app: WindowCommandMenuPresenterTestApp())
+        let windowsController = AppWindowsController()
+        windowsController.syncWindowControllers(
+            sceneListAttr: appGraph.sceneListAttr,
+            commandsListAttr: appGraph.commandsListAttr,
+            rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            in: appGraph.graph
+        )
+
+        let root = try XCTUnwrap(
+            windowsController.allWindowControllers.first
+        )
+        let presenter = try XCTUnwrap(root.windowCommandMenuPresenter)
+        XCTAssertNil(root.platformCommandMenuPresenter)
+        XCTAssertTrue(presenter.items.map(\.name).contains("Fixture Menu"))
+
+        var redraw = false
+        root.updateView(
+            tick: 0,
+            delta: 0,
+            date: root.date,
+            contentSize: CGSize(width: 320, height: 208),
+            redraw: &redraw
+        ) { _, _ in }
+        XCTAssertNotNil(root.viewGraph.responderNode)
+    }
+
     func testPresentationChildrenDoNotInheritRootCommandsSource() throws {
         let appGraph = AppGraph(app: RootCommandsSourceTestApp())
         let windowsController = AppWindowsController()
@@ -1156,6 +1187,20 @@ private struct RootCommandsSourceTestApp: App {
         }
         .commandsRemoved()
         .environment(\.rootCommandsProbeValue, "removed-scene")
+    }
+}
+
+private struct WindowCommandMenuPresenterTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        WindowGroup("Window command-menu presenter test") { EmptyView() }
+            .commandMenuPresentationStyle(.window)
+            .commands {
+                CommandMenu("Fixture Menu") {
+                    Button("Fixture Action") {}
+                }
+            }
     }
 }
 

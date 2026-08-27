@@ -24,6 +24,31 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
             CommandMenuPresentationStyle.platform.resolvedForRootPresenter,
             .platform
         )
+
+        XCTAssertEqual(
+            CommandMenuPresentationStyle.window.rootPresenterSelection(
+                platformControllerAvailable: nil
+            ),
+            .window
+        )
+        XCTAssertEqual(
+            CommandMenuPresentationStyle.platform.rootPresenterSelection(
+                platformControllerAvailable: nil
+            ),
+            .pendingPlatformCapability
+        )
+        XCTAssertEqual(
+            CommandMenuPresentationStyle.platform.rootPresenterSelection(
+                platformControllerAvailable: true
+            ),
+            .platform
+        )
+        XCTAssertEqual(
+            CommandMenuPresentationStyle.platform.rootPresenterSelection(
+                platformControllerAvailable: false
+            ),
+            .window
+        )
     }
 
     @MainActor

@@ -162,6 +162,14 @@ class WindowContext: @unchecked Sendable {
             window.contentSize = defaultSize
         }
 
+        applyInitialScenePosition(configuration, to: window)
+    }
+
+    @MainActor
+    static func applyInitialScenePosition(
+        _ configuration: WindowSceneConfiguration,
+        to window: any PlatformWindow
+    ) {
         guard let initialPosition = configuration.defaultPosition else {
             window.center()
             return

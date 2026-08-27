@@ -445,6 +445,11 @@ class WindowController: WindowDelegate,
     private(set) var rootCommandsSource: RootCommandsSource?
     private var resolvedRootCommands: ResolvedRootCommands?
     var platformCommandMenuPresenter: PlatformCommandMenuPresenter?
+    private(set) var windowCommandMenuPresenter: WindowCommandMenuPresenter?
+    private var staticRootContent: AnyView?
+    private var rootPlatformMenuCapability: Bool?
+    // MainActor-owned because changing it also mutates the platform window.
+    private var windowCommandMenuGeometryApplied = false
 
     var date: Date  // latest platform frame timestamp
 
@@ -716,9 +721,13 @@ class WindowController: WindowDelegate,
 
         configureForwardedEventDispatchers()
 
+        let staticRootContent = AnyView(contentValue)
+        self.staticRootContent = staticRootContent
         self._viewGraph = ViewGraph(
-            rootViewType: Content.self,
-            content: contentValue,
+            replaceableContent: WindowCommandMenuPresenter.hostRootView(
+                sceneContent: staticRootContent,
+                presenter: nil
+            ),
             rendererHost: self,
             initialEnvironment: self.environment,
             features: [HostViewGraph()]
@@ -764,13 +773,46 @@ class WindowController: WindowDelegate,
     }
 
     private func updateRootCommandMenuPresenter() {
-        guard parentWindow == nil,
-              sceneConfiguration.commandMenuPresentationStyle
-                .resolvedForRootPresenter == .platform,
-              let resolvedRootCommands else {
+        guard parentWindow == nil, let resolvedRootCommands else {
             platformCommandMenuPresenter?.invalidate()
             platformCommandMenuPresenter = nil
+            setWindowCommandMenuPresenter(nil)
             return
+        }
+
+        let selection = sceneConfiguration.commandMenuPresentationStyle
+            .rootPresenterSelection(
+                platformControllerAvailable: rootPlatformMenuCapability
+            )
+
+        switch selection {
+        case .window:
+            platformCommandMenuPresenter?.invalidate()
+            platformCommandMenuPresenter = nil
+            let presenter = windowCommandMenuPresenter
+                ?? WindowCommandMenuPresenter()
+            presenter.update(
+                items: resolvedRootCommands.items,
+                environment: resolvedRootCommands.environment,
+                hostEnvironment: environment,
+                sceneResources: sceneResources
+            )
+            setWindowCommandMenuPresenter(presenter)
+            return
+
+        case .pendingPlatformCapability:
+            // Keep an already-visible renderer presenter until the actual
+            // window answers the capability query. At startup there is no
+            // wrapper to install before that answer is known.
+            windowCommandMenuPresenter?.update(
+                items: resolvedRootCommands.items,
+                environment: resolvedRootCommands.environment,
+                hostEnvironment: environment,
+                sceneResources: sceneResources
+            )
+
+        case .platform:
+            setWindowCommandMenuPresenter(nil)
         }
 
         let presenter: PlatformCommandMenuPresenter
@@ -785,6 +827,12 @@ class WindowController: WindowDelegate,
             environment: resolvedRootCommands.environment
         )
 
+        if selection == .pendingPlatformCapability {
+            Task { @MainActor [weak self] in
+                self?.resolveRootPlatformMenuCapability()
+            }
+        }
+
         Task { @MainActor [weak self, weak presenter] in
             guard let self, let presenter,
                   self.platformCommandMenuPresenter === presenter,
@@ -792,6 +840,76 @@ class WindowController: WindowDelegate,
                 return
             }
             presenter.attach(to: window)
+        }
+    }
+
+    private func setWindowCommandMenuPresenter(
+        _ presenter: WindowCommandMenuPresenter?
+    ) {
+        let visibilityChanged = (windowCommandMenuPresenter != nil)
+            != (presenter != nil)
+        windowCommandMenuPresenter = presenter
+        viewGraph.valuesNeedingUpdate.insert(.rootView)
+        viewChangedWhileDrawing = true
+        if visibilityChanged {
+            Task { @MainActor [weak self] in
+                self?.synchronizeWindowCommandMenuGeometry(
+                    isInitialAttachment: false
+                )
+            }
+        }
+    }
+
+    @MainActor
+    private func resolveRootPlatformMenuCapability(
+        isInitialAttachment: Bool = false
+    ) {
+        guard parentWindow == nil,
+              sceneConfiguration.commandMenuPresentationStyle
+                .resolvedForRootPresenter == .platform,
+              let window else {
+            synchronizeWindowCommandMenuGeometry(
+                isInitialAttachment: isInitialAttachment
+            )
+            return
+        }
+        let controller = window.menuController
+        rootPlatformMenuCapability = controller != nil
+        updateRootCommandMenuPresenter()
+        platformCommandMenuPresenter?.attach(to: controller)
+        synchronizeWindowCommandMenuGeometry(
+            isInitialAttachment: isInitialAttachment
+        )
+    }
+
+    @MainActor
+    private func synchronizeWindowCommandMenuGeometry(
+        isInitialAttachment: Bool
+    ) {
+        guard let window else {
+            windowCommandMenuGeometryApplied = false
+            return
+        }
+        let shouldApply = windowCommandMenuPresenter != nil
+        guard shouldApply != windowCommandMenuGeometryApplied else { return }
+
+        let size = window.contentSize
+        if shouldApply {
+            window.contentSize = WindowCommandMenuPresenter
+                .platformContentSize(preserving: size)
+        } else {
+            window.contentSize = WindowCommandMenuPresenter
+                .sceneContentSize(from: size)
+        }
+        windowCommandMenuGeometryApplied = shouldApply
+
+        // Initial default positioning must use the final outer size after the
+        // renderer-owned chrome has expanded the logical client surface.
+        if isInitialAttachment {
+            WindowContext.applyInitialScenePosition(
+                sceneConfiguration,
+                to: window
+            )
         }
     }
 
@@ -946,6 +1064,17 @@ class WindowController: WindowDelegate,
                 self.inputEvents.withLock { storage in
                     storage.events.append(.gesture(event, time))
                 }
+            }
+            if parentWindow == nil,
+               sceneConfiguration.commandMenuPresentationStyle
+                .resolvedForRootPresenter == .platform {
+                resolveRootPlatformMenuCapability(
+                    isInitialAttachment: true
+                )
+            } else {
+                synchronizeWindowCommandMenuGeometry(
+                    isInitialAttachment: true
+                )
             }
             self.onWindowCreated(window)
             self.platformCommandMenuPresenter?.attach(to: window)
@@ -1546,6 +1675,8 @@ class WindowController: WindowDelegate,
     func handleWindowEvent(event: WindowEvent) {
         switch event.type {
         case .closed:
+            rootPlatformMenuCapability = nil
+            windowCommandMenuGeometryApplied = false
             if endSessionOnWindowClosed {
                 enqueueInputAction { [weak self] in
                     self?.endPresentationSession()
@@ -2459,7 +2590,16 @@ class WindowController: WindowDelegate,
     // MARK: - ViewGraphRootValueUpdater
 
     func updateRootView() {
-        // Content is lifted into ViewGraph at init time. There is no separate root view setter.
+        guard let staticRootContent,
+              let rootInput = viewGraph.rootAnyViewContentInput else {
+            return
+        }
+        rootInput.setValue(
+            WindowCommandMenuPresenter.hostRootView(
+                sceneContent: staticRootContent,
+                presenter: windowCommandMenuPresenter
+            )
+        )
     }
 
     func updateEnvironment() {
