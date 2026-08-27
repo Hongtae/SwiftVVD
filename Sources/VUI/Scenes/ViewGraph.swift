@@ -214,6 +214,18 @@ struct ImageRendererHostViewGraph: ViewGraphFeature {
     }
 }
 
+// Installs the semantic item collector only for graphs that explicitly ask
+// for platform-item output. The concrete presenter remains responsible for
+// converting the resulting values to native or renderer-backed menu items.
+struct PlatformItemListViewGraph: ViewGraphFeature {
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+        guard graph.requestedOutputs.contains(.platformItemList) else {
+            return
+        }
+        inputs.addPlatformItemListKey(flags: AllPlatformItemListFlags.self)
+    }
+}
+
 // ViewGraphHost - intermediate base class between GraphHost and ViewGraph.
 // The backend currently drives updateOutputs from the render loop. The class
 // keeps the shared host lifecycle surface so scheduling can be tightened later.
@@ -532,6 +544,7 @@ class ViewGraph: ViewGraphHost {
     private(set) var rootDisplayList: Attribute<DisplayList>?
     private(set) var rootResourceList: Attribute<ResourceList>?
     private(set) var rootViewResponders: Attribute<[ViewResponder]>?
+    private(set) var rootPlatformItemList: Attribute<PlatformItemList>?
     // Captures root output construction until the host instantiates outputs.
     private var rootOutputsBuilder: (() -> Void)?
     private var rootViewInputs: _ViewInputs?
@@ -1036,6 +1049,26 @@ class ViewGraph: ViewGraphHost {
                         }
                     }
 
+                    if requestedOutputs.contains(.platformItemList) {
+                        let itemNodes = outputs.preferences.values(
+                            for: PlatformItemList.Key.self
+                        )
+                        if !itemNodes.isEmpty {
+                            self.rootPlatformItemList = g.makeRule {
+                                var combined = PlatformItemList.Key.defaultValue
+                                for nodeID in itemNodes {
+                                    let list = Attribute<PlatformItemList>(
+                                        nodeID
+                                    ).value
+                                    PlatformItemList.Key.reduce(
+                                        value: &combined
+                                    ) { list }
+                                }
+                                return combined
+                            }
+                        }
+                    }
+
                     let responderNodes = outputs.preferences.values(for: ViewRespondersKey.self)
                     if !responderNodes.isEmpty {
                         self.rootViewResponders = g.makeRule {
@@ -1308,6 +1341,11 @@ class ViewGraph: ViewGraphHost {
 
     // Returns the current display list from the AG graph.
     func displayList() -> DisplayList? { rootDisplayList?.value }
+
+    // Returns the current semantic platform-item output for dedicated hosts.
+    func platformItemList() -> PlatformItemList? {
+        rootPlatformItemList?.value
+    }
 
     var responderNode: ResponderNode? {
         data.withCurrent {
