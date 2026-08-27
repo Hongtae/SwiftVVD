@@ -538,6 +538,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         set {
             var filteredValues = newValue
             filteredValues.configurationOverride.drawDebugInfo = nil
+            filteredValues.configurationOverride.drawDebugInfoPosition = nil
             super.inheritedValues = filteredValues
         }
     }

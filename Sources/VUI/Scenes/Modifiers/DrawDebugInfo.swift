@@ -30,6 +30,8 @@ public struct _DrawDebug: _SceneModifier {
     }
     
     let selectedValues: Info
+    // nil leaves the window's base or previously contributed position intact.
+    let position: CGPoint?
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         guard let graph = _AGGraph.current else {
@@ -37,8 +39,10 @@ public struct _DrawDebug: _SceneModifier {
         }
         var outputs = body(_Graph(), inputs)
         let configAttr: Attribute<WindowConfiguration.Override> = graph.makeRule {
-            WindowConfiguration.Override(
-                drawDebugInfo: modifier._attribute.value.selectedValues
+            let modifier = modifier._attribute.value
+            return WindowConfiguration.Override(
+                drawDebugInfo: modifier.selectedValues,
+                drawDebugInfoPosition: modifier.position
             )
         }
         outputs.preferences.append(
@@ -50,10 +54,16 @@ public struct _DrawDebug: _SceneModifier {
 }
 
 extension Scene {
-    public func drawDebugInfo(_ values: _DrawDebug.Info...) -> some Scene {
+    public func drawDebugInfo(
+        _ values: _DrawDebug.Info...,
+        position: CGPoint? = nil
+    ) -> some Scene {
         var info: _DrawDebug.Info = []
         values.forEach { info.formUnion($0) }
-        let modifier = _DrawDebug(selectedValues: info)
+        let modifier = _DrawDebug(
+            selectedValues: info,
+            position: position
+        )
         return self.modifier(modifier)
     }
 }

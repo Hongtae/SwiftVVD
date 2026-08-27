@@ -18,6 +18,8 @@ struct WindowConfiguration {
         rgba8: .init(r: 255, g: 255, b: 241, a: 255)
     )
     var drawDebugInfo: _DrawDebug.Info = []
+    // Top-leading origin of the diagnostic text in logical window coordinates.
+    var drawDebugInfoPosition = CGPoint(x: 5, y: 5)
     var contentScaleFactorOverride: CGFloat? = nil
 
     // Partial values supplied by scene modifiers. nil means that the base
@@ -29,6 +31,7 @@ struct WindowConfiguration {
         var drawEveryFrames: Bool? = nil
         var backgroundColor: BackendColor? = nil
         var drawDebugInfo: _DrawDebug.Info? = nil
+        var drawDebugInfoPosition: CGPoint? = nil
         var contentScaleFactor: CGFloat? = nil
     }
 
@@ -51,6 +54,9 @@ struct WindowConfiguration {
         }
         if let value = override.drawDebugInfo {
             result.drawDebugInfo = value
+        }
+        if let value = override.drawDebugInfoPosition {
+            result.drawDebugInfoPosition = value
         }
         if let value = override.contentScaleFactor {
             result.contentScaleFactorOverride = value
@@ -91,6 +97,9 @@ extension WindowConfiguration.Override {
                 } else {
                     value.drawDebugInfo = nextValue
                 }
+            }
+            if let nextValue = next.drawDebugInfoPosition {
+                value.drawDebugInfoPosition = nextValue
             }
             if let nextValue = next.contentScaleFactor {
                 value.contentScaleFactor = nextValue

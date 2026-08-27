@@ -472,7 +472,7 @@ class WindowContext: @unchecked Sendable {
 
                         if debugDrawInfo.isEmpty == false {
                             withGC(true) { context in
-                                var offset = CGPoint(x: 5, y: 5)
+                                var offset = config.drawDebugInfoPosition
                                 let drawText = { (text: Text) in
                                     let resolvedText = context.resolve(text)
                                     context.draw(resolvedText, at: offset, anchor: .topLeading)
