@@ -5,6 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+import Observation
 import VVD
 
 struct ContextMenuModifier<MenuContent>: ViewModifier where MenuContent: View {
@@ -303,6 +304,7 @@ public extension EnvironmentValues {
 final class ContextMenuPresentationSession {
     weak var root: ContextMenuWindowController?
     var onFinish: (() -> Void)?
+    private weak var activatedMenu: ContextMenuWindowController?
     private weak var sourceGraph: _AGGraph?
     private var liveContentSubgraph: AGSubgraph?
     private var isPresented: Binding<Bool>?
@@ -323,6 +325,13 @@ final class ContextMenuPresentationSession {
         isPresented?.wrappedValue = true
     }
 
+    func activateMenu(_ menu: ContextMenuWindowController) {
+        guard !didFinish, activatedMenu !== menu else { return }
+        activatedMenu?.setActivated(false)
+        activatedMenu = menu
+        menu.setActivated(true)
+    }
+
     func dismissAll() {
         if let root {
             root.dismiss()
@@ -334,6 +343,7 @@ final class ContextMenuPresentationSession {
     func finish() {
         guard !didFinish else { return }
         didFinish = true
+        activatedMenu = nil
         isPresented?.wrappedValue = false
         tearDownLiveContent()
         onFinish?()
@@ -514,11 +524,26 @@ func contextMenuPresentationItems(
     return result
 }
 
+@Observable
+private final class MenuPopupActivationState {
+    var isActivated = false
+}
+
 final class ContextMenuPopupActions {
     var openSubmenu: ((ContextMenuPresentationItem, CGPoint) -> Void)?
     var closeSubmenus: (() -> Void)?
     var dismiss: (() -> Void)?
     var pointerInteractionBegan: (() -> Void)?
+    var menuHoverChanged: ((Bool) -> Void)?
+    var submenuRowHoverChanged:
+        ((ContextMenuPresentationItem.ID, Bool) -> Void)?
+    private let activationState = MenuPopupActivationState()
+
+    var isActivated: Bool { activationState.isActivated }
+
+    func setActivated(_ activated: Bool) {
+        activationState.isActivated = activated
+    }
 }
 
 struct ContextMenuSubmenuPlacement {
@@ -561,11 +586,11 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let shape = RoundedRectangle(cornerRadius: 6)
         context.fill(
             shape.path(in: frame),
-            with: .color(contextMenuPopupChromeFill)
+            with: .color(menuPopupAppearance.palette.chromeFill)
         )
         context.stroke(
             shape.inset(by: 0.5).path(in: frame),
-            with: .color(contextMenuPopupChromeStroke),
+            with: .color(menuPopupAppearance.palette.chromeStroke),
             lineWidth: 1
         )
     }
@@ -578,6 +603,10 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private var menuItems: [ContextMenuPresentationItem]
     private var openedSubmenuID: ContextMenuPresentationItem.ID?
     private weak var openedSubmenu: ContextMenuWindowController?
+    private var menuHoverGeneration: UInt64 = 0
+    private var submenuRowHoverGeneration: UInt64 = 0
+    private var submenuPresentsToRight = true
+    private(set) var isActivated = false
     private(set) var keyboardSelectionID:
         ContextMenuPresentationItem.ID?
     private var consumedKeyboardStreams: Set<KeyboardStream> = []
@@ -610,14 +639,224 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         popupActions.pointerInteractionBegan = { [weak self] in
             self?.setKeyboardSelection(nil)
         }
+        popupActions.menuHoverChanged = { [weak self] hovering in
+            self?.menuHoverChanged(hovering)
+        }
+        popupActions.submenuRowHoverChanged = { [weak self] id, hovering in
+            self?.submenuRowHoverChanged(id, hovering: hovering)
+        }
 
         // A platform popup clears its rectangular render target with the menu
         // surface color. Window shape, border, and shadow remain the platform's
         // responsibility; overlay presentations draw those separately.
         var configuration = baseConfiguration
-        configuration.backgroundColor = contextMenuPopupWindowBackground
+        configuration.backgroundColor = menuPopupAppearance.palette.windowBackground
         baseConfiguration = configuration
         self.contentAttr = viewGraph.rootAnyViewContentInput
+    }
+
+    func setActivated(_ activated: Bool) {
+        guard isActivated != activated else { return }
+        isActivated = activated
+        // Activation changes only the active/inactive row colors. Keep the
+        // popup root and any open overlay child mounted while that visual state
+        // invalidates through observation.
+        popupActions.setActivated(activated)
+    }
+
+    private func menuHoverChanged(_ hovering: Bool) {
+        if hovering {
+            // Geometry changes can refresh a responder with an older pointer
+            // snapshot after a descendant popup has already received newer
+            // raw input. Activation is therefore owned exclusively by
+            // handleMouseHover; this callback only supplies the exit edge.
+            return
+        }
+
+        menuHoverGeneration &+= 1
+        let generation = menuHoverGeneration
+        // Parent-window exit and child-window enter may arrive through
+        // different platform event callbacks. Resolve the exit from this
+        // controller's next input snapshot so a child enter from the same
+        // pointer transition can transfer activation first.
+        enqueueInputAction { [weak self] in
+            self?.resolveMenuHoverExit(generation: generation)
+        }
+        requestUpdate(after: 0)
+    }
+
+    private func resolveMenuHoverExit(generation: UInt64) {
+        guard menuSession.isActive,
+              menuHoverGeneration == generation else {
+            return
+        }
+        if !isActivated,
+           openedSubmenu?.containsActivatedMenu == true {
+            return
+        }
+        closeSubmenus()
+    }
+
+    private func submenuRowHoverChanged(
+        _ id: ContextMenuPresentationItem.ID,
+        hovering: Bool
+    ) {
+        submenuRowHoverGeneration &+= 1
+        guard !hovering else { return }
+
+        let generation = submenuRowHoverGeneration
+        // The popup panel includes chrome padding outside every row. Defer a
+        // submenu-row exit so a child popup entered by the same pointer move
+        // can take activation before an otherwise provisional branch closes.
+        enqueueInputAction { [weak self] in
+            self?.resolveSubmenuRowHoverExit(
+                id: id,
+                generation: generation
+            )
+        }
+        requestUpdate(after: 0)
+    }
+
+    private func resolveSubmenuRowHoverExit(
+        id: ContextMenuPresentationItem.ID,
+        generation: UInt64
+    ) {
+        guard menuSession.isActive,
+              submenuRowHoverGeneration == generation,
+              openedSubmenuID == id else {
+            return
+        }
+        if !isActivated,
+           openedSubmenu?.containsActivatedMenu == true {
+            return
+        }
+        closeSubmenus()
+    }
+
+    private func pointerEnteredPopup() {
+        guard menuSession.isActive else { return }
+        // A platform-window input reset drops the dispatcher binding without
+        // ending the view responder's hover phase. Use the raw popup boundary
+        // as the activation source so re-entering the same responder still
+        // transfers ownership and cancels any deferred exit decision.
+        menuHoverGeneration &+= 1
+        setKeyboardSelection(nil)
+        menuSession.activateMenu(self)
+    }
+
+    private var containsActivatedMenu: Bool {
+        isActivated || openedSubmenu?.containsActivatedMenu == true
+    }
+
+    override func onTopMostMouseHover(
+        at location: CGPoint,
+        deviceID: Int,
+        at time: Time
+    ) {
+        super.onTopMostMouseHover(
+            at: location,
+            deviceID: deviceID,
+            at: time
+        )
+        if CGRect(origin: .zero, size: cachedContentSize).contains(location) {
+            // Popup chrome and panel padding form part of the menu-tracking
+            // region even when no row responder occupies that exact point.
+            pointerEnteredPopup()
+            if window == nil,
+               let openedSubmenuID,
+               interactiveItemID(atY: location.y) != openedSubmenuID {
+                // Descendant routing has already established that the child
+                // does not own this sample. Close an overlay branch when the
+                // parent regains raw ownership outside its opened row, even if
+                // a replaced View hover responder misses the corresponding
+                // exit callback at the popup's diagonal corner.
+                closeSubmenus()
+            }
+        }
+    }
+
+    override func overlayHitTest(_ locationInParent: CGPoint) -> Bool {
+        super.overlayHitTest(locationInParent) ||
+            submenuBridgeHoverLocation(from: locationInParent) != nil
+    }
+
+    override func handleMouseHover(
+        at location: CGPoint,
+        deviceID: Int,
+        isTopMost: Bool,
+        at time: Time
+    ) -> Bool {
+        // A submenu overlaps its parent to avoid a diagonal tracking gap at
+        // their shared edge. Route that external strip to the nearest child
+        // row edge so the hover and submenu-placement overlap use one metric.
+        let bridgeLocation = submenuBridgeHoverLocation(from: location)
+        let routedLocation = bridgeLocation ?? location
+        if window == nil,
+           submenuPlacement == nil,
+           !isTopMost,
+           openedSubmenuID != nil {
+            // The parent router passes true while this popup or any overlay
+            // descendant owns the pointer. A false sample at the root popup
+            // therefore means the complete menu tree was exited; close the
+            // child branch even when no retained View hover binding can emit
+            // another row-level exit.
+            closeSubmenus()
+        }
+        return super.handleMouseHover(
+            at: routedLocation,
+            deviceID: deviceID,
+            isTopMost: isTopMost,
+            at: time
+        )
+    }
+
+    private func submenuBridgeHoverLocation(
+        from location: CGPoint
+    ) -> CGPoint? {
+        guard window == nil,
+              submenuPlacement != nil,
+              interactiveRowContains(y: location.y) else {
+            return nil
+        }
+        let overlap = menuPopupAppearance.metrics.submenuOverlap
+        if submenuPresentsToRight {
+            guard location.x >= -overlap, location.x < 0 else {
+                return nil
+            }
+            return CGPoint(x: 0, y: location.y)
+        }
+        let width = cachedContentSize.width
+        guard location.x >= width,
+              location.x < width + overlap else {
+            return nil
+        }
+        return CGPoint(x: max(0, width.nextDown), y: location.y)
+    }
+
+    private func interactiveRowContains(y: CGFloat) -> Bool {
+        interactiveItemID(atY: y) != nil
+    }
+
+    private func interactiveItemID(
+        atY y: CGFloat
+    ) -> ContextMenuPresentationItem.ID? {
+        var rowOrigin = menuPopupAppearance.metrics.panelPadding
+        for item in contextMenuPopupRenderedItems(menuItems) {
+            let rowHeight = item.isDivider
+                ? menuPopupAppearance.metrics.dividerHeight
+                : menuPopupAppearance.metrics.rowHeight
+            defer { rowOrigin += rowHeight }
+            guard y >= rowOrigin, y < rowOrigin + rowHeight else {
+                continue
+            }
+            guard !item.isDivider,
+                  !item.isSectionHeader,
+                  item.item.isEnabled else {
+                return nil
+            }
+            return item.id
+        }
+        return nil
     }
 
     func openSubmenu(
@@ -682,9 +921,9 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
                                                 usesPlatformWindow: prefersPlatformWindowPresentation,
                                                 session: menuSession,
                                                 submenuPlacement: ContextMenuSubmenuPlacement(fallbackRightOrigin: origin),
-                                                keyboardSelectionID:
-                                                    initialKeyboardSelectionID,
-                                                allowsParentKeyboardTraversal:
+                                                    keyboardSelectionID:
+                                                        initialKeyboardSelectionID,
+                                                    allowsParentKeyboardTraversal:
                                                     allowsParentKeyboardTraversal)
         openedSubmenu = child
         actions.openSubmenu = { [weak child] item, origin in
@@ -708,7 +947,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         }
         let rightOrigin = rightSubmenuOrigin(for: submenuPlacement)
         let rightFrame = CGRect(origin: rightOrigin, size: size)
-        let leftFrame = CGRect(origin: CGPoint(x: contextMenuPopupSubmenuOverlap - size.width,
+        let leftFrame = CGRect(origin: CGPoint(x: menuPopupAppearance.metrics.submenuOverlap - size.width,
                                                y: rightOrigin.y),
                                size: size)
         guard let available = availableFrameForPresentationPlacement(),
@@ -720,22 +959,28 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let leftOverflow = max(0, available.minX - leftComparisonFrame.minX)
         let fittedFrame: CGRect
         let fittedComparisonFrame: CGRect
+        let presentsToRight: Bool
         // Keep the right side preferred, flip only when the left side has enough
         // room, and otherwise choose the side with more available horizontal
         // room while increasing overlap only by the missing amount.
         if rightOverflow == 0 {
             fittedFrame = rightFrame
             fittedComparisonFrame = rightComparisonFrame
+            presentsToRight = true
         } else if leftOverflow == 0 {
             fittedFrame = leftFrame
             fittedComparisonFrame = leftComparisonFrame
+            presentsToRight = false
         } else if rightOverflow <= leftOverflow {
             fittedFrame = rightFrame.offsetBy(dx: -rightOverflow, dy: 0)
             fittedComparisonFrame = rightComparisonFrame.offsetBy(dx: -rightOverflow, dy: 0)
+            presentsToRight = true
         } else {
             fittedFrame = leftFrame.offsetBy(dx: leftOverflow, dy: 0)
             fittedComparisonFrame = leftComparisonFrame.offsetBy(dx: leftOverflow, dy: 0)
+            presentsToRight = false
         }
+        submenuPresentsToRight = presentsToRight
         return frameByFittingPresentationFrame(fittedFrame,
                                                comparisonFrame: fittedComparisonFrame,
                                                availableFrame: available,
@@ -751,7 +996,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         // Submenu popup windows overlap their parent by only a few points. Use
         // the laid-out parent popup width because shortcut/title columns resolve
         // after the row callback's provisional origin is built.
-        return CGPoint(x: parentWidth - contextMenuPopupSubmenuOverlap,
+        return CGPoint(x: parentWidth - menuPopupAppearance.metrics.submenuOverlap,
                        y: fallback.y)
     }
 
@@ -1017,19 +1262,19 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private func keyboardSubmenuOrigin(
         for selectedItem: ContextMenuPresentationItem
     ) -> CGPoint {
-        var y = contextMenuPopupPanelPadding
+        var y = menuPopupAppearance.metrics.panelPadding
         for item in contextMenuPopupRenderedItems(menuItems) {
             if item.id == selectedItem.id { break }
             y += item.isDivider
-                ? contextMenuPopupDividerHeight
-                : contextMenuPopupRowHeight
+                ? menuPopupAppearance.metrics.dividerHeight
+                : menuPopupAppearance.metrics.rowHeight
         }
-        let provisionalPopupWidth = contextMenuPopupPlainTitleOrigin
-            + contextMenuPopupTrailingGap
-            + contextMenuPopupSubmenuIndicatorWidth
-            + contextMenuPopupTrailingPadding
+        let provisionalPopupWidth = menuPopupAppearance.metrics.plainTitleOrigin
+            + menuPopupAppearance.metrics.trailingGap
+            + menuPopupAppearance.metrics.submenuIndicatorWidth
+            + menuPopupAppearance.metrics.trailingPadding
         return CGPoint(
-            x: provisionalPopupWidth - contextMenuPopupSubmenuOverlap,
+            x: provisionalPopupWidth - menuPopupAppearance.metrics.submenuOverlap,
             y: y
         )
     }
@@ -1082,44 +1327,66 @@ extension EnvironmentValues {
     }
 }
 
-private let contextMenuPopupPanelPadding: CGFloat = 5
-private let contextMenuPopupRowHeight: CGFloat = 24
-// Separators allocate a full row separately from the visible hairline.
-private let contextMenuPopupDividerHeight: CGFloat = 11
-private let contextMenuPopupDividerLineHeight: CGFloat = 1
-private let contextMenuPopupDividerHorizontalInset: CGFloat = 16
-private let contextMenuPopupSubmenuOverlap: CGFloat = 5
-// The row layout is content-driven. Coordinates below are popup-edge based and
-// are converted into row-local positions by subtracting the panel padding.
-private let contextMenuPopupEmptyTitleWidth: CGFloat = 16
-private let contextMenuPopupPlainTitleOrigin: CGFloat = 17
-private let contextMenuPopupStateTitleOrigin: CGFloat = 25
-private let contextMenuPopupImageTitleOrigin: CGFloat = 37
-private let contextMenuPopupStateImageTitleOrigin: CGFloat = 45
-private let contextMenuPopupPlainTrailingPadding: CGFloat = 17
-private let contextMenuPopupTrailingGap: CGFloat = 25.5
-private let contextMenuPopupTrailingPadding: CGFloat = 15
-private let contextMenuPopupStateSlotOrigin: CGFloat = 8
-private let contextMenuPopupImageSlotOrigin: CGFloat = 15
-private let contextMenuPopupStateImageSlotOrigin: CGFloat = 23
-private let contextMenuPopupSectionHeaderFontSize: CGFloat = 12
-private let contextMenuPopupSectionHeaderYOffset: CGFloat = 2.5
-private let contextMenuPopupCheckmarkWidth: CGFloat = 12
-private let contextMenuPopupImageWidth: CGFloat = 16
-private let contextMenuPopupTrailingAccessorySpacing: CGFloat = 8
-private let contextMenuPopupSubmenuIndicatorWidth: CGFloat = 5.5
-private let contextMenuPopupSubmenuIndicatorHeight: CGFloat = 9.5
-private let contextMenuPopupActionForeground = Color(.sRGB, white: 60.0 / 255.0)
-private let contextMenuPopupDisabledForeground = Color(.sRGB, white: 135.0 / 255.0)
-private let contextMenuPopupHighlightedForeground = Color(.sRGB, white: 252.0 / 255.0)
-private let contextMenuPopupHighlightBackground = Color(.sRGB,
-                                                        red: 63.0 / 255.0,
-                                                        green: 146.0 / 255.0,
-                                                        blue: 252.0 / 255.0)
-private let contextMenuPopupSeparatorColor = Color(.sRGB, white: 156.0 / 255.0)
-private let contextMenuPopupChromeFill = Color(.sRGB, white: 0.96)
-private let contextMenuPopupChromeStroke = Color(.sRGB, white: 0.62, opacity: 0.45)
-private let contextMenuPopupWindowBackground = BackendColor(white: 0.96)
+// Keep popup geometry and colors behind one value boundary so a future menu
+// appearance can replace them without rewriting the renderer calculations.
+private struct MenuPopupAppearance {
+    struct Metrics {
+        let panelPadding: CGFloat = 5
+        let rowHeight: CGFloat = 24
+        // Separators allocate a full row separately from the visible hairline.
+        let dividerHeight: CGFloat = 11
+        let dividerLineHeight: CGFloat = 1
+        let dividerHorizontalInset: CGFloat = 16
+        let submenuOverlap: CGFloat = 5
+
+        // The row layout is content-driven. Coordinates below are popup-edge
+        // based and are converted into row-local positions by subtracting the
+        // panel padding.
+        let emptyTitleWidth: CGFloat = 16
+        let plainTitleOrigin: CGFloat = 17
+        let stateTitleOrigin: CGFloat = 25
+        let imageTitleOrigin: CGFloat = 37
+        let stateImageTitleOrigin: CGFloat = 45
+        let plainTrailingPadding: CGFloat = 17
+        let trailingGap: CGFloat = 25.5
+        let trailingPadding: CGFloat = 15
+        let stateSlotOrigin: CGFloat = 8
+        let imageSlotOrigin: CGFloat = 15
+        let stateImageSlotOrigin: CGFloat = 23
+        let sectionHeaderFontSize: CGFloat = 12
+        let sectionHeaderYOffset: CGFloat = 2.5
+        let checkmarkWidth: CGFloat = 12
+        let imageWidth: CGFloat = 16
+        let trailingAccessorySpacing: CGFloat = 8
+        let submenuIndicatorWidth: CGFloat = 5.5
+        let submenuIndicatorHeight: CGFloat = 9.5
+    }
+
+    struct Palette {
+        let actionForeground = Color(.sRGB, white: 60.0 / 255.0)
+        let disabledForeground = Color(.sRGB, white: 135.0 / 255.0)
+        let highlightedForeground = Color(.sRGB, white: 252.0 / 255.0)
+        let highlightBackground = Color(.sRGB,
+                                        red: 63.0 / 255.0,
+                                        green: 146.0 / 255.0,
+                                        blue: 252.0 / 255.0)
+        let inactiveSubmenuBackground = Color(
+            .sRGB,
+            red: 215.0 / 255.0,
+            green: 220.0 / 255.0,
+            blue: 225.0 / 255.0
+        )
+        let separator = Color(.sRGB, white: 156.0 / 255.0)
+        let chromeFill = Color(.sRGB, white: 0.96)
+        let chromeStroke = Color(.sRGB, white: 0.62, opacity: 0.45)
+        let windowBackground = BackendColor(white: 0.96)
+    }
+
+    let metrics = Metrics()
+    let palette = Palette()
+}
+
+private let menuPopupAppearance = MenuPopupAppearance()
 
 // The state/check column is menu-wide, while the image column resets across
 // separator-delimited groups.
@@ -1196,7 +1463,8 @@ private struct ContextMenuCheckmarkShape: Shape {
 private struct ContextMenuDividerShape: Shape {
     func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         let size = proposal.replacingUnspecifiedDimensions(
-            by: CGSize(width: 10, height: contextMenuPopupDividerHeight)
+            by: CGSize(width: 10,
+                       height: menuPopupAppearance.metrics.dividerHeight)
         )
         return CGSize(width: max(0, size.width),
                       height: max(0, size.height))
@@ -1204,12 +1472,16 @@ private struct ContextMenuDividerShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let lineHeight = min(contextMenuPopupDividerLineHeight, rect.height)
+        let lineHeight = min(menuPopupAppearance.metrics.dividerLineHeight,
+                             rect.height)
         let y = rect.midY - lineHeight * 0.5
         let lineRect = CGRect(
-            x: rect.minX + contextMenuPopupDividerHorizontalInset,
+            x: rect.minX + menuPopupAppearance.metrics.dividerHorizontalInset,
             y: y,
-            width: max(0, rect.width - contextMenuPopupDividerHorizontalInset * 2),
+            width: max(
+                0,
+                rect.width - menuPopupAppearance.metrics.dividerHorizontalInset * 2
+            ),
             height: lineHeight
         )
         path.addRect(lineRect)
@@ -1274,34 +1546,37 @@ private struct ContextMenuPopupRowLayout: Layout {
         let popupOrigin: CGFloat
         switch (layout.showsStateColumn, layout.showsImageColumn) {
         case (true, true):
-            popupOrigin = contextMenuPopupStateImageTitleOrigin
+            popupOrigin = menuPopupAppearance.metrics.stateImageTitleOrigin
         case (true, false):
-            popupOrigin = contextMenuPopupStateTitleOrigin
+            popupOrigin = menuPopupAppearance.metrics.stateTitleOrigin
         case (false, true):
-            popupOrigin = contextMenuPopupImageTitleOrigin
+            popupOrigin = menuPopupAppearance.metrics.imageTitleOrigin
         case (false, false):
-            popupOrigin = contextMenuPopupPlainTitleOrigin
+            popupOrigin = menuPopupAppearance.metrics.plainTitleOrigin
         }
-        return popupOrigin - contextMenuPopupPanelPadding
+        return popupOrigin - menuPopupAppearance.metrics.panelPadding
     }
 
     private var stateSlotOrigin: CGFloat {
-        contextMenuPopupStateSlotOrigin - contextMenuPopupPanelPadding
+        menuPopupAppearance.metrics.stateSlotOrigin -
+            menuPopupAppearance.metrics.panelPadding
     }
 
     private var imageSlotOrigin: CGFloat {
         let popupOrigin = layout.showsStateColumn
-            ? contextMenuPopupStateImageSlotOrigin
-            : contextMenuPopupImageSlotOrigin
-        return popupOrigin - contextMenuPopupPanelPadding
+            ? menuPopupAppearance.metrics.stateImageSlotOrigin
+            : menuPopupAppearance.metrics.imageSlotOrigin
+        return popupOrigin - menuPopupAppearance.metrics.panelPadding
     }
 
     private var plainTrailingPadding: CGFloat {
-        contextMenuPopupPlainTrailingPadding - contextMenuPopupPanelPadding
+        menuPopupAppearance.metrics.plainTrailingPadding -
+            menuPopupAppearance.metrics.panelPadding
     }
 
     private var trailingPadding: CGFloat {
-        contextMenuPopupTrailingPadding - contextMenuPopupPanelPadding
+        menuPopupAppearance.metrics.trailingPadding -
+            menuPopupAppearance.metrics.panelPadding
     }
 
     func sizeThatFits(proposal: ProposedViewSize,
@@ -1311,7 +1586,8 @@ private struct ContextMenuPopupRowLayout: Layout {
         let width = proposal.width.map { proposed in
             proposed.isFinite ? max(proposed, intrinsic.width) : intrinsic.width
         } ?? intrinsic.width
-        return CGSize(width: width, height: contextMenuPopupRowHeight)
+        return CGSize(width: width,
+                      height: menuPopupAppearance.metrics.rowHeight)
     }
 
     func placeSubviews(in bounds: CGRect,
@@ -1323,22 +1599,28 @@ private struct ContextMenuPopupRowLayout: Layout {
             subviews[stateIndex].place(
                 at: CGPoint(x: bounds.minX + stateSlotOrigin, y: midY),
                 anchor: .leading,
-                proposal: ProposedViewSize(width: contextMenuPopupCheckmarkWidth,
-                                           height: contextMenuPopupCheckmarkWidth)
+                proposal: ProposedViewSize(
+                    width: menuPopupAppearance.metrics.checkmarkWidth,
+                    height: menuPopupAppearance.metrics.checkmarkWidth
+                )
             )
         }
         if layout.showsImageColumn, subviews.indices.contains(imageIndex) {
             subviews[imageIndex].place(
                 at: CGPoint(x: bounds.minX + imageSlotOrigin, y: midY),
                 anchor: .leading,
-                proposal: ProposedViewSize(width: contextMenuPopupImageWidth,
-                                           height: contextMenuPopupImageWidth)
+                proposal: ProposedViewSize(
+                    width: menuPopupAppearance.metrics.imageWidth,
+                    height: menuPopupAppearance.metrics.imageWidth
+                )
             )
         }
         if subviews.indices.contains(titleIndex) {
             subviews[titleIndex].place(
                 at: CGPoint(x: bounds.minX + titleOrigin,
-                            y: midY + (isSectionHeader ? contextMenuPopupSectionHeaderYOffset : 0)),
+                            y: midY + (isSectionHeader
+                                ? menuPopupAppearance.metrics.sectionHeaderYOffset
+                                : 0)),
                 anchor: .leading,
                 proposal: .unspecified
             )
@@ -1359,7 +1641,9 @@ private struct ContextMenuPopupRowLayout: Layout {
                 ? subviews[submenuIndex].sizeThatFits(.unspecified).width
                 : 0
             let right = trailingRight -
-                (submenuWidth > 0 ? submenuWidth + contextMenuPopupTrailingAccessorySpacing : 0)
+                (submenuWidth > 0
+                    ? submenuWidth + menuPopupAppearance.metrics.trailingAccessorySpacing
+                    : 0)
             subviews[shortcutIndex].place(
                 at: CGPoint(x: right, y: midY),
                 anchor: .trailing,
@@ -1370,7 +1654,8 @@ private struct ContextMenuPopupRowLayout: Layout {
 
     private func intrinsicSize(subviews: Subviews) -> CGSize {
         guard subviews.indices.contains(titleIndex) else {
-            return CGSize(width: 0, height: contextMenuPopupRowHeight)
+            return CGSize(width: 0,
+                          height: menuPopupAppearance.metrics.rowHeight)
         }
         let titleWidth = subviews[titleIndex].sizeThatFits(.unspecified).width
         let trailingWidth = self.trailingWidth(subviews: subviews)
@@ -1379,16 +1664,19 @@ private struct ContextMenuPopupRowLayout: Layout {
            trailingWidth <= 0,
            !layout.showsStateColumn,
            !layout.showsImageColumn {
-            rowWidth = contextMenuPopupEmptyTitleWidth - contextMenuPopupPanelPadding * 2
+            rowWidth = menuPopupAppearance.metrics.emptyTitleWidth -
+                menuPopupAppearance.metrics.panelPadding * 2
         } else {
             let titleRight = titleOrigin + titleWidth
             if trailingWidth > 0 {
-                rowWidth = titleRight + contextMenuPopupTrailingGap + trailingWidth + trailingPadding
+                rowWidth = titleRight + menuPopupAppearance.metrics.trailingGap +
+                    trailingWidth + trailingPadding
             } else {
                 rowWidth = titleRight + plainTrailingPadding
             }
         }
-        return CGSize(width: max(0, rowWidth), height: contextMenuPopupRowHeight)
+        return CGSize(width: max(0, rowWidth),
+                      height: menuPopupAppearance.metrics.rowHeight)
     }
 
     private func trailingWidth(subviews: Subviews) -> CGFloat {
@@ -1398,7 +1686,7 @@ private struct ContextMenuPopupRowLayout: Layout {
         }
         if hasSubmenu, subviews.indices.contains(submenuIndex) {
             if width > 0 {
-                width += contextMenuPopupTrailingAccessorySpacing
+                width += menuPopupAppearance.metrics.trailingAccessorySpacing
             }
             width += subviews[submenuIndex].sizeThatFits(.unspecified).width
         }
@@ -1469,11 +1757,9 @@ private struct ContextMenuPopupView: View {
     let actions: ContextMenuPopupActions
     let keyboardSelectionID: ContextMenuPresentationItem.ID?
     let presentedSubmenuID: ContextMenuPresentationItem.ID?
-    @State private var activeSubmenuID: ContextMenuPresentationItem.ID?
 
     var body: some View {
-        let candidateSubmenuID = presentedSubmenuID ?? activeSubmenuID
-        let activeSubmenuID = candidateSubmenuID.flatMap { id in
+        let activeSubmenuID = presentedSubmenuID.flatMap { id in
             items.contains { item in
                 item.id == id
                     && item.item.isEnabled
@@ -1485,6 +1771,7 @@ private struct ContextMenuPopupView: View {
             items: items,
             activeItemID: activeSubmenuID,
             keyboardSelectionID: keyboardSelectionID,
+            isActivated: actions.isActivated,
             dismiss: {
                 actions.dismiss?()
             },
@@ -1497,14 +1784,16 @@ private struct ContextMenuPopupView: View {
                       !item.children.isEmpty else {
                     return
                 }
-                self.activeSubmenuID = item.id
                 actions.openSubmenu?(item, origin)
             },
             clearSubmenus: {
-                if activeSubmenuID != nil {
-                    self.activeSubmenuID = nil
-                }
                 actions.closeSubmenus?()
+            },
+            menuHoverChanged: { hovering in
+                actions.menuHoverChanged?(hovering)
+            },
+            submenuRowHoverChanged: { id, hovering in
+                actions.submenuRowHoverChanged?(id, hovering)
             }
         )
         .fixedSize()
@@ -1515,10 +1804,14 @@ private struct ContextMenuPopupPanel: View {
     let items: [ContextMenuPresentationItem]
     let activeItemID: ContextMenuPresentationItem.ID?
     let keyboardSelectionID: ContextMenuPresentationItem.ID?
+    let isActivated: Bool
     let dismiss: () -> Void
     let pointerInteractionBegan: () -> Void
     let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
+    let menuHoverChanged: (Bool) -> Void
+    let submenuRowHoverChanged:
+        (ContextMenuPresentationItem.ID, Bool) -> Void
     private var renderedItems: [ContextMenuPresentationItem] {
         contextMenuPopupRenderedItems(items)
     }
@@ -1538,24 +1831,25 @@ private struct ContextMenuPopupPanel: View {
     private func rowTopOffset(
         for id: ContextMenuPresentationItem.ID
     ) -> CGFloat {
-        var offset = contextMenuPopupPanelPadding
+        var offset = menuPopupAppearance.metrics.panelPadding
         for item in renderedItems {
             if item.id == id { return offset }
             offset += item.isDivider
-                ? contextMenuPopupDividerHeight
-                : contextMenuPopupRowHeight
+                ? menuPopupAppearance.metrics.dividerHeight
+                : menuPopupAppearance.metrics.rowHeight
         }
-        return contextMenuPopupPanelPadding
+        return menuPopupAppearance.metrics.panelPadding
     }
 
     private func submenuOrigin(
         for item: ContextMenuPresentationItem
     ) -> CGPoint {
-        let provisionalPopupWidth = contextMenuPopupPlainTitleOrigin +
-            contextMenuPopupTrailingGap +
-            contextMenuPopupSubmenuIndicatorWidth +
-            contextMenuPopupTrailingPadding
-        return CGPoint(x: provisionalPopupWidth - contextMenuPopupSubmenuOverlap,
+        let provisionalPopupWidth = menuPopupAppearance.metrics.plainTitleOrigin +
+            menuPopupAppearance.metrics.trailingGap +
+            menuPopupAppearance.metrics.submenuIndicatorWidth +
+            menuPopupAppearance.metrics.trailingPadding
+        return CGPoint(x: provisionalPopupWidth -
+            menuPopupAppearance.metrics.submenuOverlap,
                        y: rowTopOffset(for: item.id))
     }
 
@@ -1568,6 +1862,7 @@ private struct ContextMenuPopupPanel: View {
                 ContextMenuPopupRow(item: item,
                                     layout: rowLayouts[item.id] ?? .empty,
                                     isSubmenuOpen: activeItemID == item.id,
+                                    isMenuActivated: isActivated,
                                     isKeyboardSelected:
                                         keyboardSelectionID == item.id,
                                     accessKey: accessKeys[item.id],
@@ -1578,11 +1873,17 @@ private struct ContextMenuPopupPanel: View {
                                     pointerInteractionBegan:
                                         pointerInteractionBegan,
                                     openSubmenu: openSubmenu,
-                                    clearSubmenus: clearSubmenus)
+                                    clearSubmenus: clearSubmenus,
+                                    submenuRowHoverChanged:
+                                        submenuRowHoverChanged)
             }
         }
-        .padding(contextMenuPopupPanelPadding)
+        // Rows own the horizontal panel padding as interaction space while
+        // their visual backgrounds remain inset. Vertical padding stays
+        // panel-only so moving above or below a row ends that row's hover.
+        .padding(.vertical, menuPopupAppearance.metrics.panelPadding)
         .fixedSize()
+        .onHover(perform: menuHoverChanged)
     }
 }
 
@@ -1590,6 +1891,7 @@ private struct ContextMenuPopupRow: View {
     let item: ContextMenuPresentationItem
     let layout: ContextMenuPopupLayout
     let isSubmenuOpen: Bool
+    let isMenuActivated: Bool
     let isKeyboardSelected: Bool
     let accessKey: Character?
     let showsAccessKey: Bool
@@ -1598,6 +1900,8 @@ private struct ContextMenuPopupRow: View {
     let pointerInteractionBegan: () -> Void
     let openSubmenu: (ContextMenuPresentationItem, CGPoint) -> Void
     let clearSubmenus: () -> Void
+    let submenuRowHoverChanged:
+        (ContextMenuPresentationItem.ID, Bool) -> Void
     @State private var isPressed = false
     @State private var isHovered = false
 
@@ -1618,25 +1922,30 @@ private struct ContextMenuPopupRow: View {
     }
 
     private var rowBackground: Color {
-        if isHighlighted {
-            return contextMenuPopupHighlightBackground
+        if isDirectlyHighlighted {
+            return menuPopupAppearance.palette.highlightBackground
+        }
+        if isSubmenuOpen, !isMenuActivated {
+            // The pointer is tracking a descendant popup. Its parent row keeps
+            // an inactive selection instead of the accent-colored hover state.
+            return menuPopupAppearance.palette.inactiveSubmenuBackground
         }
         return .clear
     }
 
     private var rowForeground: Color {
-        if isHighlighted {
-            return contextMenuPopupHighlightedForeground
+        if isDirectlyHighlighted {
+            return menuPopupAppearance.palette.highlightedForeground
         }
         if isSectionHeader || !item.item.isEnabled {
             // Static Text/Label menu rows are disabled platform items and render
             // with disabled foreground, not a normal actionable-row foreground.
-            return contextMenuPopupDisabledForeground
+            return menuPopupAppearance.palette.disabledForeground
         }
-        return contextMenuPopupActionForeground
+        return menuPopupAppearance.palette.actionForeground
     }
 
-    private var isHighlighted: Bool {
+    private var isDirectlyHighlighted: Bool {
         guard !item.isDivider,
               !isSectionHeader,
               item.item.isEnabled else {
@@ -1645,16 +1954,19 @@ private struct ContextMenuPopupRow: View {
         if showsAccessKey {
             return isKeyboardSelected || (isSubmenuOpen && hasSubmenu)
         }
-        return isHovered
-            || isPressed
-            || (isSubmenuOpen && hasSubmenu)
+        // A row-local hover can outlive its platform window's event binding
+        // while the pointer transfers into a child popup. Only the popup that
+        // currently owns menu activation may draw that pointer highlight.
+        return isMenuActivated && (isHovered || isPressed)
     }
 
     var body: some View {
         if item.isDivider {
             ContextMenuDividerShape()
-                .fill(contextMenuPopupSeparatorColor)
-                .frame(height: contextMenuPopupDividerHeight)
+                .fill(menuPopupAppearance.palette.separator)
+                .frame(height: menuPopupAppearance.metrics.dividerHeight)
+                .padding(.horizontal,
+                         menuPopupAppearance.metrics.panelPadding)
         } else {
             ContextMenuPopupRowLayout(layout: layout,
                                       hasShortcut: shortcut != nil,
@@ -1666,8 +1978,8 @@ private struct ContextMenuPopupRow: View {
                                 style: StrokeStyle(lineWidth: 1.6,
                                                    lineCap: .round,
                                                    lineJoin: .round))
-                        .frame(width: contextMenuPopupCheckmarkWidth,
-                               height: contextMenuPopupCheckmarkWidth,
+                        .frame(width: menuPopupAppearance.metrics.checkmarkWidth,
+                               height: menuPopupAppearance.metrics.checkmarkWidth,
                                alignment: .center)
                 } else {
                     Color.clear
@@ -1676,20 +1988,22 @@ private struct ContextMenuPopupRow: View {
                 if layout.showsImageColumn {
                     if item.hasImage {
                         item.image
-                            .frame(width: contextMenuPopupImageWidth,
-                                   height: contextMenuPopupImageWidth,
+                            .frame(width: menuPopupAppearance.metrics.imageWidth,
+                                   height: menuPopupAppearance.metrics.imageWidth,
                                    alignment: .center)
                     } else {
                         Color.clear
-                            .frame(width: contextMenuPopupImageWidth,
-                                   height: contextMenuPopupImageWidth)
+                            .frame(width: menuPopupAppearance.metrics.imageWidth,
+                                   height: menuPopupAppearance.metrics.imageWidth)
                     }
                 } else {
                     Color.clear
                         .frame(width: 0, height: 0)
                 }
                 menuItemTitle
-                    .font(isSectionHeader ? .system(size: contextMenuPopupSectionHeaderFontSize) : nil)
+                    .font(isSectionHeader
+                        ? .system(size: menuPopupAppearance.metrics.sectionHeaderFontSize)
+                        : nil)
                     .fixedSize(horizontal: true, vertical: false)
                 if let shortcut {
                     MenuKeyboardShortcutLabel(shortcut: shortcut)
@@ -1701,8 +2015,8 @@ private struct ContextMenuPopupRow: View {
                 if hasSubmenu {
                     ContextMenuSubmenuIndicatorShape()
                         .fill(rowForeground)
-                        .frame(width: contextMenuPopupSubmenuIndicatorWidth,
-                               height: contextMenuPopupSubmenuIndicatorHeight)
+                        .frame(width: menuPopupAppearance.metrics.submenuIndicatorWidth,
+                               height: menuPopupAppearance.metrics.submenuIndicatorHeight)
                 } else {
                     Color.clear
                         .frame(width: 0, height: 0)
@@ -1710,8 +2024,13 @@ private struct ContextMenuPopupRow: View {
             }
             .foregroundStyle(rowForeground)
             .background(rowBackground, in: RoundedRectangle(cornerRadius: 4))
+            // Native menu row tracking extends horizontally beyond the
+            // highlighted ink to the popup edges, but not vertically into the
+            // panel's top or bottom padding.
+            .padding(.horizontal, menuPopupAppearance.metrics.panelPadding)
             // The rounded highlight is visual only. Menu selection covers the
-            // complete row rectangle, including its transparent corner pixels.
+            // complete horizontally expanded row rectangle, including its
+            // transparent corner pixels and side padding.
             .contentShape(Rectangle())
             ._onButtonGesture(pressing: { pressing in
                 guard !isSectionHeader else {
@@ -1755,6 +2074,9 @@ private struct ContextMenuPopupRow: View {
                     return
                 }
                 isHovered = hovering
+                if hasSubmenu {
+                    submenuRowHoverChanged(item.id, hovering)
+                }
                 guard hovering else { return }
                 pointerInteractionBegan()
                 if hasSubmenu {

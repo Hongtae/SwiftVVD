@@ -424,6 +424,140 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         controller.dismissAllPresentationChildren()
     }
 
+    // ASSERTIONS menuSubmenuActivationTransferObserved
+    @MainActor
+    func testRendererSubmenuReturnKeepsPopupContentAndChildIdentity() throws {
+        let previousAppContext = appContext
+        appContext = WindowCommandMenuTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.defaultPresentationHostMode = .overlay
+        let presenter = WindowCommandMenuPresenter()
+        presenter.update(
+            items: [
+                MainMenuItem(
+                    name: "Command Lab",
+                    id: .custom(UUID()),
+                    groups: [
+                        CommandAccumulator.Result(
+                            viewContent: AnyView(
+                                Menu("Nested Commands") {
+                                    Button("Nested Action") {}
+                                }
+                            )
+                        ),
+                    ]
+                ),
+            ],
+            environment: environment,
+            hostEnvironment: environment,
+            sceneResources: SceneResources()
+        )
+
+        let controller = WindowController(
+            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            environment: environment,
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Self.self)
+            )
+        )
+        var tick: UInt64 = 0
+        updateController(controller, tick: &tick)
+
+        let menuResponder = try XCTUnwrap(
+            menuResponders(in: controller).values.first
+        )
+        controller.viewGraph.data.withCurrent {
+            menuResponder.present(from: controller)
+        }
+        updateController(controller, tick: &tick)
+
+        let popup = try XCTUnwrap(firstMenuPopup(in: controller))
+        _ = controller.handleMouseHover(
+            at: popup.presentationPointInParent(
+                forLocalPoint: try popupRowHoverPoint(in: popup)
+            ),
+            deviceID: 19,
+            isTopMost: true,
+            at: Time(seconds: 1)
+        )
+        updateController(controller, tick: &tick)
+
+        let submenu = try XCTUnwrap(firstMenuPopup(in: popup))
+        let submenuPointInPopup = submenu.presentationPointInParent(
+            forLocalPoint: try popupRowHoverPoint(in: submenu)
+        )
+        _ = controller.handleMouseHover(
+            at: popup.presentationPointInParent(
+                forLocalPoint: submenuPointInPopup
+            ),
+            deviceID: 19,
+            isTopMost: true,
+            at: Time(seconds: 2)
+        )
+        updateController(controller, tick: &tick)
+        XCTAssertFalse(popup.isActivated)
+        XCTAssertTrue(submenu.isActivated)
+        XCTAssertFalse(try popupHasAccentFill(popup))
+
+        let popupContent = try XCTUnwrap(popup.viewGraph.data.withCurrent {
+            popup.viewGraph.rootAnyViewContentInput?.value.storage
+        })
+        let submenuContent = try XCTUnwrap(submenu.viewGraph.data.withCurrent {
+            submenu.viewGraph.rootAnyViewContentInput?.value.storage
+        })
+        let submenuSize = submenu.cachedContentSize
+        let submenuOrigin = submenu.presentationPointInParent(
+            forLocalPoint: .zero
+        )
+
+        _ = controller.handleMouseHover(
+            at: popup.presentationPointInParent(
+                forLocalPoint: try popupRowHoverPoint(in: popup)
+            ),
+            deviceID: 19,
+            isTopMost: true,
+            at: Time(seconds: 3)
+        )
+        updateController(controller, tick: &tick, turns: 1)
+
+        XCTAssertTrue(popup.isActivated)
+        XCTAssertFalse(submenu.isActivated)
+        XCTAssertTrue(try popupHasAccentFill(popup))
+        XCTAssertTrue(try popupHasDrawContent(submenu))
+        XCTAssertEqual(submenu.cachedContentSize, submenuSize)
+        XCTAssertEqual(
+            submenu.presentationPointInParent(forLocalPoint: .zero),
+            submenuOrigin
+        )
+        XCTAssertTrue(firstMenuPopup(in: popup) === submenu)
+        XCTAssertTrue(popup.viewGraph.data.withCurrent {
+            guard let current = popup.viewGraph.rootAnyViewContentInput?
+                .value.storage else {
+                return false
+            }
+            return current === popupContent
+        })
+        XCTAssertTrue(submenu.viewGraph.data.withCurrent {
+            guard let current = submenu.viewGraph.rootAnyViewContentInput?
+                .value.storage else {
+                return false
+            }
+            return current === submenuContent
+        })
+
+        // The overlay renderer draws this first post-transfer output directly;
+        // a platform child could otherwise hide a one-turn gap behind its last
+        // presented surface. Keep the following steady-state turn guarded too.
+        updateController(controller, tick: &tick, turns: 1)
+        XCTAssertTrue(try popupHasDrawContent(submenu))
+        XCTAssertTrue(firstMenuPopup(in: popup) === submenu)
+
+        controller.dismissAllPresentationChildren()
+    }
+
     private func responderTree(_ responder: ViewResponder) -> [ViewResponder] {
         [responder] + responder.children.flatMap(responderTree)
     }
@@ -472,6 +606,90 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
             }
         }
         return result
+    }
+
+    @MainActor
+    private func updateController(
+        _ controller: WindowController,
+        tick: inout UInt64,
+        turns: Int = 2
+    ) {
+        var redraw = false
+        for _ in 0..<turns {
+            controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 320, height: 208),
+                redraw: &redraw
+            ) { _, _ in }
+            tick &+= 1
+        }
+    }
+
+    private func popupRowHoverPoint(
+        in popup: ContextMenuWindowController
+    ) throws -> CGPoint {
+        let root = try XCTUnwrap(
+            popup.viewGraph.responderNode as? MultiViewResponder
+        )
+        let hover = try XCTUnwrap(
+            responderTree(root)
+                .compactMap { $0 as? HoverResponder }
+                .min { lhs, rhs in
+                    lhs.size.width * lhs.size.height <
+                        rhs.size.width * rhs.size.height
+                }
+        )
+        var points = [CGPoint(
+            x: hover.size.width / 2,
+            y: hover.size.height / 2
+        )]
+        hover.transform.convertGlobal(from: .local, points: &points)
+        return try XCTUnwrap(points.first)
+    }
+
+    private func popupHasAccentFill(
+        _ popup: ContextMenuWindowController
+    ) throws -> Bool {
+        let list = try popup.viewGraph.data.withCurrent {
+            try XCTUnwrap(popup.viewGraph.displayList())
+        }
+
+        func containsAccent(_ list: DisplayList) -> Bool {
+            for record in list.itemRecords {
+                guard record.kind == .shapeFill,
+                      case let .color(color)? = record.shapeStyle else {
+                    continue
+                }
+                let provider = color.provider
+                if provider.blue - provider.red > 0.5,
+                   provider.green - provider.red > 0.2 {
+                    return true
+                }
+            }
+            return list.effects.contains {
+                containsAccent($0.contents)
+            }
+        }
+
+        return containsAccent(list)
+    }
+
+    private func popupHasDrawContent(
+        _ popup: ContextMenuWindowController
+    ) throws -> Bool {
+        let list = try popup.viewGraph.data.withCurrent {
+            try XCTUnwrap(popup.viewGraph.displayList())
+        }
+
+        func containsContent(_ list: DisplayList) -> Bool {
+            !list.itemRecords.isEmpty || list.effects.contains {
+                containsContent($0.contents)
+            }
+        }
+
+        return containsContent(list)
     }
 
     private func globalFrame(_ responder: MenuControlResponder) -> CGRect {

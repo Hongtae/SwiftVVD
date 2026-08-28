@@ -2562,18 +2562,32 @@ class WindowController: WindowDelegate,
             let child = entry.controller
             if entry.frame != nil {
                 let loc = child.presentationPointInLocal(fromParentPoint: location)
-                if child.handleMouseHover(at: loc,
-                                          deviceID: deviceID,
-                                          isTopMost: topMost,
-                                          at: time) {
+                // Hover-end delivery may be consumed by the child that owned
+                // the preceding sample. Consumption does not make that child
+                // the frontmost surface at the new location. Resolve current
+                // ownership geometrically, including descendants that extend
+                // beyond their ancestor popup's frame.
+                let childOwnsTopMost = topMost && (
+                    child.overlayHitTest(loc) ||
+                    child.containsOverlayPresentation(at: loc)
+                )
+                _ = child.handleMouseHover(
+                    at: loc,
+                    deviceID: deviceID,
+                    isTopMost: childOwnsTopMost,
+                    at: time
+                )
+                if childOwnsTopMost {
                     topMost = false
                 }
             }
-            if topMost && child.overlayHitTest(
-                child.presentationPointInLocal(fromParentPoint: location)
-            ) {
-                topMost = false
-            }
+        }
+        if topMost {
+            onTopMostMouseHover(
+                at: location,
+                deviceID: deviceID,
+                at: time
+            )
         }
         if sendHoverEvent(at: location,
                           deviceID: deviceID,
@@ -2583,6 +2597,33 @@ class WindowController: WindowDelegate,
         }
         return isTopMost != topMost
     }
+
+    private func containsOverlayPresentation(at location: CGPoint) -> Bool {
+        for entry in presentationChildren.withLock({ $0.reversed() }) {
+            guard entry.isOverlay, entry.initiated, entry.frame != nil else {
+                continue
+            }
+            let child = entry.controller
+            let localPoint = child.presentationPointInLocal(
+                fromParentPoint: location
+            )
+            if child.overlayHitTest(localPoint) ||
+                child.containsOverlayPresentation(at: localPoint) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // Subclasses that own a rectangular tracking surface can react after
+    // nested overlay hit testing has selected this controller as the frontmost
+    // hover target. Running this hook before descendant routing would let
+    // overlapping parent and child surfaces fight over transient state.
+    func onTopMostMouseHover(
+        at location: CGPoint,
+        deviceID: Int,
+        at time: Time
+    ) {}
 
     @discardableResult
     private func sendHoverEvent(at location: CGPoint,
