@@ -5,6 +5,19 @@ struct TestApp1: App {
     var body: some Scene {
         WindowGroup("TestApp1") {
             ContentView()
+                .toolbar {
+                    ToolbarItem {
+                        Button("Run Toolbar Action", systemImage: "play") {
+                            print("Toolbar Lab: Run Toolbar Action")
+                        }
+                    }
+
+                    ToolbarItem(showsByDefault: false) {
+                        Button("Optional Toolbar Action") {
+                            print("Toolbar Lab: Optional Toolbar Action")
+                        }
+                    }
+                }
                 .environment(\.resourceBundle, .module)
                 //.environment(\._debugLayout, true)
         }
@@ -16,7 +29,7 @@ struct TestApp1: App {
             .queue,
             .appState,
             .windowState,
-            position: .init(x: 5, y: 33)
+            position: .init(x: 5, y: 73)
         )
         .updateFrameRate(
             forActiveState: 60,
