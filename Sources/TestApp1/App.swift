@@ -29,7 +29,7 @@ struct TestApp1: App {
             .queue,
             .appState,
             .windowState,
-            position: .init(x: 5, y: 73)
+            alignment: .topTrailing
         )
         .updateFrameRate(
             forActiveState: 60,
