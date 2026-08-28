@@ -71,14 +71,9 @@ public struct _VariadicView_Children: View {
         self.transform = transform
     }
 
-    /// Build children storage from a `_ViewListOutputs` produced during the body wiring pass.
-    fileprivate static func makeChildren(from outputs: _ViewListOutputs) -> Self {
-        switch outputs.views {
-        case .staticList(let elements):
-            return Self(list: BaseViewList(elements: elements), contentSubgraph: nil)
-        case .dynamicList(let viewListAttr, _):
-            return Self(list: viewListAttr.value, contentSubgraph: nil)
-        }
+    /// Build children storage from a materialized list produced during wiring.
+    fileprivate static func makeChildren(from list: any ViewList) -> Self {
+        Self(list: list, contentSubgraph: nil)
     }
 
     /// Returns true if `outputs` contains any `.dynamicList` at any nesting level.
@@ -448,9 +443,14 @@ extension _VariadicView_ViewRoot {
         }
 
         let childListOutputs = body(_Graph(), inputs)
+        let childListAttribute = childListOutputs.makeAttribute(
+            inputs: inputs.listInputs
+        )
 
         // Body != Never: create children AG input node + body(children:) rule.
-        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
+        let initialChildren = _VariadicView_Children.makeChildren(
+            from: childListAttribute.value
+        )
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
             value: initialChildren
         )
@@ -461,7 +461,9 @@ extension _VariadicView_ViewRoot {
             let _ = graph.makeRule {
                 // makeElements re-reads all nested viewListAttr.value (registering AG dependencies)
                 // so this rule re-fires whenever any child's ViewList changes.
-                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                let children = _VariadicView_Children.makeChildren(
+                    from: childListAttribute.value
+                )
                 childrenAttr.setValue(children)
             }
         }
@@ -488,14 +490,19 @@ extension _VariadicView_ViewRoot {
         }
 
         // Body != Never: build children + body rule, then wrap in dynamicList.
-        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
+        let childListAttribute = childListOutputs.makeAttribute(inputs: inputs)
+        let initialChildren = _VariadicView_Children.makeChildren(
+            from: childListAttribute.value
+        )
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
             value: initialChildren
         )
 
         if _VariadicView_Children.containsDynamicList(childListOutputs) {
             let _ = graph.makeRule {
-                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                let children = _VariadicView_Children.makeChildren(
+                    from: childListAttribute.value
+                )
                 childrenAttr.setValue(children)
             }
         }
@@ -561,14 +568,21 @@ extension _VariadicView_MultiViewRoot {
         }
 
         // Dynamic MultiViewGenerator with Proxy, same routing as the Body != Never ViewRoot path.
-        let initialChildren = _VariadicView_Children.makeChildren(from: childListOutputs)
+        let childListAttribute = childListOutputs.makeAttribute(
+            inputs: inputs.listInputs
+        )
+        let initialChildren = _VariadicView_Children.makeChildren(
+            from: childListAttribute.value
+        )
         let childrenAttr: Attribute<_VariadicView_Children> = graph.makeInput(
             value: initialChildren
         )
 
         if _VariadicView_Children.containsDynamicList(childListOutputs) {
             let _ = graph.makeRule {
-                let children = _VariadicView_Children.makeChildren(from: childListOutputs)
+                let children = _VariadicView_Children.makeChildren(
+                    from: childListAttribute.value
+                )
                 childrenAttr.setValue(children)
             }
         }

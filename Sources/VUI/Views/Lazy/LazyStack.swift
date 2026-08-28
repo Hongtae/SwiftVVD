@@ -6940,13 +6940,9 @@ extension LazyLayout where Self: LazyStack, Cache == _LazyStack_Cache<Self> {
         lazyInputs.base[IsInLazyContainer.self] = true
 
         let childListOutputs = body(_Graph(), lazyInputs)
-        let listAttr: Attribute<any ViewList>
-        switch childListOutputs.views {
-        case .staticList(let elements):
-            listAttr = graph.makeInput(value: BaseViewList(elements: elements) as any ViewList)
-        case .dynamicList(let list, _):
-            listAttr = list
-        }
+        let listAttr = childListOutputs.makeAttribute(
+            inputs: lazyInputs.listInputs
+        )
 
         let layoutDirection: Attribute<LayoutDirection> = graph.makeRule {
             inputs.base.cachedEnvironment.value.environment.value.layoutDirection

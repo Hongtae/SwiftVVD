@@ -2266,7 +2266,11 @@ extension Layout {
             layoutComputerAttr = staticLCAttr
             mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)
 
-        case .dynamicList(let viewListAttr, _):
+        case .dynamicList(let viewListAttr, let modifier):
+            let materializedViewList = _ViewListOutputs.makeModifiedList(
+                list: viewListAttr,
+                modifier: modifier
+            )
             let dynamicLayoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
                 DynamicLayoutComputer(
                     _layout: root._attribute,
@@ -2282,7 +2286,7 @@ extension Layout {
                 )
             )
             let adaptor = DynamicLayoutViewAdaptor(
-                _items: viewListAttr,
+                _items: materializedViewList,
                 _childGeometries: OptionalAttribute(childGeometries)
             ) { mutation in
                 guard let graph = _AGGraph.current else {

@@ -935,21 +935,37 @@ public struct _ViewListOutputs {
 }
 
 extension _ViewListOutputs {
+    static func makeModifiedList(
+        list: Attribute<any ViewList>,
+        modifier: ListModifier?
+    ) -> Attribute<any ViewList> {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "_ViewListOutputs.makeModifiedList called outside an active graph."
+            )
+        }
+        guard let modifier else {
+            return list
+        }
+        return graph.makeRule(
+            ApplyModifiers(source: list, listModifier: modifier)
+        )
+    }
+
     func makeAttribute(inputs: _ViewListInputs) -> Attribute<any ViewList> {
         guard let graph = _AGGraph.current else {
             fatalError("_ViewListOutputs.makeAttribute(inputs:) called outside an active graph.")
         }
         switch views {
         case .dynamicList(let attribute, let modifier):
-            guard let modifier else { return attribute }
-            return graph.makeRule {
-                var list = attribute.value
-                modifier.apply(to: &list)
-                return list
-            }
+            return Self.makeModifiedList(
+                list: attribute,
+                modifier: modifier
+            )
         case .staticList(let elements):
             let implicitID = inputs.implicitID
             let traitKeys = inputs.traitKeys
+            let stableIDScope = inputs.base.stableIDScope
             let traits: OptionalAttribute<ViewTraitCollection>
             if case .unaryElements(let unary) = elements,
                let generator = (
@@ -967,10 +983,47 @@ extension _ViewListOutputs {
                 if canTransition {
                     values[CanTransitionTraitKey.self] = true
                 }
+                if let stableIDScope {
+                    values[_DisplayList_StableIdentityScope.self] =
+                        stableIDScope
+                }
                 return BaseViewList(
                     elements: elements,
                     implicitID: implicitID,
                     traitKeys: traitKeys,
+                    traits: values
+                ) as any ViewList
+            }
+        }
+    }
+
+    func makeAttribute(
+        viewInputs: _ViewInputs
+    ) -> Attribute<any ViewList> {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "_ViewListOutputs.makeAttribute(viewInputs:) called outside an active graph."
+            )
+        }
+        switch views {
+        case .dynamicList(let attribute, let modifier):
+            return Self.makeModifiedList(
+                list: attribute,
+                modifier: modifier
+            )
+        case .staticList(let elements):
+            let implicitID = nextImplicitID - elements.count
+            let stableIDScope = viewInputs.base.stableIDScope
+            return graph.makeRule {
+                var values = ViewTraitCollection()
+                if let stableIDScope {
+                    values[_DisplayList_StableIdentityScope.self] =
+                        stableIDScope
+                }
+                return BaseViewList(
+                    elements: elements,
+                    implicitID: implicitID,
+                    traitKeys: nil,
                     traits: values
                 ) as any ViewList
             }

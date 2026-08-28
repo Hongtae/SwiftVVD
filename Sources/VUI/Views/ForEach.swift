@@ -67,7 +67,11 @@ extension ForEach: View where Content: View {
                 switch outputs.views {
                 case .staticList(let elements):
                     return BaseViewList(elements: elements) as any ViewList
-                case .dynamicList(let attribute, _):
+                case .dynamicList(let attribute, let modifier):
+                    precondition(
+                        modifier == nil,
+                        "ForEach section bridge requires a top-level nil modifier."
+                    )
                     return attribute.value
                 }
             }

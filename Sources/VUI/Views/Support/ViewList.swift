@@ -1724,7 +1724,10 @@ struct MergedElements: _ViewList_Elements {
         outputs.reduce(0) { acc, output in
             switch output.views {
             case .staticList(let elems): return acc + elems.count
-            case .dynamicList(let attr, _): return acc + attr.value.count(style: _ViewList_IteratorStyle())
+            case .dynamicList:
+                preconditionFailure(
+                    "MergedElements requires static list outputs."
+                )
             }
         }
     }
@@ -1752,28 +1755,10 @@ struct MergedElements: _ViewList_Elements {
                 if !cont {
                     return (merge(collected, in: graph), false)
                 }
-            case .dynamicList(let attr, _):
-                var traversalFrom = from
-                var remaining = from
-                let list = attr.value
-                let cont = _applySublists(in: list, from: &traversalFrom, listAttribute: attr) { sublist in
-                    var elementFrom = remaining
-                    let (result, shouldContinue) = sublist.elements.makeElements(
-                        from: &elementFrom,
-                        inputs: inputs,
-                        indirectMap: indirectMap,
-                        body: body
-                    )
-                    if let result {
-                        collected.append(result)
-                    }
-                    remaining = elementFrom
-                    return shouldContinue
-                }
-                from = remaining
-                if !cont {
-                    return (merge(collected, in: graph), false)
-                }
+            case .dynamicList:
+                preconditionFailure(
+                    "MergedElements requires static list outputs."
+                )
             }
         }
         return (merge(collected, in: graph), true)
@@ -3246,7 +3231,7 @@ extension _ViewListOutputs {
     /// Wraps the current view list content with a ViewModifier applied to each element.
     ///
     /// staticList branch (tag != 1): creates ModifiedElements, stores as .staticList(.modified(...))
-    /// dynamicList branch (tag == 1): creates ListModifier + ApplyModifiers AG rule
+    /// dynamicList branch (tag == 1): stages the original list and modifier chain
     mutating func multiModifier<M: ViewModifier>(
         _ modifier: _GraphValue<M>,
         inputs: _ViewListInputs
@@ -3258,14 +3243,8 @@ extension _ViewListOutputs {
             views = .staticList(.modified(modElements))
 
         case .dynamicList(let listAttr, let pred):
-            guard let graph = _AGGraph.current else {
-                fatalError("_ViewListOutputs.multiModifier called outside AG context.")
-            }
             let lm = ListModifier(pred: pred, modifier: modifier._attribute, inputs: inputs.base)
-            let newAttr: Attribute<any ViewList> = graph.makeRule(
-                ApplyModifiers(source: listAttr, listModifier: lm)
-            )
-            views = .dynamicList(newAttr, lm)
+            views = .dynamicList(listAttr, lm)
         }
     }
 }
