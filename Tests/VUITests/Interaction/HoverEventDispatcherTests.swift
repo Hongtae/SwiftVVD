@@ -453,6 +453,67 @@ final class HoverEventDispatcherTests: XCTestCase {
         XCTAssertEqual(recorder.timestamps, [occurrenceTime])
     }
 
+    @MainActor
+    func testWindowBoundaryMouseEventsBeginAndEndHover() throws {
+        let recorder = HoverEventRecorder()
+        let controller = WindowController(
+            content: HoverScrollSurface(recorder: recorder),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(HoverScrollSurface.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+        let root = try XCTUnwrap(
+            controller.viewGraph.responderNode as? ViewResponder
+        )
+        let responder = try XCTUnwrap(
+            responderTree(root).compactMap { $0 as? HoverResponder }.first {
+                $0.size.width > 0 && $0.size.height > 0
+            }
+        )
+        var points = [CGPoint(
+            x: responder.size.width / 2,
+            y: responder.size.height / 2
+        )]
+        responder.transform.convertGlobal(from: .local, points: &points)
+        let location = try XCTUnwrap(points.first)
+
+        controller.onMouseEvent(
+            event: VVD.MouseEvent(
+                type: .entered,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: location,
+                timestamp: 1
+            ),
+            at: Time(seconds: 1)
+        )
+        XCTAssertEqual(recorder.events, ["row:true"])
+
+        controller.onMouseEvent(
+            event: VVD.MouseEvent(
+                type: .exited,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: location,
+                timestamp: 2
+            ),
+            at: Time(seconds: 2)
+        )
+        XCTAssertEqual(recorder.events, ["row:true", "row:false"])
+    }
+
     // ASSERTIONS appKitBlockedMouseMoveCoalescingObserved
     @MainActor
     func testQueuedUnpressedMouseMovesKeepOnlyLatestHoverSample() throws {

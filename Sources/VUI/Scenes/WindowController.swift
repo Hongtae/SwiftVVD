@@ -1849,12 +1849,27 @@ class WindowController: WindowDelegate,
             return
         }
 
-        if event.type == .wheel {
-            self.handleMouseWheel(event: event, time: time ?? currentTimestamp)
-        } else {
+        let eventTime = time ?? currentTimestamp
+        switch event.type {
+        case .wheel:
+            self.handleMouseWheel(event: event, time: eventTime)
+
+        case .entered, .exited:
+            // Window-boundary events carry hover lifetime only. They must not
+            // begin, update, or cancel a pressed pointer gesture.
+            if event.device != .touch {
+                self.handleMouseHover(
+                    at: event.location,
+                    deviceID: event.deviceID,
+                    isTopMost: event.type == .entered,
+                    at: eventTime
+                )
+            }
+
+        default:
             self.handleMouseEvent(
                 event: event,
-                at: time ?? currentTimestamp
+                at: eventTime
             )
             // Direct touch has no hover phase independent of contact.
             if event.device != .touch {
@@ -1869,14 +1884,14 @@ class WindowController: WindowDelegate,
                         at: event.location,
                         deviceID: event.deviceID,
                         isTopMost: true,
-                        at: time ?? currentTimestamp
+                        at: eventTime
                     )
                 } else if event.type == .cancelled {
                     self.handleMouseHover(
                         at: event.location,
                         deviceID: event.deviceID,
                         isTopMost: false,
-                        at: time ?? currentTimestamp
+                        at: eventTime
                     )
                 }
             }

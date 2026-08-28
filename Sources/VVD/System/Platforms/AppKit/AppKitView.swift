@@ -70,6 +70,7 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     var markedText: String = ""
 
     weak var proxyWindow: AppKitWindow?
+    private var mouseBoundaryTrackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true } // upper-left is origin
     override var acceptsFirstResponder: Bool { true }
@@ -167,6 +168,29 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
     }
 
     // MARK: - Mouse Event
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let mouseBoundaryTrackingArea {
+            removeTrackingArea(mouseBoundaryTrackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .mouseEnteredAndExited,
+                .activeInActiveApp,
+                .inVisibleRect,
+                .enabledDuringMouseDrag,
+            ],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        mouseBoundaryTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) { self.postMouseEvent(event) }
+    override func mouseExited(with event: NSEvent)  { self.postMouseEvent(event) }
+
     override func mouseDown(with event: NSEvent)        { self.handleMouseDown(event: event) }
     override func rightMouseDown(with event: NSEvent)   { self.handleMouseDown(event: event) }
     override func otherMouseDown(with event: NSEvent)   { self.handleMouseDown(event: event) }
@@ -656,6 +680,10 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
                 eventType = .buttonUp
             case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
                 eventType = .move
+            case .mouseEntered:
+                eventType = .entered
+            case .mouseExited:
+                eventType = .exited
             case .scrollWheel:
                 eventType = .wheel
                 scrollData = ScrollEventData(

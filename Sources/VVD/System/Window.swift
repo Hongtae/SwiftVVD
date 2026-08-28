@@ -26,6 +26,8 @@ public enum MouseEventType {
     case buttonDown
     case buttonUp
     case move
+    case entered
+    case exited
     case wheel
     case pointing
     case cancelled
@@ -256,8 +258,14 @@ public protocol Window: AnyObject {
 
     func showMouse(_: Bool, forDeviceID: Int)
     func isMouseVisible(forDeviceID: Int) -> Bool
+
+    /// Enables or disables relative mouse input for the specified device.
+    ///
+    /// While locked, the mouse position remains fixed, but physical movement
+    /// is still reported through the `delta` of each move event.
     func lockMouse(_: Bool, forDeviceID: Int)
     func isMouseLocked(forDeviceID: Int) -> Bool
+
     func setMousePosition(_: CGPoint, forDeviceID: Int)
     func mousePosition(forDeviceID: Int) -> CGPoint?
 

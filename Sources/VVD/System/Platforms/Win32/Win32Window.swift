@@ -50,8 +50,8 @@ private func dpiScaleForWindow(_ hWnd: HWND) -> CGFloat {
 }
 
 // Timer settings.
-private let updateKeyboardMouseTimerId: UINT_PTR = 10
-private let updateKeyboardMouseTimeInterval: UINT = 10
+private let updateKeyboardTimerId: UINT_PTR = 10
+private let updateKeyboardTimeInterval: UINT = 10
 
 // Custom window messages.
 private let WM_VVDWINDOW_SHOWCURSOR = (WM_USER + 0x1175)
@@ -240,6 +240,9 @@ final class Win32Window: Window {
     private var lockedMousePosition: CGPoint = .zero
     private var mouseButtonDownMask: MouseButtonDownMask = []
     private var mouseLocked: Bool = false
+    private var mouseInsideClient: Bool = false
+    private var mouseLeaveTrackingArmed: Bool = false
+    private var mouseBoundaryTrackingSuspended: Bool = false
     private var pointerStates: [UINT32: PointerInputState] = [:]
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
@@ -475,7 +478,7 @@ final class Win32Window: Window {
         self.windowFrame = CGRect(rc2)
 
         SetWindowPos(hWnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
-        SetTimer(hWnd, updateKeyboardMouseTimerId, updateKeyboardMouseTimeInterval, nil)
+        SetTimer(hWnd, updateKeyboardTimerId, updateKeyboardTimeInterval, nil)
         postWindowEvent(type: .created)
     }
 
@@ -495,7 +498,7 @@ final class Win32Window: Window {
             modals.forEach { $0.close() }
 
             if let hWnd {
-                KillTimer(hWnd, updateKeyboardMouseTimerId)
+                KillTimer(hWnd, updateKeyboardTimerId)
                 Self.windowMap.removeValue(forKey: hWnd)
                 PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
             }
@@ -670,7 +673,7 @@ final class Win32Window: Window {
             }
             self.dropTarget = nil
 
-            KillTimer(hWnd, updateKeyboardMouseTimerId)
+            KillTimer(hWnd, updateKeyboardTimerId)
 
             // The HWND is removed from windowMap before the queued WM_CLOSE is
             // dispatched, so a later WA_INACTIVE message cannot update this
@@ -741,6 +744,11 @@ final class Win32Window: Window {
 
     func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0, let pos = self.mousePosition(forDeviceID: 0) {
+            if lock || self.mouseLocked {
+                // Keep boundary notifications suspended until the window
+                // thread has reconciled capture and TrackMouseEvent state.
+                self.mouseBoundaryTrackingSuspended = true
+            }
             self.mouseLocked = lock
             self.mousePosition = pos
             self.lockedMousePosition = pos
@@ -794,33 +802,8 @@ final class Win32Window: Window {
 
     // MARK: - Input Synchronization
 
-    private func synchronizeMouse() {
-        guard self.visible else { return }
-        guard self.resizing == false else { return }
-        let styleEx = DWORD(bitPattern: GetWindowLongW(hWnd, GWL_EXSTYLE))
-        if styleEx & DWORD(WS_EX_NOACTIVATE) == 0 {
-            guard self.activated else { return }
-        }
-
-        // Check whether the mouse moved outside the window region.
-        if let hWnd = self.hWnd, GetCapture() != hWnd {
-            var pt = POINT()
-            GetCursorPos(&pt)
-            ScreenToClient(hWnd, &pt)
-
-            var rc = RECT()
-            GetClientRect(hWnd, &rc)
-            if pt.x < rc.left || pt.x > rc.right || pt.y > rc.bottom || pt.y < rc.top {
-
-                let MAKELPARAM = {(a:Int32, b:Int32) -> LPARAM in
-                    LPARAM(a & 0xffff) | (LPARAM(b & 0xffff) << 16)
-                }
-                SendMessageW(hWnd, UINT(WM_MOUSEMOVE), 0, MAKELPARAM(pt.x, pt.y))
-            }
-        }
-    }
-
     private func resetMouse() {
+        self.disarmMouseLeaveTracking()
         if let hWnd = self.hWnd {
             var pt = POINT()
             GetCursorPos(&pt)
@@ -828,7 +811,111 @@ final class Win32Window: Window {
             mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
         }
         self.mouseButtonDownMask = []
+        self.mouseInsideClient = false
+        self.mouseBoundaryTrackingSuspended = self.mouseLocked
         self.pointerStates.removeAll()
+    }
+
+    private func mouseLocationIsInsideClient(x: LONG, y: LONG) -> Bool {
+        guard let hWnd else { return false }
+        var rect = RECT()
+        guard GetClientRect(hWnd, &rect) else { return false }
+        return x >= rect.left && x < rect.right &&
+            y >= rect.top && y < rect.bottom
+    }
+
+    @discardableResult
+    private func armMouseLeaveTracking() -> Bool {
+        if mouseLeaveTrackingArmed { return true }
+        guard let hWnd else { return false }
+        var tracking = TRACKMOUSEEVENT()
+        tracking.cbSize = DWORD(MemoryLayout<TRACKMOUSEEVENT>.size)
+        tracking.dwFlags = DWORD(TME_LEAVE)
+        tracking.hwndTrack = hWnd
+        guard TrackMouseEvent(&tracking) else {
+            Log.err("TrackMouseEvent failed: \(win32ErrorString(GetLastError()))")
+            return false
+        }
+        mouseLeaveTrackingArmed = true
+        return true
+    }
+
+    private func disarmMouseLeaveTracking() {
+        guard mouseLeaveTrackingArmed else { return }
+        defer { mouseLeaveTrackingArmed = false }
+        guard let hWnd else { return }
+        var tracking = TRACKMOUSEEVENT()
+        tracking.cbSize = DWORD(MemoryLayout<TRACKMOUSEEVENT>.size)
+        tracking.dwFlags = DWORD(TME_CANCEL) | DWORD(TME_LEAVE)
+        tracking.hwndTrack = hWnd
+        _ = TrackMouseEvent(&tracking)
+    }
+
+    private func updateMouseBoundaryTracking(
+        at location: CGPoint,
+        isInsideClient: Bool,
+        timestamp: TimeInterval
+    ) {
+        // A locked mouse is a relative-input device: its reported location is
+        // intentionally fixed and only move deltas are meaningful. Physical
+        // motion must therefore not start or end client-boundary hover state.
+        guard !mouseLocked, !mouseBoundaryTrackingSuspended else { return }
+
+        guard isInsideClient else {
+            endMouseBoundaryTracking(timestamp: timestamp)
+            return
+        }
+
+        guard armMouseLeaveTracking(), !mouseInsideClient else { return }
+        mouseInsideClient = true
+        postMouseEvent(MouseEvent(
+            type: .entered,
+            window: self,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: timestamp
+        ))
+    }
+
+    private func endMouseBoundaryTracking(timestamp: TimeInterval) {
+        disarmMouseLeaveTracking()
+        guard mouseInsideClient else { return }
+        mouseInsideClient = false
+        let location = mousePosition(forDeviceID: 0) ?? mousePosition
+        mousePosition = location
+        postMouseEvent(MouseEvent(
+            type: .exited,
+            window: self,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: location,
+            timestamp: timestamp
+        ))
+    }
+
+    private func reconcileMouseBoundaryTracking(timestamp: TimeInterval) {
+        guard let hWnd else { return }
+        if mouseLocked {
+            // TrackMouseEvent observes the physical cursor. Suspend it while
+            // the window owns relative mouse input, but retain the logical
+            // inside/outside state until ordinary positioning resumes.
+            disarmMouseLeaveTracking()
+            return
+        }
+
+        mouseBoundaryTrackingSuspended = false
+        var point = POINT()
+        guard GetCursorPos(&point), ScreenToClient(hWnd, &point) else { return }
+        let location = CGPoint(x: Int(point.x), y: Int(point.y)) *
+            (1.0 / contentScaleFactor)
+        updateMouseBoundaryTracking(
+            at: location,
+            isInsideClient: mouseLocationIsInsideClient(x: point.x, y: point.y),
+            timestamp: timestamp
+        )
     }
 
     private func suspendMouseCaptureForModal() {
@@ -2197,9 +2284,8 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_TIMER):
-                if wParam == updateKeyboardMouseTimerId {
+                if wParam == updateKeyboardTimerId {
                     window.synchronizeKeyStates()
-                    window.synchronizeMouse()
                     return 0
                 }
             case UINT(WM_POINTERDOWN), UINT(WM_POINTERUPDATE), UINT(WM_POINTERUP):
@@ -2238,8 +2324,19 @@ final class Win32Window: Window {
             case UINT(WM_MOUSEMOVE):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 let pt = MAKEPOINTS(lParam)
+                let timestamp = messageTimestamp()
                 let oldPtX = Int((window.mousePosition.x * window.contentScaleFactor).rounded())
                 let oldPtY = Int((window.mousePosition.y * window.contentScaleFactor).rounded())
+                let location = CGPoint(x: Int(pt.x), y: Int(pt.y)) *
+                    (1.0 / window.contentScaleFactor)
+                window.updateMouseBoundaryTracking(
+                    at: location,
+                    isInsideClient: window.mouseLocationIsInsideClient(
+                        x: LONG(pt.x),
+                        y: LONG(pt.y)
+                    ),
+                    timestamp: timestamp
+                )
                 if pt.x != oldPtX || pt.y != oldPtY {
                     let delta = CGPoint(x: Int(pt.x) - oldPtX,
                                         y: Int(pt.y) - oldPtY) * (1.0 / window.contentScaleFactor)
@@ -2273,9 +2370,20 @@ final class Win32Window: Window {
                                                          buttonID: 0,
                                                          location: window.mousePosition,
                                                          delta: delta,
-                                                         timestamp: messageTimestamp()))
+                                                         timestamp: timestamp))
                     }
                 }
+                return 0
+            case UINT(WM_MOUSELEAVE):
+                // Windows cancels the TrackMouseEvent request before posting
+                // this message. Locked relative input retains its logical
+                // boundary state and rearms tracking after it is unlocked.
+                guard window.mouseLeaveTrackingArmed else { return 0 }
+                window.mouseLeaveTrackingArmed = false
+                if window.mouseLocked || window.mouseBoundaryTrackingSuspended {
+                    return 0
+                }
+                window.endMouseBoundaryTracking(timestamp: messageTimestamp())
                 return 0
             case UINT(WM_LBUTTONDOWN):
                 if isPointerCompatibilityMouseMessage() { return 0 }
@@ -2668,6 +2776,9 @@ final class Win32Window: Window {
                         SetCapture(hWnd)
                     }
                 }
+                window.reconcileMouseBoundaryTracking(
+                    timestamp: messageTimestamp()
+                )
                 return 0
             default:
                 break

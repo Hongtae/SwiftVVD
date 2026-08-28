@@ -536,10 +536,36 @@ final class WaylandApplication: Application, @unchecked Sendable {
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerTarget = self.window(forSurface: surface)
         pointerLocation = CGPoint(x: x, y: y)
+        if let target = pointerTarget {
+            MainActor.assumeIsolated {
+                target.postMouseEvent(MouseEvent(
+                    type: .entered,
+                    window: target,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: pointerLocation,
+                    timestamp: ProcessInfo.processInfo.systemUptime
+                ))
+            }
+        }
         Log.debug("wl_pointer_listener.enter (serial:\(serial), x:\(x), y:\(y))")
     }
 
     fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
+        if let target = pointerTarget {
+            MainActor.assumeIsolated {
+                target.postMouseEvent(MouseEvent(
+                    type: .exited,
+                    window: target,
+                    device: .genericMouse,
+                    deviceID: 0,
+                    buttonID: 0,
+                    location: pointerLocation,
+                    timestamp: ProcessInfo.processInfo.systemUptime
+                ))
+            }
+        }
         cancelActivePointerButtons()
         pointerTarget = nil
         pointerAxisFrame = PointerAxisFrame()
