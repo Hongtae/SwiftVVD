@@ -5,14 +5,14 @@ struct TestApp1: App {
     var body: some Scene {
         WindowGroup("TestApp1") {
             ContentView()
-                .toolbar {
-                    ToolbarItem {
+                .toolbar(id: "testapp-main-toolbar") {
+                    ToolbarItem(id: "run") {
                         Button("Run Toolbar Action", systemImage: "play") {
                             print("Toolbar Lab: Run Toolbar Action")
                         }
                     }
 
-                    ToolbarItem(showsByDefault: false) {
+                    ToolbarItem(id: "optional", showsByDefault: false) {
                         Button("Optional Toolbar Action") {
                             print("Toolbar Lab: Optional Toolbar Action")
                         }
@@ -38,6 +38,8 @@ struct TestApp1: App {
         )
         .commandMenuPresentationStyle(.window)
         .commands {
+            ToolbarCommands()
+
             CommandGroup(after: .appInfo) {
                 Button("About Command Lab") {
                     print("Command Lab: About")
