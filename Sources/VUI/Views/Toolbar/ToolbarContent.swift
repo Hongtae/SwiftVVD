@@ -51,10 +51,14 @@ public struct ToolbarItemPlacement: Equatable, Hashable, Sendable {
     public static let navigation         = ToolbarItemPlacement(role: .navigation)
     public static let keyboard           = ToolbarItemPlacement(role: .keyboard)
 }
-// Local toolbar storage for the currently implemented sheet toolbar path:
-// identity, role placement, and a view payload for ModalButtonRow rendering.
-// The broader toolbar storage surface lives outside this sheet toolbar path.
+// Local storage shared by the current sheet and renderer-owned root toolbar
+// paths: identity, role placement, default visibility, and an erased view
+// payload. The broader toolbar storage surface remains outside this subset.
 struct ToolbarStorage {
+    struct Configuration: Equatable {
+        var customizationID: String?
+    }
+
     struct ID: Hashable {
         var rawValue: AnyHashable
         init(_ rawValue: AnyHashable) { self.rawValue = rawValue }
@@ -64,6 +68,7 @@ struct ToolbarStorage {
         var id: ID
         var placement: ToolbarItemPlacement.Role
         var view: AnyView
+        var showsByDefault: Bool
         // Keeps toolbar entry rendering on the original AG path so source aliases
         // such as PrimitiveButtonStyleConfiguration.Label remain connected.
         var generator: TypedUnaryViewGenerator?
@@ -71,10 +76,12 @@ struct ToolbarStorage {
         init(id: ID,
              placement: ToolbarItemPlacement.Role,
              view: AnyView,
+             showsByDefault: Bool = true,
              generator: TypedUnaryViewGenerator? = nil) {
             self.id = id
             self.placement = placement
             self.view = view
+            self.showsByDefault = showsByDefault
             self.generator = generator
         }
     }
@@ -90,10 +97,14 @@ struct ToolbarStorage {
 
     var items: [Item] = []
     var searchItem: SearchItem? = nil
+    var configuration: Configuration? = nil
 
     mutating func merge(_ other: ToolbarStorage) {
         items.append(contentsOf: other.items)
         if searchItem == nil { searchItem = other.searchItem }
+        if let configuration = other.configuration {
+            self.configuration = configuration
+        }
     }
 
     func toolbarItems(in role: ToolbarItemPlacement.Role) -> [Item] {

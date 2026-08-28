@@ -309,17 +309,40 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
             sceneResources: SceneResources()
         )
 
+        var toolbarStorage = ToolbarStorage()
+        toolbarStorage.configuration = ToolbarStorage.Configuration(
+            customizationID: nil
+        )
+        toolbarStorage.items = [
+            ToolbarStorage.Item(
+                id: ToolbarStorage.ID("fixture-toolbar-item"),
+                placement: .automatic,
+                view: AnyView(Text("Toolbar"))
+            ),
+        ]
+        let toolbarBridge = RootToolbarBridge()
+        XCTAssertTrue(toolbarBridge.update(storage: toolbarStorage))
+
+        // The renderer menu remains the outer chrome branch so its popup
+        // anchor stays above the controller-owned root toolbar.
         let controller = WindowController(
-            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            content: presenter.rootView(
+                sceneContent: RootToolbarHost.hostRootView(
+                    sceneContent: AnyView(EmptyView()),
+                    bridge: toolbarBridge
+                )
+            ),
             environment: sceneEnvironment,
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(Self.self)
             )
         )
-        let sceneSize = CGSize(width: 320, height: 180)
-        let platformSize = WindowCommandMenuPresenter.platformContentSize(
-            preserving: sceneSize
+        let platformSize = CGSize(
+            width: 320,
+            height: 180
+                + WindowCommandMenuPresenter.menuBarHeight
+                + RootToolbarHost.toolbarHeight
         )
         var redraw = false
         controller.updateView(

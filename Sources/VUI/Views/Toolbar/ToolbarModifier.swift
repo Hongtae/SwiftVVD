@@ -25,7 +25,7 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent>: ViewModifier, 
         inputs: _ViewInputs,
         body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
     ) -> _ViewOutputs {
-        guard _AGGraph.current != nil else {
+        guard let graph = _AGGraph.current else {
             fatalError("ToolbarModifier._makeView called outside AG context")
         }
         var outputs = body(_Graph(), inputs)
@@ -39,9 +39,15 @@ struct ToolbarModifier<CustomizationID, Content: ToolbarContent>: ViewModifier, 
             content: modifier[\.content],
             inputs: _ToolbarInputs(toolbarInputs)
         )
-        if let storage = toolbarOutputs.storage.attribute {
-            outputs.preferences.append(ToolbarKey.self, node: storage.identifier)
+        let contentStorage = toolbarOutputs.storage.attribute
+        let storage: Attribute<ToolbarStorage> = graph.makeRule {
+            var storage = contentStorage?.value ?? ToolbarStorage()
+            storage.configuration = ToolbarStorage.Configuration(
+                customizationID: modifier._attribute.value.id
+            )
+            return storage
         }
+        outputs.preferences.append(ToolbarKey.self, node: storage.identifier)
         return outputs
     }
 

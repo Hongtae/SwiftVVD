@@ -1,0 +1,280 @@
+import XCTest
+@testable import VUI
+
+final class RootToolbarHostTests: XCTestCase {
+    func testToolbarModifierPublishesHostReadableRootStorage() throws {
+        let host = ToolbarTestRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: Text("Scene")
+                .toolbar {
+                    ToolbarItem {
+                        Text("Action")
+                    }
+                },
+            rendererHost: host,
+            features: [RootToolbarViewGraph()]
+        )
+        host.storage = graph
+        graph.updateOutputs(at: .zero)
+
+        let storage = try XCTUnwrap(host.receivedToolbarStorage)
+        XCTAssertNotNil(storage.configuration)
+        XCTAssertNil(storage.configuration?.customizationID)
+        XCTAssertEqual(storage.items.count, 1)
+        if let item = storage.items.first {
+            XCTAssertEqual(item.placement, .automatic)
+            XCTAssertTrue(item.showsByDefault)
+        }
+    }
+
+    func testRootBridgeOutlivesReplaceableToolbarSnapshots() throws {
+        let bridge = RootToolbarBridge()
+        let first = toolbarStorage(id: "first")
+
+        XCTAssertTrue(bridge.update(storage: first))
+        XCTAssertEqual(bridge.snapshot?.visibility, .visible)
+        XCTAssertEqual(
+            bridge.allocatedHeight,
+            RootToolbarHost.toolbarHeight
+        )
+        XCTAssertFalse(bridge.update(storage: first))
+
+        var refreshedContent = first
+        refreshedContent.items[0].view = AnyView(Text("refreshed"))
+        XCTAssertTrue(bridge.update(storage: refreshedContent))
+
+        XCTAssertTrue(bridge.toggleVisibility())
+        XCTAssertEqual(bridge.snapshot?.visibility, .hidden)
+        XCTAssertEqual(bridge.allocatedHeight, 0)
+
+        // Replacing the concrete toolbar snapshot preserves bridge-owned
+        // visibility as long as the root toolbar remains installed.
+        XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "second")))
+        XCTAssertEqual(bridge.snapshot?.visibility, .hidden)
+
+        XCTAssertTrue(bridge.update(storage: ToolbarStorage()))
+        XCTAssertNil(bridge.snapshot)
+        XCTAssertEqual(bridge.allocatedHeight, 0)
+
+        XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "third")))
+        XCTAssertEqual(bridge.snapshot?.visibility, .visible)
+    }
+
+    func testRootFeatureTracksToolbarRemovalAndReinstallation() throws {
+        let host = ToolbarTestRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: toolbarView(id: "first"),
+            rendererHost: host,
+            features: [RootToolbarViewGraph()]
+        )
+        host.storage = graph
+
+        graph.updateOutputs(at: .zero)
+        XCTAssertEqual(
+            host.receivedToolbarStorage?.items.map(\.id),
+            [ToolbarStorage.ID("first")]
+        )
+
+        let rootInput = try XCTUnwrap(graph.rootAnyViewContentInput)
+        graph.data.withCurrent {
+            rootInput.setValue(AnyView(Text("No toolbar")))
+        }
+        graph.updateOutputs(at: .zero)
+        XCTAssertNil(host.receivedToolbarStorage?.configuration)
+        XCTAssertEqual(host.receivedToolbarStorage?.items.count, 0)
+
+        graph.data.withCurrent {
+            rootInput.setValue(toolbarView(id: "second"))
+        }
+        graph.updateOutputs(at: .zero)
+        XCTAssertNotNil(host.receivedToolbarStorage?.configuration)
+        XCTAssertEqual(
+            host.receivedToolbarStorage?.items.map(\.id),
+            [ToolbarStorage.ID("second")]
+        )
+    }
+
+    func testVisibleRootToolbarHostBuildsItsViewRoute() throws {
+        let host = TestViewRendererHost()
+        let bridge = RootToolbarBridge()
+        XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "action")))
+        let graph = ViewGraph(
+            replaceableContent: RootToolbarHost.hostRootView(
+                sceneContent: AnyView(Text("Scene")),
+                bridge: bridge
+            ),
+            rendererHost: host
+        )
+        host.storage = graph
+
+        graph.updateOutputs(at: .zero)
+
+        XCTAssertNotNil(graph.rootLayoutComputer)
+    }
+
+    func testStableRootHostObservesBridgeInstallation() throws {
+        let counter = ToolbarRenderCounter()
+        let bridge = RootToolbarBridge()
+        let host = TestViewRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: RootToolbarHost.hostRootView(
+                sceneContent: AnyView(Text("Scene")),
+                bridge: bridge
+            ),
+            rendererHost: host
+        )
+        host.storage = graph
+
+        graph.updateOutputs(at: .zero)
+        XCTAssertEqual(counter.value, 0)
+
+        var storage = toolbarStorage(id: "action")
+        storage.items[0].view = AnyView(
+            ToolbarRenderProbe(counter: counter)
+        )
+        XCTAssertTrue(bridge.update(storage: storage))
+        graph.updateOutputs(at: .zero)
+
+        XCTAssertGreaterThan(counter.value, 0)
+    }
+
+    func testRootHostDoesNotConsumeSheetWeakGenerator() throws {
+        let sourceHost = TestViewRendererHost()
+        let sourceGraph = ViewGraph(
+            replaceableContent: Text("Generator source"),
+            rendererHost: sourceHost
+        )
+        sourceHost.storage = sourceGraph
+
+        let foreignGenerator: TypedUnaryViewGenerator =
+            sourceGraph.data.withCurrent {
+                let graph = sourceGraph.data.graph
+                let source = graph.makeInput(
+                    value: Text("Foreign")
+                )
+                return TypedUnaryViewGenerator(
+                    _GraphValue(_attribute: source),
+                    baseInputs: _GraphInputs(
+                        time: graph.makeInput(value: .zero),
+                        phase: graph.makeInput(value: _GraphInputs.Phase()),
+                        environment: graph.makeInput(value: .tracking()),
+                        transaction: graph.makeInput(value: Transaction())
+                    )
+                )
+            }
+
+        var storage = toolbarStorage(id: "action")
+        storage.items[0].generator = foreignGenerator
+        let bridge = RootToolbarBridge()
+        XCTAssertTrue(bridge.update(storage: storage))
+
+        let host = TestViewRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: RootToolbarHost.hostRootView(
+                sceneContent: AnyView(Text("Scene")),
+                bridge: bridge
+            ),
+            rendererHost: host
+        )
+        host.storage = graph
+
+        // A root host rebuilds the erased value in its own graph. Reusing the
+        // sheet bridge's weak generator here would cross graph ownership.
+        graph.updateOutputs(at: .zero)
+
+        XCTAssertNotNil(graph.rootLayoutComputer)
+    }
+
+    private func toolbarStorage(id: String) -> ToolbarStorage {
+        var storage = ToolbarStorage()
+        storage.configuration = ToolbarStorage.Configuration(
+            customizationID: nil
+        )
+        storage.items = [
+            ToolbarStorage.Item(
+                id: ToolbarStorage.ID(id),
+                placement: .automatic,
+                view: AnyView(Text(id))
+            ),
+        ]
+        return storage
+    }
+
+    private func toolbarView(id: String) -> AnyView {
+        AnyView(
+            Text("Scene")
+                .toolbar {
+                    ToolbarItem(id: id) {
+                        Text(id)
+                    }
+                }
+        )
+    }
+}
+
+private final class ToolbarRenderCounter {
+    private let lock = NSLock()
+    private var storage = 0
+
+    var value: Int {
+        lock.withLock { storage }
+    }
+
+    func increment() {
+        lock.withLock { storage += 1 }
+    }
+}
+
+private struct ToolbarRenderProbe: View, PrimitiveView {
+    typealias Body = Never
+
+    var counter: ToolbarRenderCounter
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        view._attribute.value.counter.increment()
+        return _ViewOutputs()
+    }
+
+    static func _makeViewList(
+        view: _GraphValue<Self>,
+        inputs: _ViewListInputs
+    ) -> _ViewListOutputs {
+        _ViewListOutputs.unaryViewList(view: view, inputs: inputs)
+    }
+}
+
+private final class ToolbarTestRendererHost:
+    ViewRendererHost,
+    RootToolbarStorageHost
+{
+    var storage: ViewGraph!
+    let sceneResources = SceneResources()
+    var currentTimestamp = Time.zero
+    var valuesNeedingUpdate: ViewGraphRootValues = []
+    var renderingPhase = ViewRenderingPhase()
+    var externalUpdateCount = 0
+    var receivedToolbarStorage: ToolbarStorage?
+
+    var viewGraph: ViewGraph { storage }
+    var responderNode: ResponderNode? { nil }
+    var gestureGraph: GestureGraph? { nil }
+
+    func requestUpdate(after: Double) {}
+
+    func `as`<T>(_ type: T.Type) -> T? {
+        self as? T
+    }
+
+    func updateRootView() {}
+    func updateEnvironment() {}
+    func updateSize() {}
+    func updateSafeArea() {}
+    func updateContainerSize() {}
+
+    func rootToolbarStorageDidChange(_ storage: ToolbarStorage) {
+        receivedToolbarStorage = storage
+    }
+}

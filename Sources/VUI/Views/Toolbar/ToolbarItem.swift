@@ -44,6 +44,7 @@ public struct ToolbarItem<ID, Content: View>: ToolbarContent {
                 id: ToolbarStorage.ID(toolbarIdentifier(item.identifier)),
                 placement: item.placement.role,
                 view: AnyView(item.content),
+                showsByDefault: item.showsByDefault,
                 generator: TypedUnaryViewGenerator(contentView, baseInputs: baseInputs)
             ))
             return storage
@@ -62,6 +63,7 @@ public struct ToolbarItem<ID, Content: View>: ToolbarContent {
             id: ToolbarStorage.ID(toolbarIdentifier(item.identifier)),
             placement: item.placement.role,
             view: AnyView(item.content),
+            showsByDefault: item.showsByDefault,
             generator: TypedUnaryViewGenerator(content[\.content], baseInputs: inputs)
         ))
     }
@@ -138,6 +140,7 @@ public struct ToolbarItemGroup<Content: View>: ToolbarContent {
                 id: id,
                 placement: group.placement.role,
                 view: AnyView(group.content),
+                showsByDefault: true,
                 generator: TypedUnaryViewGenerator(contentView, baseInputs: baseInputs)
             ))
             return storage
@@ -156,6 +159,7 @@ public struct ToolbarItemGroup<Content: View>: ToolbarContent {
             id: ToolbarStorage.ID(AnyHashable(ObjectIdentifier(Content.self))),
             placement: group.placement.role,
             view: AnyView(group.content),
+            showsByDefault: true,
             generator: TypedUnaryViewGenerator(content[\.content], baseInputs: inputs)
         ))
     }

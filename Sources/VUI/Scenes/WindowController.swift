@@ -25,6 +25,7 @@ class WindowController: WindowDelegate,
                         GraphDelegate,
                         EventGraphHost, EventBindingManagerDelegate,
                         FocusedValueListHost,
+                        RootToolbarStorageHost,
                         @unchecked Sendable {
 
     // MARK: - Types
@@ -422,10 +423,11 @@ class WindowController: WindowDelegate,
     private var resolvedRootCommands: ResolvedRootCommands?
     var platformCommandMenuPresenter: PlatformCommandMenuPresenter?
     private(set) var windowCommandMenuPresenter: WindowCommandMenuPresenter?
+    private var rootToolbarBridge: RootToolbarBridge?
     private var staticRootContent: AnyView?
     private var rootPlatformMenuCapability: Bool?
     // MainActor-owned because changing it also mutates the platform window.
-    private var windowCommandMenuGeometryApplied = false
+    private var appliedRootChromeHeight: CGFloat = 0
 
     private struct FocusedValuesState: @unchecked Sendable {
         var local = FocusedValues()
@@ -708,15 +710,21 @@ class WindowController: WindowDelegate,
         configureForwardedEventDispatchers()
 
         let staticRootContent = AnyView(contentValue)
+        let rootToolbarBridge = RootToolbarBridge()
         self.staticRootContent = staticRootContent
+        self.rootToolbarBridge = rootToolbarBridge
+        let toolbarRoot = RootToolbarHost.hostRootView(
+            sceneContent: staticRootContent,
+            bridge: rootToolbarBridge
+        )
         self._viewGraph = ViewGraph(
             replaceableContent: WindowCommandMenuPresenter.hostRootView(
-                sceneContent: staticRootContent,
+                sceneContent: toolbarRoot,
                 presenter: nil
             ),
             rendererHost: self,
             initialEnvironment: self.environment,
-            features: [HostViewGraph()]
+            features: [HostViewGraph(), RootToolbarViewGraph()]
         )
         self.crossGraphSourceGraph = nil
         
@@ -854,7 +862,7 @@ class WindowController: WindowDelegate,
         viewChangedWhileDrawing = true
         if visibilityChanged {
             Task { @MainActor [weak self] in
-                self?.synchronizeWindowCommandMenuGeometry(
+                self?.synchronizeRootChromeGeometry(
                     isInitialAttachment: false
                 )
             }
@@ -927,7 +935,7 @@ class WindowController: WindowDelegate,
               sceneConfiguration.commandMenuPresentationStyle
                 .resolvedForRootPresenter == .platform,
               let window else {
-            synchronizeWindowCommandMenuGeometry(
+            synchronizeRootChromeGeometry(
                 isInitialAttachment: isInitialAttachment
             )
             return
@@ -936,31 +944,33 @@ class WindowController: WindowDelegate,
         rootPlatformMenuCapability = controller != nil
         updateRootCommandMenuPresenter()
         platformCommandMenuPresenter?.attach(to: controller)
-        synchronizeWindowCommandMenuGeometry(
+        synchronizeRootChromeGeometry(
             isInitialAttachment: isInitialAttachment
         )
     }
 
     @MainActor
-    private func synchronizeWindowCommandMenuGeometry(
+    private func synchronizeRootChromeGeometry(
         isInitialAttachment: Bool
     ) {
         guard let window else {
-            windowCommandMenuGeometryApplied = false
+            appliedRootChromeHeight = 0
             return
         }
-        let shouldApply = windowCommandMenuPresenter != nil
-        guard shouldApply != windowCommandMenuGeometryApplied else { return }
+        let menuHeight = windowCommandMenuPresenter == nil
+            ? 0
+            : WindowCommandMenuPresenter.menuBarHeight
+        let toolbarHeight = rootToolbarBridge?.allocatedHeight ?? 0
+        let desiredHeight = menuHeight + toolbarHeight
+        guard desiredHeight != appliedRootChromeHeight else { return }
 
         let size = window.contentSize
-        if shouldApply {
-            window.contentSize = WindowCommandMenuPresenter
-                .platformContentSize(preserving: size)
-        } else {
-            window.contentSize = WindowCommandMenuPresenter
-                .sceneContentSize(from: size)
-        }
-        windowCommandMenuGeometryApplied = shouldApply
+        let sceneHeight = max(0, size.height - appliedRootChromeHeight)
+        window.contentSize = CGSize(
+            width: size.width,
+            height: sceneHeight + desiredHeight
+        )
+        appliedRootChromeHeight = desiredHeight
 
         // Initial default positioning must use the final outer size after the
         // renderer-owned chrome has expanded the logical client surface.
@@ -968,6 +978,25 @@ class WindowController: WindowDelegate,
             WindowContext.applyInitialScenePosition(
                 sceneConfiguration,
                 to: window
+            )
+        }
+    }
+
+    func rootToolbarStorageDidChange(_ storage: ToolbarStorage) {
+        guard parentWindow == nil,
+              staticRootContent != nil,
+              let rootToolbarBridge else {
+            return
+        }
+        guard rootToolbarBridge.update(storage: storage) else { return }
+
+        // The stable root host observes this controller-owned bridge directly.
+        // Replacing the root input here would unnecessarily rebuild the Scene
+        // wrapper every time toolbar content changes.
+        viewChangedWhileDrawing = true
+        Task { @MainActor [weak self] in
+            self?.synchronizeRootChromeGeometry(
+                isInitialAttachment: false
             )
         }
     }
@@ -1131,7 +1160,7 @@ class WindowController: WindowDelegate,
                     isInitialAttachment: true
                 )
             } else {
-                synchronizeWindowCommandMenuGeometry(
+                synchronizeRootChromeGeometry(
                     isInitialAttachment: true
                 )
             }
@@ -1743,7 +1772,7 @@ class WindowController: WindowDelegate,
         switch event.type {
         case .closed:
             rootPlatformMenuCapability = nil
-            windowCommandMenuGeometryApplied = false
+            appliedRootChromeHeight = 0
             if parentWindow == nil {
                 rootCommandsSource?.owner?.rootWindowDidClose(self)
             }
@@ -2695,12 +2724,17 @@ class WindowController: WindowDelegate,
 
     func updateRootView() {
         guard let staticRootContent,
+              let rootToolbarBridge,
               let rootInput = viewGraph.rootAnyViewContentInput else {
             return
         }
+        let toolbarRoot = RootToolbarHost.hostRootView(
+            sceneContent: staticRootContent,
+            bridge: rootToolbarBridge
+        )
         rootInput.setValue(
             WindowCommandMenuPresenter.hostRootView(
-                sceneContent: staticRootContent,
+                sceneContent: toolbarRoot,
                 presenter: windowCommandMenuPresenter
             )
         )
