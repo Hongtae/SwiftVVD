@@ -169,6 +169,60 @@ struct FocusedValuesInputKey: ViewInput {
     }
 }
 
+@propertyWrapper public struct FocusedBinding<Value>: DynamicProperty {
+    @usableFromInline
+    enum Content {
+        case keyPath(KeyPath<FocusedValues, Binding<Value>?>)
+        case value(Binding<Value>?)
+    }
+
+    @usableFromInline
+    var content: Content
+
+    public init(_ keyPath: KeyPath<FocusedValues, Binding<Value>?>) {
+        content = .keyPath(keyPath)
+    }
+
+    @inlinable public var wrappedValue: Value? {
+        get {
+            if case let .value(value) = content {
+                return value?.wrappedValue
+            }
+            return nil
+        }
+        nonmutating set {
+            if case let .value(value) = content, let newValue {
+                value?.wrappedValue = newValue
+            }
+        }
+    }
+
+    public var projectedValue: Binding<Value?> {
+        if case let .value(value) = content, let value {
+            return Binding(value)
+        }
+        return .constant(nil)
+    }
+
+    public static func _makeProperty<V>(
+        in buffer: inout _DynamicPropertyBuffer,
+        container: _GraphValue<V>,
+        fieldOffset: Int,
+        inputs: inout _GraphInputs
+    ) {
+        let box = FocusedValueBox<Binding<Value>>(
+            _focusedValues: inputs[FocusedValuesInputKey.self]
+        )
+        buffer.append(
+            box,
+            fieldOffset: fieldOffset,
+            propertyType: Self.self
+        ) { box, property, phase in
+            box.update(property: &property, phase: phase)
+        }
+    }
+}
+
 private struct FocusedValueBox<Value>: DynamicPropertyBox {
     var _focusedValues: OptionalAttribute<FocusedValues>
     var keyPath: KeyPath<FocusedValues, Value?>?
@@ -201,6 +255,24 @@ private struct FocusedValueBox<Value>: DynamicPropertyBox {
         return true
     }
 
+    mutating func update<Wrapped>(
+        property: inout FocusedBinding<Wrapped>,
+        phase: _GraphInputs.Phase
+    ) -> Bool where Value == Binding<Wrapped> {
+        if case let .keyPath(propertyKeyPath) = property.content {
+            keyPath = propertyKeyPath
+        }
+        guard let keyPath else {
+            property.content = .value(nil)
+            value = nil
+            return true
+        }
+
+        value = _focusedValues.attribute?.value[keyPath: keyPath]
+        property.content = .value(value)
+        return true
+    }
+
     func getState<T>(type: T.Type) -> Binding<T>? {
         nil
     }
@@ -212,6 +284,14 @@ extension FocusedValue: Sendable {
 
 @available(*, unavailable)
 extension FocusedValue.Content: Sendable {
+}
+
+@available(*, unavailable)
+extension FocusedBinding: Sendable {
+}
+
+@available(*, unavailable)
+extension FocusedBinding.Content: Sendable {
 }
 
 @available(*, unavailable)

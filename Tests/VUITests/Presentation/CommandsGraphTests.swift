@@ -743,6 +743,7 @@ final class CommandsGraphTests: XCTestCase {
             sceneListAttr: appGraph.sceneListAttr,
             commandsListAttr: appGraph.commandsListAttr,
             rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            focusedValuesAttr: appGraph.focusedValuesAttr,
             in: appGraph.graph
         )
 
@@ -758,6 +759,10 @@ final class CommandsGraphTests: XCTestCase {
             let source = try XCTUnwrap(root.rootCommandsSource)
             XCTAssertTrue(source.graph === appGraph.graph)
             XCTAssertEqual(source.commandsList?.identifier, expectedCommands.identifier)
+            XCTAssertEqual(
+                source.focusedValues.identifier,
+                appGraph.focusedValuesAttr.identifier
+            )
             try _AGGraph.withCurrent(source.graph) {
                 XCTAssertEqual(
                     commandFlagIDs(try XCTUnwrap(source.commandsList).value),
@@ -781,6 +786,7 @@ final class CommandsGraphTests: XCTestCase {
             sceneListAttr: appGraph.sceneListAttr,
             commandsListAttr: appGraph.commandsListAttr,
             rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            focusedValuesAttr: appGraph.focusedValuesAttr,
             in: appGraph.graph
         )
 
@@ -809,6 +815,7 @@ final class CommandsGraphTests: XCTestCase {
             sceneListAttr: appGraph.sceneListAttr,
             commandsListAttr: appGraph.commandsListAttr,
             rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            focusedValuesAttr: appGraph.focusedValuesAttr,
             in: appGraph.graph
         )
         let root = try XCTUnwrap(windowsController.allWindowControllers.first)

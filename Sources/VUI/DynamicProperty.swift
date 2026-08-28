@@ -52,15 +52,38 @@ public struct _DynamicPropertyBuffer {
     // Stores the box context by field offset. The update closure copies the
     // container field, lets the box update it, then writes it back.
     mutating func append<T: DynamicPropertyBox>(_ box: T, fieldOffset: Int) {
+        append(
+            box,
+            fieldOffset: fieldOffset,
+            propertyType: T.Property.self
+        ) { box, property, phase in
+            box.update(property: &property, phase: phase)
+        }
+    }
+
+    // Some dynamic-property wrappers share one backing box even though the
+    // wrapper types themselves differ. Keep the typed pointer conversion at
+    // this boundary while allowing the shared box to provide the adapter.
+    mutating func append<T, Property>(
+        _ box: T,
+        fieldOffset: Int,
+        propertyType: Property.Type,
+        update: @escaping (
+            inout T,
+            inout Property,
+            _GraphInputs.Phase
+        ) -> Bool
+    ) where Property: DynamicProperty {
         let boxRef = MutableBox(box)
-        properties.append(.init(type: T.Property.self, offset: fieldOffset))
+        properties.append(.init(type: propertyType, offset: fieldOffset))
         contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
-            var property = ptr.assumingMemoryBound(to: T.Property.self).pointee
-            _ = boxRef.value.update(
-                property: &property,
-                phase: _GraphInputs.Phase()
+            var property = ptr.assumingMemoryBound(to: Property.self).pointee
+            _ = update(
+                &boxRef.value,
+                &property,
+                _GraphInputs.Phase()
             )
-            ptr.assumingMemoryBound(to: T.Property.self).pointee = property
+            ptr.assumingMemoryBound(to: Property.self).pointee = property
         }
     }
 

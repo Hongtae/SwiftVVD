@@ -34,15 +34,83 @@ class WindowController: WindowDelegate,
     // App-level command operations and their root materialization environment
     // remain owned by one source graph. Static scene roots share this carrier;
     // presentation children never receive it through inherited values.
-    struct RootCommandsSource: @unchecked Sendable {
+    final class RootCommandsSource: @unchecked Sendable {
+        weak var owner: AppWindowsController?
         let graph: _AGGraph
         let commandsList: Attribute<CommandsList>?
         let environment: Attribute<EnvironmentValues>
+        let focusedValues: Attribute<FocusedValues>
+
+        private let graphAccess = Mutex(())
+        private let roots = Mutex<[WeakBox<WindowController>]>([])
+
+        init(
+            owner: AppWindowsController,
+            graph: _AGGraph,
+            commandsList: Attribute<CommandsList>?,
+            environment: Attribute<EnvironmentValues>,
+            focusedValues: Attribute<FocusedValues>
+        ) {
+            self.owner = owner
+            self.graph = graph
+            self.commandsList = commandsList
+            self.environment = environment
+            self.focusedValues = focusedValues
+        }
+
+        func register(_ root: WindowController) {
+            roots.withLock { roots in
+                roots.removeAll { $0.base == nil }
+                if !roots.contains(where: { $0.base === root }) {
+                    roots.append(WeakBox(root))
+                }
+            }
+        }
+
+        func unregister(_ root: WindowController) {
+            roots.withLock { roots in
+                roots.removeAll { $0.base == nil || $0.base === root }
+            }
+        }
+
+        func scheduleRefreshForRoots() {
+            let roots = roots.withLock { roots in
+                roots.removeAll { $0.base == nil }
+                return roots.compactMap(\.base)
+            }
+            for root in roots {
+                root.scheduleRootCommandsRefresh(from: self)
+            }
+        }
+
+        func updateFocusedValues(_ values: FocusedValues) {
+            _ = graphAccess.withLock { _ in
+                _AGGraph.withCurrent(graph) {
+                    focusedValues.setValue(values)
+                }
+            }
+        }
+
+        fileprivate func resolve() -> ResolvedRootCommands {
+            graphAccess.withLock { _ in
+                _AGGraph.withCurrent(graph) {
+                    var resolved = _ResolvedCommands()
+                    commandsList?.value.resolveOperations(into: &resolved)
+                    let environment = environment.value
+                    return ResolvedRootCommands(
+                        items: resolved.mainMenuItems(env: environment),
+                        environment: environment,
+                        focusedValues: focusedValues.value
+                    )
+                }
+            }
+        }
     }
 
-    private struct ResolvedRootCommands {
+    fileprivate struct ResolvedRootCommands {
         var items: [MainMenuItem]
         var environment: EnvironmentValues
+        var focusedValues: FocusedValues
     }
 
     // This resolver is the one-shot boundary between graph evaluation and
@@ -671,23 +739,37 @@ class WindowController: WindowDelegate,
             parentWindow == nil,
             "Only static scene roots can own the app command source."
         )
+        if rootCommandsSource !== source {
+            rootCommandsSource?.unregister(self)
+            source?.register(self)
+        }
         rootCommandsSource = source
         if let source {
             precondition(
                 _AGGraph.current == source.graph,
                 "The app command source must be resolved by its owning graph."
             )
-            var resolved = _ResolvedCommands()
-            source.commandsList?.value.resolveOperations(into: &resolved)
-            let environment = source.environment.value
-            resolvedRootCommands = ResolvedRootCommands(
-                items: resolved.mainMenuItems(env: environment),
-                environment: environment
-            )
+            resolvedRootCommands = source.resolve()
         } else {
             resolvedRootCommands = nil
         }
         updateRootCommandMenuPresenter()
+    }
+
+    private func scheduleRootCommandsRefresh(from source: RootCommandsSource) {
+        guard parentWindow == nil, rootCommandsSource === source else {
+            return
+        }
+        enqueueInputAction { [weak self, weak source] in
+            guard let self, let source,
+                  self.parentWindow == nil,
+                  self.rootCommandsSource === source else {
+                return
+            }
+            self.resolvedRootCommands = source.resolve()
+            self.updateRootCommandMenuPresenter()
+        }
+        requestUpdate(after: 0)
     }
 
     private func updateRootCommandMenuPresenter() {
@@ -743,7 +825,7 @@ class WindowController: WindowDelegate,
         presenter.update(
             items: resolvedRootCommands.items,
             environment: resolvedRootCommands.environment,
-            focusedValues: resolvedFocusedValues
+            focusedValues: resolvedRootCommands.focusedValues
         )
 
         if selection == .pendingPlatformCapability {
@@ -817,8 +899,17 @@ class WindowController: WindowDelegate,
             mayDeferUpdate: true,
             values: .focusedValues
         )
-        platformCommandMenuPresenter?.updateFocusedValues(values)
-        parentWindow?.scheduleFocusedValuesRecompute()
+        if let parentWindow {
+            parentWindow.scheduleFocusedValuesRecompute()
+        } else if let owner = rootCommandsSource?.owner {
+            // Static roots publish through the app coordinator so an inactive
+            // root cannot replace the focus context used by app Commands.
+            owner.updateWindowFocus(self, values: values)
+        } else {
+            // Standalone roots without an app command source retain the direct
+            // semantic-host update path.
+            platformCommandMenuPresenter?.updateFocusedValues(values)
+        }
     }
 
     private func scheduleFocusedValuesRecompute() {
@@ -1599,6 +1690,14 @@ class WindowController: WindowDelegate,
         }
     }
 
+    private func notifyRootCommandFocusActivated() {
+        var root = self
+        while let parent = root.parentWindow {
+            root = parent
+        }
+        root.rootCommandsSource?.owner?.rootWindowDidActivate(root)
+    }
+
     private var didEndPresentationSession = false
     func endPresentationSession() {
         guard !didEndPresentationSession else { return }
@@ -1645,6 +1744,9 @@ class WindowController: WindowDelegate,
         case .closed:
             rootPlatformMenuCapability = nil
             windowCommandMenuGeometryApplied = false
+            if parentWindow == nil {
+                rootCommandsSource?.owner?.rootWindowDidClose(self)
+            }
             if endSessionOnWindowClosed {
                 enqueueInputAction { [weak self] in
                     self?.endPresentationSession()
@@ -1659,7 +1761,11 @@ class WindowController: WindowDelegate,
             }
         case .activated:
             enqueueInputAction { [weak self] in
-                self?.forEachPresentationChild { $0.onParentWindowActivated() }
+                guard let self else { return }
+                self.notifyRootCommandFocusActivated()
+                self.forEachPresentationChild {
+                    $0.onParentWindowActivated()
+                }
             }
         case .inactivated:
             viewGraph.data.graph.inbox.enqueue { [weak self] in

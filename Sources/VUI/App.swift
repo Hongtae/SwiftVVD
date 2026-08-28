@@ -85,6 +85,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         wc.syncWindowControllers(sceneListAttr: graph.sceneListAttr,
                                  commandsListAttr: graph.commandsListAttr,
                                  rootEnvironmentAttr: graph.rootEnvironmentAttr,
+                                 focusedValuesAttr: graph.focusedValuesAttr,
                                  configurationOverrideAttr: graph.windowConfigurationOverrideAttr,
                                  in: graph.graph)
         self.appGraph = graph

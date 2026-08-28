@@ -33,6 +33,10 @@ class AppGraph<A: App>: @unchecked Sendable {
     // this source while command producers retain their own scene inputs.
     let rootEnvironmentAttr: Attribute<EnvironmentValues>
 
+    // Active-window focused values remain an app-graph input because Commands
+    // bodies are built in this graph rather than in an individual root view.
+    let focusedValuesAttr: Attribute<FocusedValues>
+
     // The window-configuration override AG node produced by scene modifiers
     // (.updateFrameRate, .drawDebugInfo). Re-evaluated on every sync and
     // applied to all live WindowControllers.
@@ -45,6 +49,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         var commandsList: Attribute<CommandsList>? = nil
         var configurationOverride: Attribute<WindowConfiguration.Override>? = nil
         var rootEnvironment: Attribute<EnvironmentValues>!
+        var focusedValues: Attribute<FocusedValues>!
         var rootSubgraph: AGSubgraphRef!
 
         _AGGraph.withCurrent(graph) {
@@ -56,13 +61,18 @@ class AppGraph<A: App>: @unchecked Sendable {
                 let phaseAttr       = graph.makeInput(value: _GraphInputs.Phase())
                 let transactionAttr = graph.makeInput(value: Transaction())
                 let envAttr         = graph.makeInput(value: EnvironmentValues.tracking())
+                let focusedAttr     = graph.makeInput(value: FocusedValues())
                 rootEnvironment = envAttr
+                focusedValues = focusedAttr
 
-                let graphInputs = _GraphInputs(
+                var graphInputs = _GraphInputs(
                     time: timeAttr,
                     phase: phaseAttr,
                     environment: envAttr,
                     transaction: transactionAttr
+                )
+                graphInputs[FocusedValuesInputKey.self] = OptionalAttribute(
+                    focusedAttr
                 )
 
                 // Register preference keys so that scenes output them in _SceneOutputs.
@@ -103,6 +113,7 @@ class AppGraph<A: App>: @unchecked Sendable {
         self.sceneListAttr = sceneList
         self.commandsListAttr = commandsList
         self.rootEnvironmentAttr = rootEnvironment
+        self.focusedValuesAttr = focusedValues
         self.windowConfigurationOverrideAttr = configurationOverride
     }
 }
