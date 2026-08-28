@@ -560,16 +560,16 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         var key: VirtualKey
     }
 
-    // Window diagnostics occupy the same upper-left region as transient menu
-    // content. Menu popup trees inherit every other window policy, but remove
-    // the parent's debug override at this boundary. Leaving the field nil is
-    // important: it keeps a menu's own base or future local policy effective.
+    // Window diagnostics can obscure transient menu content. Menu popup trees
+    // inherit every other window policy, but remove the parent's debug override
+    // at this boundary. Leaving the fields nil is important: it keeps a menu's
+    // own base or future local policy effective.
     override var inheritedValues: InheritedValues {
         get { super.inheritedValues }
         set {
             var filteredValues = newValue
             filteredValues.configurationOverride.drawDebugInfo = nil
-            filteredValues.configurationOverride.drawDebugInfoPosition = nil
+            filteredValues.configurationOverride.drawDebugInfoPlacement = nil
             super.inheritedValues = filteredValues
         }
     }

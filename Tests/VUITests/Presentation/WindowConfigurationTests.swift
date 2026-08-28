@@ -9,7 +9,11 @@ final class WindowConfigurationTests: XCTestCase {
         base.displaySyncEnabled = true
         base.drawEveryFrames = true
         base.drawDebugInfo = [.frameInfo]
-        base.drawDebugInfoPosition = CGPoint(x: 7, y: 9)
+        base.drawDebugInfoPlacement = debugPlacement(
+            .bottomLeading,
+            x: 7,
+            y: 9
+        )
         base.contentScaleFactorOverride = 1.5
 
         let override = WindowConfiguration.Override(
@@ -17,7 +21,11 @@ final class WindowConfigurationTests: XCTestCase {
             displaySyncEnabled: false,
             drawEveryFrames: false,
             drawDebugInfo: [.thread],
-            drawDebugInfoPosition: CGPoint(x: 11, y: 13),
+            drawDebugInfoPlacement: debugPlacement(
+                .topTrailing,
+                x: 11,
+                y: 13
+            ),
             contentScaleFactor: 2
         )
         let resolved = base.applying(override)
@@ -29,8 +37,8 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, [.thread])
         XCTAssertEqual(
-            resolved.drawDebugInfoPosition,
-            CGPoint(x: 11, y: 13)
+            resolved.drawDebugInfoPlacement,
+            debugPlacement(.topTrailing, x: 11, y: 13)
         )
         XCTAssertEqual(resolved.contentScaleFactorOverride, 2)
     }
@@ -42,7 +50,11 @@ final class WindowConfigurationTests: XCTestCase {
         base.displaySyncEnabled = false
         base.drawEveryFrames = false
         base.drawDebugInfo = [.queue, .windowState]
-        base.drawDebugInfoPosition = CGPoint(x: 17, y: 19)
+        base.drawDebugInfoPlacement = debugPlacement(
+            .trailing,
+            x: 17,
+            y: 19
+        )
         base.contentScaleFactorOverride = 1.5
 
         let resolved = base.applying(.init())
@@ -54,8 +66,8 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(resolved.backgroundColor, base.backgroundColor)
         XCTAssertEqual(resolved.drawDebugInfo, base.drawDebugInfo)
         XCTAssertEqual(
-            resolved.drawDebugInfoPosition,
-            base.drawDebugInfoPosition
+            resolved.drawDebugInfoPlacement,
+            base.drawDebugInfoPlacement
         )
         XCTAssertEqual(
             resolved.contentScaleFactorOverride,
@@ -72,10 +84,20 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertTrue(resolved.drawDebugInfo.isEmpty)
     }
 
-    func testDebugInfoPositionDefaultsToTopLeadingInset() {
+    func testDebugInfoPlacementDefaultsToTopLeadingWithZeroOffset() {
         XCTAssertEqual(
-            WindowConfiguration().drawDebugInfoPosition,
-            CGPoint(x: 5, y: 5)
+            WindowConfiguration().drawDebugInfoPlacement,
+            DebugInfoPlacement()
+        )
+        XCTAssertEqual(DebugInfoLayout.edgeInset, 5)
+    }
+
+    func testDebugInfoModifierAcceptsAlignmentAndOffset() {
+        _ = _EmptyScene().drawDebugInfo(
+            .frameInfo,
+            .thread,
+            alignment: .bottomTrailing,
+            offset: CGSize(width: 3, height: -4)
         )
     }
 
@@ -84,7 +106,7 @@ final class WindowConfigurationTests: XCTestCase {
             activeFrameInterval: 0.1,
             displaySyncEnabled: true,
             drawDebugInfo: [.frameInfo],
-            drawDebugInfoPosition: CGPoint(x: 5, y: 33),
+            drawDebugInfoPlacement: debugPlacement(.top, x: 5, y: 33),
             contentScaleFactor: 1
         )
 
@@ -95,7 +117,11 @@ final class WindowConfigurationTests: XCTestCase {
                 displaySyncEnabled: false,
                 drawEveryFrames: false,
                 drawDebugInfo: [.thread],
-                drawDebugInfoPosition: CGPoint(x: 7, y: 41),
+                drawDebugInfoPlacement: debugPlacement(
+                    .bottomTrailing,
+                    x: 7,
+                    y: 41
+                ),
                 contentScaleFactor: 3
             )
         }
@@ -106,8 +132,8 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(value.drawEveryFrames, false)
         XCTAssertEqual(value.drawDebugInfo, [.frameInfo, .thread])
         XCTAssertEqual(
-            value.drawDebugInfoPosition,
-            CGPoint(x: 7, y: 41)
+            value.drawDebugInfoPlacement,
+            debugPlacement(.bottomTrailing, x: 7, y: 41)
         )
         XCTAssertEqual(value.contentScaleFactor, 3)
 
@@ -115,8 +141,8 @@ final class WindowConfigurationTests: XCTestCase {
             WindowConfiguration.Override(drawDebugInfo: [.queue])
         }
         XCTAssertEqual(
-            value.drawDebugInfoPosition,
-            CGPoint(x: 7, y: 41)
+            value.drawDebugInfoPlacement,
+            debugPlacement(.bottomTrailing, x: 7, y: 41)
         )
     }
 
@@ -182,7 +208,7 @@ final class WindowConfigurationTests: XCTestCase {
             activeFrameInterval: 0.01,
             displaySyncEnabled: false,
             drawDebugInfo: [.frameInfo],
-            drawDebugInfoPosition: CGPoint(x: 11, y: 13),
+            drawDebugInfoPlacement: debugPlacement(.leading, x: 11, y: 13),
             contentScaleFactor: 2
         )
 
@@ -196,8 +222,8 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(child.configurationOverride.displaySyncEnabled, false)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.frameInfo])
         XCTAssertEqual(
-            child.configurationOverride.drawDebugInfoPosition,
-            CGPoint(x: 11, y: 13)
+            child.configurationOverride.drawDebugInfoPlacement,
+            debugPlacement(.leading, x: 11, y: 13)
         )
         XCTAssertEqual(child.configurationOverride.contentScaleFactor, 2)
 
@@ -212,7 +238,7 @@ final class WindowConfigurationTests: XCTestCase {
             inactiveFrameInterval: 0.2,
             displaySyncEnabled: true,
             drawDebugInfo: [.thread, .queue],
-            drawDebugInfoPosition: CGPoint(x: 17, y: 19),
+            drawDebugInfoPlacement: debugPlacement(.bottom, x: 17, y: 19),
             contentScaleFactor: 3
         )
 
@@ -222,8 +248,8 @@ final class WindowConfigurationTests: XCTestCase {
             XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, true)
             XCTAssertEqual(controller.configurationOverride.drawDebugInfo, [.thread, .queue])
             XCTAssertEqual(
-                controller.configurationOverride.drawDebugInfoPosition,
-                CGPoint(x: 17, y: 19)
+                controller.configurationOverride.drawDebugInfoPlacement,
+                debugPlacement(.bottom, x: 17, y: 19)
             )
             XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 3)
         }
@@ -240,7 +266,11 @@ final class WindowConfigurationTests: XCTestCase {
             activeFrameInterval: 0.01,
             displaySyncEnabled: false,
             drawDebugInfo: [.frameInfo, .thread],
-            drawDebugInfoPosition: CGPoint(x: 23, y: 29),
+            drawDebugInfoPlacement: debugPlacement(
+                .topTrailing,
+                x: 23,
+                y: 29
+            ),
             contentScaleFactor: 2
         )
 
@@ -267,11 +297,11 @@ final class WindowConfigurationTests: XCTestCase {
             XCTAssertEqual(controller.configurationOverride.activeFrameInterval, 0.01)
             XCTAssertEqual(controller.configurationOverride.displaySyncEnabled, false)
             XCTAssertNil(controller.configurationOverride.drawDebugInfo)
-            XCTAssertNil(controller.configurationOverride.drawDebugInfoPosition)
+            XCTAssertNil(controller.configurationOverride.drawDebugInfoPlacement)
             XCTAssertTrue(controller.configuration.drawDebugInfo.isEmpty)
             XCTAssertEqual(
-                controller.configuration.drawDebugInfoPosition,
-                CGPoint(x: 5, y: 5)
+                controller.configuration.drawDebugInfoPlacement,
+                DebugInfoPlacement()
             )
             XCTAssertEqual(
                 controller.configuration.backgroundColor,
@@ -282,19 +312,27 @@ final class WindowConfigurationTests: XCTestCase {
 
         var menuBaseConfiguration = menu.baseConfiguration
         menuBaseConfiguration.drawDebugInfo = [.resourceTiming]
-        menuBaseConfiguration.drawDebugInfoPosition = CGPoint(x: 2, y: 3)
+        menuBaseConfiguration.drawDebugInfoPlacement = debugPlacement(
+            .center,
+            x: 2,
+            y: 3
+        )
         menu.baseConfiguration = menuBaseConfiguration
         XCTAssertEqual(menu.configuration.drawDebugInfo, [.resourceTiming])
         XCTAssertEqual(
-            menu.configuration.drawDebugInfoPosition,
-            CGPoint(x: 2, y: 3)
+            menu.configuration.drawDebugInfoPlacement,
+            debugPlacement(.center, x: 2, y: 3)
         )
 
         root.configurationOverride = .init(
             inactiveFrameInterval: 0.2,
             displaySyncEnabled: true,
             drawDebugInfo: [.queue, .windowState],
-            drawDebugInfoPosition: CGPoint(x: 31, y: 37),
+            drawDebugInfoPlacement: debugPlacement(
+                .bottomLeading,
+                x: 31,
+                y: 37
+            ),
             contentScaleFactor: 3
         )
 
@@ -305,18 +343,18 @@ final class WindowConfigurationTests: XCTestCase {
             XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 3)
         }
         XCTAssertNil(menu.configurationOverride.drawDebugInfo)
-        XCTAssertNil(menu.configurationOverride.drawDebugInfoPosition)
+        XCTAssertNil(menu.configurationOverride.drawDebugInfoPlacement)
         XCTAssertEqual(menu.configuration.drawDebugInfo, [.resourceTiming])
         XCTAssertEqual(
-            menu.configuration.drawDebugInfoPosition,
-            CGPoint(x: 2, y: 3)
+            menu.configuration.drawDebugInfoPlacement,
+            debugPlacement(.center, x: 2, y: 3)
         )
         XCTAssertNil(submenu.configurationOverride.drawDebugInfo)
-        XCTAssertNil(submenu.configurationOverride.drawDebugInfoPosition)
+        XCTAssertNil(submenu.configurationOverride.drawDebugInfoPlacement)
         XCTAssertTrue(submenu.configuration.drawDebugInfo.isEmpty)
         XCTAssertEqual(
-            submenu.configuration.drawDebugInfoPosition,
-            CGPoint(x: 5, y: 5)
+            submenu.configuration.drawDebugInfoPlacement,
+            DebugInfoPlacement()
         )
     }
 
@@ -330,7 +368,11 @@ final class WindowConfigurationTests: XCTestCase {
         root.configurationOverride = .init(
             displaySyncEnabled: false,
             drawDebugInfo: [.windowState],
-            drawDebugInfoPosition: CGPoint(x: 41, y: 43)
+            drawDebugInfoPlacement: debugPlacement(
+                .trailing,
+                x: 41,
+                y: 43
+            )
         )
 
         let content = AnyView(EmptyView())
@@ -362,15 +404,19 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertFalse(child.configuration.displaySyncEnabled)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.windowState])
         XCTAssertEqual(
-            child.configurationOverride.drawDebugInfoPosition,
-            CGPoint(x: 41, y: 43)
+            child.configurationOverride.drawDebugInfoPlacement,
+            debugPlacement(.trailing, x: 41, y: 43)
         )
 
         root.configurationOverride = .init(
             activeFrameInterval: 0.02,
             displaySyncEnabled: true,
             drawDebugInfo: [.appState],
-            drawDebugInfoPosition: CGPoint(x: 47, y: 53)
+            drawDebugInfoPlacement: debugPlacement(
+                .bottomTrailing,
+                x: 47,
+                y: 53
+            )
         )
 
         XCTAssertEqual(child.configurationOverride.activeFrameInterval, 0.02)
@@ -378,8 +424,19 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertTrue(child.configuration.displaySyncEnabled)
         XCTAssertEqual(child.configurationOverride.drawDebugInfo, [.appState])
         XCTAssertEqual(
-            child.configurationOverride.drawDebugInfoPosition,
-            CGPoint(x: 47, y: 53)
+            child.configurationOverride.drawDebugInfoPlacement,
+            debugPlacement(.bottomTrailing, x: 47, y: 53)
+        )
+    }
+
+    private func debugPlacement(
+        _ alignment: Alignment,
+        x: CGFloat,
+        y: CGFloat
+    ) -> DebugInfoPlacement {
+        DebugInfoPlacement(
+            alignment: alignment,
+            offset: CGSize(width: x, height: y)
         )
     }
 }

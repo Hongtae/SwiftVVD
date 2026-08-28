@@ -30,8 +30,7 @@ public struct _DrawDebug: _SceneModifier {
     }
     
     let selectedValues: Info
-    // nil leaves the window's base or previously contributed position intact.
-    let position: CGPoint?
+    let placement: DebugInfoPlacement
     
     public static func _makeScene(modifier: _GraphValue<Self>, inputs: _SceneInputs, body: @escaping (_Graph, _SceneInputs) -> _SceneOutputs) -> _SceneOutputs {
         guard let graph = _AGGraph.current else {
@@ -42,7 +41,7 @@ public struct _DrawDebug: _SceneModifier {
             let modifier = modifier._attribute.value
             return WindowConfiguration.Override(
                 drawDebugInfo: modifier.selectedValues,
-                drawDebugInfoPosition: modifier.position
+                drawDebugInfoPlacement: modifier.placement
             )
         }
         outputs.preferences.append(
@@ -56,14 +55,66 @@ public struct _DrawDebug: _SceneModifier {
 extension Scene {
     public func drawDebugInfo(
         _ values: _DrawDebug.Info...,
-        position: CGPoint? = nil
+        alignment: Alignment = .topLeading,
+        offset: CGSize = .zero
     ) -> some Scene {
         var info: _DrawDebug.Info = []
         values.forEach { info.formUnion($0) }
         let modifier = _DrawDebug(
             selectedValues: info,
-            position: position
+            placement: DebugInfoPlacement(
+                alignment: alignment,
+                offset: offset
+            )
         )
         return self.modifier(modifier)
+    }
+}
+
+struct DebugInfoPlacement: Equatable, Sendable {
+    var alignment: Alignment = .topLeading
+    var offset: CGSize = .zero
+}
+
+struct DebugInfoLayout {
+    static let edgeInset: CGFloat = 5
+
+    static func lineFrames(
+        for lineSizes: [CGSize],
+        in bounds: CGRect,
+        placement: DebugInfoPlacement
+    ) -> [CGRect] {
+        guard lineSizes.isEmpty == false else {
+            return []
+        }
+
+        let blockWidth = lineSizes.reduce(CGFloat.zero) {
+            max($0, $1.width)
+        }
+        let blockHeight = lineSizes.reduce(CGFloat.zero) {
+            $0 + $1.height
+        }
+        let fraction = placement.alignment.fraction
+        let blockOrigin = CGPoint(
+            x: bounds.minX + edgeInset
+                + (bounds.width - edgeInset * 2 - blockWidth) * fraction.x
+                + placement.offset.width,
+            y: bounds.minY + edgeInset
+                + (bounds.height - edgeInset * 2 - blockHeight) * fraction.y
+                + placement.offset.height
+        )
+
+        var lineY = blockOrigin.y
+        return lineSizes.map { lineSize in
+            let frame = CGRect(
+                x: blockOrigin.x
+                    + (blockWidth - lineSize.width) * fraction.x,
+                y: lineY,
+                width: lineSize.width,
+                height: lineSize.height
+            )
+            lineY += lineSize.height
+            return frame
+        }
     }
 }

@@ -472,26 +472,24 @@ class WindowContext: @unchecked Sendable {
 
                         if debugDrawInfo.isEmpty == false {
                             withGC(true) { context in
-                                var offset = config.drawDebugInfoPosition
-                                let drawText = { (text: Text) in
-                                    let resolvedText = context.resolve(text)
-                                    context.draw(resolvedText, at: offset, anchor: .topLeading)
-                                    offset.y += resolvedText.measure().height
+                                var debugTexts: [Text] = []
+                                let appendText = { (text: Text) in
+                                    debugTexts.append(text)
                                 }
                                 if debugDrawInfo.contains(.frameInfo) {
                                     if config.drawEveryFrames {
                                         let d = max(delta, 0.001001) // up to 999
-                                        drawText(Text(String(
+                                        appendText(Text(String(
                                             format: "%.1f FPS (%f, V-Sync: \(displaySyncEnabled ? "ON" : "OFF"))",
                                             1.0 / d,
                                             delta
                                         )))
                                     } else {
-                                        drawText(Text(String(format: "frame: %llu", debugFrameCount)))
+                                        appendText(Text(String(format: "frame: %llu", debugFrameCount)))
                                     }
                                 }
                                 if debugDrawInfo.contains(.updateTiming) {
-                                    drawText(Text(String(
+                                    appendText(Text(String(
                                         format: "update: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
                                         updateTiming.latestDuration,
                                         updateTiming.latestSummary.minimum,
@@ -500,7 +498,7 @@ class WindowContext: @unchecked Sendable {
                                     )))
                                 }
                                 if debugDrawInfo.contains(.resourceTiming) {
-                                    drawText(Text(String(
+                                    appendText(Text(String(
                                         format: "resource: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
                                         resourceTiming.latestDuration,
                                         resourceTiming.latestSummary.minimum,
@@ -509,7 +507,7 @@ class WindowContext: @unchecked Sendable {
                                     )))
                                 }
                                 if debugDrawInfo.contains(.drawTiming) {
-                                    drawText(Text(String(
+                                    appendText(Text(String(
                                         format: "draw: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
                                         drawTiming.latestDuration,
                                         drawTiming.latestSummary.minimum,
@@ -518,7 +516,7 @@ class WindowContext: @unchecked Sendable {
                                     )))
                                 }
                                 if debugDrawInfo.contains(.presentTiming) {
-                                    drawText(Text(String(
+                                    appendText(Text(String(
                                         format: "present: %.3f ms (min: %.3f, max: %.3f, avg: %.3f)",
                                         presentTiming.latestDuration,
                                         presentTiming.latestSummary.minimum,
@@ -527,16 +525,39 @@ class WindowContext: @unchecked Sendable {
                                     )))
                                 }
                                 if debugDrawInfo.contains(.thread) {
-                                    drawText(Text("thread: \(Platform.currentThreadID())"))
-                                }                                
+                                    appendText(Text("thread: \(Platform.currentThreadID())"))
+                                }
                                 if debugDrawInfo.contains(.queue) {
-                                    drawText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
+                                    appendText(Text("dispatch-queue: \(isMainQueue() ? "main" : "global")"))
                                 }
                                 if debugDrawInfo.contains(.appState) {
-                                    drawText(Text("app-active: \(appContext?.isActive ?? false)"))
+                                    appendText(Text("app-active: \(appContext?.isActive ?? false)"))
                                 }
                                 if debugDrawInfo.contains(.windowState) {
-                                    drawText(Text("foreground: \(state.activated)"))
+                                    appendText(Text("foreground: \(state.activated)"))
+                                }
+
+                                let lines = debugTexts.map { text in
+                                    let resolvedText = context.resolve(text)
+                                    return (
+                                        text: resolvedText,
+                                        size: resolvedText.measure()
+                                    )
+                                }
+                                let lineFrames = DebugInfoLayout.lineFrames(
+                                    for: lines.map { $0.size },
+                                    in: CGRect(
+                                        origin: .zero,
+                                        size: contentSize
+                                    ),
+                                    placement: config.drawDebugInfoPlacement
+                                )
+                                for (line, frame) in zip(lines, lineFrames) {
+                                    context.draw(
+                                        line.text,
+                                        at: frame.origin,
+                                        anchor: .topLeading
+                                    )
                                 }
                             }
                         }
