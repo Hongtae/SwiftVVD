@@ -203,6 +203,10 @@ public protocol ToolbarContent {
     )
 }
 
+public protocol CustomizableToolbarContent: ToolbarContent
+where Body: CustomizableToolbarContent {
+}
+
 extension ToolbarContent {
     public static func _makeToolbar(
         content: _GraphValue<Self>,
@@ -221,6 +225,9 @@ extension ToolbarContent {
 }
 
 extension Never: ToolbarContent {
+}
+
+extension Never: CustomizableToolbarContent {
 }
 
 // MARK: - ToolbarDefaultItemKind

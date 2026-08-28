@@ -13,7 +13,10 @@ import Foundation
 // TupleToolbarContent<(C0, C1, ...)> (multiple items, C = tuple).
 // Field iteration reflects over the content tuple and visits view-typed fields.
 // Public visibility keeps result-builder expansion usable across module boundaries.
-public struct TupleToolbarContent<C>: ToolbarContent {
+public struct TupleToolbarContent<C>:
+    ToolbarContent,
+    CustomizableToolbarContent
+{
     public var value: C
     public init(_ value: C) { self.value = value }
 
@@ -127,39 +130,32 @@ public struct ToolbarContentBuilder {
     public static func buildBlock(_ content: Never) -> Never {}
 
     @inlinable
-    public static func buildBlock<C: ToolbarContent>(_ c: C) -> TupleToolbarContent<C> {
+    public static func buildBlock<C: ToolbarContent>(
+        _ c: C
+    ) -> some ToolbarContent {
         TupleToolbarContent(c)
     }
 
     @inlinable
-    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent>(
-        _ c0: C0, _ c1: C1
-    ) -> TupleToolbarContent<(C0, C1)> {
-        TupleToolbarContent((c0, c1))
+    public static func buildBlock<C: CustomizableToolbarContent>(
+        _ c: C
+    ) -> some CustomizableToolbarContent {
+        TupleToolbarContent(c)
     }
 
     @inlinable
-    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent, C2: ToolbarContent>(
-        _ c0: C0, _ c1: C1, _ c2: C2
-    ) -> TupleToolbarContent<(C0, C1, C2)> {
-        TupleToolbarContent((c0, c1, c2))
+    public static func buildBlock<each Content>(
+        _ content: repeat each Content
+    ) -> some ToolbarContent where repeat each Content: ToolbarContent {
+        TupleToolbarContent((repeat each content))
     }
 
     @inlinable
-    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent,
-                                  C2: ToolbarContent, C3: ToolbarContent>(
-        _ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3
-    ) -> TupleToolbarContent<(C0, C1, C2, C3)> {
-        TupleToolbarContent((c0, c1, c2, c3))
-    }
-
-    @inlinable
-    public static func buildBlock<C0: ToolbarContent, C1: ToolbarContent,
-                                  C2: ToolbarContent, C3: ToolbarContent,
-                                  C4: ToolbarContent>(
-        _ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3, _ c4: C4
-    ) -> TupleToolbarContent<(C0, C1, C2, C3, C4)> {
-        TupleToolbarContent((c0, c1, c2, c3, c4))
+    public static func buildBlock<each Content>(
+        _ content: repeat each Content
+    ) -> some CustomizableToolbarContent
+    where repeat each Content: CustomizableToolbarContent {
+        TupleToolbarContent((repeat each content))
     }
 
     public static func buildEither<T: ToolbarContent, F: ToolbarContent>(
@@ -176,6 +172,11 @@ public struct ToolbarContentBuilder {
 
     public static func buildIf<C: ToolbarContent>(_ c: C?) -> C? { c }
     public static func buildExpression<C: ToolbarContent>(_ c: C) -> C { c }
+    public static func buildExpression<C: CustomizableToolbarContent>(
+        _ c: C
+    ) -> C {
+        c
+    }
 }
 
 // MARK: - _ConditionalContent ToolbarContent conformance
@@ -187,4 +188,9 @@ where TrueContent: ToolbarContent, FalseContent: ToolbarContent {
     public var body: Never {
         fatalError("_ConditionalContent may not have Body == Never")
     }
+}
+
+extension _ConditionalContent: CustomizableToolbarContent
+where TrueContent: CustomizableToolbarContent,
+      FalseContent: CustomizableToolbarContent {
 }

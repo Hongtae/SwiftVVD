@@ -72,6 +72,9 @@ extension ToolbarItem: Identifiable where ID: Hashable {
     public var id: ID { identifier }
 }
 
+extension ToolbarItem: CustomizableToolbarContent where ID == String {
+}
+
 extension ToolbarItem where ID == Void {
     public init(placement: ToolbarItemPlacement = .automatic,
                 showsByDefault: Bool = true,
@@ -169,7 +172,7 @@ public struct ToolbarItemGroup<Content: View>: ToolbarContent {
 
 // EmptyToolbarContent: ToolbarContent and CustomizableToolbarContent conformance.
 // Produces no toolbar items.
-public struct EmptyToolbarContent: ToolbarContent {
+public struct EmptyToolbarContent: ToolbarContent, CustomizableToolbarContent {
     public typealias Body = Never
 
     public init() {}

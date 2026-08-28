@@ -27,6 +27,78 @@ final class RootToolbarHostTests: XCTestCase {
         }
     }
 
+    func testPlainToolbarBuilderSupportsParameterPackBeyondPreviousLimit()
+    throws {
+        let host = ToolbarTestRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: Text("Scene")
+                .toolbar {
+                    ToolbarItem { Text("First") }
+                    ToolbarItem { Text("Second") }
+                    ToolbarItem { Text("Third") }
+                    ToolbarItem { Text("Fourth") }
+                    ToolbarItem { Text("Fifth") }
+                    ToolbarItem { Text("Sixth") }
+                },
+            rendererHost: host,
+            features: [RootToolbarViewGraph()]
+        )
+        host.storage = graph
+        graph.updateOutputs(at: .zero)
+
+        let storage = try XCTUnwrap(host.receivedToolbarStorage)
+        XCTAssertNil(storage.configuration?.customizationID)
+        XCTAssertEqual(storage.items.count, 6)
+    }
+
+    func testCustomizableToolbarPublishesIdentityAndItems() throws {
+        let host = ToolbarTestRendererHost()
+        let graph = ViewGraph(
+            replaceableContent: Text("Scene")
+                .toolbar(id: "root-toolbar") {
+                    ToolbarItem(id: "first") {
+                        Text("First")
+                    }
+                    ToolbarItem(id: "second") {
+                        Text("Second")
+                    }
+                    ToolbarItem(id: "third") {
+                        Text("Third")
+                    }
+                    ToolbarItem(id: "fourth") {
+                        Text("Fourth")
+                    }
+                    ToolbarItem(id: "fifth") {
+                        Text("Fifth")
+                    }
+                    ToolbarItem(id: "sixth") {
+                        Text("Sixth")
+                    }
+                },
+            rendererHost: host,
+            features: [RootToolbarViewGraph()]
+        )
+        host.storage = graph
+        graph.updateOutputs(at: .zero)
+
+        let storage = try XCTUnwrap(host.receivedToolbarStorage)
+        XCTAssertEqual(
+            storage.configuration?.customizationID,
+            "root-toolbar"
+        )
+        XCTAssertEqual(
+            storage.items.map(\.id),
+            [
+                ToolbarStorage.ID("first"),
+                ToolbarStorage.ID("second"),
+                ToolbarStorage.ID("third"),
+                ToolbarStorage.ID("fourth"),
+                ToolbarStorage.ID("fifth"),
+                ToolbarStorage.ID("sixth"),
+            ]
+        )
+    }
+
     func testRootBridgeOutlivesReplaceableToolbarSnapshots() throws {
         let bridge = RootToolbarBridge()
         let first = toolbarStorage(id: "first")
@@ -58,6 +130,65 @@ final class RootToolbarHostTests: XCTestCase {
 
         XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "third")))
         XCTAssertEqual(bridge.snapshot?.visibility, .visible)
+    }
+
+    func testRootBridgeOwnsToolbarCommandValidationAndCustomizationSession()
+    throws {
+        // ASSERTIONS commandsToolbarRootOwnerFieldMetadataObserved
+        // ASSERTIONS commandsToolbarRootOwnerDisassemblyObserved
+        let bridge = RootToolbarBridge()
+
+        XCTAssertNil(bridge.commandContext)
+        XCTAssertFalse(bridge.perform(.toggleVisibility))
+        XCTAssertFalse(bridge.perform(.customize))
+
+        XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "plain")))
+        XCTAssertEqual(bridge.commandContext?.visibility, .visible)
+        XCTAssertEqual(bridge.commandContext?.canToggleVisibility, true)
+        XCTAssertEqual(bridge.commandContext?.canCustomize, false)
+        XCTAssertTrue(bridge.perform(.toggleVisibility))
+        XCTAssertEqual(bridge.commandContext?.visibility, .hidden)
+
+        let customizable = customizableToolbarStorage()
+        XCTAssertTrue(bridge.update(storage: customizable))
+        XCTAssertEqual(bridge.commandContext?.canCustomize, true)
+        XCTAssertTrue(bridge.perform(.customize))
+        XCTAssertEqual(bridge.commandContext?.visibility, .visible)
+        XCTAssertEqual(
+            bridge.commandContext?.customizationIsPresented,
+            true
+        )
+        XCTAssertEqual(
+            bridge.commandContext?.canToggleVisibility,
+            false
+        )
+        XCTAssertFalse(bridge.perform(.toggleVisibility))
+
+        XCTAssertEqual(
+            bridge.snapshot?.visibleItemIDs,
+            [ToolbarStorage.ID("first")]
+        )
+        XCTAssertTrue(
+            bridge.toggleCustomizationItem(ToolbarStorage.ID("second"))
+        )
+        XCTAssertEqual(
+            bridge.snapshot?.visibleItemIDs,
+            [ToolbarStorage.ID("first"), ToolbarStorage.ID("second")]
+        )
+        XCTAssertTrue(bridge.endCustomization())
+        XCTAssertEqual(
+            bridge.commandContext?.customizationIsPresented,
+            false
+        )
+        XCTAssertEqual(bridge.commandContext?.canToggleVisibility, true)
+
+        XCTAssertTrue(bridge.update(storage: ToolbarStorage()))
+        XCTAssertNil(bridge.commandContext)
+        XCTAssertTrue(bridge.update(storage: customizable))
+        XCTAssertEqual(
+            bridge.snapshot?.visibleItemIDs,
+            [ToolbarStorage.ID("first"), ToolbarStorage.ID("second")]
+        )
     }
 
     func testRootFeatureTracksToolbarRemovalAndReinstallation() throws {
@@ -195,6 +326,27 @@ final class RootToolbarHostTests: XCTestCase {
                 id: ToolbarStorage.ID(id),
                 placement: .automatic,
                 view: AnyView(Text(id))
+            ),
+        ]
+        return storage
+    }
+
+    private func customizableToolbarStorage() -> ToolbarStorage {
+        var storage = ToolbarStorage()
+        storage.configuration = ToolbarStorage.Configuration(
+            customizationID: "root-toolbar"
+        )
+        storage.items = [
+            ToolbarStorage.Item(
+                id: ToolbarStorage.ID("first"),
+                placement: .automatic,
+                view: AnyView(Text("First"))
+            ),
+            ToolbarStorage.Item(
+                id: ToolbarStorage.ID("second"),
+                placement: .automatic,
+                view: AnyView(Text("Second")),
+                showsByDefault: false
             ),
         ]
         return storage

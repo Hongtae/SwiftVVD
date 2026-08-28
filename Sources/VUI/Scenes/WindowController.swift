@@ -1001,6 +1001,21 @@ class WindowController: WindowDelegate,
         }
     }
 
+    func performRootToolbarCommand(_ command: RootToolbarCommand) {
+        guard parentWindow == nil,
+              let rootToolbarBridge,
+              rootToolbarBridge.perform(command) else {
+            return
+        }
+
+        viewChangedWhileDrawing = true
+        Task { @MainActor [weak self] in
+            self?.synchronizeRootChromeGeometry(
+                isInitialAttachment: false
+            )
+        }
+    }
+
     func setRootSceneEnvironment(_ sceneEnvironment: EnvironmentValues) {
         precondition(
             parentWindow == nil,

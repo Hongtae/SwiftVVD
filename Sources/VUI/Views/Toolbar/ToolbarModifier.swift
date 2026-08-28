@@ -69,6 +69,19 @@ extension View {
     ) -> some View {
         modifier(ToolbarModifier<Void, Content>(id: nil, content: content(), selection: nil))
     }
+
+    public func toolbar<Content: CustomizableToolbarContent>(
+        id: String,
+        @ToolbarContentBuilder content: () -> Content
+    ) -> some View {
+        modifier(
+            ToolbarModifier<String, Content>(
+                id: id,
+                content: content(),
+                selection: nil
+            )
+        )
+    }
 }
 
 struct SearchContentKey: PreferenceKey {
