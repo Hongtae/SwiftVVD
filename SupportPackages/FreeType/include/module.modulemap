@@ -4,4 +4,5 @@ module FreeType {
     header "freetype/ftoutln.h"
     header "freetype/ftstroke.h"
     header "freetype/ftbbox.h"
+    header "freetype/ftmm.h"
 }

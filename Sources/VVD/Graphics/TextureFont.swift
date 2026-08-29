@@ -2,7 +2,7 @@
 //  File: TextureFont.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -58,14 +58,22 @@ public class TextureFont: Font {
         didSet { if oldValue != outlineThickness { self.clearCache() } }
     }
 
-    public init?(deviceContext: GraphicsDeviceContext, data: any DataProtocol) {
+    public init?(
+        deviceContext: GraphicsDeviceContext,
+        data: any DataProtocol,
+        faceIndex: Int = 0
+    ) {
         self.deviceContext = deviceContext
-        super.init(data: data)
+        super.init(data: data, faceIndex: faceIndex)
     }
 
-    public init?(deviceContext: GraphicsDeviceContext, path: String) {
+    public init?(
+        deviceContext: GraphicsDeviceContext,
+        path: String,
+        faceIndex: Int = 0
+    ) {
         self.deviceContext = deviceContext
-        super.init(path: path)
+        super.init(path: path, faceIndex: faceIndex)
     }
 
     override func clearCacheLocked() {

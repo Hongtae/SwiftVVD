@@ -2,7 +2,7 @@
 //  File: Font.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -150,6 +150,10 @@ public class Font {
     public let familyName: String
     public let styleName: String
     public let filePath: String
+    /// The selected face within a font collection.
+    public let faceIndex: Int
+    /// The number of faces contained in the source font or collection.
+    public let numFaces: Int
     public let numGlyphs: Int
 
     public let maxPointSize: CGFloat = CGFloat(1<<25) - CGFloat(1.0/64.0)
@@ -189,13 +193,29 @@ public class Font {
         public let descender: CGFloat   // lower distance from baseline (negative direction)
     }
 
-    public init?(path: String) {
+    public struct VariationAxis: Hashable, Sendable {
+        public let tag: UInt32
+        public let minimumValue: CGFloat
+        public let defaultValue: CGFloat
+        public let maximumValue: CGFloat
+    }
+
+    public init?(path: String, faceIndex: Int = 0) {
+        guard let faceIndex = FT_Long(exactly: faceIndex),
+              faceIndex >= 0 else {
+            return nil
+        }
         self._size26d6 = 10 * 64
         self._dpi = Self.defaultDPI
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
-        let err: FT_Error = FT_New_Face(library.library, path, 0, &face)
+        let err: FT_Error = FT_New_Face(
+            library.library,
+            path,
+            faceIndex,
+            &face
+        )
         if err != 0 {
             return nil
         }
@@ -212,13 +232,19 @@ public class Font {
         self.library = library
         self.familyName = .init(cString: face.pointee.family_name)
         self.styleName = .init(cString: face.pointee.style_name)
+        self.faceIndex = Int(face.pointee.face_index)
+        self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
         self.face = .init(.init(face: face))
         self.filePath = path
     }
 
-    public init?(data: any DataProtocol) {
+    public init?(data: any DataProtocol, faceIndex: Int = 0) {
         if data.isEmpty { return nil }
+        guard let faceIndex = FT_Long(exactly: faceIndex),
+              faceIndex >= 0 else {
+            return nil
+        }
 
         self._size26d6 = 10 * 64
         self._dpi = Self.defaultDPI
@@ -228,7 +254,13 @@ public class Font {
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
-        let err: FT_Error = FT_New_Memory_Face(library.library, data.address, FT_Long(data.count), 0, &face)
+        let err: FT_Error = FT_New_Memory_Face(
+            library.library,
+            data.address,
+            FT_Long(data.count),
+            faceIndex,
+            &face
+        )
         if err != 0 {
             return nil
         }
@@ -245,6 +277,8 @@ public class Font {
         self.library = library
         self.familyName = .init(cString: face.pointee.family_name)
         self.styleName = .init(cString: face.pointee.style_name)
+        self.faceIndex = Int(face.pointee.face_index)
+        self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
         self.face = .init(.init(face: face))
         self.filePath = ""
@@ -289,6 +323,160 @@ public class Font {
                 assert(self.numGlyphs == Int(face.pointee.num_glyphs))
                 self.clearCacheLocked()
             }
+        }
+    }
+
+    public var variationAxes: [VariationAxis] {
+        self.face.withLock { state in
+            var descriptor: UnsafeMutablePointer<FT_MM_Var>?
+            guard FT_Get_MM_Var(state.face, &descriptor) == 0,
+                  let descriptor else {
+                return []
+            }
+            defer {
+                _ = FT_Done_MM_Var(library.library, descriptor)
+            }
+
+            let value = descriptor.pointee
+            guard value.num_axis > 0, let axes = value.axis else {
+                return []
+            }
+            return (0..<Int(value.num_axis)).compactMap { index in
+                let axis = axes[index]
+                guard let tag = UInt32(exactly: axis.tag) else {
+                    return nil
+                }
+                return VariationAxis(
+                    tag: tag,
+                    minimumValue: ft16d16ToFloat(axis.minimum),
+                    defaultValue: ft16d16ToFloat(axis.def),
+                    maximumValue: ft16d16ToFloat(axis.maximum)
+                )
+            }
+        }
+    }
+
+    public var variationCoordinates: [UInt32: CGFloat] {
+        self.face.withLock { state in
+            var descriptor: UnsafeMutablePointer<FT_MM_Var>?
+            guard FT_Get_MM_Var(state.face, &descriptor) == 0,
+                  let descriptor else {
+                return [:]
+            }
+            defer {
+                _ = FT_Done_MM_Var(library.library, descriptor)
+            }
+
+            let value = descriptor.pointee
+            guard value.num_axis > 0, let axes = value.axis else {
+                return [:]
+            }
+            var coordinates = [FT_Fixed](
+                repeating: 0,
+                count: Int(value.num_axis)
+            )
+            let result = coordinates.withUnsafeMutableBufferPointer {
+                FT_Get_Var_Design_Coordinates(
+                    state.face,
+                    value.num_axis,
+                    $0.baseAddress
+                )
+            }
+            guard result == 0 else { return [:] }
+
+            var resolved: [UInt32: CGFloat] = [:]
+            for index in coordinates.indices {
+                if let tag = UInt32(exactly: axes[index].tag) {
+                    resolved[tag] = ft16d16ToFloat(coordinates[index])
+                }
+            }
+            return resolved
+        }
+    }
+
+    @discardableResult
+    public func setVariationCoordinates(
+        _ requested: [UInt32: CGFloat]
+    ) -> Bool {
+        guard requested.values.allSatisfy(\.isFinite) else {
+            return false
+        }
+        return self.face.withLock { state in
+            if requested.isEmpty {
+                guard FT_Set_Var_Design_Coordinates(
+                    state.face,
+                    0,
+                    nil
+                ) == 0 else {
+                    return false
+                }
+                guard FT_Set_Char_Size(
+                    state.face,
+                    0,
+                    _size26d6,
+                    _dpi.x,
+                    _dpi.y
+                ) == 0 else {
+                    return false
+                }
+                self.clearCacheLocked()
+                return true
+            }
+
+            var descriptor: UnsafeMutablePointer<FT_MM_Var>?
+            guard FT_Get_MM_Var(state.face, &descriptor) == 0,
+                  let descriptor else {
+                return false
+            }
+            defer {
+                _ = FT_Done_MM_Var(library.library, descriptor)
+            }
+
+            let value = descriptor.pointee
+            guard value.num_axis > 0, let axes = value.axis else {
+                return false
+            }
+            var coordinates = [FT_Fixed](
+                repeating: 0,
+                count: Int(value.num_axis)
+            )
+            var remainingTags = Set(requested.keys)
+            for index in coordinates.indices {
+                let axis = axes[index]
+                coordinates[index] = axis.def
+                guard let tag = UInt32(exactly: axis.tag),
+                      let coordinate = requested[tag] else {
+                    continue
+                }
+                let minimum = ft16d16ToFloat(axis.minimum)
+                let maximum = ft16d16ToFloat(axis.maximum)
+                guard coordinate >= minimum, coordinate <= maximum else {
+                    return false
+                }
+                coordinates[index] = ft16d16(coordinate)
+                remainingTags.remove(tag)
+            }
+            guard remainingTags.isEmpty else { return false }
+
+            let result = coordinates.withUnsafeMutableBufferPointer {
+                FT_Set_Var_Design_Coordinates(
+                    state.face,
+                    value.num_axis,
+                    $0.baseAddress
+                )
+            }
+            guard result == 0 else { return false }
+            guard FT_Set_Char_Size(
+                state.face,
+                0,
+                _size26d6,
+                _dpi.x,
+                _dpi.y
+            ) == 0 else {
+                return false
+            }
+            self.clearCacheLocked()
+            return true
         }
     }
 
@@ -791,8 +979,6 @@ public class Font {
 
             let index = face.pointee.charmap != nil
                 ? FT_Get_Char_Index(face, FT_ULong(c.value)) : FT_UInt(c.value)
-
-            guard index != 0 else { return nil }
 
             let loadFlags = FT_Int32(FT_LOAD_DEFAULT) |
                             FT_Int32(FT_LOAD_NO_BITMAP)
