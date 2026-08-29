@@ -147,6 +147,10 @@ struct ContentView: View {
         }
         .padding(24)
         .frame(width: 680, height: 650)
+        .focusedSceneValue(
+            \.testAppSettingsPresented,
+            $settingsPresented
+        )
         .sheet(isPresented: $settingsPresented) {
             settingsContent()
         }

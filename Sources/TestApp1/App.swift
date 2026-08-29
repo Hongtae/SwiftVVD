@@ -1,5 +1,31 @@
 import VUI
 
+private struct TestAppSettingsPresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    var testAppSettingsPresented: Binding<Bool>? {
+        get { self[TestAppSettingsPresentedKey.self] }
+        set { self[TestAppSettingsPresentedKey.self] = newValue }
+    }
+}
+
+private struct TestAppSettingsCommands: Commands {
+    @FocusedBinding(\.testAppSettingsPresented)
+    private var settingsPresented
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…", systemImage: "settings") {
+                settingsPresented = true
+            }
+            .keyboardShortcut(",", modifiers: [.command])
+            .disabled(settingsPresented == nil)
+        }
+    }
+}
+
 @main
 struct TestApp1: App {
     var body: some Scene {
@@ -39,6 +65,7 @@ struct TestApp1: App {
         .commandMenuPresentationStyle(.window)
         .commands {
             ToolbarCommands()
+            TestAppSettingsCommands()
 
             CommandGroup(after: .appInfo) {
                 Button("About Command Lab") {
