@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "fonts": {
+    "Roboto": {
+      "sources": [
+        {
+          "weight": 100,
+          "file": "Roboto/Roboto-Thin.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 300,
+          "file": "Roboto/Roboto-Light.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 400,
+          "file": "Roboto/Roboto-Regular.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 500,
+          "file": "Roboto/Roboto-Medium.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 700,
+          "file": "Roboto/Roboto-Bold.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 900,
+          "file": "Roboto/Roboto-Black.ttf",
+          "faceIndex": 0
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NanumSquareNeo": {
+      "sources": [
+        {
+          "weight": 300,
+          "file": "NanumSquareNeo/NanumSquareNeo-aLt.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 400,
+          "file": "NanumSquareNeo/NanumSquareNeo-bRg.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 700,
+          "file": "NanumSquareNeo/NanumSquareNeo-cBd.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 800,
+          "file": "NanumSquareNeo/NanumSquareNeo-dEb.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 900,
+          "file": "NanumSquareNeo/NanumSquareNeo-eHv.ttf",
+          "faceIndex": 0
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NanumGothic": {
+      "sources": [
+        {
+          "weight": 300,
+          "file": "NanumGothic/NanumGothicLight.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 400,
+          "file": "NanumGothic/NanumGothic.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 700,
+          "file": "NanumGothic/NanumGothicBold.ttf",
+          "faceIndex": 0
+        },
+        {
+          "weight": 800,
+          "file": "NanumGothic/NanumGothicExtraBold.ttf",
+          "faceIndex": 0
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansCJK": {
+      "sources": [
+        {
+          "file": "NotoSansCJK/NotoSansCJK-VF.otf.ttc",
+          "faceIndex": 0,
+          "localeFaceIndices": {
+            "ja": 0,
+            "ko": 1,
+            "zh-Hans": 2,
+            "zh-Hant": 3,
+            "zh-HK": 4
+          },
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "LastResort": {
+      "sources": [
+        {
+          "weight": 400,
+          "file": "LastResort/LastResort-Regular.ttf",
+          "faceIndex": 0
+        }
+      ],
+      "syntheticWeight": false
+    }
+  },
+  "systemFont": "Roboto",
+  "defaultLocale": "en",
+  "locales": {
+    "en": ["Roboto", "NotoSansCJK"],
+    "ko": ["NanumSquareNeo", "NotoSansCJK"],
+    "ja": ["NotoSansCJK", "Roboto"]
+  },
+  "missingGlyphFont": "LastResort"
+}

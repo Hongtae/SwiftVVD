@@ -28,44 +28,45 @@ private struct OpenTypeDecorationMetrics {
         var length: Int
     }
 
-    private let data: Data
+    private let data: any FixedAddressStorageData
     private let directoryOffset: Int
 
     init?(font: VVD.Font) {
-        let resolvedData: Data
+        let resolvedData: any FixedAddressStorageData
         if let fontData = font.fontData {
-            resolvedData = Data(fontData)
+            resolvedData = fontData
         } else if !font.filePath.isEmpty,
                   let fileData = try? Data(
                     contentsOf: URL(fileURLWithPath: font.filePath)
                   ) {
-            resolvedData = fileData
+            resolvedData = fileData.makeFixedAddressStorage()
         } else {
             return nil
         }
 
         func uint32(at offset: Int) -> UInt32? {
-            guard offset >= 0, offset <= resolvedData.count - 4 else {
+            guard offset >= 0,
+                  offset <= resolvedData.count - 4,
+                  let address = resolvedData.address else {
                 return nil
             }
-            return resolvedData.withUnsafeBytes {
-                UInt32(bigEndian: $0.loadUnaligned(
-                    fromByteOffset: offset,
-                    as: UInt32.self
-                ))
-            }
+            return UInt32(bigEndian: address.loadUnaligned(
+                fromByteOffset: offset,
+                as: UInt32.self
+            ))
         }
 
         guard resolvedData.count >= 12 else { return nil }
         let resolvedDirectoryOffset: Int
         if uint32(at: 0) == Self.tag("ttcf") {
             guard let numberOfFonts = uint32(at: 8),
-                  numberOfFonts > 0,
-                  let firstOffset = uint32(at: 12),
-                  let firstDirectoryOffset = Int(exactly: firstOffset) else {
+                  font.faceIndex >= 0,
+                  font.faceIndex < Int(numberOfFonts),
+                  let faceOffset = uint32(at: 12 + font.faceIndex * 4),
+                  let faceDirectoryOffset = Int(exactly: faceOffset) else {
                 return nil
             }
-            resolvedDirectoryOffset = firstDirectoryOffset
+            resolvedDirectoryOffset = faceDirectoryOffset
         } else {
             resolvedDirectoryOffset = 0
         }
@@ -142,13 +143,13 @@ private struct OpenTypeDecorationMetrics {
     }
 
     private func uint16IfPresent(at offset: Int) -> UInt16? {
-        guard offset >= 0, offset <= data.count - 2 else { return nil }
-        return data.withUnsafeBytes {
-            UInt16(bigEndian: $0.loadUnaligned(
-                fromByteOffset: offset,
-                as: UInt16.self
-            ))
-        }
+        guard offset >= 0,
+              offset <= data.count - 2,
+              let address = data.address else { return nil }
+        return UInt16(bigEndian: address.loadUnaligned(
+            fromByteOffset: offset,
+            as: UInt16.self
+        ))
     }
 
     private func int16IfPresent(at offset: Int) -> Int16? {
@@ -156,13 +157,13 @@ private struct OpenTypeDecorationMetrics {
     }
 
     private func uint32IfPresent(at offset: Int) -> UInt32? {
-        guard offset >= 0, offset <= data.count - 4 else { return nil }
-        return data.withUnsafeBytes {
-            UInt32(bigEndian: $0.loadUnaligned(
-                fromByteOffset: offset,
-                as: UInt32.self
-            ))
-        }
+        guard offset >= 0,
+              offset <= data.count - 4,
+              let address = data.address else { return nil }
+        return UInt32(bigEndian: address.loadUnaligned(
+            fromByteOffset: offset,
+            as: UInt32.self
+        ))
     }
 
     private func uint32(at offset: Int) -> UInt32 {

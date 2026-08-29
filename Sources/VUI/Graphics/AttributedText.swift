@@ -254,11 +254,11 @@ private func _resolvedAttributedRuns(
             }
             font = font.resolved(in: context.environment)
             attributes.font = font
-            typefaces = ([font.typeface(
+            typefaces = font.typefaceCascade(
+                in: context.environment,
                 forContext: context.sceneResources,
                 contentScaleFactor: context.contentScaleFactor
-            )] +
-                font.fallbackTypefaces).compactMap { $0 }
+            ).runFaces
         } else {
             typefaces = defaultTypefaces
         }
@@ -300,7 +300,8 @@ final class AttributedStringTextStorage: AnyTextStorage {
                 context: context
             ),
             scaleFactor: context.contentScaleFactor,
-            displayScale: context.displayScale
+            displayScale: context.displayScale,
+            drawMissingGlyphs: true
         )
     }
 
@@ -338,6 +339,7 @@ func _resolvedAttributedText(
             context: context
         ),
         scaleFactor: context.contentScaleFactor,
-        displayScale: context.displayScale
+        displayScale: context.displayScale,
+        drawMissingGlyphs: true
     )
 }

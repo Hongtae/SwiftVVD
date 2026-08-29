@@ -10,6 +10,7 @@ final class TextEditingCommandsTests: XCTestCase {
         // ASSERTIONS commandsTextEditingMenuRuntimeObserved
         // ASSERTIONS commandsTextEditingResponderRuntimeObserved
         let appGraph = AppGraph(app: TextEditingCommandsTestApp())
+        setVectorFontRendering(in: appGraph)
         let windowsController = AppWindowsController()
         let previousAppContext = appContext
         appContext = TextEditingCommandsTestAppContext(
@@ -109,6 +110,7 @@ final class TextEditingCommandsTests: XCTestCase {
         // ASSERTIONS commandsTextEditingResponderActionObserved
         // ASSERTIONS commandsTextEditingRuntimeTransitionsObserved
         let appGraph = AppGraph(app: TextEditingCommandsTestApp())
+        setVectorFontRendering(in: appGraph)
         let windowsController = AppWindowsController()
         let previousAppContext = appContext
         appContext = TextEditingCommandsTestAppContext(
@@ -287,6 +289,14 @@ final class TextEditingCommandsTests: XCTestCase {
                 redraw: &redraw
             ) { _, _ in }
         }
+    }
+}
+
+private func setVectorFontRendering<A: App>(in appGraph: AppGraph<A>) {
+    var rootEnvironment = EnvironmentValues.tracking()
+    rootEnvironment.defaultFontRenderingMode = .vector()
+    _ = _AGGraph.withCurrent(appGraph.graph) {
+        appGraph.rootEnvironmentAttr.setValue(rootEnvironment)
     }
 }
 

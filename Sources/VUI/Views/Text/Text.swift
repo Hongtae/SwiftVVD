@@ -1595,12 +1595,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         var resolutionContext = context
         resolutionContext.environment.font = font
         font = font.resolved(in: context.environment)
-        let defaultFace = font.typeface(
+        let faces = font.typefaceCascade(
+            in: context.environment,
             forContext: context.sceneResources,
             contentScaleFactor: context.contentScaleFactor
-        )
-        let fallbackFaces = font.fallbackTypefaces
-        let faces = ([defaultFace] + fallbackFaces).compactMap {$0 }
+        ).runFaces
 
         if faces.isEmpty == false {
             var runs: [GraphicsContext.ResolvedText.Run] = []
@@ -1612,7 +1611,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                             .applying(textModifiers: modifiers)
                     },
                     scaleFactor: context.contentScaleFactor,
-                    displayScale: context.displayScale
+                    displayScale: context.displayScale,
+                    drawMissingGlyphs: true
                 )
             }
             else if case let .anyTextStorage(text) = self.storage {
@@ -1624,7 +1624,12 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                     return nil
                 }
                 guard !customAttributes.isEmpty || hasResolvedRunModifiers else {
-                    return resolved
+                    return GraphicsContext.ResolvedText(
+                        runs: resolved.runs,
+                        scaleFactor: resolved.scaleFactor,
+                        displayScale: resolved.displayScale,
+                        drawMissingGlyphs: true
+                    )
                 }
                 return GraphicsContext.ResolvedText(
                     runs: resolved.runs.map {
@@ -1632,7 +1637,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                             .applying(textModifiers: modifiers)
                     },
                     scaleFactor: context.contentScaleFactor,
-                    displayScale: context.displayScale
+                    displayScale: context.displayScale,
+                    drawMissingGlyphs: true
                 )
             }
         }
@@ -1812,11 +1818,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             font = font.italic()
         }
         font = font.resolved(in: context.environment)
-        let faces = ([font.typeface(
+        let faces = font.typefaceCascade(
+            in: context.environment,
             forContext: context.sceneResources,
             contentScaleFactor: context.contentScaleFactor
-        )] + font.fallbackTypefaces)
-            .compactMap { $0 }
+        ).runFaces
         guard !faces.isEmpty else { return nil }
 
         return variants.map { variant, string in
@@ -1827,7 +1833,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                         .applying(textModifiers: modifiers)
                 },
                 scaleFactor: context.contentScaleFactor,
-                displayScale: context.displayScale
+                displayScale: context.displayScale,
+                drawMissingGlyphs: true
             )
             return (variant, resolved)
         }

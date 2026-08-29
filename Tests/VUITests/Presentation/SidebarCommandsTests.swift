@@ -11,6 +11,11 @@ final class SidebarCommandsTests: XCTestCase {
         // ASSERTIONS commandsSidebarActiveRootRuntimeObserved
         // ASSERTIONS navigationSplitViewSidebarResponderRuntimeObserved
         let appGraph = AppGraph(app: SidebarCommandsTestApp())
+        var rootEnvironment = EnvironmentValues.tracking()
+        rootEnvironment.defaultFontRenderingMode = .vector()
+        _ = _AGGraph.withCurrent(appGraph.graph) {
+            appGraph.rootEnvironmentAttr.setValue(rootEnvironment)
+        }
         let windowsController = AppWindowsController()
         let previousAppContext = appContext
         appContext = SidebarCommandsTestAppContext(

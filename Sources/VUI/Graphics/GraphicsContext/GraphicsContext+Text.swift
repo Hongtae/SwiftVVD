@@ -652,9 +652,15 @@ extension GraphicsContext {
                 var char1 = prevChar
 
                 for char2 in unicodeScalars {
-                    let face2 = faces.first { $0.hasGlyph(for: char2) } ?? faces[0]
-
-                    let makeGlyph = drawMissingGlyphs || face2.hasGlyph(for: char2) == true
+                    let supportedFace = faces.first {
+                        $0.hasGlyph(for: char2)
+                    }
+                    let makeMissingGlyph = drawMissingGlyphs &&
+                        !char2.properties.isDefaultIgnorableCodePoint
+                    let face2 = supportedFace ?? (
+                        makeMissingGlyph ? faces[faces.count - 1] : faces[0]
+                    )
+                    let makeGlyph = supportedFace != nil || makeMissingGlyph
 
                     var glyph = Glyph(scalar: char2, face: face2)
                     if makeGlyph, let metrics = face2.glyphMetrics(for: char2) {
@@ -1616,7 +1622,9 @@ extension GraphicsContext {
             if glyphs.isEmpty == false {
                 let lineHeight = ascender - descender
                 assert(lineHeight > 0)
-                assert(offset.x > 0)
+
+                // Zero-advance scalars and suppressed missing glyphs still
+                // form a line with valid vertical metrics.
 
                 lines.append(LineGlyphs(glyphs: glyphs,
                                         ascender: ascender,

@@ -10,6 +10,7 @@ final class ToolbarCommandsTests: XCTestCase {
         // ASSERTIONS commandsToolbarMenuRuntimeObserved
         // ASSERTIONS commandsToolbarRootHostLifetimeObserved
         let appGraph = AppGraph(app: ToolbarCommandsTestApp())
+        setToolbarVectorFontRendering(in: appGraph)
         let windowsController = AppWindowsController()
         let previousAppContext = appContext
         appContext = ToolbarCommandsTestAppContext(
@@ -89,6 +90,7 @@ final class ToolbarCommandsTests: XCTestCase {
 
     func testToolbarCommandActionsDispatchToTheActiveRoot() throws {
         let appGraph = AppGraph(app: ToolbarCommandsMultiRootTestApp())
+        setToolbarVectorFontRendering(in: appGraph)
         let windowsController = AppWindowsController()
         let previousAppContext = appContext
         appContext = ToolbarCommandsTestAppContext(
@@ -222,6 +224,14 @@ final class ToolbarCommandsTests: XCTestCase {
                 ticks: (tick + offset * 6)..<(tick + offset * 6 + 6)
             )
         }
+    }
+}
+
+private func setToolbarVectorFontRendering<A: App>(in appGraph: AppGraph<A>) {
+    var rootEnvironment = EnvironmentValues.tracking()
+    rootEnvironment.defaultFontRenderingMode = .vector()
+    _ = _AGGraph.withCurrent(appGraph.graph) {
+        appGraph.rootEnvironmentAttr.setValue(rootEnvironment)
     }
 }
 

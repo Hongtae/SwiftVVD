@@ -82,7 +82,8 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
             modifiers: [.command, .shift]
         )
         let presenter = WindowCommandMenuPresenter()
-        let environment = EnvironmentValues()
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
         presenter.update(
             items: [
                 MainMenuItem(
@@ -283,6 +284,7 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         var sceneEnvironment = EnvironmentValues()
         sceneEnvironment.commandMenuEnvironmentProbeValue = "scene"
         sceneEnvironment.defaultPresentationHostMode = .platformWindow
+        sceneEnvironment.defaultFontRenderingMode = .vector()
 
         let presenter = WindowCommandMenuPresenter()
         presenter.update(
@@ -433,6 +435,7 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
 
         var environment = EnvironmentValues()
         environment.defaultPresentationHostMode = .overlay
+        environment.defaultFontRenderingMode = .vector()
         let presenter = WindowCommandMenuPresenter()
         presenter.update(
             items: [
