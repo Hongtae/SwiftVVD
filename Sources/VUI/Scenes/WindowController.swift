@@ -435,6 +435,13 @@ class WindowController: WindowDelegate,
     }
     private let focusedValuesState = Mutex(FocusedValuesState())
 
+    // The nearest controller backed by a platform window owns one focused text
+    // responder for its complete overlay presentation tree.
+    private weak var textInputFocusController: WindowController?
+    private weak var textInputFocusedResponder: ResponderNode?
+    private var platformTextInputEnabled = false
+    private var platformTextInputGeneration: UInt64 = 0
+
     var resolvedFocusedValues: FocusedValues {
         focusedValuesState.withLock { $0.resolved }
     }
@@ -669,7 +676,9 @@ class WindowController: WindowDelegate,
     // ViewRendererHost
     var responderNode: ResponderNode? { viewGraph.responderNode }
     var focusedResponder: ResponderNode? {
-        nil
+        let owner = textInputFocusOwner
+        guard owner.textInputFocusController === self else { return nil }
+        return owner.textInputFocusedResponder
     }
     var nextGestureUpdateTime: Time {
         viewGraph.nextUpdate.gestures.time
@@ -1746,6 +1755,7 @@ class WindowController: WindowDelegate,
     func endPresentationSession() {
         guard !didEndPresentationSession else { return }
         didEndPresentationSession = true
+        resignTextInputFocus()
         dismissAllPresentationChildren()
         dismissAllModalWindows()
         if let window {
@@ -1950,6 +1960,11 @@ class WindowController: WindowDelegate,
                 return true
             }
             self.contextMenuRecognizer.handleKeyboardEvent(event)
+            if let responder = self.focusedResponder
+                    as? any TextInputResponder,
+               responder.handleTextInputEvent(event) {
+                return true
+            }
             var keyConsumed = false
             if let keyEvent = self.keyEvent(from: event) {
                 let eventID = self.keyEventID(for: event)
@@ -2007,6 +2022,13 @@ class WindowController: WindowDelegate,
         let handleEvent = { (event: PlatformMouseEvent) -> Bool in
             if let window = self.window, window !== event.window { return false }
             if event.type == .wheel { return false }
+            if event.type == .buttonDown,
+               event.buttonID == 0,
+               let responder = self.focusedResponder
+                    as? any TextInputResponder,
+               !responder.containsTextInputPoint(event.location) {
+                self.resignTextInputFocus()
+            }
             guard let rootResponder = self.responderNode
                 as? MultiViewResponder else {
                 return false
@@ -2876,6 +2898,64 @@ class WindowController: WindowDelegate,
         viewGraph.setFocusedValues(resolvedFocusedValues)
     }
     func updateAccessibilityEnvironment() {}  // Accessibility root input is not wired yet.
+
+    // MARK: - Text Input Focus
+
+    private var textInputFocusOwner: WindowController {
+        var controller = self
+        while controller.window == nil,
+              let parent = controller.parentWindow {
+            controller = parent
+        }
+        return controller
+    }
+
+    func focusTextInputResponder(_ responder: ResponderNode) {
+        guard let textResponder = responder as? any TextInputResponder else {
+            return
+        }
+        let owner = textInputFocusOwner
+        if owner.textInputFocusController === self,
+           owner.textInputFocusedResponder === responder {
+            return
+        }
+
+        (owner.textInputFocusedResponder as? any TextInputResponder)?
+            .textInputFocusDidChange(false)
+        owner.textInputFocusController = self
+        owner.textInputFocusedResponder = responder
+        textResponder.textInputFocusDidChange(true)
+        owner.setPlatformTextInputEnabled(true)
+    }
+
+    func resignTextInputFocus(_ responder: ResponderNode? = nil) {
+        let owner = textInputFocusOwner
+        if let responder {
+            guard owner.textInputFocusedResponder === responder else { return }
+        } else {
+            guard owner.textInputFocusController === self else { return }
+        }
+
+        (owner.textInputFocusedResponder as? any TextInputResponder)?
+            .textInputFocusDidChange(false)
+        owner.textInputFocusedResponder = nil
+        owner.textInputFocusController = nil
+        owner.setPlatformTextInputEnabled(false)
+    }
+
+    private func setPlatformTextInputEnabled(_ enabled: Bool) {
+        guard platformTextInputEnabled != enabled else { return }
+        platformTextInputEnabled = enabled
+        platformTextInputGeneration &+= 1
+        let generation = platformTextInputGeneration
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.platformTextInputGeneration == generation else {
+                return
+            }
+            self.window?.enableTextInput(enabled, forDeviceID: 0)
+        }
+    }
 
     // MARK: - Presentation Child / Modal Management (nested structure)
     // WindowController owns its dynamic children directly (strong refs).

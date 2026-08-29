@@ -184,6 +184,22 @@ struct ToggleStyleModifier<S: ToggleStyle>: StyleModifier {
     }
 }
 
+struct TextFieldStyleModifier<S: TextFieldStyle>: StyleModifier {
+    typealias Body = Never
+    typealias StyleConfiguration = TextField<_TextFieldStyleLabel>
+    typealias StyleBody = S._Body
+
+    var style: S
+
+    init(style: S) { self.style = style }
+
+    func styleBody(
+        configuration: TextField<_TextFieldStyleLabel>
+    ) -> S._Body {
+        style._body(configuration: configuration)
+    }
+}
+
 struct DividerStyleModifier<S: DividerStyle>: StyleModifier {
     typealias Body = Never
     typealias StyleConfiguration = DividerStyleConfiguration
