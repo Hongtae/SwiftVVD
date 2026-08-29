@@ -54,6 +54,7 @@ struct PlatformItemList {
         var controlSize: ControlSize?
         var toggleState: ToggleState?
         var commandOperation: CommandOperation?
+        var textEditingCommand: TextEditingCommand?
         var scaleDownMenuImage: Bool
         var tint: Color?
 
@@ -109,6 +110,7 @@ struct PlatformItemList {
             controlSize = nil
             toggleState = nil
             commandOperation = nil
+            textEditingCommand = nil
             scaleDownMenuImage = false
             tint = nil
         }

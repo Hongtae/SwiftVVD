@@ -226,15 +226,7 @@ class AppWindowsController: @unchecked Sendable {
         // A Commands body is app-owned. Resolve its fallback action against the
         // currently active static root instead of retaining whichever root last
         // materialized the shared menu.
-        let activeRootID = rootCommandFocusState.withLock(\.activeRoot)
-        let activeRoot = activeRootID.flatMap { activeRootID in
-            allWindowControllers.first {
-                ObjectIdentifier($0) == activeRootID
-            }
-        } ?? allWindowControllers.first {
-            $0.parentWindow == nil
-                && $0.windowContext?.state.activated == true
-        }
+        let activeRoot = activeRootWindowController()
         guard let activeRoot else { return }
 
         activeRoot.enqueueInputAction { [weak activeRoot] in
@@ -244,15 +236,7 @@ class AppWindowsController: @unchecked Sendable {
     }
 
     func performRootSidebarCommand() {
-        let activeRootID = rootCommandFocusState.withLock(\.activeRoot)
-        let activeRoot = activeRootID.flatMap { activeRootID in
-            allWindowControllers.first {
-                ObjectIdentifier($0) == activeRootID
-            }
-        } ?? allWindowControllers.first {
-            $0.parentWindow == nil
-                && $0.windowContext?.state.activated == true
-        }
+        let activeRoot = activeRootWindowController()
         guard let activeRoot else { return }
 
         activeRoot.enqueueInputAction { [weak activeRoot] in
@@ -261,6 +245,37 @@ class AppWindowsController: @unchecked Sendable {
                 .toggleSidebar()
         }
         activeRoot.requestUpdate(after: 0)
+    }
+
+    func canPerformRootTextEditingCommand(
+        _ command: TextEditingCommand
+    ) -> Bool {
+        activeRootWindowController()?
+            .canPerformTextEditingCommand(command) == true
+    }
+
+    func performRootTextEditingCommand(_ command: TextEditingCommand) {
+        guard let activeRoot = activeRootWindowController() else { return }
+
+        // The menu belongs to the app graph. Resolve both the active root and
+        // its focused responder again on the input lane so a stale menu item
+        // cannot retain a responder from a previously active window.
+        activeRoot.enqueueInputAction { [weak activeRoot] in
+            activeRoot?.performTextEditingCommand(command)
+        }
+        activeRoot.requestUpdate(after: 0)
+    }
+
+    private func activeRootWindowController() -> WindowController? {
+        let activeRootID = rootCommandFocusState.withLock(\.activeRoot)
+        return activeRootID.flatMap { activeRootID in
+            allWindowControllers.first {
+                ObjectIdentifier($0) == activeRootID
+            }
+        } ?? allWindowControllers.first {
+            $0.parentWindow == nil
+                && $0.windowContext?.state.activated == true
+        }
     }
 
     private func publishRootCommandFocus(
