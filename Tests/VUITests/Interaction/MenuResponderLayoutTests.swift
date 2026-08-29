@@ -931,6 +931,55 @@ final class MenuResponderLayoutTests: XCTestCase {
 
     // ASSERTIONS menuSubmenuActivationTransferObserved
     @MainActor
+    func testActivatedSubmenuRemainsOpenAfterRootRoutedExit() throws {
+        let harness = try makeSubmenuPopupHarness(primaryAction: nil)
+        var tick: UInt64 = 2
+
+        _ = harness.parent.handleMouseHover(
+            at: harness.popup.presentationPointInParent(
+                forLocalPoint: harness.rowCenter
+            ),
+            deviceID: 41,
+            isTopMost: true,
+            at: Time(seconds: 1)
+        )
+        updateSubmenuPopupHarness(harness, tick: &tick)
+
+        let submenu = try XCTUnwrap(firstMenuPopup(in: harness.popup))
+        let childHoverPoint = try popupHoverPoint(in: submenu)
+        _ = harness.parent.handleMouseHover(
+            at: harness.popup.presentationPointInParent(
+                forLocalPoint: submenu.presentationPointInParent(
+                    forLocalPoint: childHoverPoint
+                )
+            ),
+            deviceID: 41,
+            isTopMost: true,
+            at: Time(seconds: 2)
+        )
+        updateSubmenuPopupHarness(harness, tick: &tick)
+
+        XCTAssertFalse(harness.popup.isActivated)
+        XCTAssertTrue(submenu.isActivated)
+
+        _ = harness.parent.handleMouseHover(
+            at: CGPoint(x: -100, y: -100),
+            deviceID: 41,
+            isTopMost: true,
+            at: Time(seconds: 3)
+        )
+        updateSubmenuPopupHarness(harness, tick: &tick, turns: 3)
+
+        XCTAssertFalse(harness.popup.isActivated)
+        XCTAssertTrue(submenu.isActivated)
+        XCTAssertTrue(firstMenuPopup(in: harness.popup) === submenu)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
+
+        harness.parent.dismissAllPresentationChildren()
+    }
+
+    // ASSERTIONS menuSubmenuActivationTransferObserved
+    @MainActor
     func testSubmenuPopupPaddingOwnsOverlayTransition() throws {
         let harness = try makeSubmenuPopupHarness(primaryAction: nil)
         var tick: UInt64 = 2
@@ -1069,7 +1118,7 @@ final class MenuResponderLayoutTests: XCTestCase {
 
     // ASSERTIONS menuSubmenuActivationTransferObserved
     @MainActor
-    func testOverlaySubmenuCornerExitClosesOpenedBranch() throws {
+    func testOverlaySubmenuCornerExitRetainsActivatedBranch() throws {
         let harness = try makeSubmenuPopupHarness(primaryAction: nil)
         var tick: UInt64 = 2
 
@@ -1125,9 +1174,8 @@ final class MenuResponderLayoutTests: XCTestCase {
         )
 
         // This point is just beyond both the child row's leading and bottom
-        // edges. The parent popup owns the new sample, but no parent row owns
-        // it, so the formerly active child branch must close rather than stay
-        // visible without any highlighted row.
+        // edges. Once the child popup has been entered, leaving both popup
+        // rows ends the row hover but keeps the activated branch open.
         _ = harness.parent.handleMouseHover(
             at: harness.popup.presentationPointInParent(
                 forLocalPoint: submenu.presentationPointInParent(
@@ -1140,8 +1188,13 @@ final class MenuResponderLayoutTests: XCTestCase {
         )
         updateSubmenuPopupHarness(harness, tick: &tick, turns: 3)
 
-        XCTAssertNil(firstMenuPopup(in: harness.popup))
-        XCTAssertEqual(presentationChildCount(in: harness.popup), 0)
+        if case .active = childRowHover.currentPhase {
+            XCTFail("Submenu row hover remained active outside the popup tree")
+        }
+        XCTAssertFalse(harness.popup.isActivated)
+        XCTAssertTrue(submenu.isActivated)
+        XCTAssertTrue(firstMenuPopup(in: harness.popup) === submenu)
+        XCTAssertEqual(presentationChildCount(in: harness.popup), 1)
 
         harness.parent.dismissAllPresentationChildren()
     }

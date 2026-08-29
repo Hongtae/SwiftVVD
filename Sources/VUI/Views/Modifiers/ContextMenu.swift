@@ -791,17 +791,6 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         // row edge so the hover and submenu-placement overlap use one metric.
         let bridgeLocation = submenuBridgeHoverLocation(from: location)
         let routedLocation = bridgeLocation ?? location
-        if window == nil,
-           submenuPlacement == nil,
-           !isTopMost,
-           openedSubmenuID != nil {
-            // The parent router passes true while this popup or any overlay
-            // descendant owns the pointer. A false sample at the root popup
-            // therefore means the complete menu tree was exited; close the
-            // child branch even when no retained View hover binding can emit
-            // another row-level exit.
-            closeSubmenus()
-        }
         return super.handleMouseHover(
             at: routedLocation,
             deviceID: deviceID,
