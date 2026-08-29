@@ -12,6 +12,9 @@ import VVD
 final class _AGUpdateContext {
     let predecessor: _AGUpdateContext?
     var isCancelled = false
+    // The current attribute belongs to the active update stack. Keeping it on
+    // this context also preserves the parent's attribute across nested pulls.
+    var currentAttribute: AGAttribute?
 
     init(predecessor: _AGUpdateContext?) {
         self.predecessor = predecessor
@@ -389,7 +392,9 @@ final class _AGGraph: Equatable, @unchecked Sendable {
 
     private static let currentStorage = _AGThreadLocal<_AGGraph?>(nil)
     private static let changeSetStorage = _AGThreadLocal<ChangeSet?>(nil)
-    private static let currentlyEvaluatingNodeStorage = _AGThreadLocal<AGAttribute?>(nil)
+    // Explicit rule contexts can also be installed outside an update stack.
+    // Evaluation itself uses _AGUpdateContext.currentAttribute instead.
+    private static let ruleContextStorage = _AGThreadLocal<AGAttribute?>(nil)
     private static let currentlyUpdatingGraphsStorage = _AGThreadLocal<Set<ObjectIdentifier>?>(nil)
     private static let currentUpdateContextStorage = _AGThreadLocal<_AGUpdateContext?>(nil)
 
@@ -398,7 +403,10 @@ final class _AGGraph: Equatable, @unchecked Sendable {
     }
 
     static var currentlyEvaluatingNode: AGAttribute? {
-        currentlyEvaluatingNodeStorage.value
+        if let context = currentUpdateContext {
+            return context.currentAttribute
+        }
+        return ruleContextStorage.value
     }
 
     static var currentlyUpdatingGraphs: Set<ObjectIdentifier>? {
@@ -487,8 +495,15 @@ extension _AGGraph {
     }
 
     static func withCurrentlyEvaluatingNode<R>(_ attribute: AGAttribute?, _ body: () throws -> R) rethrows -> R {
-        try currentlyEvaluatingNodeStorage.withValue(attribute) {
-            try body()
+        if let context = currentUpdateContext {
+            let previous = context.currentAttribute
+            context.currentAttribute = attribute
+            defer { context.currentAttribute = previous }
+            return try body()
+        } else {
+            return try ruleContextStorage.withValue(attribute) {
+                try body()
+            }
         }
     }
 

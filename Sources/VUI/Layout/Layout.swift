@@ -2139,14 +2139,16 @@ public protocol Layout: Sendable, Animatable {
 }
 
 extension Layout {
-    /// Builds either the static or dynamic layout graph while keeping
-    /// measurement, aggregate placement, and per-child geometry in their
-    /// distinct rule owners.
-    public static func _makeLayoutView(root: _GraphValue<Self>, inputs: _ViewInputs, body: (_Graph, _ViewInputs) -> _ViewListOutputs) -> _ViewOutputs {
+    public static func _makeLayoutView(
+        root: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: (_Graph, _ViewInputs) -> _ViewListOutputs
+    ) -> _ViewOutputs {
         guard let graph = _AGGraph.current else {
             fatalError("\(self)._makeLayoutView called outside an active _AGGraph context.")
         }
 
+        let properties = Self.layoutProperties
         var layoutInputs = inputs
         if ObjectIdentifier(Self.self) == ObjectIdentifier(AnyLayout.self) {
             let layout = Attribute<AnyLayout>(
@@ -2166,242 +2168,309 @@ extension Layout {
                 layoutInputs[DynamicStackOrientation.self] = OptionalAttribute()
             }
         }
-        let dynamicStackOrientation =
-            layoutInputs[DynamicStackOrientation.self]
 
         let childListOutputs = body(_Graph(), layoutInputs)
-
-        // Debug overlay for the layout container itself.
-        // Reads the container's pos/size from LayoutChildGeometries-driven posAttr/sizeAttr
-        // via the parent. Replace this with the exact layout-container overlay
-        // mechanism once modeled.
-        let cachedEnvironmentAttr = inputs.base.cachedEnvironment
-        let environment = cachedEnvironmentAttr.value.environment
-        let containerPosAttr  = inputs.position
-        let containerSizeAttr = inputs.size
-        let debugDLAttr: Attribute<DisplayList> = graph.makeRule {
-            let debugLayout = cachedEnvironmentAttr.value.environment.value._debugLayout
-            var dl = DisplayList()
-            if debugLayout {
-                appendDebugOverlay(
-                    to: &dl,
-                    frame: CGRect(origin: containerPosAttr.value, size: containerSizeAttr.value.value),
-                    category: .layoutContainer
-                )
-            }
-            return dl
-        }
-
-        let layoutComputerAttr: Attribute<LayoutComputer>
-        var mergedPreferences: PreferencesOutputs
-
         switch childListOutputs.views {
         case .staticList(let elements):
-            var childProxyAttrs: [LayoutProxyAttributes] = []
-            var allPreferences: [PreferencesOutputs] = []
+            return makeStaticView(
+                root: root,
+                inputs: layoutInputs,
+                properties: properties,
+                list: elements
+            )
+        case .dynamicList(let viewList, let modifier):
+            return makeDynamicView(
+                root: root,
+                inputs: layoutInputs,
+                properties: properties,
+                list: _ViewListOutputs.makeModifiedList(
+                    list: viewList,
+                    modifier: modifier
+                )
+            )
+        }
+    }
 
-            let staticLCAttr: Attribute<LayoutComputer> = graph.makeStatefulRule(
+    private static func makeStaticView(
+        root: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        properties: LayoutProperties,
+        list: any _ViewList_Elements
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "\(self).makeStaticView called outside an active _AGGraph context."
+            )
+        }
+
+        if list.count == 1, properties.isIdentityUnaryLayout {
+            return list.makeAllElements(inputs: inputs) {
+                elementInputs,
+                makeView in
+                makeView(elementInputs)
+            } ?? _ViewOutputs()
+        }
+
+        let environment = inputs.base.cachedEnvironment.value.environment
+        var childProxyAttrs: [LayoutProxyAttributes] = []
+        var allPreferences: [PreferencesOutputs] = []
+        let staticLayoutComputer: Attribute<LayoutComputer> =
+            graph.makeStatefulRule(
                 StaticLayoutComputer(
                     _layout: root._attribute,
                     _environment: environment,
-                    childAttributes: [],
+                    childAttributes: []
                 )
             )
-            let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
-                LayoutChildGeometries(
-                    parentSize: inputs.size,
-                    parentPosition: inputs.position,
-                    layoutComputer: staticLCAttr
+        let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
+            LayoutChildGeometries(
+                parentSize: inputs.size,
+                parentPosition: inputs.position,
+                layoutComputer: staticLayoutComputer
+            )
+        )
+        let dynamicStackOrientation =
+            inputs[DynamicStackOrientation.self]
+
+        var from = 0
+        var childIndex = 0
+        list.makeElements(
+            from: &from,
+            inputs: inputs,
+            indirectMap: nil
+        ) { elementInputs, makeView in
+            let geometry = graph.makeRule(
+                LayoutChildGeometry(
+                    _childGeometries: childGeometries,
+                    index: childIndex
                 )
             )
+            childIndex += 1
 
-            var from = 0
-            var childIndex = 0
-            elements.makeElements(from: &from, inputs: layoutInputs, indirectMap: nil) { elementInputs, makeView in
-                let geometry = graph.makeRule(
-                    LayoutChildGeometry(
-                        _childGeometries: childGeometries,
-                        index: childIndex
-                    )
+            var childInputs = elementInputs
+            childInputs.copyCaches()
+            childInputs.base.options.insert(.viewNeedsGeometry)
+            childInputs.requestsLayoutComputer = true
+            childInputs.position = geometry.origin()
+            childInputs.size = geometry.size()
+            childInputs.safeAreaInsets = inputs.safeAreaInsets
+            childInputs.stackOrientation = inputs.stackOrientation
+            childInputs[DynamicStackOrientation.self] =
+                dynamicStackOrientation
+
+            let childOutputs = makeView(childInputs)
+            if let layoutComputer = childOutputs._layoutComputer.attribute {
+                childProxyAttrs.append(
+                    LayoutProxyAttributes(layoutComputer: layoutComputer)
                 )
-                childIndex += 1
-
-                var childInputs = elementInputs
-                childInputs.copyCaches()
-                childInputs.base.options.insert(.viewNeedsGeometry)
-                childInputs.requestsLayoutComputer = true
-                // Both child inputs project from the same geometry rule so a
-                // placement update cannot publish independently recomputed
-                // position and size values.
-                let posAttr = geometry.origin()
-                let sizeAttr = geometry.size()
-                childInputs.position = posAttr
-                childInputs.size = sizeAttr
-                // Layout placement does not redefine the transform or nearest
-                // container channels.
-                childInputs.safeAreaInsets = inputs.safeAreaInsets
-                childInputs.stackOrientation = layoutInputs.stackOrientation
-                childInputs[DynamicStackOrientation.self] =
-                    dynamicStackOrientation
-
-                let childOutputs = makeView(childInputs)
-                if let layoutComputer = childOutputs._layoutComputer.attribute {
-                    childProxyAttrs.append(
-                        LayoutProxyAttributes(layoutComputer: layoutComputer)
-                    )
-                } else {
-                    childProxyAttrs.append(LayoutProxyAttributes())
-                }
-                allPreferences.append(childOutputs.preferences)
-                return (childOutputs, true)
+            } else {
+                childProxyAttrs.append(LayoutProxyAttributes())
             }
+            allPreferences.append(childOutputs.preferences)
+            return (childOutputs, true)
+        }
 
-            graph.mutateStatefulRule(
-                staticLCAttr.identifier,
-                as: StaticLayoutComputer<Self>.self,
-                invalidating: true
-            ) {
-                $0.childAttributes = childProxyAttrs
-            }
-            layoutComputerAttr = staticLCAttr
-            mergedPreferences = PreferencesOutputs.merge(allPreferences, in: graph)
+        graph.mutateStatefulRule(
+            staticLayoutComputer.identifier,
+            as: StaticLayoutComputer<Self>.self,
+            invalidating: true
+        ) {
+            $0.childAttributes = childProxyAttrs
+        }
 
-        case .dynamicList(let viewListAttr, let modifier):
-            let materializedViewList = _ViewListOutputs.makeModifiedList(
-                list: viewListAttr,
-                modifier: modifier
+        var preferences = PreferencesOutputs.merge(allPreferences, in: graph)
+        preferences.append(
+            DisplayList.Key.self,
+            node: makeDebugLayoutDisplayList(inputs: inputs, in: graph).identifier
+        )
+        return _ViewOutputs(
+            preferences: preferences,
+            layoutComputer: OptionalAttribute(staticLayoutComputer)
+        )
+    }
+
+    private static func makeDynamicView(
+        root: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        properties: LayoutProperties,
+        list: Attribute<any ViewList>
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "\(self).makeDynamicView called outside an active _AGGraph context."
             )
-            let dynamicLayoutComputer: Attribute<LayoutComputer> = graph.makeStatefulRule(
+        }
+        _ = properties
+
+        let environment = inputs.base.cachedEnvironment.value.environment
+        let dynamicLayoutComputer: Attribute<LayoutComputer> =
+            graph.makeStatefulRule(
                 DynamicLayoutComputer(
                     _layout: root._attribute,
                     _environment: environment,
                     _containerInfo: OptionalAttribute()
                 )
             )
-            let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
-                LayoutChildGeometries(
-                    parentSize: inputs.size,
-                    parentPosition: inputs.position,
-                    layoutComputer: dynamicLayoutComputer
-                )
+        let childGeometries: Attribute<[ViewGeometry]> = graph.makeRule(
+            LayoutChildGeometries(
+                parentSize: inputs.size,
+                parentPosition: inputs.position,
+                layoutComputer: dynamicLayoutComputer
             )
-            let adaptor = DynamicLayoutViewAdaptor(
-                _items: materializedViewList,
-                _childGeometries: OptionalAttribute(childGeometries)
-            ) { mutation in
-                guard let graph = _AGGraph.current else {
-                    fatalError("DynamicLayoutMap mutation requires an active AG context.")
-                }
-                graph.mutateStatefulRule(
-                    dynamicLayoutComputer.identifier,
-                    as: DynamicLayoutComputer<Self>.self,
-                    invalidating: true
-                ) {
-                    mutation(&$0.layoutMap)
-                }
+        )
+        let adaptor = DynamicLayoutViewAdaptor(
+            _items: list,
+            _childGeometries: OptionalAttribute(childGeometries)
+        ) { mutation in
+            guard let graph = _AGGraph.current else {
+                fatalError("DynamicLayoutMap mutation requires an active AG context.")
             }
-            var dynamicInputs = layoutInputs
-            dynamicInputs.stackOrientation = layoutInputs.stackOrientation
-            dynamicInputs[DynamicStackOrientation.self] =
-                dynamicStackOrientation
-            let (
-                containerInfoAttr,
-                containerOutputs
-            ) = DynamicContainer.makeContainer(
-                adaptor: adaptor,
-                inputs: dynamicInputs
-            )
             graph.mutateStatefulRule(
                 dynamicLayoutComputer.identifier,
                 as: DynamicLayoutComputer<Self>.self,
                 invalidating: true
             ) {
-                $0._containerInfo = OptionalAttribute(containerInfoAttr)
+                mutation(&$0.layoutMap)
             }
-            layoutComputerAttr = dynamicLayoutComputer
-
-            // The container owns one combiner per requested key, so retained
-            // inclusion follows the key's own lifecycle policy.
-            var dynMergedPreferences = containerOutputs.preferences
-            let childScrollables = dynMergedPreferences
-                .value(for: ScrollablePreferenceKey.self)
-                .map {
-                    Attribute<ScrollablePreferenceKey.Value>(
-                        identifier: $0
-                    )
-                }
-
-            let parentScrollable = inputs.weakScrollable
-            let collection: Attribute<any ScrollableCollection> = graph.makeRule {
-                DynamicLayoutScrollable(
-                    containerInfo: containerInfoAttr,
-                    viewList: viewListAttr,
-                    geometries: childGeometries,
-                    transform: inputs.transform,
-                    parentScrollable: parentScrollable,
-                    childScrollables: childScrollables
-                ) as any ScrollableCollection
-            }
-            if inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self),
-               let role = inputs.scrollTargetRole.attribute {
-                let transform: Attribute<(inout ScrollTargetRole.ContentKey.Value) -> Void> = graph.makeRule(
-                    ScrollTargetRole.SetLayout(role: role, collection: collection)
-                )
-                dynMergedPreferences.makePreferenceTransformer(
-                    inputs: inputs.preferences,
-                    key: ScrollTargetRole.ContentKey.self,
-                    transform: transform
-                )
-            }
-            if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
-               let role = inputs.scrollTargetRole.attribute {
-                let transform: Attribute<(inout ScrollTargetRole.Key.Value) -> Void> = graph.makeRule(
-                    ScrollTargetRole.SetLayout(role: role, collection: collection)
-                )
-                dynMergedPreferences.makePreferenceTransformer(
-                    inputs: inputs.preferences,
-                    key: ScrollTargetRole.Key.self,
-                    transform: transform
-                )
-            }
-            if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
-                let transform: Attribute<(inout ScrollablePreferenceKey.Value) -> Void> = graph.makeRule {
-                    let scrollable = collection.value as any Scrollable
-                    return { value in
-                        ScrollablePreferenceKey.reduce(value: &value) { [scrollable] }
-                    }
-                }
-                dynMergedPreferences.makePreferenceTransformer(
-                    inputs: inputs.preferences,
-                    key: ScrollablePreferenceKey.self,
-                    transform: transform
-                )
-            }
-            if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
-                let requests: Attribute<UpdateScrollStateRequestKey.Value> = graph.makeStatefulRule(
-                    ScrollStateRequestTransform(collection: collection, inputs: inputs)
-                )
-                let transform: Attribute<(inout UpdateScrollStateRequestKey.Value) -> Void> = graph.makeRule {
-                    let requests = requests.value
-                    return { value in
-                        UpdateScrollStateRequestKey.reduce(value: &value) { requests }
-                    }
-                }
-                dynMergedPreferences.makePreferenceTransformer(
-                    inputs: inputs.preferences,
-                    key: UpdateScrollStateRequestKey.self,
-                    transform: transform
-                )
-            }
-            mergedPreferences = dynMergedPreferences
+        }
+        let (
+            containerInfo,
+            containerOutputs
+        ) = DynamicContainer.makeContainer(
+            adaptor: adaptor,
+            inputs: inputs
+        )
+        graph.mutateStatefulRule(
+            dynamicLayoutComputer.identifier,
+            as: DynamicLayoutComputer<Self>.self,
+            invalidating: true
+        ) {
+            $0._containerInfo = OptionalAttribute(containerInfo)
         }
 
-        mergedPreferences.append(DisplayList.Key.self, node: debugDLAttr.identifier)
-
-        return _ViewOutputs(
-            preferences: mergedPreferences,
-            layoutComputer: OptionalAttribute(layoutComputerAttr)
+        var preferences = containerOutputs.preferences
+        let childScrollables = preferences
+            .value(for: ScrollablePreferenceKey.self)
+            .map {
+                Attribute<ScrollablePreferenceKey.Value>(identifier: $0)
+            }
+        let parentScrollable = inputs.weakScrollable
+        let collection: Attribute<any ScrollableCollection> = graph.makeRule {
+            DynamicLayoutScrollable(
+                containerInfo: containerInfo,
+                viewList: list,
+                geometries: childGeometries,
+                transform: inputs.transform,
+                parentScrollable: parentScrollable,
+                childScrollables: childScrollables
+            ) as any ScrollableCollection
+        }
+        if inputs.preferences.keys.contains(ScrollTargetRole.ContentKey.self),
+           let role = inputs.scrollTargetRole.attribute {
+            let transform: Attribute<
+                (inout ScrollTargetRole.ContentKey.Value) -> Void
+            > = graph.makeRule(
+                ScrollTargetRole.SetLayout(
+                    role: role,
+                    collection: collection
+                )
+            )
+            preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
+                key: ScrollTargetRole.ContentKey.self,
+                transform: transform
+            )
+        }
+        if inputs.preferences.keys.contains(ScrollTargetRole.Key.self),
+           let role = inputs.scrollTargetRole.attribute {
+            let transform: Attribute<
+                (inout ScrollTargetRole.Key.Value) -> Void
+            > = graph.makeRule(
+                ScrollTargetRole.SetLayout(
+                    role: role,
+                    collection: collection
+                )
+            )
+            preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
+                key: ScrollTargetRole.Key.self,
+                transform: transform
+            )
+        }
+        if inputs.preferences.keys.contains(ScrollablePreferenceKey.self) {
+            let transform: Attribute<
+                (inout ScrollablePreferenceKey.Value) -> Void
+            > = graph.makeRule {
+                let scrollable = collection.value as any Scrollable
+                return { value in
+                    ScrollablePreferenceKey.reduce(value: &value) {
+                        [scrollable]
+                    }
+                }
+            }
+            preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
+                key: ScrollablePreferenceKey.self,
+                transform: transform
+            )
+        }
+        if inputs.preferences.keys.contains(UpdateScrollStateRequestKey.self) {
+            let requests: Attribute<UpdateScrollStateRequestKey.Value> =
+                graph.makeStatefulRule(
+                    ScrollStateRequestTransform(
+                        collection: collection,
+                        inputs: inputs
+                    )
+                )
+            let transform: Attribute<
+                (inout UpdateScrollStateRequestKey.Value) -> Void
+            > = graph.makeRule {
+                let requests = requests.value
+                return { value in
+                    UpdateScrollStateRequestKey.reduce(value: &value) {
+                        requests
+                    }
+                }
+            }
+            preferences.makePreferenceTransformer(
+                inputs: inputs.preferences,
+                key: UpdateScrollStateRequestKey.self,
+                transform: transform
+            )
+        }
+        preferences.append(
+            DisplayList.Key.self,
+            node: makeDebugLayoutDisplayList(inputs: inputs, in: graph).identifier
         )
+        return _ViewOutputs(
+            preferences: preferences,
+            layoutComputer: OptionalAttribute(dynamicLayoutComputer)
+        )
+    }
+
+    private static func makeDebugLayoutDisplayList(
+        inputs: _ViewInputs,
+        in graph: _AGGraph
+    ) -> Attribute<DisplayList> {
+        let cachedEnvironment = inputs.base.cachedEnvironment
+        let position = inputs.position
+        let size = inputs.size
+        return graph.makeRule {
+            let debugLayout =
+                cachedEnvironment.value.environment.value._debugLayout
+            var displayList = DisplayList()
+            if debugLayout {
+                appendDebugOverlay(
+                    to: &displayList,
+                    frame: CGRect(
+                        origin: position.value,
+                        size: size.value.value
+                    ),
+                    category: .layoutContainer
+                )
+            }
+            return displayList
+        }
     }
 }
 

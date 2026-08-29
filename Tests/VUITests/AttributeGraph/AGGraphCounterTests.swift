@@ -1,6 +1,11 @@
+import Foundation
 import Synchronization
 import XCTest
 @testable import VUI
+
+#if canImport(Darwin)
+import Darwin
+#endif
 
 final class AGGraphCounterTests: XCTestCase {
     func testComputedOutputReusesGraphOwnedStorageAcrossPublications() {
@@ -927,6 +932,76 @@ final class AGGraphCounterTests: XCTestCase {
         }.value
 
         XCTAssertEqual(result, 65)
+    }
+
+    func testUnevaluatedRuleChainFitsConstrainedStack() {
+        // ASSERTIONS attributeGraphNestedValueUpdateDebugStackRuntimeObserved
+        let completed = DispatchSemaphore(value: 0)
+        let result = Mutex((value: Int?.none, stackSize: 0))
+        let thread = Thread {
+            let graph = _AGGraph()
+            let ref = _AGGraphContext(graph: graph)
+
+            let value = ref.withCurrent {
+                let source = graph.makeInput(value: 1)
+                var output = source
+
+                for _ in 0..<72 {
+                    let input = output
+                    output = graph.makeRule {
+                        input.value + 1
+                    }
+                }
+
+                return output.value
+            }
+            result.withLock {
+                $0.value = value
+#if canImport(Darwin)
+                $0.stackSize = pthread_get_stacksize_np(pthread_self())
+#endif
+            }
+            completed.signal()
+        }
+#if canImport(Darwin)
+        thread.stackSize = 512 * 1024
+#endif
+        thread.start()
+
+        XCTAssertEqual(completed.wait(timeout: .now() + 10), .success)
+        result.withLock {
+            XCTAssertEqual($0.value, 73)
+#if canImport(Darwin)
+            XCTAssertGreaterThanOrEqual($0.stackSize, 512 * 1024)
+            XCTAssertLessThan($0.stackSize, 544 * 1024)
+#endif
+        }
+    }
+
+    func testNestedValueUpdateRestoresCurrentUpdateStackAttribute() {
+        // ASSERTIONS attributeGraphCurrentAttributeUpdateStackRuntimeObserved
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        var observed: [AGAttribute?] = []
+
+        ref.withCurrent {
+            let child = graph.makeRule {
+                observed.append(_AGGraph.currentRuleContextAttribute)
+                return 41
+            }
+            let parent = graph.makeRule {
+                observed.append(_AGGraph.currentRuleContextAttribute)
+                let value = child.value + 1
+                observed.append(_AGGraph.currentRuleContextAttribute)
+                return value
+            }
+
+            XCTAssertEqual(parent.value, 42)
+            XCTAssertEqual(
+                observed,
+                [parent.identifier, child.identifier, parent.identifier]
+            )
+        }
     }
 
     func testUnevaluatedDeepKeyPathChainUpdatesIteratively() {

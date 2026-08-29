@@ -1570,10 +1570,11 @@ extension _AGGraph {
         // the same side effect recursively.
         guard !slots[index].node!.pointee.isEvaluating else { return }
         slots[index].node!.pointee.isEvaluating = true
-        if isUpdatingOnCurrentThread {
+        if _AGGraph.currentUpdateContext != nil {
             evaluateNode(id)
         } else {
-            withGraphUpdateCounterIfNeeded {
+            let context = _AGUpdateContext(predecessor: nil)
+            _AGGraph.withCurrentUpdateContext(context) {
                 evaluateNode(id)
             }
         }
@@ -1883,9 +1884,13 @@ extension _AGGraph {
         }
 
         beginInputEvaluation(forNodeAt: index)
-        _AGGraph.withCurrentlyEvaluatingNode(id) {
-            evaluateNodeBody(id, index: index)
+        guard let context = _AGGraph.currentUpdateContext else {
+            fatalError("evaluateNode called outside of an attribute update.")
         }
+        let previous = context.currentAttribute
+        context.currentAttribute = id
+        defer { context.currentAttribute = previous }
+        evaluateNodeBody(id, index: index)
     }
 
     private func evaluateNodeBody(_ id: AGAttribute, index: Int) {

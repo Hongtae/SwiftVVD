@@ -1,4 +1,6 @@
 import XCTest
+import Observation
+import Synchronization
 @testable import VUI
 
 final class RootToolbarHostTests: XCTestCase {
@@ -130,6 +132,22 @@ final class RootToolbarHostTests: XCTestCase {
 
         XCTAssertTrue(bridge.update(storage: toolbarStorage(id: "third")))
         XCTAssertEqual(bridge.snapshot?.visibility, .visible)
+    }
+
+    func testRepeatedAbsentRootToolbarUpdateDoesNotNotifyObservers() {
+        // ASSERTIONS commandsRootToolbarAbsentNoOpRuntimeObserved
+        let bridge = RootToolbarBridge()
+        let observationCount = Mutex(0)
+
+        withObservationTracking {
+            _ = bridge.snapshot
+            _ = bridge.customizationSession
+        } onChange: {
+            observationCount.withLock { $0 += 1 }
+        }
+
+        XCTAssertFalse(bridge.update(storage: ToolbarStorage()))
+        XCTAssertEqual(observationCount.withLock { $0 }, 0)
     }
 
     func testRootBridgeOwnsToolbarCommandValidationAndCustomizationSession()

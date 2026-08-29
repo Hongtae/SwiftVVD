@@ -77,6 +77,56 @@ final class FocusedValuesTests: XCTestCase {
     }
 
     @MainActor
+    func testFocusedSceneValueVersionChangesOnlyWithContent() throws {
+        // ASSERTIONS commandsFocusedValueVersionGatingRuntimeObserved
+        var title: Binding<String>?
+        var unrelated: Binding<Int>?
+        let controller = WindowController(
+            content: FocusedValueVersionHost { capturedTitle, capturedUnrelated in
+                title = capturedTitle
+                unrelated = capturedUnrelated
+            },
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(FocusedValueVersionHost.self)
+            )
+        )
+        let startDate = controller.date
+
+        controller.viewGraph.updateOutputs(at: .zero)
+        update(controller, tick: 1, seconds: 1, startDate: startDate)
+        update(controller, tick: 2, seconds: 2, startDate: startDate)
+
+        let initialVersion = controller.resolvedFocusedValues.version
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "Initial"
+        )
+
+        try XCTUnwrap(unrelated).wrappedValue += 1
+        update(controller, tick: 3, seconds: 3, startDate: startDate)
+        update(controller, tick: 4, seconds: 4, startDate: startDate)
+
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.version,
+            initialVersion
+        )
+
+        try XCTUnwrap(title).wrappedValue = "Updated"
+        update(controller, tick: 5, seconds: 5, startDate: startDate)
+        update(controller, tick: 6, seconds: 6, startDate: startDate)
+
+        XCTAssertNotEqual(
+            controller.resolvedFocusedValues.version,
+            initialVersion
+        )
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "Updated"
+        )
+    }
+
+    @MainActor
     func testActiveModalOverridesAndThenRestoresRootFocusedValues() throws {
         // ASSERTIONS commandsPresentationChildFocusRuntimeObserved
         // ASSERTIONS commandsPresentationChildOverridesRootFocusRuntimeObserved
@@ -185,5 +235,17 @@ private struct FocusedValuesSheetHost: View {
                         "Presentation"
                     )
             }
+    }
+}
+
+private struct FocusedValueVersionHost: View {
+    let capture: (Binding<String>, Binding<Int>) -> Void
+    @State private var title = "Initial"
+    @State private var unrelated = 0
+
+    var body: some View {
+        let _ = capture($title, $unrelated)
+        Text(verbatim: "Unrelated \(unrelated)")
+            .focusedSceneValue(\.focusedValuesTestTitle, title)
     }
 }

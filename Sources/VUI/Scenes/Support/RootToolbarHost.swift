@@ -133,10 +133,11 @@ final class RootToolbarBridge {
             let changed = snapshot != nil
                 || signature != nil
                 || customizationSession != nil
+            guard changed else { return false }
             snapshot = nil
             signature = nil
             customizationSession = nil
-            return changed
+            return true
         }
 
         let changed = signature != newSignature || snapshot == nil

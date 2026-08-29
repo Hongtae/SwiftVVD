@@ -1,3 +1,5 @@
+import Foundation
+import Synchronization
 import XCTest
 @testable import VUI
 
@@ -6,6 +8,80 @@ import Darwin
 #endif
 
 final class ZStackConstructionTests: XCTestCase {
+    func testFocusedSystemImageBuildsOnConstrainedStack() {
+        // ASSERTIONS layoutStaticDynamicHelperDispatchRuntimeObserved
+        let completed = DispatchSemaphore(value: 0)
+        let result = Mutex((stackSize: 0, hasLayoutComputer: false))
+        let thread = Thread {
+            autoreleasepool {
+                let host = TestViewRendererHost()
+                let graph = ViewGraph(
+                    replaceableContent: ConstrainedFocusedLabelView(),
+                    rendererHost: host
+                )
+                host.storage = graph
+                graph.updateOutputs(at: .zero)
+                result.withLock {
+#if canImport(Darwin)
+                    $0.stackSize = pthread_get_stacksize_np(pthread_self())
+#endif
+                    $0.hasLayoutComputer = graph.rootLayoutComputer != nil
+                }
+            }
+            completed.signal()
+        }
+        thread.stackSize = 512 * 1024
+        thread.start()
+
+        XCTAssertEqual(completed.wait(timeout: .now() + 10), .success)
+        result.withLock {
+#if canImport(Darwin)
+            XCTAssertGreaterThanOrEqual($0.stackSize, 512 * 1024)
+            XCTAssertLessThan($0.stackSize, 544 * 1024)
+#endif
+            XCTAssertTrue($0.hasLayoutComputer)
+        }
+    }
+
+    func testStaticIdentityUnaryLayoutsForwardTheirOnlyChild() {
+        // ASSERTIONS layoutIdentityUnaryDirectChildForwardingObserved
+        let hStack = render(HStack { Text("Child") })
+        let vStack = render(VStack { Text("Child") })
+        let zStack = render(ZStack { Text("Child") })
+
+        XCTAssertEqual(
+            staticLayoutComputerCount(in: hStack, layout: "_HStackLayout"),
+            0
+        )
+        XCTAssertEqual(
+            staticLayoutComputerCount(in: vStack, layout: "_VStackLayout"),
+            0
+        )
+        XCTAssertEqual(
+            staticLayoutComputerCount(in: zStack, layout: "_ZStackLayout"),
+            0
+        )
+    }
+
+    func testStaticIdentityUnaryLayoutKeepsZeroAndMultipleChildContainers() {
+        let empty = render(ZStack {})
+        let multiple = render(
+            ZStack {
+                Text("First")
+                Text("Second")
+            }
+        )
+
+        XCTAssertEqual(
+            staticLayoutComputerCount(in: empty, layout: "_ZStackLayout"),
+            1
+        )
+        XCTAssertEqual(
+            staticLayoutComputerCount(in: multiple, layout: "_ZStackLayout"),
+            1
+        )
+    }
+
     func testDeepErasureBaselineBuilds() {
         let graph = render(deeplyErasedSystemImage)
 
@@ -313,6 +389,15 @@ final class ZStackConstructionTests: XCTestCase {
         }
     }
 
+    private func staticLayoutComputerCount(
+        in viewGraph: ViewGraph,
+        layout: String
+    ) -> Int {
+        ruleBodyCount(in: viewGraph) { name in
+            name.contains("StaticLayoutComputer<VUI.\(layout)>")
+        }
+    }
+
     private func ruleBodyCount(
         in viewGraph: ViewGraph,
         matching predicate: (String) -> Bool
@@ -386,5 +471,39 @@ final class ZStackConstructionTests: XCTestCase {
     private func modifiedViewListDepth(_ list: any ViewList) -> Int {
         guard let modified = list as? ModifiedViewList else { return 0 }
         return 1 + modifiedViewListDepth(modified.list)
+    }
+}
+
+private struct ConstrainedFocusedValueKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+private extension FocusedValues {
+    var constrainedFocusedValue: Binding<Bool>? {
+        get { self[ConstrainedFocusedValueKey.self] }
+        set { self[ConstrainedFocusedValueKey.self] = newValue }
+    }
+}
+
+private struct ConstrainedFocusedLabelView: View {
+    @State private var isPresented = false
+
+    var body: some View {
+        VStack {
+            ZStack {
+                HStack {
+                    Button("Settings", systemImage: "settings") {}
+                    Text("Status")
+                }
+                Rectangle().fill(Color.clear)
+            }
+            Text("Footer")
+        }
+        .padding(1)
+        .padding(2)
+        .padding(3)
+        .padding(4)
+        .frame(width: 320, height: 240)
+        .focusedSceneValue(\.constrainedFocusedValue, $isPresented)
     }
 }
