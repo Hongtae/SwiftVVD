@@ -215,6 +215,13 @@ class AppWindowsController: @unchecked Sendable {
         }
     }
 
+    var activeRootSidebarCommandContext: RootSidebarCommandContext? {
+        rootCommandFocusState.withLock { state in
+            guard let activeRoot = state.activeRoot else { return nil }
+            return state.values[activeRoot]?.rootSidebarCommandContext
+        }
+    }
+
     func performRootToolbarCommand(_ command: RootToolbarCommand) {
         // A Commands body is app-owned. Resolve its fallback action against the
         // currently active static root instead of retaining whichever root last
@@ -232,6 +239,26 @@ class AppWindowsController: @unchecked Sendable {
 
         activeRoot.enqueueInputAction { [weak activeRoot] in
             activeRoot?.performRootToolbarCommand(command)
+        }
+        activeRoot.requestUpdate(after: 0)
+    }
+
+    func performRootSidebarCommand() {
+        let activeRootID = rootCommandFocusState.withLock(\.activeRoot)
+        let activeRoot = activeRootID.flatMap { activeRootID in
+            allWindowControllers.first {
+                ObjectIdentifier($0) == activeRootID
+            }
+        } ?? allWindowControllers.first {
+            $0.parentWindow == nil
+                && $0.windowContext?.state.activated == true
+        }
+        guard let activeRoot else { return }
+
+        activeRoot.enqueueInputAction { [weak activeRoot] in
+            activeRoot?.resolvedFocusedValues
+                .rootSidebarCommandContext?
+                .toggleSidebar()
         }
         activeRoot.requestUpdate(after: 0)
     }
