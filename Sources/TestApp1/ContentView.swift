@@ -14,6 +14,7 @@ private enum LabCategory: Int, Identifiable {
     case customAnimation
     case images
     case textVariants
+    case textInput
     case scrollView
     case scrollViewReader
 
@@ -107,6 +108,7 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     categoryButton("Scroll View", category: .scrollView, width: 145)
                     categoryButton("ScrollView Reader", category: .scrollViewReader, width: 145)
+                    categoryButton("Text Input", category: .textInput, width: 145)
                 }
             }
 
@@ -311,6 +313,10 @@ struct ContentView: View {
             }
         case .textVariants:
             TextVariantLabSheet {
+                selectedCategory = nil
+            }
+        case .textInput:
+            TextInputLabSheet {
                 selectedCategory = nil
             }
         case .scrollView:
