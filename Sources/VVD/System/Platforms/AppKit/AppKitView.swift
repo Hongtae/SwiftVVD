@@ -361,7 +361,10 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
             #selector(insertNewline(_:)): "\n",
             #selector(insertTab(_:)): "\t",
             #selector(deleteBackward(_:)): "\u{8}", // \b
-            #selector(deleteBackwardByDecomposingPreviousCharacter(_:)): "\u{8}",
+            #selector(
+                deleteBackwardByDecomposingPreviousCharacter(_:)
+            ): "\u{8}",
+            #selector(deleteForward(_:)): "\u{F728}",
             #selector(cancelOperation(_:)): "\u{1B}", // \e (esc)
         ]
 
