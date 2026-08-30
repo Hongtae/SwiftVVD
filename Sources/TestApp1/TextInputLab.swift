@@ -4,6 +4,7 @@ struct TextInputLabSheet: View {
     let close: () -> Void
 
     @State private var primaryText = ""
+    @State private var primarySelection: TextSelection?
     @State private var secondaryText = "Second field"
     @State private var enclosesCompositionText = true
 
@@ -26,7 +27,8 @@ struct TextInputLabSheet: View {
 
             TextField(
                 "Type with a direct keyboard or IME",
-                text: $primaryText
+                text: $primaryText,
+                selection: $primarySelection
             )
             .frame(width: 420)
 

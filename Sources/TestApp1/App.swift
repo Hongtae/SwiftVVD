@@ -65,6 +65,7 @@ struct TestApp1: App {
         .commandMenuPresentationStyle(.window)
         .commands {
             ToolbarCommands()
+            TextEditingCommands()
             TestAppSettingsCommands()
 
             CommandGroup(after: .appInfo) {
