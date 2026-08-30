@@ -5,6 +5,7 @@ struct TextInputLabSheet: View {
 
     @State private var primaryText = ""
     @State private var secondaryText = "Second field"
+    @State private var enclosesCompositionText = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -17,6 +18,11 @@ struct TextInputLabSheet: View {
             )
             .font(.system(.callout))
             .foregroundColor(.secondary)
+
+            Toggle(
+                "Enclose composition text",
+                isOn: $enclosesCompositionText
+            )
 
             TextField(
                 "Type with a direct keyboard or IME",
@@ -45,6 +51,9 @@ struct TextInputLabSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 330)
+        .frame(width: 520, height: 370)
+        .textFieldCompositionCaretStyle(
+            enclosesCompositionText ? .enclosing : .insertionPoint
+        )
     }
 }
