@@ -150,6 +150,26 @@ public struct TextField<Label>: View where Label: View {
         )
     }
 
+    public init(
+        text: Binding<String>,
+        selection: Binding<TextSelection?>,
+        prompt: Text? = nil,
+        axis: Axis? = nil,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.init(
+            text: text,
+            isSecure: false,
+            label: label(),
+            axis: axis ?? .horizontal,
+            prompt: prompt,
+            state: StateOrBinding(wrappedValue: TextFieldState(
+                displayText: text.wrappedValue
+            )),
+            selection: selection
+        )
+    }
+
     public var body: some View {
         ResolvedTextFieldStyle(configuration: TextField<_TextFieldStyleLabel>(
             text: _text,
@@ -239,6 +259,59 @@ extension TextField where Label == Text {
             )),
             selection: nil
         )
+    }
+
+    public init(
+        _ titleKey: LocalizedStringKey,
+        text: Binding<String>,
+        selection: Binding<TextSelection?>,
+        prompt: Text? = nil,
+        axis: Axis? = nil
+    ) {
+        self.init(
+            text: text,
+            selection: selection,
+            prompt: prompt,
+            axis: axis
+        ) {
+            Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        text: Binding<String>,
+        selection: Binding<TextSelection?>,
+        prompt: Text? = nil,
+        axis: Axis? = nil
+    ) {
+        self.init(
+            text: text,
+            selection: selection,
+            prompt: prompt,
+            axis: axis
+        ) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<S>(
+        _ title: S,
+        text: Binding<String>,
+        selection: Binding<TextSelection?>,
+        prompt: Text? = nil,
+        axis: Axis? = nil
+    ) where S: StringProtocol {
+        self.init(
+            text: text,
+            selection: selection,
+            prompt: prompt,
+            axis: axis
+        ) {
+            Text(title)
+        }
     }
 
     @_disfavoredOverload
@@ -374,17 +447,100 @@ enum TextFieldInputResult: Equatable {
 
 struct TextFieldInputState: Equatable {
     var composition = ""
+    var compositionReplacementRange: Range<Int>?
     var caretOffset = 0
+    var selectionRange: Range<Int>?
+    var selectionAffinity: TextSelectionAffinity = .automatic
     var isFocused = false
+
+    var selectionOffsets: Range<Int> {
+        selectionRange ?? caretOffset..<caretOffset
+    }
+
+    var hasSelection: Bool {
+        selectionRange?.isEmpty == false
+    }
 
     mutating func setFocused(_ focused: Bool, committedText: String) {
         isFocused = focused
         composition = ""
+        compositionReplacementRange = nil
         if focused {
             caretOffset = committedText.count
+            selectionRange = nil
+            selectionAffinity = .upstream
         } else {
             clampCaret(to: committedText)
         }
+    }
+
+    mutating func setSelection(
+        _ selection: TextSelection,
+        committedText: String
+    ) -> Bool {
+        let offsets: Range<Int>
+        switch selection.indices {
+        case .selection(let range):
+            offsets = committedText.distance(
+                from: committedText.startIndex,
+                to: range.lowerBound
+            )..<committedText.distance(
+                from: committedText.startIndex,
+                to: range.upperBound
+            )
+        case .multiSelection:
+            return false
+        }
+        return setSelection(
+            offsets,
+            affinity: selection.affinity,
+            committedText: committedText
+        )
+    }
+
+    @discardableResult
+    mutating func setSelection(
+        _ offsets: Range<Int>,
+        affinity: TextSelectionAffinity,
+        committedText: String
+    ) -> Bool {
+        let lower = min(max(offsets.lowerBound, 0), committedText.count)
+        let upper = min(max(offsets.upperBound, lower), committedText.count)
+        let oldOffsets = selectionOffsets
+        let oldAffinity = selectionAffinity
+        caretOffset = upper
+        selectionRange = lower == upper ? nil : lower..<upper
+        selectionAffinity = affinity
+        composition = ""
+        compositionReplacementRange = nil
+        return oldOffsets != selectionOffsets || oldAffinity != affinity
+    }
+
+    mutating func collapseSelection(
+        to offset: Int,
+        affinity: TextSelectionAffinity,
+        committedText: String
+    ) {
+        _ = setSelection(
+            offset..<offset,
+            affinity: affinity,
+            committedText: committedText
+        )
+    }
+
+    func textSelection(in committedText: String) -> TextSelection {
+        let offsets = selectionOffsets
+        let lower = committedText.index(
+            committedText.startIndex,
+            offsetBy: min(max(offsets.lowerBound, 0), committedText.count)
+        )
+        let upper = committedText.index(
+            committedText.startIndex,
+            offsetBy: min(max(offsets.upperBound, 0), committedText.count)
+        )
+        var selection = TextSelection(range: lower..<upper)
+        selection.affinity = selectionAffinity
+        return selection
     }
 
     mutating func replaceComposition(
@@ -392,6 +548,18 @@ struct TextFieldInputState: Equatable {
         committedText: String
     ) {
         clampCaret(to: committedText)
+        if compositionReplacementRange == nil,
+           text.isEmpty == false || hasSelection {
+            compositionReplacementRange = selectionOffsets
+        }
+        if let replacement = compositionReplacementRange {
+            caretOffset = min(
+                replacement.lowerBound + text.count,
+                committedText.count
+            )
+            selectionAffinity = text.isEmpty ? .downstream : .upstream
+        }
+        selectionRange = nil
         composition = text
     }
 
@@ -400,7 +568,11 @@ struct TextFieldInputState: Equatable {
         committedText: inout String
     ) -> TextFieldInputResult {
         clampCaret(to: committedText)
-        composition = ""
+        if let replacement = compositionReplacementRange {
+            caretOffset = replacement.upperBound
+            selectionRange = replacement.isEmpty ? nil : replacement
+        }
+        compositionReplacementRange = nil
 
         switch input {
         case "\r", "\n":
@@ -408,6 +580,10 @@ struct TextFieldInputState: Equatable {
         case "\t", "\u{1B}":
             return .handled
         case "\u{8}", "\u{7F}":
+            if removeSelection(from: &committedText) {
+                selectionAffinity = .downstream
+                return .changed
+            }
             guard caretOffset > 0 else { return .handled }
             let end = committedText.index(
                 committedText.startIndex,
@@ -416,14 +592,32 @@ struct TextFieldInputState: Equatable {
             let start = committedText.index(before: end)
             committedText.removeSubrange(start..<end)
             caretOffset -= 1
+            selectionAffinity = .downstream
+            return .changed
+        case "\u{F728}":
+            if removeSelection(from: &committedText) {
+                selectionAffinity = .downstream
+                return .changed
+            }
+            guard caretOffset < committedText.count else { return .handled }
+            let start = committedText.index(
+                committedText.startIndex,
+                offsetBy: caretOffset
+            )
+            let end = committedText.index(after: start)
+            committedText.removeSubrange(start..<end)
+            selectionAffinity = .downstream
             return .changed
         default:
+            _ = removeSelection(from: &committedText)
             let index = committedText.index(
                 committedText.startIndex,
                 offsetBy: caretOffset
             )
             committedText.insert(contentsOf: input, at: index)
             caretOffset += input.count
+            selectionRange = nil
+            selectionAffinity = .upstream
             return input.isEmpty ? .handled : .changed
         }
     }
@@ -433,49 +627,163 @@ struct TextFieldInputState: Equatable {
         committedText: inout String
     ) -> Bool {
         clampCaret(to: committedText)
-        composition = ""
 
         switch key {
         case .left:
-            caretOffset = max(0, caretOffset - 1)
+            if let selectionRange {
+                caretOffset = selectionRange.lowerBound
+                self.selectionRange = nil
+            } else {
+                caretOffset = max(0, caretOffset - 1)
+            }
+            selectionAffinity = .downstream
         case .right:
-            caretOffset = min(committedText.count, caretOffset + 1)
+            if let selectionRange {
+                caretOffset = selectionRange.upperBound
+                self.selectionRange = nil
+            } else {
+                caretOffset = min(committedText.count, caretOffset + 1)
+            }
+            selectionAffinity = .upstream
         case .home:
             caretOffset = 0
+            selectionRange = nil
+            selectionAffinity = .downstream
         case .end:
             caretOffset = committedText.count
-        case .delete:
-            guard caretOffset < committedText.count else { return true }
-            let start = committedText.index(
-                committedText.startIndex,
-                offsetBy: caretOffset
-            )
-            let end = committedText.index(after: start)
-            committedText.removeSubrange(start..<end)
-        case .backspace, .return, .enter, .tab, .escape:
-            // These commands arrive as textInput on text-enabled platform
-            // windows. Own the paired key stream without applying it twice.
-            break
+            selectionRange = nil
+            selectionAffinity = .upstream
         default:
+            // Editing control characters are delivered through textInput.
+            // Raw keys own physical caret navigation only.
             return false
         }
         return true
     }
 
     func segments(in committedText: String) -> (String, String) {
-        let offset = min(max(caretOffset, 0), committedText.count)
-        let index = committedText.index(
+        let parts = displaySegments(in: committedText)
+        return (parts.leading, parts.selected + parts.trailing)
+    }
+
+    func displaySegments(
+        in committedText: String
+    ) -> (leading: String, selected: String, trailing: String) {
+        let offsets = compositionReplacementRange ?? selectionOffsets
+        let lower = committedText.index(
             committedText.startIndex,
-            offsetBy: offset
+            offsetBy: min(max(offsets.lowerBound, 0), committedText.count)
+        )
+        let upper = committedText.index(
+            committedText.startIndex,
+            offsetBy: min(max(offsets.upperBound, 0), committedText.count)
         )
         return (
-            String(committedText[..<index]),
-            String(committedText[index...])
+            String(committedText[..<lower]),
+            compositionReplacementRange == nil
+                ? String(committedText[lower..<upper])
+                : "",
+            String(committedText[upper...])
         )
+    }
+
+    func transformationRange(in committedText: String) -> Range<Int>? {
+        if let selectionRange, selectionRange.isEmpty == false {
+            return selectionRange
+        }
+        let characters = Array(committedText)
+        guard characters.isEmpty == false else { return nil }
+
+        let seed: Int
+        if caretOffset < characters.count,
+           Self.isWordCharacter(characters[caretOffset]) {
+            seed = caretOffset
+        } else if caretOffset > 0,
+                  Self.isWordCharacter(characters[caretOffset - 1]) {
+            seed = caretOffset - 1
+        } else {
+            return nil
+        }
+
+        var lower = seed
+        var upper = seed + 1
+        while lower > 0, Self.isWordCharacter(characters[lower - 1]) {
+            lower -= 1
+        }
+        while upper < characters.count,
+              Self.isWordCharacter(characters[upper]) {
+            upper += 1
+        }
+        return lower..<upper
+    }
+
+    @discardableResult
+    mutating func transformSelection(
+        in committedText: inout String,
+        transform: (String) -> String
+    ) -> Bool {
+        guard let offsets = transformationRange(in: committedText) else {
+            return false
+        }
+        let lower = committedText.index(
+            committedText.startIndex,
+            offsetBy: offsets.lowerBound
+        )
+        let upper = committedText.index(
+            committedText.startIndex,
+            offsetBy: offsets.upperBound
+        )
+        let replacement = transform(String(committedText[lower..<upper]))
+        committedText.replaceSubrange(lower..<upper, with: replacement)
+        caretOffset = offsets.lowerBound + replacement.count
+        selectionRange = offsets.lowerBound..<caretOffset
+        selectionAffinity = .upstream
+        compositionReplacementRange = nil
+        return true
     }
 
     private mutating func clampCaret(to text: String) {
         caretOffset = min(max(caretOffset, 0), text.count)
+        if let selectionRange {
+            let lower = min(max(selectionRange.lowerBound, 0), text.count)
+            let upper = min(max(selectionRange.upperBound, lower), text.count)
+            self.selectionRange = lower == upper ? nil : lower..<upper
+        }
+        if let compositionReplacementRange {
+            let lower = min(
+                max(compositionReplacementRange.lowerBound, 0),
+                text.count
+            )
+            let upper = min(
+                max(compositionReplacementRange.upperBound, lower),
+                text.count
+            )
+            self.compositionReplacementRange = lower..<upper
+        }
+    }
+
+    private mutating func removeSelection(from text: inout String) -> Bool {
+        guard let selectionRange, selectionRange.isEmpty == false else {
+            return false
+        }
+        let lower = text.index(
+            text.startIndex,
+            offsetBy: selectionRange.lowerBound
+        )
+        let upper = text.index(
+            text.startIndex,
+            offsetBy: selectionRange.upperBound
+        )
+        text.removeSubrange(lower..<upper)
+        caretOffset = selectionRange.lowerBound
+        self.selectionRange = nil
+        return true
+    }
+
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character == "_" || character.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0)
+        }
     }
 }
 
@@ -670,7 +978,7 @@ private struct TextFieldControl: View {
     @ViewBuilder
     private var editorContent: some View {
         let text = configuration._text.wrappedValue
-        let segments = inputState.segments(in: text)
+        let segments = inputState.displaySegments(in: text)
         let defaultCaretWidth: CGFloat = 1
         HStack(spacing: 0) {
             if text.isEmpty && inputState.composition.isEmpty {
@@ -686,8 +994,12 @@ private struct TextFieldControl: View {
                     configuration.label.foregroundStyle(Color.secondary)
                 }
             } else {
-                Text(segments.0)
-                if inputState.composition.isEmpty {
+                Text(segments.leading)
+                if segments.selected.isEmpty == false {
+                    Text(segments.selected)
+                        .foregroundStyle(Color.white)
+                        .background(Color.blue)
+                } else if inputState.composition.isEmpty {
                     if inputState.isFocused {
                         TextFieldCaret(
                             compositionText: nil,
@@ -701,7 +1013,7 @@ private struct TextFieldControl: View {
                         compositionStyle: compositionCaretStyle
                     )
                 }
-                Text(segments.1)
+                Text(segments.trailing)
             }
             Spacer(minLength: 0)
         }
@@ -711,6 +1023,8 @@ private struct TextFieldControl: View {
     private var inputModifier: TextFieldInputModifier {
         TextFieldInputModifier(
             text: configuration._text,
+            selection: configuration.selection,
+            selectionValue: configuration.selection?.wrappedValue,
             fieldState: configuration.$state,
             inputState: $inputState
         )
@@ -727,6 +1041,8 @@ private struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
     var text: Binding<String>
+    var selection: Binding<TextSelection?>?
+    var selectionValue: TextSelection?
     var fieldState: Binding<TextFieldState>
     var inputState: Binding<TextFieldInputState>
 
@@ -825,9 +1141,11 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         let modifier = modifier.value
         let environment = environment.value
         responder.text = modifier.text
+        responder.selection = modifier.selection
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
         responder.isEnabled = environment.isEnabled
+        responder.synchronizeSelection(modifier.selectionValue)
         responder.helper.update(
             data: (value: TrivialContentResponder(), changed: false),
             size: (
@@ -876,12 +1194,28 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
 }
 
 final class TextFieldResponder: MultiViewResponder,
-    ExclusiveResponderEventConsumer, TextInputResponder {
+    ExclusiveResponderEventConsumer, TextInputResponder,
+    TextEditingCommandResponder {
     var helper = ContentResponderHelper<TrivialContentResponder>()
     var text: Binding<String>?
+    var selection: Binding<TextSelection?>? {
+        didSet {
+            let location = selection.map {
+                ObjectIdentifier($0.location)
+            }
+            if location != selectionLocation {
+                selectionLocation = location
+                selectionBindingValue = nil
+                hasSelectionBindingValue = false
+            }
+        }
+    }
     var fieldState: Binding<TextFieldState>?
     var inputState: Binding<TextFieldInputState>?
     var isEnabled = true
+    private var selectionLocation: ObjectIdentifier?
+    private var selectionBindingValue: TextSelection?
+    private var hasSelectionBindingValue = false
     private var consumedKeyStreams: Set<KeyStream> = []
 
     private struct KeyStream: Hashable {
@@ -975,7 +1309,21 @@ final class TextFieldResponder: MultiViewResponder,
         Update.enqueueAction {
             var editing = inputState.wrappedValue
             editing.setFocused(focused, committedText: text.wrappedValue)
+            if focused,
+               let selection = self.selection?.wrappedValue {
+                _ = editing.setSelection(
+                    selection,
+                    committedText: text.wrappedValue
+                )
+            } else if !focused {
+                editing.collapseSelection(
+                    to: 0,
+                    affinity: .downstream,
+                    committedText: text.wrappedValue
+                )
+            }
             inputState.wrappedValue = editing
+            self.publishSelection(editing, committedText: text.wrappedValue)
 
             var state = fieldState.wrappedValue
             guard state.isEditing != focused else { return }
@@ -1002,6 +1350,10 @@ final class TextFieldResponder: MultiViewResponder,
                     committedText: text.wrappedValue
                 )
                 inputState.wrappedValue = editing
+                self.publishSelection(
+                    editing,
+                    committedText: text.wrappedValue
+                )
             }
             return true
 
@@ -1022,6 +1374,10 @@ final class TextFieldResponder: MultiViewResponder,
                 } else if result == .submit {
                     fieldState.wrappedValue.deprecatedActions?.commit()
                 }
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
             }
             return true
 
@@ -1052,6 +1408,10 @@ final class TextFieldResponder: MultiViewResponder,
                     state.displayText = committedText
                     fieldState.wrappedValue = state
                 }
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
             }
             return true
 
@@ -1061,5 +1421,108 @@ final class TextFieldResponder: MultiViewResponder,
                 key: event.key
             )) != nil
         }
+    }
+
+    func canPerformTextEditingCommand(_ command: TextEditingCommand) -> Bool {
+        guard isEnabled,
+              let text,
+              let inputState,
+              inputState.wrappedValue.isFocused else {
+            return false
+        }
+        switch command {
+        case .jumpToSelection:
+            return true
+        case .makeUpperCase, .makeLowerCase, .capitalize:
+            return inputState.wrappedValue.transformationRange(
+                in: text.wrappedValue
+            ) != nil
+        default:
+            return false
+        }
+    }
+
+    func performTextEditingCommand(_ command: TextEditingCommand) {
+        guard canPerformTextEditingCommand(command),
+              let text,
+              let fieldState,
+              let inputState else {
+            return
+        }
+        switch command {
+        case .jumpToSelection:
+            // The single-line renderer always keeps the complete value in its
+            // current bounds, so there is no additional viewport transition.
+            return
+
+        case .makeUpperCase, .makeLowerCase, .capitalize:
+            Update.enqueueAction {
+                var committedText = text.wrappedValue
+                var editing = inputState.wrappedValue
+                let transformed = editing.transformSelection(
+                    in: &committedText
+                ) { value in
+                    switch command {
+                    case .makeUpperCase:
+                        value.uppercased()
+                    case .makeLowerCase:
+                        value.lowercased()
+                    case .capitalize:
+                        value.capitalized
+                    default:
+                        value
+                    }
+                }
+                guard transformed else { return }
+                inputState.wrappedValue = editing
+                text.wrappedValue = committedText
+                var state = fieldState.wrappedValue
+                state.displayText = committedText
+                fieldState.wrappedValue = state
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
+            }
+
+        default:
+            return
+        }
+    }
+
+    func synchronizeSelection(_ selectionValue: TextSelection?) {
+        guard !hasSelectionBindingValue
+                || selectionBindingValue != selectionValue else {
+            return
+        }
+        selectionBindingValue = selectionValue
+        hasSelectionBindingValue = true
+        guard let selectionValue, let text,
+              let inputState else {
+            return
+        }
+        Update.enqueueAction {
+            var editing = inputState.wrappedValue
+            guard editing.setSelection(
+                selectionValue,
+                committedText: text.wrappedValue
+            ) else {
+                return
+            }
+            inputState.wrappedValue = editing
+        }
+    }
+
+    private func publishSelection(
+        _ inputState: TextFieldInputState,
+        committedText: String
+    ) {
+        guard let selection else { return }
+        let value = inputState.textSelection(
+            in: committedText
+        )
+        selectionBindingValue = value
+        hasSelectionBindingValue = true
+        selection.wrappedValue = value
     }
 }

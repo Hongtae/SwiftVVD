@@ -34,6 +34,35 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertNil(configured.state.deprecatedActions)
     }
 
+    // ASSERTIONS textFieldStructureObserved
+    // ASSERTIONS textFieldSelectionBindingRuntimeObserved
+    func testSelectionInitializerStoresTheExternalSelectionBinding() {
+        let model = TextFieldSelectionModel(text: "value")
+        let localizedField = TextField(
+            "Selected",
+            text: model.textBinding,
+            selection: model.selectionBinding
+        )
+        let title = "Selected"
+        let stringField = TextField(
+            title,
+            text: model.textBinding,
+            selection: model.selectionBinding
+        )
+        let resourceField = TextField(
+            LocalizedStringResource("Selected"),
+            text: model.textBinding,
+            selection: model.selectionBinding
+        )
+
+        XCTAssertNotNil(localizedField.selection)
+        XCTAssertNil(localizedField.state.deprecatedActions)
+        XCTAssertNotNil(stringField.selection)
+        XCTAssertNil(stringField.state.deprecatedActions)
+        XCTAssertNotNil(resourceField.selection)
+        XCTAssertNil(resourceField.state.deprecatedActions)
+    }
+
     // ASSERTIONS textFieldCompositionCommitBoundaryObserved
     func testDirectTextInputAppendsCommittedCharacters() {
         var text = ""
@@ -110,6 +139,81 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(input.composition, "日本")
     }
 
+    // ASSERTIONS textFieldCompositionReplacementObserved
+    func testRawEditingKeysKeepCommittedAndLatestCompositionSnapshots() {
+        var text = ""
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+
+        input.replaceComposition(with: "ㄱ", committedText: text)
+        input.replaceComposition(with: "가", committedText: text)
+        input.replaceComposition(with: "ㄱ", committedText: text)
+
+        XCTAssertFalse(input.handleKeyDown(
+            .backspace,
+            committedText: &text
+        ))
+        XCTAssertFalse(input.handleKeyDown(
+            .delete,
+            committedText: &text
+        ))
+        XCTAssertEqual(text, "")
+        XCTAssertEqual(input.composition, "ㄱ")
+        XCTAssertEqual(input.compositionReplacementRange, 0..<0)
+    }
+
+    // ASSERTIONS textFieldCompositionCommitBoundaryObserved
+    func testCommittedInputWaitsForEmptyCompositionSnapshotToClearMarkedText() {
+        var text = ""
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+        input.replaceComposition(with: "가", committedText: text)
+
+        XCTAssertEqual(
+            input.handleTextInput("가", committedText: &text),
+            .changed
+        )
+        XCTAssertEqual(text, "가")
+        XCTAssertEqual(input.composition, "가")
+
+        input.replaceComposition(with: "", committedText: text)
+        XCTAssertEqual(input.composition, "")
+    }
+
+    // ASSERTIONS textFieldSelectionCompositionReplacementObserved
+    func testCompositionTemporarilyReplacesSelectionUntilCommit() {
+        var text = "Alpha beta gamma"
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+        XCTAssertTrue(input.setSelection(
+            0..<5,
+            affinity: .upstream,
+            committedText: text
+        ))
+
+        input.replaceComposition(with: "ㄱ", committedText: text)
+        XCTAssertEqual(text, "Alpha beta gamma")
+        XCTAssertEqual(input.compositionReplacementRange, 0..<5)
+        XCTAssertEqual(input.selectionOffsets, 1..<1)
+        XCTAssertEqual(input.displaySegments(in: text).leading, "")
+        XCTAssertEqual(input.displaySegments(in: text).trailing, " beta gamma")
+
+        input.replaceComposition(with: "가", committedText: text)
+        XCTAssertEqual(text, "Alpha beta gamma")
+        input.replaceComposition(with: "", committedText: text)
+        XCTAssertEqual(input.selectionOffsets, 0..<0)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        XCTAssertEqual(
+            input.handleTextInput("가", committedText: &text),
+            .changed
+        )
+        XCTAssertEqual(text, "가 beta gamma")
+        XCTAssertNil(input.compositionReplacementRange)
+        XCTAssertEqual(input.selectionOffsets, 1..<1)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+    }
+
     func testCaretNavigationAndInsertionUseCharacterBoundaries() {
         var text = "A강B"
         var input = TextFieldInputState()
@@ -127,8 +231,119 @@ final class TextFieldInputTests: XCTestCase {
             .changed
         )
         XCTAssertEqual(text, "A강B")
-        XCTAssertTrue(input.handleKeyDown(.backspace, committedText: &text))
+        XCTAssertFalse(input.handleKeyDown(.backspace, committedText: &text))
         XCTAssertEqual(text, "A강B")
+    }
+
+    func testForwardDeleteUsesTextInputAndKeepsTheCharacterOffset() {
+        var text = "A강🙂B"
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+
+        XCTAssertTrue(input.handleKeyDown(.left, committedText: &text))
+        XCTAssertTrue(input.handleKeyDown(.left, committedText: &text))
+
+        XCTAssertEqual(
+            input.handleTextInput("\u{F728}", committedText: &text),
+            .changed
+        )
+        XCTAssertEqual(text, "A강B")
+        XCTAssertEqual(input.caretOffset, 2)
+
+        XCTAssertEqual(
+            input.handleTextInput("\u{F728}", committedText: &text),
+            .changed
+        )
+        XCTAssertEqual(text, "A강")
+        XCTAssertEqual(input.caretOffset, 2)
+        XCTAssertEqual(
+            input.handleTextInput("\u{F728}", committedText: &text),
+            .handled
+        )
+    }
+
+    // ASSERTIONS textFieldSelectionBindingRuntimeObserved
+    // ASSERTIONS textFieldTextEditingCommandsTransformationObserved
+    func testSelectionReplacementAndTransformationsUseCharacterOffsets() {
+        var text = "Alpha beta gamma"
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+
+        XCTAssertTrue(input.setSelection(
+            0..<5,
+            affinity: .automatic,
+            committedText: text
+        ))
+        XCTAssertEqual(
+            input.handleTextInput("Omega", committedText: &text),
+            .changed
+        )
+        XCTAssertEqual(text, "Omega beta gamma")
+        XCTAssertEqual(input.selectionOffsets, 5..<5)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        XCTAssertTrue(input.setSelection(
+            7..<7,
+            affinity: .automatic,
+            committedText: text
+        ))
+        XCTAssertTrue(input.transformSelection(in: &text) {
+            $0.uppercased()
+        })
+        XCTAssertEqual(text, "Omega BETA gamma")
+        XCTAssertEqual(input.selectionOffsets, 6..<10)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+    }
+
+    // ASSERTIONS textFieldCommandResponderOwnershipObserved
+    // ASSERTIONS textFieldTextEditingCommandsValidationObserved
+    // ASSERTIONS textFieldTextEditingCommandsTransformationObserved
+    func testTextFieldResponderPublishesObservedFindAndTransformSemantics() {
+        let model = TextFieldSelectionModel(text: "Alpha beta gamma")
+        var fieldState = TextFieldState(displayText: model.text)
+        var inputState = TextFieldInputState()
+        inputState.setFocused(true, committedText: model.text)
+
+        let responder = TextFieldResponder()
+        responder.text = model.textBinding
+        responder.selection = model.selectionBinding
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.inputState = Binding(
+            get: { inputState },
+            set: { inputState = $0 }
+        )
+
+        let selectionEnd = model.text.index(
+            model.text.startIndex,
+            offsetBy: 5
+        )
+        model.selection = TextSelection(
+            range: model.text.startIndex..<selectionEnd
+        )
+        responder.synchronizeSelection(model.selection)
+        Update.dispatchActions()
+        XCTAssertEqual(inputState.selectionOffsets, 0..<5)
+
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.find))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(
+            .useSelectionForFind
+        ))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.jumpToSelection))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.makeUpperCase))
+
+        responder.performTextEditingCommand(.makeUpperCase)
+        Update.dispatchActions()
+
+        XCTAssertEqual(model.text, "ALPHA beta gamma")
+        XCTAssertEqual(fieldState.displayText, model.text)
+        XCTAssertEqual(inputState.selectionOffsets, 0..<5)
+        XCTAssertEqual(
+            model.selection,
+            inputState.textSelection(in: model.text)
+        )
     }
 
     func testCaretMetricsUseFontLineHeightAndCompositionWidth() {
@@ -258,12 +473,42 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
             .textComposition,
             window: controller.testWindow,
-            text: "강"
+            text: "가"
+        )))
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .textComposition,
+            window: controller.testWindow,
+            text: "ㄱ"
+        )))
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .keyDown,
+            window: controller.testWindow,
+            key: .backspace
         )))
         Update.dispatchActions()
         renderFrame(3)
         XCTAssertEqual(model.text, "")
+        XCTAssertEqual(responder.inputState?.wrappedValue.composition, "ㄱ")
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .textComposition,
+            window: controller.testWindow,
+            text: "강"
+        )))
+        Update.dispatchActions()
+        renderFrame(4)
+        XCTAssertEqual(model.text, "")
         XCTAssertEqual(responder.inputState?.wrappedValue.composition, "강")
+
+        XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
+            .textComposition,
+            window: controller.testWindow,
+            text: ""
+        )))
+        Update.dispatchActions()
+        renderFrame(5)
+        XCTAssertEqual(model.text, "")
+        XCTAssertEqual(responder.inputState?.wrappedValue.composition, "")
 
         XCTAssertTrue(controller.handleKeyboardEvent(event: keyboardEvent(
             .textInput,
@@ -271,7 +516,7 @@ final class TextFieldInputTests: XCTestCase {
             text: "강"
         )))
         Update.dispatchActions()
-        renderFrame(4)
+        renderFrame(6)
         XCTAssertEqual(model.text, "강")
         XCTAssertEqual(responder.inputState?.wrappedValue.composition, "")
 
@@ -282,6 +527,157 @@ final class TextFieldInputTests: XCTestCase {
             TextInputChange(enabled: true, deviceID: 0),
             TextInputChange(enabled: false, deviceID: 0)
         ])
+    }
+
+    // ASSERTIONS textFieldSelectionBindingRuntimeObserved
+    func testBackspaceAfterCaretRoundTripKeepsSelectionIndicesValid() throws {
+        let model = TextFieldSelectionModel(text: "")
+        var fieldState = TextFieldState(displayText: model.text)
+        var inputState = TextFieldInputState()
+        inputState.setFocused(true, committedText: model.text)
+
+        let responder = TextFieldResponder()
+        responder.selection = model.selectionBinding
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.inputState = Binding(
+            get: { inputState },
+            set: { inputState = $0 }
+        )
+        responder.text = Binding(
+            get: { model.text },
+            set: { value in
+                let contractsText = value.count < model.text.count
+                model.text = value
+                if contractsText {
+                    responder.synchronizeSelection(model.selection)
+                }
+            }
+        )
+
+        func send(_ event: KeyboardEvent) {
+            XCTAssertTrue(responder.handleTextInputEvent(event))
+            Update.dispatchActions()
+        }
+
+        for character in ["1", "2", "3", "4"] {
+            send(KeyboardEvent(
+                type: .textInput,
+                window: nil,
+                deviceID: 0,
+                key: .none,
+                text: character
+            ))
+        }
+        send(KeyboardEvent(
+            type: .keyDown,
+            window: nil,
+            deviceID: 0,
+            key: .left,
+            text: ""
+        ))
+        send(KeyboardEvent(
+            type: .keyDown,
+            window: nil,
+            deviceID: 0,
+            key: .right,
+            text: ""
+        ))
+        send(KeyboardEvent(
+            type: .textInput,
+            window: nil,
+            deviceID: 0,
+            key: .none,
+            text: "\u{8}"
+        ))
+
+        XCTAssertEqual(model.text, "123")
+        XCTAssertEqual(inputState.selectionOffsets, 3..<3)
+        guard case .selection(let range) = model.selection?.indices else {
+            return XCTFail("Expected a single insertion selection")
+        }
+        XCTAssertEqual(range.lowerBound, model.text.endIndex)
+        XCTAssertEqual(range.upperBound, model.text.endIndex)
+    }
+
+    @MainActor
+    // ASSERTIONS textFieldCommandResponderOwnershipObserved
+    // ASSERTIONS textFieldFocusSelectionRuntimeObserved
+    func testProductionTextFieldCommandResponderFollowsFocusTransfer() throws {
+        let model = TextFieldCommandFocusModel()
+        let controller = TextFieldCommandFocusHostController(model: model)
+
+        var redraw = false
+        func renderFrame(_ tick: UInt64) {
+            controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 180),
+                redraw: &redraw
+            ) { _, _ in }
+        }
+        renderFrame(0)
+
+        var responders: [TextFieldResponder] = []
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                responders.append(responder)
+            }
+            return .next
+        }
+        XCTAssertEqual(responders.count, 2)
+        let first = try XCTUnwrap(responders.first {
+            $0.text?.wrappedValue == model.first
+        })
+        let second = try XCTUnwrap(responders.first {
+            $0.text?.wrappedValue == model.second
+        })
+
+        model.firstSelection = selection(
+            in: model.first,
+            offsets: 0..<5,
+            affinity: .upstream
+        )
+        controller.focusTextInputResponder(first)
+        Update.dispatchActions()
+        XCTAssertEqual(first.inputState?.wrappedValue.selectionOffsets, 0..<5)
+        controller.performTextEditingCommand(.makeUpperCase)
+        Update.dispatchActions()
+        XCTAssertEqual(model.first, "ALPHA")
+        XCTAssertEqual(model.second, "bravo")
+
+        model.secondSelection = selection(
+            in: model.second,
+            offsets: 0..<5,
+            affinity: .upstream
+        )
+        controller.focusTextInputResponder(second)
+        Update.dispatchActions()
+        XCTAssertEqual(first.inputState?.wrappedValue.selectionOffsets, 0..<0)
+        XCTAssertEqual(first.inputState?.wrappedValue.selectionAffinity, .downstream)
+        XCTAssertEqual(second.inputState?.wrappedValue.selectionOffsets, 0..<5)
+        controller.performTextEditingCommand(.makeUpperCase)
+        Update.dispatchActions()
+
+        XCTAssertFalse(first.canPerformTextEditingCommand(.makeUpperCase))
+        XCTAssertTrue(second.canPerformTextEditingCommand(.makeUpperCase))
+        XCTAssertEqual(model.first, "ALPHA")
+        XCTAssertEqual(model.second, "BRAVO")
+    }
+
+    private func selection(
+        in text: String,
+        offsets: Range<Int>,
+        affinity: TextSelectionAffinity
+    ) -> TextSelection {
+        let lower = text.index(text.startIndex, offsetBy: offsets.lowerBound)
+        let upper = text.index(text.startIndex, offsetBy: offsets.upperBound)
+        var selection = TextSelection(range: lower..<upper)
+        selection.affinity = affinity
+        return selection
     }
 
     private func keyboardEvent(
@@ -304,6 +700,79 @@ final class TextFieldInputTests: XCTestCase {
 
 private final class TextFieldInputModel {
     var text = ""
+}
+
+private final class TextFieldSelectionModel {
+    var text: String
+    var selection: TextSelection?
+
+    init(text: String) {
+        self.text = text
+    }
+
+    var textBinding: Binding<String> {
+        Binding(
+            get: { self.text },
+            set: { self.text = $0 }
+        )
+    }
+
+    var selectionBinding: Binding<TextSelection?> {
+        Binding(
+            get: { self.selection },
+            set: { self.selection = $0 }
+        )
+    }
+}
+
+private final class TextFieldCommandFocusModel {
+    var first = "alpha"
+    var firstSelection: TextSelection?
+    var second = "bravo"
+    var secondSelection: TextSelection?
+}
+
+@MainActor
+private final class TextFieldCommandFocusHostController: WindowController,
+    @unchecked Sendable {
+    init(model: TextFieldCommandFocusModel) {
+        let firstText = Binding<String>(
+            get: { model.first },
+            set: { model.first = $0 }
+        )
+        let firstSelection = Binding<TextSelection?>(
+            get: { model.firstSelection },
+            set: { model.firstSelection = $0 }
+        )
+        let secondText = Binding<String>(
+            get: { model.second },
+            set: { model.second = $0 }
+        )
+        let secondSelection = Binding<TextSelection?>(
+            get: { model.secondSelection },
+            set: { model.secondSelection = $0 }
+        )
+        super.init(
+            content: VStack {
+                TextField(
+                    "First",
+                    text: firstText,
+                    selection: firstSelection
+                )
+                TextField(
+                    "Second",
+                    text: secondText,
+                    selection: secondSelection
+                )
+            }
+            .frame(width: 300)
+            .environment(\.defaultFontRenderingMode, .vector()),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(TextFieldCommandFocusHostController.self)
+            )
+        )
+    }
 }
 
 @MainActor
