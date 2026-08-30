@@ -266,6 +266,17 @@ class AppWindowsController: @unchecked Sendable {
         activeRoot.requestUpdate(after: 0)
     }
 
+    func performRootTextFormattingCommand(_ command: TextFormattingCommand) {
+        guard let activeRoot = activeRootWindowController() else { return }
+
+        // The app Commands graph owns the menu snapshot. Resolve the active
+        // root and its focused formatting responder again on selection.
+        activeRoot.enqueueInputAction { [weak activeRoot] in
+            activeRoot?.performTextFormattingCommand(command)
+        }
+        activeRoot.requestUpdate(after: 0)
+    }
+
     private func activeRootWindowController() -> WindowController? {
         let activeRootID = rootCommandFocusState.withLock(\.activeRoot)
         return activeRootID.flatMap { activeRootID in
