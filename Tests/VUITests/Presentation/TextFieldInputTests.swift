@@ -158,6 +158,40 @@ final class TextFieldInputTests: XCTestCase {
         )
     }
 
+    func testCompositionCaretStyleSelectsInsertionPointOrEnclosure() {
+        var environment = EnvironmentValues()
+        XCTAssertEqual(
+            environment.textFieldCompositionCaretStyle,
+            .enclosing
+        )
+        XCTAssertEqual(
+            TextFieldCaret.presentation(
+                compositionText: "강",
+                compositionStyle: environment.textFieldCompositionCaretStyle
+            ),
+            .enclosing("강")
+        )
+
+        environment.textFieldCompositionCaretStyle = .insertionPoint
+        XCTAssertEqual(
+            TextFieldCaret.presentation(
+                compositionText: "にほん",
+                compositionStyle: environment.textFieldCompositionCaretStyle
+            ),
+            .insertionPoint(
+                compositionText: "にほん",
+                blinks: false
+            )
+        )
+        XCTAssertEqual(
+            TextFieldCaret.presentation(
+                compositionText: nil,
+                compositionStyle: environment.textFieldCompositionCaretStyle
+            ),
+            .insertionPoint(compositionText: nil, blinks: true)
+        )
+    }
+
     func testOnlyInsertionCaretBlinks() {
         let start = Date(timeIntervalSinceReferenceDate: 1_000)
 

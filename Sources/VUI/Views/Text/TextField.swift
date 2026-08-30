@@ -339,6 +339,33 @@ extension View {
     }
 }
 
+public enum TextFieldCompositionCaretStyle: Hashable, Sendable {
+    /// Draws the marked text normally followed by a nonblinking insertion
+    /// caret.
+    case insertionPoint
+    /// Draws the marked text inside a nonblinking, color-inverted caret.
+    case enclosing
+}
+
+private struct TextFieldCompositionCaretStyleKey: EnvironmentKey {
+    static let defaultValue: TextFieldCompositionCaretStyle = .enclosing
+}
+
+extension EnvironmentValues {
+    public var textFieldCompositionCaretStyle: TextFieldCompositionCaretStyle {
+        get { self[TextFieldCompositionCaretStyleKey.self] }
+        set { self[TextFieldCompositionCaretStyleKey.self] = newValue }
+    }
+}
+
+extension View {
+    public func textFieldCompositionCaretStyle(
+        _ style: TextFieldCompositionCaretStyle
+    ) -> some View {
+        environment(\.textFieldCompositionCaretStyle, style)
+    }
+}
+
 enum TextFieldInputResult: Equatable {
     case changed
     case submit
@@ -507,37 +534,75 @@ private struct TextFieldCaretLayout: Layout {
 struct TextFieldCaret: View {
     static let blinkInterval: TimeInterval = 0.5
 
+    enum Presentation: Equatable {
+        case insertionPoint(compositionText: String?, blinks: Bool)
+        case enclosing(String)
+    }
+
     var compositionText: String?
     var defaultWidth: CGFloat
+    var compositionStyle: TextFieldCompositionCaretStyle
 
     init(
         compositionText: String?,
-        defaultWidth: CGFloat = 1
+        defaultWidth: CGFloat = 1,
+        compositionStyle: TextFieldCompositionCaretStyle = .enclosing
     ) {
         self.compositionText = compositionText
         self.defaultWidth = defaultWidth
+        self.compositionStyle = compositionStyle
     }
 
     @ViewBuilder
     var body: some View {
-        if let compositionText, !compositionText.isEmpty {
+        switch Self.presentation(
+            compositionText: compositionText,
+            compositionStyle: compositionStyle
+        ) {
+        case .enclosing(let compositionText):
             caretContent(compositionText, usesCompositionWidth: true)
                 .foregroundStyle(Color.white)
                 .background(Color.blue)
-        } else {
+
+        case .insertionPoint(let compositionText?, false):
+            HStack(spacing: 0) {
+                Text(compositionText)
+                insertionCaret
+            }
+
+        case .insertionPoint(nil, true):
             let start = Date()
             TimelineView(.periodic(
                 from: start,
                 by: Self.blinkInterval
             )) { context in
-                caretContent("\u{200B}", usesCompositionWidth: false)
-                    .foregroundStyle(Color.clear)
-                    .background(Color.blue)
+                insertionCaret
                     .opacity(Self.isBlinkVisible(
                         at: context.date,
                         from: start
                     ) ? 1 : 0)
             }
+
+        case .insertionPoint:
+            insertionCaret
+        }
+    }
+
+    static func presentation(
+        compositionText: String?,
+        compositionStyle: TextFieldCompositionCaretStyle
+    ) -> Presentation {
+        guard let compositionText, compositionText.isEmpty == false else {
+            return .insertionPoint(compositionText: nil, blinks: true)
+        }
+        switch compositionStyle {
+        case .insertionPoint:
+            return .insertionPoint(
+                compositionText: compositionText,
+                blinks: false
+            )
+        case .enclosing:
+            return .enclosing(compositionText)
         }
     }
 
@@ -562,12 +627,20 @@ struct TextFieldCaret: View {
             Text(text)
         }
     }
+
+    private var insertionCaret: some View {
+        caretContent("\u{200B}", usesCompositionWidth: false)
+            .foregroundStyle(Color.clear)
+            .background(Color.blue)
+    }
 }
 
 private struct TextFieldControl: View {
     var configuration: TextField<_TextFieldStyleLabel>
     var drawsBorder: Bool
     @State private var inputState = TextFieldInputState()
+    @Environment(\.textFieldCompositionCaretStyle)
+    private var compositionCaretStyle
 
     var body: some View {
         if drawsBorder {
@@ -624,7 +697,8 @@ private struct TextFieldControl: View {
                 } else {
                     TextFieldCaret(
                         compositionText: inputState.composition,
-                        defaultWidth: defaultCaretWidth
+                        defaultWidth: defaultCaretWidth,
+                        compositionStyle: compositionCaretStyle
                     )
                 }
                 Text(segments.1)
