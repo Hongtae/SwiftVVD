@@ -7,9 +7,9 @@
 
 import Foundation
 
-// Renderer-owned menus have no native label syntax for declaring mnemonics.
-// Assign the earliest unused alphanumeric character so every presentation of
-// the same ordered item list derives the same keyboard surface.
+// The semantic menu model carries mnemonics separately from rendered or native
+// label syntax. Assign the earliest unused alphanumeric character so every
+// presentation of the same ordered item list derives the same keyboard surface.
 func resolvedMenuAccessKeys<ID: Hashable>(
     for entries: [(id: ID, title: String)]
 ) -> [ID: Character] {

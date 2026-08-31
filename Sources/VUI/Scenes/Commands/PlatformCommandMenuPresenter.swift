@@ -188,12 +188,16 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
         }
         invalidEntryIDs.removeAll()
 
+        let accessKeys = resolvedMenuAccessKeys(
+            for: entries.map { (id: $0.item.id, title: $0.item.name) }
+        )
         let pendingMenus = entries.compactMap { entry -> PendingWindowMenu? in
             guard let items = entry.cachedItems else { return nil }
             return PendingWindowMenu(
                 id: entry.menuID,
                 title: entry.item.name,
                 role: entry.item.id.windowMenuRole,
+                accessKey: accessKeys[entry.item.id],
                 items: items
             )
         }
@@ -338,6 +342,7 @@ struct PendingWindowMenu {
     var id: WindowMenu.ID
     var title: String
     var role: WindowMenu.Role
+    var accessKey: Character? = nil
     var items: PlatformItemList
 }
 
@@ -376,6 +381,7 @@ enum WindowMenuSnapshotBuilder {
                 id: pending.id,
                 title: pending.title,
                 role: pending.role,
+                accessKey: pending.accessKey,
                 elements: elements
             ))
         }
@@ -389,6 +395,15 @@ enum WindowMenuSnapshotBuilder {
         actionDispatcher: PlatformCommandMenuActionDispatcher
     ) -> [WindowMenu.Element] {
         var result: [WindowMenu.Element] = []
+        let accessKeys = resolvedMenuAccessKeys(
+            for: items.enumerated().compactMap {
+                (index, item) -> (id: Int, title: String)? in
+                guard !item.isHidden else { return nil }
+                if case .divider? = item.systemItem { return nil }
+                if case .section? = item.systemItem { return nil }
+                return (id: index, title: title(for: item))
+            }
+        )
         for (index, item) in items.enumerated() {
             guard !Task.isCancelled else { return [] }
             let itemID = resolvedID(
@@ -408,6 +423,7 @@ enum WindowMenuSnapshotBuilder {
                     result.append(.item(makeItem(
                         item,
                         id: itemID + "/header",
+                        accessKey: nil,
                         imageRenderer: &imageRenderer,
                         actionDispatcher: actionDispatcher,
                         forcesDisabled: true
@@ -435,6 +451,7 @@ enum WindowMenuSnapshotBuilder {
                 result.append(.submenu(WindowMenu.Menu(
                     id: itemID,
                     title: title(for: item),
+                    accessKey: accessKeys[index],
                     image: imageRenderer?.image(for: item),
                     scalesImageToFit: item.scaleDownMenuImage,
                     isEnabled: true,
@@ -449,6 +466,7 @@ enum WindowMenuSnapshotBuilder {
             result.append(.item(makeItem(
                 item,
                 id: itemID,
+                accessKey: accessKeys[index],
                 imageRenderer: &imageRenderer,
                 actionDispatcher: actionDispatcher
             )))
@@ -459,6 +477,7 @@ enum WindowMenuSnapshotBuilder {
     private static func makeItem(
         _ item: PlatformItemList.Item,
         id: WindowMenu.ID,
+        accessKey: Character?,
         imageRenderer: inout PlatformCommandMenuImageRenderer?,
         actionDispatcher: PlatformCommandMenuActionDispatcher,
         forcesDisabled: Bool = false
@@ -481,6 +500,7 @@ enum WindowMenuSnapshotBuilder {
         return WindowMenu.Item(
             id: id,
             title: title(for: item),
+            accessKey: accessKey,
             image: imageRenderer?.image(for: item),
             scalesImageToFit: item.scaleDownMenuImage,
             state: state(for: item.toggleState),

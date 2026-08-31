@@ -529,6 +529,84 @@ final class TextFieldInputTests: XCTestCase {
         ])
     }
 
+    @MainActor
+    func testMountedTextFieldUsesIBeamCursorOnlyWhileHovered() async throws {
+        let controller = TextFieldInputHostController(
+            model: TextFieldInputModel()
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 120),
+            redraw: &redraw
+        ) { _, _ in }
+
+        var textResponder: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                textResponder = responder
+                return .cancel
+            }
+            return .next
+        }
+        let responder = try XCTUnwrap(textResponder)
+        let eventID = EventID(type: HoverEvent.self, serial: 1)
+
+        XCTAssertTrue(responder.updateHoverEvent(
+            id: eventID,
+            at: CGPoint(x: 10, y: 10),
+            time: .zero
+        ))
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [.iBeam(0)])
+
+        XCTAssertTrue(responder.endHoverEvent(
+            id: eventID,
+            time: Time(seconds: 1)
+        ))
+        await Task.yield()
+        XCTAssertEqual(
+            controller.testWindow.cursorChanges,
+            [.iBeam(0), .platformDefault(0)]
+        )
+    }
+
+    @MainActor
+    func testMountedTextFieldCursorOptionDisablesIBeamRequest() async throws {
+        let controller = TextFieldInputHostController(
+            model: TextFieldInputModel(),
+            isTextFieldCursorEnabled: false
+        )
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 120),
+            redraw: &redraw
+        ) { _, _ in }
+
+        var textResponder: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                textResponder = responder
+                return .cancel
+            }
+            return .next
+        }
+        let responder = try XCTUnwrap(textResponder)
+
+        XCTAssertFalse(responder.updateHoverEvent(
+            id: EventID(type: HoverEvent.self, serial: 2),
+            at: CGPoint(x: 10, y: 10),
+            time: .zero
+        ))
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [])
+    }
+
     // ASSERTIONS textFieldSelectionBindingRuntimeObserved
     func testBackspaceAfterCaretRoundTripKeepsSelectionIndicesValid() throws {
         let model = TextFieldSelectionModel(text: "")
@@ -1036,7 +1114,10 @@ private final class TextFieldInputHostController: WindowController,
 
     override var window: (any VVD.Window)? { testWindow }
 
-    init(model: TextFieldInputModel) {
+    init(
+        model: TextFieldInputModel,
+        isTextFieldCursorEnabled: Bool = true
+    ) {
         let binding = Binding<String>(
             get: { model.text },
             set: { model.text = $0 }
@@ -1044,6 +1125,10 @@ private final class TextFieldInputHostController: WindowController,
         super.init(
             content: TextField("Input", text: binding)
                 .frame(width: 300)
+                .environment(
+                    \.isTextFieldCursorEnabled,
+                    isTextFieldCursorEnabled
+                )
                 .environment(\.defaultFontRenderingMode, .vector()),
             scene: WindowKey(
                 namespace: .app,
@@ -1056,6 +1141,12 @@ private final class TextFieldInputHostController: WindowController,
 private struct TextInputChange: Equatable {
     var enabled: Bool
     var deviceID: Int
+}
+
+private enum TextInputCursorChange: Equatable {
+    case iBeam(Int)
+    case platformDefault(Int)
+    case other(Int)
 }
 
 @MainActor
@@ -1075,6 +1166,8 @@ private final class TextFieldInputTestWindow: VVD.Window {
     var platformHandle: OpaquePointer? { nil }
     var eventObservers = WindowEventObserverContainer()
     var textInputChanges: [TextInputChange] = []
+    var cursorChanges: [TextInputCursorChange] = []
+    private var cursors: [Int: Cursor] = [:]
 
     required init?(
         name: String,
@@ -1106,6 +1199,26 @@ private final class TextFieldInputTestWindow: VVD.Window {
         textInputChanges.last.map { change in
             change.deviceID == deviceID && change.enabled
         } ?? false
+    }
+
+    func setCursor(_ cursor: Cursor?, forDeviceID deviceID: Int) {
+        if let cursor {
+            cursors[deviceID] = cursor
+        } else {
+            cursors.removeValue(forKey: deviceID)
+        }
+        switch cursor {
+        case .some(.iBeam):
+            cursorChanges.append(.iBeam(deviceID))
+        case .none:
+            cursorChanges.append(.platformDefault(deviceID))
+        default:
+            cursorChanges.append(.other(deviceID))
+        }
+    }
+
+    func cursor(forDeviceID deviceID: Int) -> Cursor? {
+        cursors[deviceID]
     }
 
     func convertPointToScreen(_ point: CGPoint) -> CGPoint { point }

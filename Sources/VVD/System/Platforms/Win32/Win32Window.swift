@@ -162,6 +162,12 @@ func win32RetainsPointerStateAfterEvent(
     return true
 }
 
+private let HIGH_SURROGATE_START: WCHAR = 0xd800
+private let HIGH_SURROGATE_END: WCHAR = 0xdbff
+private let LOW_SURROGATE_START: WCHAR = 0xdc00
+private let LOW_SURROGATE_END: WCHAR = 0xdfff
+
+
 nonisolated(unsafe) private let HWND_TOP:HWND? = nil
 nonisolated(unsafe) private let HWND_TOPMOST:HWND = HWND(bitPattern: -1)!
 nonisolated(unsafe) private let HWND_NOTOPMOST:HWND = HWND(bitPattern: -2)!
@@ -244,9 +250,15 @@ final class Win32Window: Window {
     private var mouseLeaveTrackingArmed: Bool = false
     private var mouseBoundaryTrackingSuspended: Bool = false
     private var pointerStates: [UINT32: PointerInputState] = [:]
+    private var cursorOverride: Cursor?
+    private var cursorHandle: Win32CursorHandle?
+    private var _menuController: Win32WindowMenuController?
+    private var applyingNativeMenuGeometry = false
     private var textCompositionMode: Bool = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
     private var pendingKeyRepeat: Int? = nil
+    
+    private var utf16HighSurrogate: WCHAR? = nil
 
     // WM_GESTURE tracking values for incremental delta computation.
     private var _lastGestureDistance: DWORD = 0
@@ -485,6 +497,8 @@ final class Win32Window: Window {
     deinit {
         let modals = self.modalEntries.map { $0.window }
         let hWnd = self.hWnd
+        let menuController = self._menuController
+        self._menuController = nil
 
         // windowMap retains only a weak reference, so the last owner may release
         // an active window without calling close(). Balance the activation count
@@ -498,6 +512,7 @@ final class Win32Window: Window {
             modals.forEach { $0.close() }
 
             if let hWnd {
+                menuController?.invalidate(detachingFrom: hWnd)
                 KillTimer(hWnd, updateKeyboardTimerId)
                 Self.windowMap.removeValue(forKey: hWnd)
                 PostMessageW(hWnd, UINT(WM_CLOSE), 0, 0)
@@ -599,6 +614,81 @@ final class Win32Window: Window {
         }
     }
 
+    var menuController: (any WindowMenuController)? {
+        guard hWnd != nil,
+              !style.contains(.utilityWindow),
+              !style.contains(.popupWindow) else {
+            return nil
+        }
+        if let _menuController { return _menuController }
+        let controller = Win32WindowMenuController(window: self)
+        _menuController = controller
+        return controller
+    }
+
+    func installNativeMenu(
+        _ menu: HMENU?,
+        preserveClientSize: Bool
+    ) -> Bool {
+        guard let hWnd else { return false }
+
+        var desiredClient = RECT()
+        guard GetClientRect(hWnd, &desiredClient) else { return false }
+        let desiredWidth = desiredClient.right - desiredClient.left
+        let desiredHeight = desiredClient.bottom - desiredClient.top
+        let shouldPreserve = preserveClientSize &&
+            desiredWidth > 0 && desiredHeight > 0 && !IsIconic(hWnd)
+
+        applyingNativeMenuGeometry = true
+        guard SetMenu(hWnd, menu) else {
+            applyingNativeMenuGeometry = false
+            return false
+        }
+        DrawMenuBar(hWnd)
+
+        if shouldPreserve {
+            for _ in 0..<4 {
+                var client = RECT()
+                var frame = RECT()
+                guard GetClientRect(hWnd, &client), GetWindowRect(hWnd, &frame) else {
+                    break
+                }
+                let widthDelta = desiredWidth - (client.right - client.left)
+                let heightDelta = desiredHeight - (client.bottom - client.top)
+                if widthDelta == 0 && heightDelta == 0 { break }
+
+                SetWindowPos(
+                    hWnd,
+                    nil,
+                    0,
+                    0,
+                    frame.right - frame.left + widthDelta,
+                    frame.bottom - frame.top + heightDelta,
+                    UINT(
+                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE |
+                        SWP_NOOWNERZORDER | SWP_FRAMECHANGED
+                    )
+                )
+            }
+        }
+
+        var client = RECT()
+        var frame = RECT()
+        if GetClientRect(hWnd, &client) {
+            contentBounds = CGRect(
+                client,
+                scale: 1.0 / contentScaleFactor
+            )
+        }
+        if GetWindowRect(hWnd, &frame) {
+            windowFrame = CGRect(frame)
+        }
+        applyingNativeMenuGeometry = false
+        repositionActiveAttachedModal()
+        repositionAttachedModal()
+        return true
+    }
+
     func minimize() {
         if let hWnd = self.hWnd {
             ShowWindow(hWnd, SW_MINIMIZE)
@@ -662,6 +752,9 @@ final class Win32Window: Window {
         }
 
         if let hWnd = self.hWnd {
+            self._menuController?.invalidate()
+            self._menuController = nil
+
             if let dt = self.dropTarget {
                 RevokeDragDrop(hWnd)
                 let refCount = dt.withMemoryRebound(to: IDropTarget.self, capacity: 1) {
@@ -742,6 +835,46 @@ final class Win32Window: Window {
         return false
     }
 
+    func setCursor(_ cursor: Cursor?, forDeviceID deviceID: Int) {
+        guard deviceID == 0 else { return }
+
+        let nextHandle = cursor.flatMap(Win32CursorHandle.init)
+        if cursor != nil && nextHandle == nil {
+            Log.error("Unable to create Win32 cursor for window: \(name)")
+            return
+        }
+
+        let previousHandle = self.cursorHandle
+        self.cursorOverride = cursor
+        self.cursorHandle = nextHandle
+        self.applyCursorIfInsideClient()
+        _ = previousHandle
+    }
+
+    func cursor(forDeviceID deviceID: Int) -> Cursor? {
+        deviceID == 0 ? cursorOverride : nil
+    }
+
+    private func applyCursorIfInsideClient() {
+        guard let hWnd else { return }
+        var screenPoint = POINT()
+        guard GetCursorPos(&screenPoint), WindowFromPoint(screenPoint) == hWnd else {
+            return
+        }
+        var clientPoint = screenPoint
+        guard ScreenToClient(hWnd, &clientPoint),
+              mouseLocationIsInsideClient(x: clientPoint.x, y: clientPoint.y) else {
+            return
+        }
+
+        if let handle = cursorHandle?.handle {
+            SetCursor(handle)
+        } else {
+            let arrow = UnsafePointer<WCHAR>(bitPattern: 32512)
+            SetCursor(LoadCursorW(nil, arrow))
+        }
+    }
+
     func lockMouse(_ lock: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0, let pos = self.mousePosition(forDeviceID: 0) {
             if lock || self.mouseLocked {
@@ -789,7 +922,10 @@ final class Win32Window: Window {
 
     func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
         if deviceID == 0 {
-            self.textCompositionMode = enable
+            if self.textCompositionMode != enable {
+                self.textCompositionMode = enable
+                self.utf16HighSurrogate = nil
+            }
         }
     }
 
@@ -1977,17 +2113,27 @@ final class Win32Window: Window {
             return pt
         }
 
-        func HIWORD(_ value: LPARAM) -> WORD {
+        @inline(__always) func HIWORD(_ value: LPARAM) -> WORD {
             return WORD((value >> 16) & 0xffff)
         }
-        func HIWORD(_ value: WPARAM) -> WORD {
+        @inline(__always) func HIWORD(_ value: WPARAM) -> WORD {
             return WORD((value >> 16) & 0xffff)
         }
-        func LOWORD(_ value: LPARAM) -> WORD {
+        @inline(__always) func LOWORD(_ value: LPARAM) -> WORD {
             return WORD(value & 0xffff)
         }
-        func LOWORD(_ value: WPARAM) -> WORD {
+        @inline(__always) func LOWORD(_ value: WPARAM) -> WORD {
             return WORD(value & 0xffff)
+        }
+
+        @inline(__always) func IS_HIGH_SURROGATE(_ wch: WCHAR) -> Bool {
+            ((wch) >= HIGH_SURROGATE_START) && ((wch) <= HIGH_SURROGATE_END)
+        }
+        @inline(__always) func IS_LOW_SURROGATE(_ wch: WCHAR) -> Bool {
+            ((wch) >= LOW_SURROGATE_START) && ((wch) <= LOW_SURROGATE_END)
+        }
+        @inline(__always) func IS_SURROGATE_PAIR(_ hs: WCHAR, _ ls: WCHAR) -> Bool {
+            IS_HIGH_SURROGATE(hs) && IS_LOW_SURROGATE(ls)
         }
 
         func messageTimestamp() -> TimeInterval {
@@ -2177,7 +2323,9 @@ final class Win32Window: Window {
                         Log.error("WM_SIZE: GetWindowRect failed: \(err)")
                     }
 
-                    if window.minimized || window.visible == false {
+                    if window.applyingNativeMenuGeometry {
+                        return 0
+                    } else if window.minimized || window.visible == false {
                         window.minimized = false
                         window.visible = true
                         window.postWindowEvent(type: .shown)
@@ -2630,20 +2778,42 @@ final class Win32Window: Window {
                                                     isPrecise: abs(Int(rawDelta)) % 120 != 0
                                                  )))
                 return 0
-            case UINT(WM_CHAR):
+            case UINT(WM_CHAR), UINT(WM_IME_CHAR):
                 window.synchronizeKeyStates()
                 if window.textCompositionMode {
 
-                    var str: [WCHAR] = [WCHAR](repeating: 0, count: 2)
-                    str[0] = WCHAR(wParam)
+                    let codeUnit = WCHAR(wParam)
+                    let inputText: String?
 
-                    let inputText = String(decoding: str, as: UTF16.self)
+                    if let high = window.utf16HighSurrogate {
+                        window.utf16HighSurrogate = nil
 
-                    window.postKeyboardEvent(KeyboardEvent(type: .textInput,
-                                                           window: window,
-                                                           deviceID: 0,
-                                                           key: .none,
-                                                           text: inputText))
+                        if IS_LOW_SURROGATE(codeUnit) {
+                            inputText = String(decoding: [high, codeUnit],
+                                               as: UTF16.self)
+                        } else if IS_HIGH_SURROGATE(codeUnit) {
+                            inputText = String(decoding: [high],
+                                               as: UTF16.self)
+                            window.utf16HighSurrogate = codeUnit
+                        } else {
+                            inputText = String(decoding: [high, codeUnit],
+                                               as: UTF16.self)
+                        }
+                    } else if IS_HIGH_SURROGATE(codeUnit) {
+                        window.utf16HighSurrogate = codeUnit
+                        inputText = nil
+                    } else {
+                        inputText = String(decoding: [codeUnit],
+                                           as: UTF16.self)
+                    }
+
+                    if let inputText {
+                        window.postKeyboardEvent(KeyboardEvent(type: .textInput,
+                                                               window: window,
+                                                               deviceID: 0,
+                                                               key: .none,
+                                                               text: inputText))
+                    }
                 }
                 return 0
             case UINT(WM_IME_STARTCOMPOSITION):
@@ -2654,7 +2824,7 @@ final class Win32Window: Window {
                 window.synchronizeKeyStates()
                 if lParam & LPARAM(GCS_RESULTSTR) != 0 {
                     // Composition finished. Result characters will arrive through
-                    // WM_CHAR, so reset input-candidate characters here.
+                    // character messages, so reset input-candidate characters here.
                     window.postKeyboardEvent(KeyboardEvent(type: .textComposition,
                                                            window: window,
                                                            deviceID: 0,
@@ -2700,6 +2870,22 @@ final class Win32Window: Window {
                     window.postWindowEvent(type: .update)
                 }
                 break
+            case UINT(WM_INITMENU):
+                window._menuController?.menuWillOpen(
+                    HMENU(bitPattern: UInt(wParam))
+                )
+                return 0
+            case UINT(WM_INITMENUPOPUP):
+                window._menuController?.menuWillOpen(
+                    HMENU(bitPattern: UInt(wParam))
+                )
+                return 0
+            case UINT(WM_ENTERMENULOOP):
+                window._menuController?.menuTrackingDidBegin()
+                return 0
+            case UINT(WM_EXITMENULOOP):
+                window._menuController?.menuTrackingDidEnd()
+                return 0
             case UINT(WM_SETCURSOR):
                 // A disabled Independent host receives no normal button-down.
                 // WM_SETCURSOR still reports the triggering mouse message in
@@ -2709,6 +2895,11 @@ final class Win32Window: Window {
                    IsWindowEnabled(hWnd) == false,
                    Self.isPointerDownMessage(UINT(HIWORD(lParam))) {
                     window.notifyActiveModal()
+                    return 1
+                }
+                if LOWORD(lParam) == WORD(HTCLIENT),
+                   let cursor = window.cursorHandle?.handle {
+                    SetCursor(cursor)
                     return 1
                 }
                 break
@@ -2726,6 +2917,12 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_COMMAND):
+                let source = HIWORD(wParam)
+                let commandID = UINT(LOWORD(wParam))
+                if source == 0,
+                   window._menuController?.performCommand(commandID) == true {
+                    return 0
+                }
                 break
             case UINT(WM_SYSCOMMAND):
                 let command = wParam & WPARAM(0xfff0)
@@ -2739,14 +2936,27 @@ final class Win32Window: Window {
                     }
                 }
                 switch command {
+                case WPARAM(SC_KEYMENU):
+                    if window._menuController?.hasAttachedMenu == true {
+                        break
+                    }
+                    return 0
                 case WPARAM(SC_CONTEXTHELP), // Help menu.
-                     WPARAM(SC_KEYMENU),     // Alt key.
                      WPARAM(SC_HOTKEY):      // Hot key.
                     return 0
                 default:
                     break
                 }
             case UINT(WM_SYSKEYDOWN), UINT(WM_KEYDOWN):
+                if window._menuController?.performShortcut(
+                    virtualKey: UINT(wParam)
+                ) == true {
+                    return 0
+                }
+                if window._menuController?.hasAttachedMenu == true,
+                   uMsg == UINT(WM_SYSKEYDOWN) || wParam == WPARAM(VK_F10) {
+                    return DefWindowProcW(hWnd, uMsg, wParam, lParam)
+                }
                 if (lParam & LPARAM(1 << 30)) != 0 {
                     window.pendingKeyRepeat = Int(wParam)
                 } else {
@@ -2755,6 +2965,10 @@ final class Win32Window: Window {
                 return 0
             case UINT(WM_SYSKEYUP), UINT(WM_KEYUP):
                 window.pendingKeyRepeat = nil
+                if window._menuController?.hasAttachedMenu == true,
+                   uMsg == UINT(WM_SYSKEYUP) || wParam == WPARAM(VK_F10) {
+                    return DefWindowProcW(hWnd, uMsg, wParam, lParam)
+                }
                 return 0
             case UINT(WM_VVDWINDOW_SHOWCURSOR):
                 // Mouse-position control from another thread would need

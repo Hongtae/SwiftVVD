@@ -8,6 +8,18 @@
 import Foundation
 import VVD
 
+private struct TextFieldCursorEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+public extension EnvironmentValues {
+    /// Whether text fields request an I-beam cursor while hovered.
+    var isTextFieldCursorEnabled: Bool {
+        get { self[TextFieldCursorEnabledKey.self] }
+        set { self[TextFieldCursorEnabledKey.self] = newValue }
+    }
+}
+
 public enum TextSelectionAffinity: Equatable, Hashable, Sendable {
     case automatic
     case upstream
@@ -1148,6 +1160,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
         responder.isEnabled = environment.isEnabled
+        responder.isTextFieldCursorEnabled = environment.isTextFieldCursorEnabled
         responder.synchronizeSelection(modifier.selectionValue)
         responder.helper.update(
             data: (value: TrivialContentResponder(), changed: false),
@@ -1171,9 +1184,11 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
                 || _AGGraph.currentStatefulInputChanged(children.identifier)
         ))
 
-        if !environment.isEnabled,
-           let host = responder.host as? WindowController {
-            host.resignTextInputFocus(responder)
+        if !environment.isEnabled {
+            responder.resetHoverEvents()
+            if let host = responder.host as? WindowController {
+                host.resignTextInputFocus(responder)
+            }
         }
         _AGGraph.setStatefulOutput([responder])
     }
@@ -1188,17 +1203,16 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         graph.mutateStatefulRule(attribute, as: Self.self) { rule in
             responder = rule.responder
         }
-        guard let responder,
-              let host = responder.host as? WindowController else {
-            return
-        }
+        guard let responder else { return }
+        responder.resetHoverEvents()
+        guard let host = responder.host as? WindowController else { return }
         host.resignTextInputFocus(responder)
     }
 }
 
 final class TextFieldResponder: MultiViewResponder,
     ExclusiveResponderEventConsumer, TextInputResponder,
-    TextEditingCommandResponder {
+    TextEditingCommandResponder, HoverEventObserver {
     var helper = ContentResponderHelper<TrivialContentResponder>()
     var text: Binding<String>?
     var selection: Binding<TextSelection?>? {
@@ -1216,10 +1230,18 @@ final class TextFieldResponder: MultiViewResponder,
     var fieldState: Binding<TextFieldState>?
     var inputState: Binding<TextFieldInputState>?
     var isEnabled = true
+    var isTextFieldCursorEnabled = true {
+        didSet {
+            guard isTextFieldCursorEnabled != oldValue else { return }
+            updateTextFieldCursor()
+        }
+    }
     private var selectionLocation: ObjectIdentifier?
     private var selectionBindingValue: TextSelection?
     private var hasSelectionBindingValue = false
     private var consumedKeyStreams: Set<KeyStream> = []
+    private var cursorHoverEventIDs: Set<EventID> = []
+    private var hasRequestedIBeamCursor = false
 
     private struct KeyStream: Hashable {
         var deviceID: Int
@@ -1305,6 +1327,39 @@ final class TextFieldResponder: MultiViewResponder,
             options: .platformDefault,
             children: children
         ).mask[0]
+    }
+
+    func updateHoverEvent(
+        id: EventID,
+        at _: CGPoint,
+        time _: Time
+    ) -> Bool {
+        guard isEnabled else { return false }
+        cursorHoverEventIDs.insert(id)
+        updateTextFieldCursor()
+        return isTextFieldCursorEnabled
+    }
+
+    func endHoverEvent(id: EventID, time _: Time) -> Bool {
+        guard cursorHoverEventIDs.remove(id) != nil else { return false }
+        updateTextFieldCursor()
+        return isTextFieldCursorEnabled
+    }
+
+    func resetHoverEvents() {
+        cursorHoverEventIDs.removeAll(keepingCapacity: true)
+        updateTextFieldCursor()
+    }
+
+    private func updateTextFieldCursor() {
+        let shouldRequestIBeam = isEnabled &&
+            isTextFieldCursorEnabled &&
+            !cursorHoverEventIDs.isEmpty
+        guard shouldRequestIBeam != hasRequestedIBeamCursor else { return }
+        hasRequestedIBeamCursor = shouldRequestIBeam
+        (host as? WindowController)?.requestTextInputCursor(
+            shouldRequestIBeam ? .iBeam : nil
+        )
     }
 
     func textInputFocusDidChange(_ focused: Bool) {

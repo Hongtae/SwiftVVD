@@ -7,6 +7,12 @@
 
 import Foundation
 
+/// Content type identifiers shared by clipboard backends.
+public enum ClipboardContentType {
+    /// UTF-8 encoded plain text.
+    public static let utf8PlainText = "public.utf8-plain-text"
+}
+
 /// An application-wide system clipboard service.
 ///
 /// Type identifiers are strings so each backend can bridge its native format
@@ -16,6 +22,12 @@ import Foundation
 public protocol Clipboard: AnyObject {
     /// Type identifiers currently advertised by the clipboard.
     var types: [String] { get }
+
+    /// Returns whether `type` is currently available without loading its data.
+    ///
+    /// Backends may recognize native aliases or types that conform to the
+    /// requested identifier even when `types` advertises a canonical type.
+    func containsData(forType type: String) -> Bool
 
     /// Replaces the clipboard with alternate representations of one value.
     ///

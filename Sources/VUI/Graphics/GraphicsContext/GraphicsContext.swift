@@ -218,7 +218,7 @@ extension GraphicsContext {
                                                   height: height,
                                                   usage: usage))
             }
-            let usage: TextureUsage = [.renderTarget, .sampled]
+            let usage: TextureUsage = [.renderTarget, .sampled, .copySource]
             if let renderTarget = makeRenderTarget(.rgba8Unorm, usage) {
                 self.source = renderTarget
             } else { return nil }

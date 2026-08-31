@@ -444,6 +444,7 @@ class WindowController: WindowDelegate,
     private weak var textInputFocusedResponder: ResponderNode?
     private var platformTextInputEnabled = false
     private var platformTextInputGeneration: UInt64 = 0
+    private let textInputCursorRequestGeneration = Mutex<UInt64>(0)
 
     var resolvedFocusedValues: FocusedValues {
         focusedValuesState.withLock { $0.resolved }
@@ -3033,6 +3034,23 @@ class WindowController: WindowDelegate,
                 return
             }
             self.window?.enableTextInput(enabled, forDeviceID: 0)
+        }
+    }
+
+    func requestTextInputCursor(_ cursor: Cursor?) {
+        let owner = textInputFocusOwner
+        let generation = owner.textInputCursorRequestGeneration.withLock {
+            $0 &+= 1
+            return $0
+        }
+        Task { @MainActor [weak owner] in
+            guard let owner,
+                  owner.textInputCursorRequestGeneration.withLock({
+                      $0 == generation
+                  }) else {
+                return
+            }
+            owner.window?.setCursor(cursor, forDeviceID: 0)
         }
     }
 

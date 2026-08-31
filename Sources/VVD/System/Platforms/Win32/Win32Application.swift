@@ -54,6 +54,12 @@ final class Win32Application: Application, @unchecked Sendable {
 
     var activationPolicy: ActivationPolicy = .regular
 
+    private let systemClipboard = Win32Clipboard()
+
+    var clipboard: (any Clipboard)? {
+        systemClipboard
+    }
+
     var threadId: DWORD = 0
     var requestExitWithCode: Int? = nil
 

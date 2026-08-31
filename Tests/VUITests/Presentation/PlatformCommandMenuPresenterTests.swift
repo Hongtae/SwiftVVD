@@ -108,6 +108,7 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
                     id: "commands.fixture",
                     title: "Fixture",
                     role: .file,
+                    accessKey: "f",
                     items: PlatformItemList(items: [
                         actionItem,
                         PlatformItemList.Item(systemItem: .divider),
@@ -130,6 +131,7 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
         XCTAssertEqual(menu.id, "commands.fixture")
         XCTAssertEqual(menu.title, "Fixture")
         XCTAssertEqual(menu.role, .file)
+        XCTAssertEqual(menu.accessKey, "f")
         XCTAssertEqual(menu.elements.count, 7)
 
         guard case let .item(run) = menu.elements[0],
@@ -144,6 +146,7 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
 
         XCTAssertEqual(run.id, "commands.fixture/run")
         XCTAssertEqual(run.title, "Run")
+        XCTAssertEqual(run.accessKey, "R")
         XCTAssertEqual(run.state, .mixed)
         XCTAssertTrue(run.isEnabled)
         XCTAssertEqual(
@@ -153,16 +156,20 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
         XCTAssertEqual(run.toolTip, "Run the command")
 
         XCTAssertEqual(more.title, "More")
+        XCTAssertEqual(more.accessKey, "M")
         XCTAssertTrue(more.isEnabled)
         XCTAssertTrue(more.usesPlatformItemValidation)
         guard case let .item(unavailable) = more.elements.first else {
             return XCTFail("Expected nested menu item")
         }
         XCTAssertFalse(unavailable.isEnabled)
+        XCTAssertEqual(unavailable.accessKey, "U")
 
         XCTAssertEqual(header.title, "Section")
+        XCTAssertNil(header.accessKey)
         XCTAssertFalse(header.isEnabled)
         XCTAssertEqual(sectionAction.title, "Section Action")
+        XCTAssertEqual(sectionAction.accessKey, "S")
         XCTAssertTrue(sectionAction.isEnabled)
 
         run.action?()

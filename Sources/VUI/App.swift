@@ -11,11 +11,20 @@ import VVD
 
 typealias Log = VVD.Log
 
+public typealias Clipboard = VVD.Clipboard
+public typealias ClipboardContentType = VVD.ClipboardContentType
+
 public protocol App {
     associatedtype Body: Scene
     @SceneBuilder var body: Self.Body { get }
 
     init()
+}
+
+public extension App {
+    static var clipboard: (any Clipboard)? {
+        sharedApplication()?.clipboard
+    }
 }
 
 protocol AppContext: AnyObject {
