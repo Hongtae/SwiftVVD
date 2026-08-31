@@ -668,6 +668,189 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(model.second, "BRAVO")
     }
 
+    @MainActor
+    // ASSERTIONS commandsFocusStoreTransferRuntimeObserved
+    // ASSERTIONS commandsFocusStoreRootPublicationRuntimeObserved
+    func testFocusStateStorePreservesInternalAndExternalTextFieldLayers() throws {
+        let model = TextFieldFocusStateModel()
+        let controller = TextFieldFocusStateHostController(model: model)
+
+        var redraw = false
+        func renderFrame(_ tick: UInt64) {
+            controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 180),
+                redraw: &redraw
+            ) { _, _ in }
+            Update.dispatchActions()
+        }
+
+        renderFrame(0)
+        renderFrame(1)
+
+        let binding = try XCTUnwrap(model.focusBinding)
+        var responders: [TextFieldResponder] = []
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                responders.append(responder)
+            }
+            return .next
+        }
+        XCTAssertEqual(responders.count, 2)
+        let first = try XCTUnwrap(responders.first {
+            $0.text?.wrappedValue == model.first
+        })
+        let second = try XCTUnwrap(responders.first {
+            $0.text?.wrappedValue == model.second
+        })
+
+        func externalValues(in store: FocusStore) -> Set<TextFieldFocusTarget> {
+            guard let plist = store.plists[binding.propertyID] else {
+                return []
+            }
+            var values: Set<TextFieldFocusTarget> = []
+            plist.forEachValue(
+                forKey: FocusStore.Key<TextFieldFocusTarget?>.self
+            ) { entry, _ in
+                if let value = entry?.value {
+                    values.insert(value)
+                }
+            }
+            return values
+        }
+
+        func itemCount(in store: FocusStore) -> Int {
+            store.plists.values.reduce(into: 0) { count, plist in
+                count += Int(plist.elements?.length ?? 0)
+            }
+        }
+
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 3)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 4)
+        XCTAssertEqual(
+            externalValues(in: controller.resolvedFocusStore),
+            [.first, .second]
+        )
+        XCTAssertTrue(controller.resolvedFocusStore.focusedResponders.isEmpty)
+
+        binding.wrappedValue = .first
+        renderFrame(2)
+        renderFrame(3)
+        renderFrame(4)
+        XCTAssertTrue(controller.focusedResponder === first)
+        XCTAssertEqual(binding.wrappedValue, .first)
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 3)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 4)
+        XCTAssertEqual(controller.resolvedFocusStore.focusedResponders.count, 2)
+
+        binding.wrappedValue = .second
+        renderFrame(5)
+        renderFrame(6)
+        renderFrame(7)
+        XCTAssertTrue(controller.focusedResponder === second)
+        XCTAssertEqual(binding.wrappedValue, .second)
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 3)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 4)
+        XCTAssertEqual(controller.resolvedFocusStore.focusedResponders.count, 2)
+
+        let showsSecond = try XCTUnwrap(model.showsSecondBinding)
+        showsSecond.wrappedValue = false
+        renderFrame(8)
+        renderFrame(9)
+        renderFrame(10)
+        renderFrame(11)
+        XCTAssertNil(controller.focusedResponder)
+        XCTAssertNil(binding.wrappedValue)
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 2)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 2)
+        XCTAssertEqual(
+            externalValues(in: controller.resolvedFocusStore),
+            [.first]
+        )
+        XCTAssertTrue(controller.resolvedFocusStore.focusedResponders.isEmpty)
+
+        let currentBinding = try XCTUnwrap(model.focusBinding)
+        XCTAssertEqual(currentBinding.propertyID, binding.propertyID)
+        let currentLocation = try XCTUnwrap(
+            currentBinding._binding.location
+                as? FocusStoreLocation<TextFieldFocusTarget?>
+        )
+        currentBinding.wrappedValue = .second
+        renderFrame(12)
+        renderFrame(13)
+        XCTAssertNil(controller.focusedResponder)
+        XCTAssertNil(currentBinding.wrappedValue)
+        XCTAssertEqual(currentLocation.deferredUpdate?.0, .second)
+        XCTAssertEqual(
+            currentLocation.deferredUpdate?.1,
+            currentLocation.store.version
+        )
+
+        showsSecond.wrappedValue = true
+        renderFrame(14)
+        renderFrame(15)
+        renderFrame(16)
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 3)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 4)
+        XCTAssertEqual(
+            externalValues(in: controller.resolvedFocusStore),
+            [.first, .second]
+        )
+        XCTAssertTrue(controller.resolvedFocusStore.focusedResponders.isEmpty)
+
+        XCTAssertEqual(currentLocation.store.plists.count, 3)
+        XCTAssertNotEqual(
+            currentLocation.deferredUpdate?.1,
+            currentLocation.store.version
+        )
+        var currentEntries: [FocusStore.Entry<TextFieldFocusTarget?>] = []
+        currentLocation.store.plists[currentBinding.propertyID]?.forEachValue(
+            forKey: FocusStore.Key<TextFieldFocusTarget?>.self
+        ) { entry, _ in
+            if let entry {
+                currentEntries.append(entry)
+            }
+        }
+        XCTAssertEqual(currentEntries.count, 2)
+        let secondEntry = try XCTUnwrap(currentEntries.first {
+            $0.value == .second
+        })
+        XCTAssertTrue(secondEntry.isValid)
+
+        currentLocation.performDeferredUpdate()
+        renderFrame(17)
+        renderFrame(18)
+        renderFrame(19)
+        XCTAssertNil(currentLocation.deferredUpdate)
+        XCTAssertEqual(currentLocation.store.plists.count, 3)
+        XCTAssertFalse(try XCTUnwrap(secondEntry.responder).children.isEmpty)
+        var replacementSecond: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            guard let responder = responder as? TextFieldResponder,
+                  responder.text?.wrappedValue == model.second else {
+                return .next
+            }
+            replacementSecond = responder
+            return .cancel
+        }
+        let focusedReplacementSecond = try XCTUnwrap(replacementSecond)
+        XCTAssertTrue(controller.focusedResponder === focusedReplacementSecond)
+        XCTAssertEqual(currentBinding.wrappedValue, .second)
+        XCTAssertEqual(controller.resolvedFocusStore.focusedResponders.count, 2)
+
+        binding.wrappedValue = nil
+        renderFrame(20)
+        renderFrame(21)
+        renderFrame(22)
+        XCTAssertNil(controller.focusedResponder)
+        XCTAssertNil(binding.wrappedValue)
+        XCTAssertEqual(controller.resolvedFocusStore.plists.count, 3)
+        XCTAssertEqual(itemCount(in: controller.resolvedFocusStore), 4)
+        XCTAssertTrue(controller.resolvedFocusStore.focusedResponders.isEmpty)
+    }
+
     private func selection(
         in text: String,
         offsets: Range<Int>,
@@ -730,6 +913,77 @@ private final class TextFieldCommandFocusModel {
     var firstSelection: TextSelection?
     var second = "bravo"
     var secondSelection: TextSelection?
+}
+
+private enum TextFieldFocusTarget: Hashable {
+    case first
+    case second
+}
+
+private final class TextFieldFocusStateModel {
+    var first = "alpha"
+    var second = "bravo"
+    var focusBinding: FocusState<TextFieldFocusTarget?>.Binding?
+    var showsSecondBinding: Binding<Bool>?
+
+    func capture(
+        focus binding: FocusState<TextFieldFocusTarget?>.Binding,
+        showsSecond: Binding<Bool>
+    ) {
+        focusBinding = binding
+        showsSecondBinding = showsSecond
+    }
+
+    var firstBinding: Binding<String> {
+        Binding(
+            get: { self.first },
+            set: { self.first = $0 }
+        )
+    }
+
+    var secondBinding: Binding<String> {
+        Binding(
+            get: { self.second },
+            set: { self.second = $0 }
+        )
+    }
+}
+
+private struct TextFieldFocusStateHost: View {
+    let model: TextFieldFocusStateModel
+    @FocusState private var focused: TextFieldFocusTarget?
+    @State private var showsSecond = true
+
+    var body: some View {
+        let _ = model.capture(
+            focus: $focused,
+            showsSecond: $showsSecond
+        )
+        VStack {
+            TextField("First", text: model.firstBinding)
+                .focused($focused, equals: .first)
+            if showsSecond {
+                TextField("Second", text: model.secondBinding)
+                    .focused($focused, equals: .second)
+            }
+        }
+        .frame(width: 300)
+        .environment(\.defaultFontRenderingMode, .vector())
+    }
+}
+
+@MainActor
+private final class TextFieldFocusStateHostController: WindowController,
+    @unchecked Sendable {
+    init(model: TextFieldFocusStateModel) {
+        super.init(
+            content: TextFieldFocusStateHost(model: model),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(TextFieldFocusStateHostController.self)
+            )
+        )
+    }
 }
 
 @MainActor

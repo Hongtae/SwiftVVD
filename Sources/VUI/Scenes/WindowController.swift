@@ -25,6 +25,7 @@ class WindowController: WindowDelegate,
                         GraphDelegate,
                         EventGraphHost, EventBindingManagerDelegate,
                         FocusedValueListHost,
+                        FocusStoreHost,
                         RootToolbarStorageHost,
                         @unchecked Sendable {
 
@@ -434,6 +435,8 @@ class WindowController: WindowDelegate,
         var resolved = FocusedValues()
     }
     private let focusedValuesState = Mutex(FocusedValuesState())
+    private(set) var resolvedFocusStore = FocusStore()
+    private(set) var resolvedFocusedItem: FocusItem?
 
     // The nearest controller backed by a platform window owns one focused text
     // responder for its complete overlay presentation tree.
@@ -891,6 +894,20 @@ class WindowController: WindowDelegate,
             // graph is never invalidated reentrantly from its output rule.
             scheduleFocusedValuesRecompute()
         }
+    }
+
+    func focusStoreDidChange(_ store: FocusStore) {
+        guard resolvedFocusStore != store else { return }
+        resolvedFocusStore = store
+        enqueueInputAction { [weak self] in
+            guard let self else { return }
+            self.viewGraph.valuesNeedingUpdate.insert(.focusStore)
+            self.viewGraph.setNeedsUpdate(
+                mayDeferUpdate: true,
+                values: .focusStore
+            )
+        }
+        requestUpdate(after: 0)
     }
 
     private func recomputeFocusedValues() {
@@ -2892,8 +2909,12 @@ class WindowController: WindowDelegate,
         viewGraph.setContainerSize(ViewSize(cachedContentSize))
     }
     func updateTransform()         {}  // Transform root input is not wired yet.
-    func updateFocusStore()        {}  // Focus store is not wired yet.
-    func updateFocusedItem()       {}  // Focused item is not wired yet.
+    func updateFocusStore() {
+        viewGraph.setFocusStore(resolvedFocusStore)
+    }
+    func updateFocusedItem() {
+        viewGraph.setFocusedItem(resolvedFocusedItem)
+    }
     func updateFocusedValues() {
         viewGraph.setFocusedValues(resolvedFocusedValues)
     }
@@ -2920,11 +2941,16 @@ class WindowController: WindowDelegate,
             return
         }
 
+        let previousController = owner.textInputFocusController
         (owner.textInputFocusedResponder as? any TextInputResponder)?
             .textInputFocusDidChange(false)
+        if previousController !== self {
+            previousController?.setFocusedItem(nil)
+        }
         owner.textInputFocusController = self
         owner.textInputFocusedResponder = responder
         textResponder.textInputFocusDidChange(true)
+        setFocusedItem(responder)
         owner.setPlatformTextInputEnabled(true)
     }
 
@@ -2940,7 +2966,60 @@ class WindowController: WindowDelegate,
             .textInputFocusDidChange(false)
         owner.textInputFocusedResponder = nil
         owner.textInputFocusController = nil
+        setFocusedItem(nil)
         owner.setPlatformTextInputEnabled(false)
+    }
+
+    func updateFocus(
+        _ focused: Bool,
+        within responder: FocusStateBindingResponder
+    ) {
+        if focused {
+            // Resolve responder preferences before selecting a target that may
+            // have entered through a conditional branch since the last read.
+            _ = viewGraph.responderNode
+            viewGraph.data.withCurrent {
+                responder.updateViewResponders()
+            }
+            var target: ResponderNode?
+            _ = responder.visit { candidate in
+                if candidate is any TextInputResponder {
+                    target = candidate
+                    return .cancel
+                }
+                return .next
+            }
+            if let target {
+                focusTextInputResponder(target)
+            }
+            return
+        }
+
+        let owner = textInputFocusOwner
+        guard owner.textInputFocusController === self,
+              let focusedResponder = owner.textInputFocusedResponder
+                as? ViewResponder,
+              focusedResponder === responder
+                || focusedResponder.isDescendant(of: responder) else {
+            return
+        }
+        resignTextInputFocus(focusedResponder)
+    }
+
+    private func setFocusedItem(_ responder: ResponderNode?) {
+        if resolvedFocusedItem?.responder === responder {
+            return
+        }
+        resolvedFocusedItem = responder.map(FocusItem.init(responder:))
+        enqueueInputAction { [weak self] in
+            guard let self else { return }
+            self.viewGraph.valuesNeedingUpdate.insert(.focusedItem)
+            self.viewGraph.setNeedsUpdate(
+                mayDeferUpdate: true,
+                values: .focusedItem
+            )
+        }
+        requestUpdate(after: 0)
     }
 
     private func setPlatformTextInputEnabled(_ enabled: Bool) {

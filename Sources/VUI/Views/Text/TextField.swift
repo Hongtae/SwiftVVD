@@ -947,6 +947,7 @@ private struct TextFieldControl: View {
     var configuration: TextField<_TextFieldStyleLabel>
     var drawsBorder: Bool
     @State private var inputState = TextFieldInputState()
+    @FocusState private var isFocused: Bool
     @Environment(\.textFieldCompositionCaretStyle)
     private var compositionCaretStyle
 
@@ -969,9 +970,11 @@ private struct TextFieldControl: View {
                         )
                 }
                 .modifier(inputModifier)
+                .focused($isFocused)
         } else {
             editorContent
                 .modifier(inputModifier)
+                .focused($isFocused)
         }
     }
 
