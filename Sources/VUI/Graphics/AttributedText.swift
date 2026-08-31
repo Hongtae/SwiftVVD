@@ -89,7 +89,7 @@ extension AttributedString {
         // Command labels classify the presence of supported run attributes;
         // render-time precedence and whether an attribute looks inactive do
         // not change this structural result.
-        runs.contains { run in
+        let hasSupportedAttribute: (AttributedString.Runs.Run) -> Bool = { run in
             run.font != nil ||
                 run.foregroundColor != nil ||
                 run.backgroundColor != nil ||
@@ -101,6 +101,12 @@ extension AttributedString {
                 run.inlinePresentationIntent != nil ||
                 run.link != nil
         }
+
+#if os(Windows)
+        return AnySequence(runs).contains(where: hasSupportedAttribute)
+#else
+        return runs.contains(where: hasSupportedAttribute)
+#endif
     }
 }
 
