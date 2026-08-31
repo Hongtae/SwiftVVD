@@ -2,7 +2,7 @@
  File: AudioStreamFLAC.cpp
  Author: Hongtae Kim (tiff2766@gmail.com)
 
- Copyright (c) 2004-2024 Hongtae Kim. All rights reserved.
+ Copyright (c) 2004-2026 Hongtae Kim. All rights reserved.
  
 *******************************************************************************/
 
@@ -422,7 +422,7 @@ VVDAudioStream* VVDAudioStreamFLACCreate(VVDStream* stream)
     if (stream && VVDSTREAM_IS_READABLE(stream))
     {
         FLAC_Context* context = (FLAC_Context*)VVDMalloc(sizeof(FLAC_Context));
-        memset(context, 0, sizeof(FLAC_Context));
+        memset((void*)context, 0, sizeof(FLAC_Context));
         new(context) FLAC_Context();
 
         context->stream = stream;
@@ -480,7 +480,7 @@ VVDAudioStream* VVDAudioStreamOggFLACCreate(VVDStream* stream)
     if (stream && VVDSTREAM_IS_READABLE(stream))
     {
         FLAC_Context* context = (FLAC_Context*)VVDMalloc(sizeof(FLAC_Context));
-        memset(context, 0, sizeof(FLAC_Context));
+        memset((void*)context, 0, sizeof(FLAC_Context));
         new(context) FLAC_Context();
 
         context->stream = stream;
@@ -543,7 +543,7 @@ void VVDAudioStreamFLACDestroy(VVDAudioStream* stream)
     }
     context->~FLAC_Context();
 #if DEBUG
-    memset(context, 0, sizeof(FLAC_Context));
+    memset((void*)context, 0, sizeof(FLAC_Context));
     memset(stream, 0, sizeof(VVDAudioStream));
 #endif 
     VVDFree(context);

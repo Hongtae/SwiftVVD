@@ -2,7 +2,7 @@
  File: AudioStreamMP3.cpp
  Author: Hongtae Kim (tiff2766@gmail.com)
 
- Copyright (c) 2004-2024 Hongtae Kim. All rights reserved.
+ Copyright (c) 2004-2026 Hongtae Kim. All rights reserved.
  
 *******************************************************************************/
 
@@ -135,7 +135,7 @@ VVDAudioStream* VVDAudioStreamMP3Create(VVDStream* stream)
     if (stream && VVDSTREAM_IS_READABLE(stream))
     {
         MP3Context* context = (MP3Context*)VVDMalloc(sizeof(MP3Context));
-        memset(context, 0, sizeof(MP3Context));
+        memset((void*)context, 0, sizeof(MP3Context));
         new(context) MP3Context();
 
         context->stream = stream;
@@ -217,7 +217,7 @@ void VVDAudioStreamMP3Destroy(VVDAudioStream* stream)
     mp3dec_ex_close(&context->dec);
     context->~MP3Context();
 #if DEBUG
-    memset(context, 0, sizeof(MP3Context));
+    memset((void*)context, 0, sizeof(MP3Context));
     memset(stream, 0, sizeof(VVDAudioStream));
 #endif    
     VVDFree(context);
