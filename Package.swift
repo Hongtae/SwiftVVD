@@ -106,6 +106,7 @@ let package = Package(
                     "-LSupportPackages/Vulkan/lib/Linux/\(arch)",
                     "-lvulkan",
                     "-lwayland-client",
+                    "-lwayland-cursor",
                     "-lxkbcommon"
                 ], .when(platforms: [.linux])),
             ]),

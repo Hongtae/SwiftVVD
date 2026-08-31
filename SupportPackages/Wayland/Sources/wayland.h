@@ -4,6 +4,7 @@
 #include "protocols/xdg-activation-client.h"
 #include "protocols/fractional-scale-client.h"
 #include "protocols/xdg-decoration-client.h"
+#include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 #include <linux/input.h>
 

@@ -2,7 +2,7 @@
 //  File: WaylandWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_WAYLAND
@@ -212,6 +212,9 @@ final class WaylandWindow: Window {
     var isValid: Bool { surface != nil }
 
     var eventObservers = WindowEventObserverContainer()
+    private(set) var cursorOverride: Cursor?
+    private(set) var mouseVisible = true
+    private var textInputEnabled = false
 
     private(set) var display: OpaquePointer?
     nonisolated(unsafe) private(set) var surface: OpaquePointer?
@@ -432,11 +435,24 @@ final class WaylandWindow: Window {
         }
     }
 
-    func showMouse(_: Bool, forDeviceID: Int) {
+    func showMouse(_ show: Bool, forDeviceID deviceID: Int) {
+        guard deviceID == 0, mouseVisible != show else { return }
+        mouseVisible = show
+        WaylandApplication.shared?.updateCursor(for: self)
     }
 
-    func isMouseVisible(forDeviceID: Int) -> Bool {
-        false
+    func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
+        deviceID == 0 && mouseVisible
+    }
+
+    func setCursor(_ cursor: Cursor?, forDeviceID deviceID: Int) {
+        guard deviceID == 0 else { return }
+        cursorOverride = cursor
+        WaylandApplication.shared?.updateCursor(for: self)
+    }
+
+    func cursor(forDeviceID deviceID: Int) -> Cursor? {
+        deviceID == 0 ? cursorOverride : nil
     }
 
     func lockMouse(_: Bool, forDeviceID: Int) {
@@ -460,15 +476,12 @@ final class WaylandWindow: Window {
     }
 
     func enableTextInput(_ enable: Bool, forDeviceID deviceID: Int) {
-        if deviceID == 0 {
-        }
+        guard deviceID == 0 else { return }
+        textInputEnabled = enable
     }
 
     func isTextInputEnabled(forDeviceID deviceID: Int) -> Bool {
-        if deviceID == 0 {
-            return false
-        }
-        return false
+        deviceID == 0 && textInputEnabled
     }
         
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {

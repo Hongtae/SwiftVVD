@@ -59,6 +59,17 @@ private var registryListener = wl_registry_listener(
         if strcmp(interface!, wl_compositor_interface.name) == 0 {
             let compositor = wl_registry_bind(registry, name, wl_compositor_interface_ptr, min(version, 4))
             app.compositor = .init(compositor)
+            app.configureCursorManager()
+        }
+        else if strcmp(interface!, wl_shm_interface.name) == 0 {
+            let sharedMemory = wl_registry_bind(
+                registry,
+                name,
+                wl_shm_interface_ptr,
+                min(version, 1)
+            )
+            app.sharedMemory = .init(sharedMemory)
+            app.configureCursorManager()
         }
         else if strcmp(interface!, xdg_wm_base_interface.name) == 0 {
             let shell = wl_registry_bind(registry, name, xdg_wm_base_interface_ptr, min(version, 4))
@@ -77,10 +88,21 @@ private var registryListener = wl_registry_listener(
             let decorationManager = wl_registry_bind(registry, name, zxdg_decoration_manager_v1_interface_ptr, min(version, 1))
             app.decorationManager = .init(decorationManager)
         }
+        else if strcmp(interface!, wl_data_device_manager_interface.name) == 0 {
+            let manager = wl_registry_bind(
+                registry,
+                name,
+                wl_data_device_manager_interface_ptr,
+                min(version, 3)
+            )
+            app.dataDeviceManager = .init(manager)
+            app.configureClipboard()
+        }
         else if strcmp(interface!, wl_seat_interface.name) == 0 {
             let seat = wl_registry_bind(registry, name, wl_seat_interface_ptr, min(version, 5))
             app.seat = .init(seat)
             wl_seat_add_listener(app.seat, &seatListener, data)
+            app.configureClipboard()
         }
         else if strcmp(interface!, wl_output_interface.name) == 0 {
             let output = wl_registry_bind(registry, name, wl_output_interface_ptr, min(version, 4))
@@ -119,6 +141,7 @@ private var seatListener = wl_seat_listener(
         } else {
             if app.pointer != nil {
                 app.cancelActivePointerButtons()
+                app.pointerEnterSerial = nil
                 wl_pointer_destroy(app.pointer)
                 app.pointer = nil
             }
@@ -240,10 +263,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private(set) var display: OpaquePointer?
     private(set) var registry: OpaquePointer?
     fileprivate(set) var compositor: OpaquePointer?
+    fileprivate(set) var sharedMemory: OpaquePointer?
     fileprivate(set) var shell: OpaquePointer?
     fileprivate(set) var activationManager: OpaquePointer?
     fileprivate(set) var fractionalScaleManager: OpaquePointer?
     fileprivate(set) var decorationManager: OpaquePointer?
+    fileprivate(set) var dataDeviceManager: OpaquePointer?
     fileprivate(set) var seat: OpaquePointer?
     fileprivate(set) var pointer: OpaquePointer?
     fileprivate(set) var keyboard: OpaquePointer?
@@ -254,6 +279,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private var keyRepeatRate: Int32 = 0
     private var keyRepeatDelay: Int32 = 0
     private var keyRepeatState: KeyRepeatState? = nil
+    private var waylandClipboard: WaylandClipboard?
+    private var cursorManager: WaylandCursorManager?
+
+    var clipboard: (any Clipboard)? {
+        waylandClipboard
+    }
 
     static func run(delegate: ApplicationDelegate?) -> Int {
         precondition(Thread.isMainThread, "\(#function) must be called on the main thread.")
@@ -477,9 +508,16 @@ final class WaylandApplication: Application, @unchecked Sendable {
             Log.err("Cannot bind wayland protocols.")
 
             if pointer != nil { wl_pointer_destroy(pointer) }
+            cursorManager = nil
+            waylandClipboard?.invalidate()
+            waylandClipboard = nil
+            if dataDeviceManager != nil {
+                wl_data_device_manager_destroy(dataDeviceManager)
+            }
             if seat != nil { wl_seat_destroy(seat) }
 
             if shell != nil { xdg_wm_base_destroy(shell) }
+            if sharedMemory != nil { wl_shm_destroy(sharedMemory) }
             if compositor != nil { wl_compositor_destroy(compositor) }
             
             wl_registry_destroy(registry)
@@ -492,6 +530,12 @@ final class WaylandApplication: Application, @unchecked Sendable {
     deinit {
         if pointer != nil { wl_pointer_destroy(pointer) }
         if keyboard != nil { wl_keyboard_destroy(keyboard) }
+        cursorManager = nil
+        waylandClipboard?.invalidate()
+        waylandClipboard = nil
+        if dataDeviceManager != nil {
+            wl_data_device_manager_destroy(dataDeviceManager)
+        }
         if seat != nil { wl_seat_destroy(seat) }
         if activationManager != nil { xdg_activation_v1_destroy(activationManager) }
         if fractionalScaleManager != nil { wp_fractional_scale_manager_v1_destroy(fractionalScaleManager) }
@@ -503,6 +547,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
         if shell != nil { xdg_wm_base_destroy(shell) }
 
+        if sharedMemory != nil { wl_shm_destroy(sharedMemory) }
         if compositor != nil { wl_compositor_destroy(compositor) }
         if registry != nil { wl_registry_destroy(registry) }
         if display != nil { wl_display_disconnect(display) }
@@ -532,12 +577,66 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private var pointerAxisSource = ScrollEventSource.unknown
     private var pointerEventClock = MillisecondTimestampExtender()
     private var pointerButtonStates: [Int: PointerButtonState] = [:]
+    fileprivate var pointerEnterSerial: UInt32?
+
+    fileprivate func configureCursorManager() {
+        guard cursorManager == nil,
+              let compositor,
+              let sharedMemory else {
+            return
+        }
+        cursorManager = WaylandCursorManager(
+            compositor: compositor,
+            sharedMemory: sharedMemory
+        )
+    }
+
+    @MainActor
+    func updateCursor(for window: WaylandWindow) {
+        guard pointerTarget === window,
+              let pointer,
+              let serial = pointerEnterSerial,
+              let cursorManager else {
+            return
+        }
+        let applied = cursorManager.apply(
+            window.cursorOverride,
+            visible: window.mouseVisible,
+            pointer: pointer,
+            serial: serial,
+            scale: Int32(max(ceil(window.contentScaleFactor), 1))
+        )
+        if !applied {
+            Log.error("Unable to apply Wayland cursor for window: \(window.title)")
+        }
+    }
+
+    fileprivate func configureClipboard() {
+        guard waylandClipboard == nil,
+              let display,
+              let dataDeviceManager,
+              let seat else {
+            return
+        }
+        waylandClipboard = WaylandClipboard(
+            display: display,
+            manager: dataDeviceManager,
+            seat: seat
+        )
+    }
+
+    private func updateClipboardInputSerial(_ serial: UInt32) {
+        waylandClipboard?.updateInputSerial(serial)
+    }
 
     fileprivate func pointerEnter(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
+        updateClipboardInputSerial(serial)
+        pointerEnterSerial = serial
         pointerTarget = self.window(forSurface: surface)
         pointerLocation = CGPoint(x: x, y: y)
         if let target = pointerTarget {
             MainActor.assumeIsolated {
+                updateCursor(for: target)
                 target.postMouseEvent(MouseEvent(
                     type: .entered,
                     window: target,
@@ -568,6 +667,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
         cancelActivePointerButtons()
         pointerTarget = nil
+        pointerEnterSerial = nil
         pointerAxisFrame = PointerAxisFrame()
         pointerAxisActiveAxes = 0
         pointerAxisSource = .unknown
@@ -596,6 +696,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func pointerButton(serial: UInt32, time: UInt32, button: UInt32, state: UInt32) {
+        updateClipboardInputSerial(serial)
         let timestamp = pointerEventClock.timestamp(for: time)
         let buttonID = Int(button) - BTN_MOUSE
         let previousState = pointerButtonStates[buttonID]
@@ -761,6 +862,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardEnter(serial: UInt32, surface: OpaquePointer?, keys: [UInt8]) {
+        updateClipboardInputSerial(serial)
         Log.debug("wl_keyboard_listener.enter (num keys: \(keys.count))")
         keys.indices.forEach { index in
             let key = keys[index]
@@ -776,30 +878,50 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardKey(serial: UInt32, time: UInt32, key: UInt32, state: UInt32) {
+        updateClipboardInputSerial(serial)
         if let state = self.xkbContext?.updateKey(key, state: state) {
             Log.debug("xkb_state_component: \(state)")
         }
 
         let code = VirtualKey.from(scanCode: key)
         let pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED.rawValue
-        if code != .none {
-            let keyEvent = KeyboardEvent(type: pressed ? .keyDown : .keyUp,
-                                         window: self.activeWindow,
-                                         deviceID: 0,
-                                         key: code,
-                                         text: "")
-            MainActor.assumeIsolated {
-                self.activeWindow?.postKeyboardEvent(keyEvent)
-            }
+        let symbol = self.xkbContext?.symbol(forKey: key)
+        let inputText = Self.inputText(from: symbol)
+        let modifiers = self.keyboardModifierFlags()
 
-            if pressed {
-                self.scheduleKeyRepeat(for: key, virtualKey: code)
-            } else if self.keyRepeatState?.key == key {
-                self.keyRepeatState = nil
+        MainActor.assumeIsolated {
+            if let window = self.activeWindow {
+                if code != .none {
+                    window.postKeyboardEvent(KeyboardEvent(
+                        type: pressed ? .keyDown : .keyUp,
+                        window: window,
+                        deviceID: 0,
+                        key: code,
+                        text: "",
+                        modifiers: modifiers
+                    ))
+                }
+                if pressed,
+                   window.isTextInputEnabled(forDeviceID: 0),
+                   let inputText {
+                    window.postKeyboardEvent(KeyboardEvent(
+                        type: .textInput,
+                        window: window,
+                        deviceID: 0,
+                        key: .none,
+                        text: inputText
+                    ))
+                }
             }
         }
 
-        if let symbol = self.xkbContext?.symbol(forKey: key) {
+        if pressed {
+            self.scheduleKeyRepeat(for: key, virtualKey: code)
+        } else if self.keyRepeatState?.key == key {
+            self.keyRepeatState = nil
+        }
+
+        if let symbol {
             Log.debug("Key: \(key), Symbol: \(String(describing: symbol)), VirtualKey: \(code), pressed: \(pressed)")
         } else {
             Log.debug("Key: \(key), Symbol: nil, VirtualKey: \(code), pressed: \(pressed)")
@@ -808,6 +930,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func keyboardModifiers(serial: UInt32, depressed: UInt32, latched: UInt32, locked: UInt32, group: UInt32) {
+        updateClipboardInputSerial(serial)
         if let state = self.xkbContext?.updateModifiers(depressed: depressed, latched: latched, locked: locked, group: group) {
             Log.debug("xkb_state_component: \(state)")
         }
@@ -853,18 +976,66 @@ final class WaylandApplication: Application, @unchecked Sendable {
             return
         }
 
-        let keyEvent = KeyboardEvent(type: .keyDown,
-                                     window: window,
-                                     deviceID: 0,
-                                     key: state.virtualKey,
-                                     text: "",
-                                     isRepeat: true)
+        let inputText = Self.inputText(from: self.xkbContext?.symbol(forKey: state.key))
+        let modifiers = self.keyboardModifierFlags()
         MainActor.assumeIsolated {
-            window.postKeyboardEvent(keyEvent)
+            if state.virtualKey != .none {
+                window.postKeyboardEvent(KeyboardEvent(
+                    type: .keyDown,
+                    window: window,
+                    deviceID: 0,
+                    key: state.virtualKey,
+                    text: "",
+                    isRepeat: true,
+                    modifiers: modifiers
+                ))
+            }
+            if window.isTextInputEnabled(forDeviceID: 0),
+               let inputText {
+                window.postKeyboardEvent(KeyboardEvent(
+                    type: .textInput,
+                    window: window,
+                    deviceID: 0,
+                    key: .none,
+                    text: inputText,
+                    isRepeat: true
+                ))
+            }
         }
 
         state.nextFireTime = now.addingTimeInterval(1.0 / Double(self.keyRepeatRate))
         self.keyRepeatState = state
+    }
+
+    private func keyboardModifierFlags() -> KeyboardModifierFlags {
+        var modifiers: KeyboardModifierFlags = []
+        if self.xkbContext?.isModifierActive(XKB_MOD_NAME_CAPS) == true {
+            modifiers.insert(.capsLock)
+        }
+        if self.xkbContext?.isModifierActive(XKB_MOD_NAME_SHIFT) == true {
+            modifiers.insert(.shift)
+        }
+        if self.xkbContext?.isModifierActive(XKB_MOD_NAME_CTRL) == true {
+            modifiers.insert(.control)
+        }
+        if self.xkbContext?.isModifierActive(XKB_MOD_NAME_ALT) == true {
+            modifiers.insert(.option)
+        }
+        if self.xkbContext?.isModifierActive(XKB_MOD_NAME_LOGO) == true {
+            modifiers.insert(.command)
+        }
+        return modifiers
+    }
+
+    private static func inputText(from symbol: XKBContext.Symbol?) -> String? {
+        guard let text = symbol?.name,
+              !text.isEmpty,
+              !text.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            return nil
+        }
+        return text
     }
 }
 

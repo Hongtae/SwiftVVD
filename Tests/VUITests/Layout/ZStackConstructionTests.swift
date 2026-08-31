@@ -13,20 +13,18 @@ final class ZStackConstructionTests: XCTestCase {
         let completed = DispatchSemaphore(value: 0)
         let result = Mutex((stackSize: 0, hasLayoutComputer: false))
         let thread = Thread {
-            autoreleasepool {
-                let host = TestViewRendererHost()
-                let graph = ViewGraph(
-                    replaceableContent: ConstrainedFocusedLabelView(),
-                    rendererHost: host
-                )
-                host.storage = graph
-                graph.updateOutputs(at: .zero)
-                result.withLock {
+            let host = TestViewRendererHost()
+            let graph = ViewGraph(
+                replaceableContent: ConstrainedFocusedLabelView(),
+                rendererHost: host
+            )
+            host.storage = graph
+            graph.updateOutputs(at: .zero)
+            result.withLock {
 #if canImport(Darwin)
-                    $0.stackSize = pthread_get_stacksize_np(pthread_self())
+                $0.stackSize = pthread_get_stacksize_np(pthread_self())
 #endif
-                    $0.hasLayoutComputer = graph.rootLayoutComputer != nil
-                }
+                $0.hasLayoutComputer = graph.rootLayoutComputer != nil
             }
             completed.signal()
         }
