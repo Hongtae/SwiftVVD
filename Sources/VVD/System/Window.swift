@@ -259,6 +259,14 @@ public protocol Window: AnyObject {
     func showMouse(_: Bool, forDeviceID: Int)
     func isMouseVisible(forDeviceID: Int) -> Bool
 
+    /// Sets a window-local cursor override for the specified pointing device.
+    /// Pass `nil` to restore the platform default.
+    func setCursor(_ cursor: Cursor?, forDeviceID: Int)
+
+    /// Returns the current window-local override, or `nil` when using the
+    /// platform default.
+    func cursor(forDeviceID: Int) -> Cursor?
+
     /// Enables or disables relative mouse input for the specified device.
     ///
     /// While locked, the mouse position remains fixed, but physical movement
@@ -307,10 +315,15 @@ extension Window {
         )
     }
 
+    public func setCursor(_ cursor: Cursor?, forDeviceID: Int) {}
+    public func cursor(forDeviceID: Int) -> Cursor? { nil }
+
     public func showMouse(_: Bool, forDeviceID: Int) {}
     public func isMouseVisible(forDeviceID: Int) -> Bool { false }
+
     public func lockMouse(_: Bool, forDeviceID: Int) {}
     public func isMouseLocked(forDeviceID: Int) -> Bool { false }
+
     public func setMousePosition(_: CGPoint, forDeviceID: Int) {}
     public func mousePosition(forDeviceID: Int) -> CGPoint? { nil }
 

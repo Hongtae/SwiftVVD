@@ -13,6 +13,13 @@ public protocol Application: AnyObject {
 
     var screens: [any Screen] { get }
     var mainScreen: (any Screen)? { get }
+
+    /// The application-wide system clipboard, when provided by the backend.
+    var clipboard: (any Clipboard)? { get }
+}
+
+public extension Application {
+    var clipboard: (any Clipboard)? { nil }
 }
 
 public protocol ApplicationDelegate: AnyObject {
