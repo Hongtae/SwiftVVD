@@ -107,7 +107,7 @@ public final class ImageRenderer<Content> where Content: View {
     }
 
     public final var cgImage: CGImage? {
-        #if canImport(CoreGraphics)
+#if canImport(CoreGraphics)
         let size = resolvedRenderSize()
         let currentScale = scale
         guard size.width > 0, size.height > 0, currentScale > 0 else {
@@ -131,38 +131,38 @@ public final class ImageRenderer<Content> where Content: View {
 
         render(rasterizationScale: currentScale, in: context)
         return context.makeImage()
-        #else
+#else
         return nil
-        #endif
+#endif
     }
 
     public final func render(
         rasterizationScale: CGFloat = 1,
         renderer: (CGSize, (CGContext) -> Void) -> Void
     ) {
-        #if canImport(CoreGraphics)
+#if canImport(CoreGraphics)
         let size = resolvedRenderSize()
         renderer(size) { context in
             self.render(rasterizationScale: rasterizationScale, in: context)
         }
-        #else
+#else
         _ = rasterizationScale
         _ = renderer
-        #endif
+#endif
     }
 
     public final func render(
         rasterizationScale: CGFloat = 1,
         in context: CGContext
     ) {
-        #if canImport(CoreGraphics)
+#if canImport(CoreGraphics)
         _ = context
         _ = rasterizationScale
         // DisplayList -> CGContext rasterization belongs to the graphics backend.
-        #else
+#else
         _ = rasterizationScale
         _ = context
-        #endif
+#endif
     }
 
     public final var isObservationEnabled: Bool {

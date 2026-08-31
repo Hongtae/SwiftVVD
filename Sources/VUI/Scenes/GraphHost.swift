@@ -1097,12 +1097,12 @@ class GraphHost: CustomReflectable {
         private let lock = NSRecursiveLock()
         private var actions: [@Sendable () -> Void] = []
 
-        #if canImport(CoreFoundation)
+#if canImport(CoreFoundation)
         private var observer: CFRunLoopObserver?
-        #endif
+#endif
 
         func schedule(_ action: @escaping @Sendable () -> Void) {
-            #if canImport(CoreFoundation)
+#if canImport(CoreFoundation)
             if Thread.isMainThread {
                 enqueueObserverAction(action)
             } else {
@@ -1111,16 +1111,16 @@ class GraphHost: CustomReflectable {
                     scheduler.enqueueObserverAction(action)
                 }
             }
-            #else
+#else
             RunLoop.main.perform {
                 Update.ensure {
                     action()
                 }
             }
-            #endif
+#endif
         }
 
-        #if canImport(CoreFoundation)
+#if canImport(CoreFoundation)
         private func enqueueObserverAction(_ action: @escaping @Sendable () -> Void) {
             lock.lock()
             actions.append(action)
@@ -1157,13 +1157,13 @@ class GraphHost: CustomReflectable {
             guard let observer else { return }
 
             self.observer = observer
-            #if canImport(Darwin)
+#if canImport(Darwin)
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
-            #else
+#else
             // swift-corelibs-foundation builds with DEPLOYMENT_RUNTIME_SWIFT,
             // so CFRunLoopMode is a bare CFString without the wrapper struct.
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, kCFRunLoopCommonModes)
-            #endif
+#endif
         }
 
         private func flushObserverActions() {
@@ -1185,7 +1185,7 @@ class GraphHost: CustomReflectable {
             actions.removeAll(keepingCapacity: true)
             return snapshot
         }
-        #endif
+#endif
     }
 
     private enum AsyncTransactionTraceState {

@@ -208,9 +208,9 @@ struct _ResolvedTextRunAttributes: Equatable {
 func _attributedStringFromResolvedTextStorage(
     _ value: NSAttributedString
 ) -> AttributedString {
-    #if canImport(Darwin)
+#if canImport(Darwin)
     try! AttributedString(value, including: AttributeScopes.CoreAttributes.self)
-    #else
+#else
     var result = AttributedString()
     value.enumerateAttributes(
         in: NSRange(location: 0, length: value.length),
@@ -225,7 +225,7 @@ func _attributedStringFromResolvedTextStorage(
         result.append(segment)
     }
     return result
-    #endif
+#endif
 }
 
 private func _resolvedAttributedRuns(
@@ -278,13 +278,13 @@ private func _resolvedAttributedRuns(
         }
     }
 
-    #if os(Windows)
+#if os(Windows)
     // Type erasure keeps the debug client from materializing an implementation
     // index type that the Windows Foundation dynamic library does not export.
     AnySequence(value.runs).forEach(resolveRun)
-    #else
+#else
     value.runs.forEach(resolveRun)
-    #endif
+#endif
     return result
 }
 

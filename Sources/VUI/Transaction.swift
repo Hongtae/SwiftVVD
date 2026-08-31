@@ -180,11 +180,11 @@ extension Transaction {
             Thread.current.threadDictionary[idKey] = NSNumber(value: next)
         }
 
-        #if DEBUG
+#if DEBUG
         static func resetCurrentIDForTesting() {
             Thread.current.threadDictionary.removeObject(forKey: idKey)
         }
-        #endif
+#endif
 
         private enum ThreadIDState {
             private static let nextID = Atomic<UInt32>(1)
