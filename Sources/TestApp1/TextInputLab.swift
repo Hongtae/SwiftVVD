@@ -1,3 +1,4 @@
+import Foundation
 import VUI
 
 struct TextInputLabSheet: View {
@@ -7,6 +8,8 @@ struct TextInputLabSheet: View {
     @State private var primarySelection: TextSelection?
     @State private var secondaryText = "Second field"
     @State private var enclosesCompositionText = true
+    @State private var usesIBeamCursor = true
+    @State private var clipboardStatus = "Clipboard has not been tested yet."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -25,6 +28,11 @@ struct TextInputLabSheet: View {
                 isOn: $enclosesCompositionText
             )
 
+            Toggle(
+                "Use I-beam cursor for text fields",
+                isOn: $usesIBeamCursor
+            )
+
             TextField(
                 "Type with a direct keyboard or IME",
                 text: $primaryText,
@@ -34,6 +42,18 @@ struct TextInputLabSheet: View {
 
             Text("Committed value: \(primaryText)")
                 .font(.system(.caption))
+
+            HStack {
+                Button("Copy") {
+                    copyPrimaryText()
+                }
+                Button("Paste") {
+                    pasteIntoPrimaryText()
+                }
+                Text(clipboardStatus)
+                    .font(.system(.caption))
+                    .foregroundColor(.secondary)
+            }
 
             Divider()
 
@@ -53,9 +73,51 @@ struct TextInputLabSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 370)
+        .frame(width: 520, height: 450)
+        .environment(\.isTextFieldCursorEnabled, usesIBeamCursor)
         .textFieldCompositionCaretStyle(
             enclosesCompositionText ? .enclosing : .insertionPoint
         )
+    }
+
+    private func copyPrimaryText() {
+        guard let clipboard = TestApp1.clipboard else {
+            clipboardStatus = "Clipboard is unavailable."
+            return
+        }
+        do {
+            let data = Data(primaryText.utf8)
+            try clipboard.setData(
+                data,
+                forType: ClipboardContentType.utf8PlainText
+            )
+            clipboardStatus = "Copied \(data.count) UTF-8 bytes."
+        } catch {
+            clipboardStatus = "Copy failed: \(error)"
+        }
+    }
+
+    private func pasteIntoPrimaryText() {
+        guard let clipboard = TestApp1.clipboard else {
+            clipboardStatus = "Clipboard is unavailable."
+            return
+        }
+        do {
+            guard let data = try clipboard.data(
+                forType: ClipboardContentType.utf8PlainText
+            ) else {
+                clipboardStatus = "The clipboard has no plain text."
+                return
+            }
+            guard let text = String(data: data, encoding: .utf8) else {
+                clipboardStatus = "Clipboard text is not valid UTF-8."
+                return
+            }
+            primaryText = text
+            primarySelection = TextSelection(insertionPoint: text.endIndex)
+            clipboardStatus = "Pasted \(data.count) UTF-8 bytes."
+        } catch {
+            clipboardStatus = "Paste failed: \(error)"
+        }
     }
 }
