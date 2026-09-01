@@ -167,17 +167,16 @@ struct ResolvedVectorSymbol: Equatable {
             return result
         }
 
-        guard !artworkBounds.isNull,
-              artworkBounds.height.isFinite,
-              artworkBounds.height > 0 else {
+        guard viewport.height.isFinite,
+              viewport.height > 0 else {
             return result
         }
 
-        // Portable assets keep their source viewport, while the effective
-        // font controls the visible vertical ink. The catalog paths used here
-        // occupy a smaller region than their 24-unit design viewport.
-        let targetInkHeight = pointSize * 0.9
-        result.intrinsicScale = targetInkHeight / artworkBounds.height
+        // The source viewport is the symbol's design cell. Its internal
+        // whitespace preserves the intended optical size and alignment of
+        // glyphs whose artwork deliberately occupies only part of that cell.
+        let targetViewportHeight = pointSize * 1.2
+        result.intrinsicScale = targetViewportHeight / viewport.height
         return result
     }
 

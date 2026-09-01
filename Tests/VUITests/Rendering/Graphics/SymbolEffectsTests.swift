@@ -2,6 +2,87 @@ import XCTest
 @testable import VUI
 
 final class SymbolEffectsTests: XCTestCase {
+    func testPortableSymbolMetricsPreserveTheDesignViewport() throws {
+        var environment = EnvironmentValues()
+        environment.font = .system(size: 12)
+        let control = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "keyboard.control",
+            variableValue: nil,
+            bundle: nil
+        )).applyingEffectiveFontMetrics(in: environment)
+        let command = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "keyboard.command",
+            variableValue: nil,
+            bundle: nil
+        )).applyingEffectiveFontMetrics(in: environment)
+        let more = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "more.horizontal",
+            variableValue: nil,
+            bundle: nil
+        )).applyingEffectiveFontMetrics(in: environment)
+        let dropDown = try XCTUnwrap(SymbolAssetCatalog.resolve(
+            name: "arrowtriangle.down.fill",
+            variableValue: nil,
+            bundle: nil
+        )).applyingEffectiveFontMetrics(in: environment)
+
+        XCTAssertEqual(control.viewport, command.viewport)
+        XCTAssertEqual(
+            control.intrinsicScale,
+            command.intrinsicScale,
+            accuracy: 0.000_001
+        )
+        for symbol in [control, command, more, dropDown] {
+            XCTAssertEqual(
+                symbol.viewport.height * symbol.intrinsicScale,
+                14.4,
+                accuracy: 0.000_001
+            )
+        }
+        XCTAssertLessThan(
+            control.artworkBounds.height * control.intrinsicScale,
+            command.artworkBounds.height * command.intrinsicScale
+        )
+        XCTAssertLessThan(
+            more.artworkBounds.height * more.intrinsicScale,
+            command.artworkBounds.height * command.intrinsicScale
+        )
+        XCTAssertLessThan(
+            dropDown.artworkBounds.height * dropDown.intrinsicScale,
+            command.artworkBounds.height * command.intrinsicScale
+        )
+    }
+
+    func testPortableCheckboxSymbolsLoadCanonicalOutlinedAssets() throws {
+        let names = [
+            "checkmark.square",
+            "square",
+            "minus.square",
+        ]
+        let symbols = try names.map { name in
+            try XCTUnwrap(SymbolAssetCatalog.resolve(
+                name: name,
+                variableValue: nil,
+                bundle: nil
+            ))
+        }
+
+        XCTAssertEqual(
+            symbols.map(\.viewport),
+            Array(repeating: CGRect(x: 0, y: -960, width: 960, height: 960),
+                  count: names.count)
+        )
+        XCTAssertTrue(symbols.allSatisfy { !$0.layers.isEmpty })
+        for index in symbols.indices {
+            for otherIndex in symbols.indices where otherIndex > index {
+                XCTAssertNotEqual(
+                    symbols[index].identity,
+                    symbols[otherIndex].identity
+                )
+            }
+        }
+    }
+
     func testPortableSymbolResolutionUsesEffectiveFontMetrics() throws {
         let graph = _AGGraph()
         try _AGGraph.withCurrent(graph) {
