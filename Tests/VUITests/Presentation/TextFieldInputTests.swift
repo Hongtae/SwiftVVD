@@ -346,6 +346,98 @@ final class TextFieldInputTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS textFieldClipboardEditingRuntimeObserved
+    func testTextFieldResponderValidatesAndPerformsClipboardCommands() throws {
+        let clipboard = TextFieldTestClipboard()
+        let context = TextFieldClipboardAppContext(clipboard: clipboard)
+        let previousAppContext = appContext
+        appContext = context
+        defer { appContext = previousAppContext }
+
+        let model = TextFieldSelectionModel(text: "Alpha beta gamma")
+        var fieldState = TextFieldState(displayText: model.text)
+        var inputState = TextFieldInputState()
+        inputState.setFocused(true, committedText: model.text)
+
+        let responder = TextFieldResponder()
+        responder.text = model.textBinding
+        responder.selection = model.selectionBinding
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.inputState = Binding(
+            get: { inputState },
+            set: { inputState = $0 }
+        )
+
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.copy))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.cut))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.paste))
+
+        XCTAssertTrue(inputState.setSelection(
+            0..<5,
+            affinity: .upstream,
+            committedText: model.text
+        ))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.copy))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.cut))
+
+        responder.performTextEditingCommand(.copy)
+        Update.dispatchActions()
+        XCTAssertEqual(
+            try clipboard.data(
+                forType: ClipboardContentType.utf8PlainText
+            ),
+            Data("Alpha".utf8)
+        )
+        XCTAssertEqual(model.text, "Alpha beta gamma")
+        XCTAssertEqual(inputState.selectionOffsets, 0..<5)
+
+        responder.performTextEditingCommand(.cut)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, " beta gamma")
+        XCTAssertEqual(fieldState.displayText, model.text)
+        XCTAssertEqual(inputState.selectionOffsets, 0..<0)
+        XCTAssertEqual(inputState.selectionAffinity, .downstream)
+
+        clipboard.representations = [
+            ClipboardContentType.utf8PlainText: Data("Omega🙂".utf8)
+        ]
+        clipboard.dataRequestCount = 0
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.paste))
+        XCTAssertEqual(clipboard.dataRequestCount, 0)
+        responder.performTextEditingCommand(.paste)
+        Update.dispatchActions()
+        XCTAssertEqual(clipboard.dataRequestCount, 1)
+        XCTAssertEqual(model.text, "Omega🙂 beta gamma")
+        XCTAssertEqual(fieldState.displayText, model.text)
+        XCTAssertEqual(inputState.selectionOffsets, 6..<6)
+        XCTAssertEqual(inputState.selectionAffinity, .upstream)
+
+        clipboard.representations = ["example/private": Data([0x01])]
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.paste))
+        responder.performTextEditingCommand(.paste)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "Omega🙂 beta gamma")
+
+        XCTAssertTrue(inputState.setSelection(
+            0..<6,
+            affinity: .upstream,
+            committedText: model.text
+        ))
+        clipboard.rejectsWrites = true
+        responder.performTextEditingCommand(.cut)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "Omega🙂 beta gamma")
+        XCTAssertEqual(inputState.selectionOffsets, 0..<6)
+
+        context.clipboard = nil
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.copy))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.cut))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.paste))
+    }
+
     func testCaretMetricsUseFontLineHeightAndCompositionWidth() {
         XCTAssertEqual(
             TextFieldCaretMetrics(
@@ -682,8 +774,14 @@ final class TextFieldInputTests: XCTestCase {
 
     @MainActor
     // ASSERTIONS textFieldCommandResponderOwnershipObserved
+    // ASSERTIONS textFieldClipboardEditingRuntimeObserved
     // ASSERTIONS textFieldFocusSelectionRuntimeObserved
     func testProductionTextFieldCommandResponderFollowsFocusTransfer() throws {
+        let clipboard = TextFieldTestClipboard()
+        let previousAppContext = appContext
+        appContext = TextFieldClipboardAppContext(clipboard: clipboard)
+        defer { appContext = previousAppContext }
+
         let model = TextFieldCommandFocusModel()
         let controller = TextFieldCommandFocusHostController(model: model)
 
@@ -726,6 +824,14 @@ final class TextFieldInputTests: XCTestCase {
         Update.dispatchActions()
         XCTAssertEqual(model.first, "ALPHA")
         XCTAssertEqual(model.second, "bravo")
+        controller.performTextEditingCommand(.copy)
+        Update.dispatchActions()
+        XCTAssertEqual(
+            try clipboard.data(
+                forType: ClipboardContentType.utf8PlainText
+            ),
+            Data("ALPHA".utf8)
+        )
 
         model.secondSelection = selection(
             in: model.second,
@@ -737,6 +843,14 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(first.inputState?.wrappedValue.selectionOffsets, 0..<0)
         XCTAssertEqual(first.inputState?.wrappedValue.selectionAffinity, .downstream)
         XCTAssertEqual(second.inputState?.wrappedValue.selectionOffsets, 0..<5)
+        controller.performTextEditingCommand(.copy)
+        Update.dispatchActions()
+        XCTAssertEqual(
+            try clipboard.data(
+                forType: ClipboardContentType.utf8PlainText
+            ),
+            Data("bravo".utf8)
+        )
         controller.performTextEditingCommand(.makeUpperCase)
         Update.dispatchActions()
 
@@ -984,6 +1098,49 @@ private final class TextFieldSelectionModel {
             set: { self.selection = $0 }
         )
     }
+}
+
+private final class TextFieldTestClipboard: Clipboard {
+    private enum Failure: Error {
+        case rejectedWrite
+    }
+
+    var representations: [String: Data] = [:]
+    var dataRequestCount = 0
+    var rejectsWrites = false
+
+    var types: [String] {
+        Array(representations.keys)
+    }
+
+    func setData(_ representations: [String: Data]) throws {
+        if rejectsWrites {
+            throw Failure.rejectedWrite
+        }
+        self.representations = representations
+    }
+
+    func data(forType type: String) throws -> Data? {
+        dataRequestCount += 1
+        return representations[type]
+    }
+}
+
+private final class TextFieldClipboardAppContext: AppContext {
+    let graphicsDeviceContext: GraphicsDeviceContext? = nil
+    let audioDeviceContext: AudioDeviceContext? = nil
+    var clipboard: (any Clipboard)?
+    let appWindowsController: AppWindowsController? = nil
+
+    init(clipboard: (any Clipboard)?) {
+        self.clipboard = clipboard
+    }
+
+    func resourceData(forURL url: URL) -> (any DataProtocol)? { nil }
+
+    func setResource(data: (any DataProtocol)?, forURL url: URL) {}
+
+    func checkWindowActivities() {}
 }
 
 private final class TextFieldCommandFocusModel {

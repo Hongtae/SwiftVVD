@@ -473,6 +473,27 @@ struct TextFieldInputState: Equatable {
         selectionRange?.isEmpty == false
     }
 
+    func selectedText(in committedText: String) -> String? {
+        guard let selectionRange, selectionRange.isEmpty == false else {
+            return nil
+        }
+        let lower = committedText.index(
+            committedText.startIndex,
+            offsetBy: min(
+                max(selectionRange.lowerBound, 0),
+                committedText.count
+            )
+        )
+        let upper = committedText.index(
+            committedText.startIndex,
+            offsetBy: min(
+                max(selectionRange.upperBound, 0),
+                committedText.count
+            )
+        )
+        return String(committedText[lower..<upper])
+    }
+
     mutating func setFocused(_ focused: Bool, committedText: String) {
         isFocused = focused
         composition = ""
@@ -750,6 +771,33 @@ struct TextFieldInputState: Equatable {
         caretOffset = offsets.lowerBound + replacement.count
         selectionRange = offsets.lowerBound..<caretOffset
         selectionAffinity = .upstream
+        compositionReplacementRange = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func replaceSelection(
+        with replacement: String,
+        in committedText: inout String
+    ) -> Bool {
+        clampCaret(to: committedText)
+        let offsets = selectionOffsets
+        guard offsets.isEmpty == false || replacement.isEmpty == false else {
+            return false
+        }
+        let lower = committedText.index(
+            committedText.startIndex,
+            offsetBy: offsets.lowerBound
+        )
+        let upper = committedText.index(
+            committedText.startIndex,
+            offsetBy: offsets.upperBound
+        )
+        committedText.replaceSubrange(lower..<upper, with: replacement)
+        caretOffset = offsets.lowerBound + replacement.count
+        selectionRange = nil
+        selectionAffinity = replacement.isEmpty ? .downstream : .upstream
+        composition = ""
         compositionReplacementRange = nil
         return true
     }
@@ -1482,6 +1530,13 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     func canPerformTextEditingCommand(_ command: TextEditingCommand) -> Bool {
+        canPerformTextEditingCommand(command, clipboard: appContext?.clipboard)
+    }
+
+    private func canPerformTextEditingCommand(
+        _ command: TextEditingCommand,
+        clipboard: (any Clipboard)?
+    ) -> Bool {
         guard isEnabled,
               let text,
               let inputState,
@@ -1489,6 +1544,12 @@ final class TextFieldResponder: MultiViewResponder,
             return false
         }
         switch command {
+        case .copy, .cut:
+            return clipboard != nil && inputState.wrappedValue.hasSelection
+        case .paste:
+            return clipboard?.containsData(
+                forType: ClipboardContentType.utf8PlainText
+            ) == true
         case .jumpToSelection:
             return true
         case .makeUpperCase, .makeLowerCase, .capitalize:
@@ -1501,13 +1562,91 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     func performTextEditingCommand(_ command: TextEditingCommand) {
-        guard canPerformTextEditingCommand(command),
+        let clipboard = appContext?.clipboard
+        guard canPerformTextEditingCommand(command, clipboard: clipboard),
               let text,
               let fieldState,
               let inputState else {
             return
         }
         switch command {
+        case .copy:
+            guard let clipboard else { return }
+            Update.enqueueAction {
+                guard let selectedText = inputState.wrappedValue.selectedText(
+                    in: text.wrappedValue
+                ) else {
+                    return
+                }
+                try? clipboard.setData(
+                    Data(selectedText.utf8),
+                    forType: ClipboardContentType.utf8PlainText
+                )
+            }
+
+        case .cut:
+            guard let clipboard else { return }
+            Update.enqueueAction {
+                guard let selectedText = inputState.wrappedValue.selectedText(
+                    in: text.wrappedValue
+                ) else {
+                    return
+                }
+                do {
+                    try clipboard.setData(
+                        Data(selectedText.utf8),
+                        forType: ClipboardContentType.utf8PlainText
+                    )
+                } catch {
+                    return
+                }
+                var committedText = text.wrappedValue
+                var editing = inputState.wrappedValue
+                guard editing.replaceSelection(
+                    with: "",
+                    in: &committedText
+                ) else {
+                    return
+                }
+                inputState.wrappedValue = editing
+                text.wrappedValue = committedText
+                var state = fieldState.wrappedValue
+                state.displayText = committedText
+                fieldState.wrappedValue = state
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
+            }
+
+        case .paste:
+            guard let clipboard else { return }
+            Update.enqueueAction {
+                guard let data = try? clipboard.data(
+                    forType: ClipboardContentType.utf8PlainText
+                ),
+                      let replacement = String(data: data, encoding: .utf8) else {
+                    return
+                }
+                var committedText = text.wrappedValue
+                var editing = inputState.wrappedValue
+                guard editing.replaceSelection(
+                    with: replacement,
+                    in: &committedText
+                ) else {
+                    return
+                }
+                inputState.wrappedValue = editing
+                text.wrappedValue = committedText
+                var state = fieldState.wrappedValue
+                state.displayText = committedText
+                fieldState.wrappedValue = state
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
+            }
+
         case .jumpToSelection:
             // The single-line renderer always keeps the complete value in its
             // current bounds, so there is no additional viewport transition.

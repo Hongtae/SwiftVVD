@@ -109,6 +109,7 @@ final class TextEditingCommandsTests: XCTestCase {
         throws {
         // ASSERTIONS commandsTextEditingResponderActionObserved
         // ASSERTIONS commandsTextEditingRuntimeTransitionsObserved
+        // ASSERTIONS textFieldClipboardEditingRuntimeObserved
         let appGraph = AppGraph(app: TextEditingCommandsTestApp())
         setVectorFontRendering(in: appGraph)
         let windowsController = AppWindowsController()
@@ -122,7 +123,7 @@ final class TextEditingCommandsTests: XCTestCase {
             enabledCommands: Set(TextEditingCommand.allTestCommands)
         )
         let secondResponder = RecordingTextEditingResponder(
-            enabledCommands: [.findNext]
+            enabledCommands: [.copy, .findNext]
         )
         let firstKey = textEditingWindowKey(index: 0)
         let secondKey = textEditingWindowKey(index: 1)
@@ -180,6 +181,9 @@ final class TextEditingCommandsTests: XCTestCase {
             try item(for: .makeUpperCase, in: items)
                 .selectionBehavior?.onSelect
         )
+        let staleCopySelection = {
+            windowsController.performRootTextEditingCommand(.copy)
+        }
 
         windowsController.rootWindowDidActivate(secondRoot)
         updateAll(roots, startingAt: 80)
@@ -190,16 +194,29 @@ final class TextEditingCommandsTests: XCTestCase {
                 command == .findNext
             )
         }
+        XCTAssertTrue(
+            windowsController.canPerformRootTextEditingCommand(.copy)
+        )
+
+        // This selection closure was retained while the first root was active.
+        // The command must still resolve the second root at invocation time.
+        staleCopySelection()
+        updateAll(roots, startingAt: 120)
+        XCTAssertEqual(firstResponder.performedCommands, [])
+        XCTAssertEqual(secondResponder.performedCommands, [.copy])
 
         // The action came from the first root's old menu snapshot, but selection
         // must resolve the second root and its focused responder again.
         staleUpperCaseAction()
-        updateAll(roots, startingAt: 120)
+        updateAll(roots, startingAt: 160)
         XCTAssertEqual(firstResponder.performedCommands, [])
-        XCTAssertEqual(secondResponder.performedCommands, [.makeUpperCase])
+        XCTAssertEqual(
+            secondResponder.performedCommands,
+            [.copy, .makeUpperCase]
+        )
 
         windowsController.rootWindowDidActivate(plainRoot)
-        updateAll(roots, startingAt: 160)
+        updateAll(roots, startingAt: 200)
         items = flattened(try textEditingItems(in: secondRoot).items)
         for command in TextEditingCommand.allFindCommands {
             XCTAssertFalse(try item(for: command, in: items).isEnabled)

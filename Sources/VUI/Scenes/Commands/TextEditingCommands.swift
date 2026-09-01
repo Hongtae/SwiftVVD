@@ -176,6 +176,9 @@ public struct TextEditingCommands: Commands {
 extension TextEditingCommands: Sendable {}
 
 enum TextEditingCommand: Hashable, Sendable {
+    case copy
+    case cut
+    case paste
     case find
     case findAndReplace
     case findNext

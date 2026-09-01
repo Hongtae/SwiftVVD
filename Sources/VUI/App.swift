@@ -30,6 +30,7 @@ public extension App {
 protocol AppContext: AnyObject {
     var graphicsDeviceContext: GraphicsDeviceContext? { get }
     var audioDeviceContext: AudioDeviceContext? { get }
+    var clipboard: (any Clipboard)? { get }
 
     func resourceData(forURL: URL) -> (any DataProtocol)?
     func setResource(data: (any DataProtocol)?, forURL: URL)
@@ -42,6 +43,10 @@ protocol AppContext: AnyObject {
 }
 
 extension AppContext {
+    var clipboard: (any Clipboard)? {
+        sharedApplication()?.clipboard
+    }
+
     var isActive: Bool {
         sharedApplication()?.isActive ?? false
     }
