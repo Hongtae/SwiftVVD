@@ -280,6 +280,19 @@ public protocol Window: AnyObject {
     func enableTextInput(_: Bool, forDeviceID: Int)
     func isTextInputEnabled(forDeviceID: Int) -> Bool
 
+    /// Ends the active text composition and returns its pending text.
+    ///
+    /// Text input does not need to be enabled when this method is called, and
+    /// the method does not change the text-input enabled state. This permits
+    /// pending platform state to be drained after an input or focus transition.
+    ///
+    /// When `emitEvents` is `true` and text input is enabled for the device, a
+    /// text-input event followed by an empty text-composition event is emitted
+    /// before the method returns. Returns `nil` when the device has no pending
+    /// composition.
+    @discardableResult
+    func resetTextComposition(_ emitEvents: Bool, forDeviceID: Int) -> String?
+
     func convertPointToScreen(_: CGPoint) -> CGPoint
     func convertPointFromScreen(_: CGPoint) -> CGPoint
 
@@ -329,6 +342,9 @@ extension Window {
 
     public func enableTextInput(_: Bool, forDeviceID: Int) {}
     public func isTextInputEnabled(forDeviceID: Int) -> Bool { false }
+    public func resetTextComposition(_ emitEvents: Bool, forDeviceID: Int) -> String? {
+        nil
+    }
 
     public var menuController: (any WindowMenuController)? { nil }
 

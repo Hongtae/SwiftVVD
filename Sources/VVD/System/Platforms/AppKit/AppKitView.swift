@@ -21,6 +21,7 @@ protocol AppKitView: AnyObject {
     var cursorOverride: NSCursor? { get set }
     var textInput: Bool { get set }
     var proxyWindow: AppKitWindow? { get set }
+    func resetTextComposition(_ emitEvents: Bool) -> String?
     
     var wantsLayer: Bool { get set }
     var layer: CALayer? { get set }
@@ -432,13 +433,22 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     nonisolated func unmarkText() {
         MainActor.assumeIsolated {
-
-            if self.textInput && self.markedText.count > 0 {
-                self.insertText(self.markedText, replacementRange: NSMakeRange(NSNotFound, 0))
-            }
-            self.markedText = ""
-            self.inputContext?.discardMarkedText()
+            let emitEvents = self.textInput && self.markedText.isEmpty == false
+            _ = self.resetTextComposition(emitEvents)
         }
+    }
+
+    func resetTextComposition(_ emitEvents: Bool) -> String? {
+        let text = self.markedText
+        self.markedText = ""
+        self.inputContext?.discardMarkedText()
+        self.inputContext?.invalidateCharacterCoordinates()
+
+        if emitEvents && self.textInput {
+            self.postTextInputEvent(text)
+            self.postTextCompositionEvent("")
+        }
+        return text.isEmpty ? nil : text
     }
 
     nonisolated func selectedRange() -> NSRange {

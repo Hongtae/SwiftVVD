@@ -202,6 +202,14 @@ final class UIKitWindow: Window {
         return false
     }
 
+    func resetTextComposition(
+        _ emitEvents: Bool,
+        forDeviceID deviceID: Int
+    ) -> String? {
+        guard deviceID == 0 else { return nil }
+        return self.view?.resetTextComposition(emitEvents)
+    }
+
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
         if let uiView, let window {
             let ptWindow = uiView.convert(point, to: nil)

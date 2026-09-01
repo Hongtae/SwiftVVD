@@ -255,6 +255,7 @@ final class Win32Window: Window {
     private var _menuController: Win32WindowMenuController?
     private var applyingNativeMenuGeometry = false
     private var textCompositionMode: Bool = false
+    private var suppressTextCompositionEvents = false
     private var keyboardStates: [UInt8] = [UInt8](repeating: 0, count: 256)
     private var pendingKeyRepeat: Int? = nil
     
@@ -934,6 +935,79 @@ final class Win32Window: Window {
             return self.textCompositionMode
         }
         return false
+    }
+
+    func resetTextComposition(
+        _ emitEvents: Bool,
+        forDeviceID deviceID: Int
+    ) -> String? {
+        guard deviceID == 0,
+              let hWnd = self.hWnd,
+              let hIMC = ImmGetContext(hWnd) else {
+            return nil
+        }
+
+        let bufferLength = ImmGetCompositionStringW(
+            hIMC,
+            DWORD(GCS_COMPSTR),
+            nil,
+            0
+        )
+        let text: String
+        if bufferLength > 0 {
+            var buffer = [UInt8](
+                repeating: 0,
+                count: Int(bufferLength + 4)
+            )
+            text = buffer.withUnsafeMutableBytes { ptr in
+                ImmGetCompositionStringW(
+                    hIMC,
+                    DWORD(GCS_COMPSTR),
+                    ptr.baseAddress,
+                    UInt32(bufferLength + 2)
+                )
+                return String(
+                    decodingCString: ptr.baseAddress!
+                        .assumingMemoryBound(to: WCHAR.self),
+                    as: UTF16.self
+                )
+            }
+        } else {
+            text = ""
+        }
+
+        self.suppressTextCompositionEvents = true
+        let didReset = ImmNotifyIME(
+            hIMC,
+            DWORD(NI_COMPOSITIONSTR),
+            DWORD(CPS_CANCEL),
+            0
+        )
+        ImmReleaseContext(hWnd, hIMC)
+
+        guard didReset != 0 else {
+            self.suppressTextCompositionEvents = false
+            return nil
+        }
+
+        self.utf16HighSurrogate = nil
+        if emitEvents && self.textCompositionMode {
+            self.postKeyboardEvent(KeyboardEvent(
+                type: .textInput,
+                window: self,
+                deviceID: 0,
+                key: .none,
+                text: text
+            ))
+            self.postKeyboardEvent(KeyboardEvent(
+                type: .textComposition,
+                window: self,
+                deviceID: 0,
+                key: .none,
+                text: ""
+            ))
+        }
+        return text.isEmpty ? nil : text
     }
 
     // MARK: - Input Synchronization
@@ -2817,10 +2891,15 @@ final class Win32Window: Window {
                 }
                 return 0
             case UINT(WM_IME_STARTCOMPOSITION):
+                window.suppressTextCompositionEvents = false
                 return 0
             case UINT(WM_IME_ENDCOMPOSITION):
+                window.suppressTextCompositionEvents = false
                 return 0
             case UINT(WM_IME_COMPOSITION):
+                if window.suppressTextCompositionEvents {
+                    return 0
+                }
                 window.synchronizeKeyStates()
                 if lParam & LPARAM(GCS_RESULTSTR) != 0 {
                     // Composition finished. Result characters will arrive through

@@ -19,6 +19,7 @@ protocol UIKitView: AnyObject {
     var layer: CALayer { get }
     var proxyWindow: UIKitWindow? { get set }
     func touchLocation(atIndex index: Int) -> CGPoint?
+    func resetTextComposition(_ emitEvents: Bool) -> String?
 }
 
 @MainActor
@@ -456,6 +457,17 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
         self.postTextInputEvent("\n")
         textField.text = ""
         return true
+    }
+
+    func resetTextComposition(_ emitEvents: Bool) -> String? {
+        let text = self.textField.text ?? ""
+        self.textField.text = ""
+
+        if emitEvents && self.textInput {
+            self.postTextInputEvent(text)
+            self.postTextCompositionEvent("")
+        }
+        return text.isEmpty ? nil : text
     }
 
     // MARK: - Notifications
