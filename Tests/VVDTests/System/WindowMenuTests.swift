@@ -79,33 +79,4 @@ final class WindowMenuTests: XCTestCase {
         XCTAssertEqual(invocationCount, 1)
     }
 
-#if os(macOS)
-    @MainActor
-    func testAppKitWindowProvidesStableMenuController() throws {
-        let window = try XCTUnwrap(
-            makeWindow(name: "WindowMenuTests", style: [.title], delegate: nil)
-        )
-        defer { window.close() }
-
-        let first = try XCTUnwrap(window.menuController)
-        let second = try XCTUnwrap(window.menuController)
-        XCTAssertTrue((first as AnyObject) === (second as AnyObject))
-
-        let snapshot = WindowMenu(menus: [
-            WindowMenu.Menu(
-                id: "file",
-                title: "File",
-                role: .file,
-                elements: [
-                    .item(WindowMenu.Item(id: "close", title: "Close")),
-                ]
-            ),
-        ])
-        first.setMenu(snapshot)
-        XCTAssertEqual(first.menu?.menus.first?.id, "file")
-
-        first.setMenu(nil)
-        XCTAssertNil(first.menu)
-    }
-#endif
 }

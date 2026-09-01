@@ -2,7 +2,7 @@
 import XCTest
 @testable import VVD
 
-final class EventTimestampTests: XCTestCase {
+final class WaylandEventTimestampTests: XCTestCase {
     func testMillisecondTimestampExtenderPreservesRolloverContinuity() {
         var clock = MillisecondTimestampExtender()
 
