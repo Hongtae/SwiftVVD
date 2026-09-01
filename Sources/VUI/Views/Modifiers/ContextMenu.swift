@@ -1907,7 +1907,7 @@ private struct ContextMenuPopupRow: View {
     }
 
     private var shortcut: KeyboardShortcut? {
-        item.item.keyboardShortcut
+        item.item.resolvedKeyboardShortcut
     }
 
     private var rowBackground: Color {

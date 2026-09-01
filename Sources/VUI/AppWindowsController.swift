@@ -54,6 +54,23 @@ class AppWindowsController: @unchecked Sendable {
         return result
     }
 
+    // One source can feed multiple roots, so schedule each shared source once.
+    func scheduleRootCommandsRefreshForKeyBindings() {
+        var sources: [
+            ObjectIdentifier: WindowController.RootCommandsSource
+        ] = [:]
+        for root in allWindowControllers {
+            guard let source = root.rootCommandsSource,
+                  source.owner === self else {
+                continue
+            }
+            sources[ObjectIdentifier(source)] = source
+        }
+        for source in sources.values {
+            source.scheduleRefreshForRoots()
+        }
+    }
+
     // Synchronizes the controller registries against the current SceneList,
     // and applies runtime window configuration overrides to all live controllers.
     // Must be called from outside an AG context; internally activates `graph`

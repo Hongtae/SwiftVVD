@@ -91,10 +91,9 @@ final class TextEditingCommandsTests: XCTestCase {
             })
             XCTAssertEqual(itemTitle(item), expected.title)
             XCTAssertEqual(item.platformTag, expected.tag)
-            XCTAssertEqual(item.keyboardShortcut?.key, expected.key)
             XCTAssertEqual(
-                item.keyboardShortcut?.modifiers,
-                expected.modifiers
+                item.keyboardShortcut,
+                expected.keyBinding.map(builtInKeyboardShortcut)
             )
             XCTAssertEqual(
                 item.isEnabled,
@@ -321,8 +320,7 @@ private struct ExpectedTextEditingCommand {
     var command: TextEditingCommand
     var title: String
     var tag: Int?
-    var key: KeyEquivalent?
-    var modifiers: EventModifiers?
+    var keyBinding: KeyBindingID?
 }
 
 private let expectedCommands = [
@@ -330,162 +328,139 @@ private let expectedCommands = [
         command: .find,
         title: "Find…",
         tag: 1,
-        key: "f",
-        modifiers: .command
+        keyBinding: .textEditingFind
     ),
     ExpectedTextEditingCommand(
         command: .findAndReplace,
         title: "Find and Replace…",
         tag: 12,
-        key: "f",
-        modifiers: [.command, .option]
+        keyBinding: .textEditingFindAndReplace
     ),
     ExpectedTextEditingCommand(
         command: .findNext,
         title: "Find Next",
         tag: 2,
-        key: "g",
-        modifiers: .command
+        keyBinding: .textEditingFindNext
     ),
     ExpectedTextEditingCommand(
         command: .findPrevious,
         title: "Find Previous",
         tag: 3,
-        key: "g",
-        modifiers: [.command, .shift]
+        keyBinding: .textEditingFindPrevious
     ),
     ExpectedTextEditingCommand(
         command: .useSelectionForFind,
         title: "Use Selection for Find",
         tag: 7,
-        key: "e",
-        modifiers: .command
+        keyBinding: .textEditingUseSelectionForFind
     ),
     ExpectedTextEditingCommand(
         command: .jumpToSelection,
         title: "Jump to Selection",
         tag: nil,
-        key: "j",
-        modifiers: .command
+        keyBinding: .textEditingJumpToSelection
     ),
     ExpectedTextEditingCommand(
         command: .showSpellingAndGrammar,
         title: "Show Spelling and Grammar",
         tag: nil,
-        key: ":",
-        modifiers: .command
+        keyBinding: .textEditingShowSpellingAndGrammar
     ),
     ExpectedTextEditingCommand(
         command: .checkDocumentNow,
         title: "Check Document Now",
         tag: nil,
-        key: ";",
-        modifiers: .command
+        keyBinding: .textEditingCheckDocumentNow
     ),
     ExpectedTextEditingCommand(
         command: .toggleCheckSpellingWhileTyping,
         title: "Check Spelling While Typing",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleCheckGrammarWithSpelling,
         title: "Check Grammar With Spelling",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleAutomaticSpellingCorrection,
         title: "Correct Spelling Automatically",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .showSubstitutions,
         title: "Show Substitutions",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleSmartCopyPaste,
         title: "Smart Copy/Paste",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleSmartQuotes,
         title: "Smart Quotes",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleSmartDashes,
         title: "Smart Dashes",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleSmartLinks,
         title: "Smart Links",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleDataDetectors,
         title: "Data Detectors",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .toggleTextReplacement,
         title: "Text Replacement",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .makeUpperCase,
         title: "Make Upper Case",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .makeLowerCase,
         title: "Make Lower Case",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .capitalize,
         title: "Capitalize",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .startSpeaking,
         title: "Start Speaking",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextEditingCommand(
         command: .stopSpeaking,
         title: "Stop Speaking",
         tag: nil,
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
 ]
 

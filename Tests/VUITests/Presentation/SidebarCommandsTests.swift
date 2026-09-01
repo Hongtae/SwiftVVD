@@ -50,8 +50,8 @@ final class SidebarCommandsTests: XCTestCase {
         XCTAssertTrue(item.isEnabled)
         XCTAssertEqual(item.keyboardShortcut?.key, "s")
         XCTAssertEqual(
-            item.keyboardShortcut?.modifiers,
-            [.command, .control]
+            item.keyboardShortcut,
+            builtInKeyboardShortcut(.sidebarToggle)
         )
 
         try XCTUnwrap(item.selectionBehavior?.onSelect)()
@@ -105,8 +105,7 @@ final class SidebarCommandsTests: XCTestCase {
             focusedValues: root.resolvedFocusedValues
         )
         return try XCTUnwrap(flattened(host.menuItems().items).first(where: {
-            $0.keyboardShortcut?.key == "s"
-                && $0.keyboardShortcut?.modifiers == [.command, .control]
+            $0.keyboardShortcut == builtInKeyboardShortcut(.sidebarToggle)
         }))
     }
 

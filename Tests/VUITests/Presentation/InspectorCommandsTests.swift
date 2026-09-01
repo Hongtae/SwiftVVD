@@ -52,8 +52,8 @@ final class InspectorCommandsTests: XCTestCase {
             XCTAssertFalse(item.isEnabled)
             XCTAssertEqual(item.keyboardShortcut?.key, "i")
             XCTAssertEqual(
-                item.keyboardShortcut?.modifiers,
-                [.command, .control]
+                item.keyboardShortcut,
+                builtInKeyboardShortcut(.inspectorToggle)
             )
         }
 

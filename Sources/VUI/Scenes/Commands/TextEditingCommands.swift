@@ -24,38 +24,36 @@ public struct TextEditingCommands: Commands {
                 "Find…",
                 command: .find,
                 tag: 1,
-                shortcut: "f"
+                keyBinding: .textEditingFind
             )
             textEditingButton(
                 "Find and Replace…",
                 command: .findAndReplace,
                 tag: 12,
-                shortcut: "f",
-                modifiers: [.command, .option]
+                keyBinding: .textEditingFindAndReplace
             )
             textEditingButton(
                 "Find Next",
                 command: .findNext,
                 tag: 2,
-                shortcut: "g"
+                keyBinding: .textEditingFindNext
             )
             textEditingButton(
                 "Find Previous",
                 command: .findPrevious,
                 tag: 3,
-                shortcut: "g",
-                modifiers: [.command, .shift]
+                keyBinding: .textEditingFindPrevious
             )
             textEditingButton(
                 "Use Selection for Find",
                 command: .useSelectionForFind,
                 tag: 7,
-                shortcut: "e"
+                keyBinding: .textEditingUseSelectionForFind
             )
             textEditingButton(
                 "Jump to Selection",
                 command: .jumpToSelection,
-                shortcut: "j"
+                keyBinding: .textEditingJumpToSelection
             )
         }
         .modifier(TextEditingFindMenuValidationModifier())
@@ -67,12 +65,12 @@ public struct TextEditingCommands: Commands {
                 textEditingButton(
                     "Show Spelling and Grammar",
                     command: .showSpellingAndGrammar,
-                    shortcut: ":"
+                    keyBinding: .textEditingShowSpellingAndGrammar
                 )
                 textEditingButton(
                     "Check Document Now",
                     command: .checkDocumentNow,
-                    shortcut: ";"
+                    keyBinding: .textEditingCheckDocumentNow
                 )
             }
             Section {
@@ -159,13 +157,12 @@ public struct TextEditingCommands: Commands {
         _ title: LocalizedStringKey,
         command: TextEditingCommand,
         tag: Int? = nil,
-        shortcut: KeyEquivalent,
-        modifiers: EventModifiers = .command
+        keyBinding: KeyBindingID
     ) -> some View {
         Button(title) {
             performRootTextEditingCommand(command)
         }
-        .keyboardShortcut(shortcut, modifiers: modifiers)
+        .builtInKeyboardShortcut(keyBinding)
         .modifier(
             TextEditingCommandItemModifier(command: command, tag: tag)
         )

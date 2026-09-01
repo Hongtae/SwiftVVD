@@ -19,7 +19,7 @@ public struct ToolbarCommands: Commands {
                 Button("Show Toolbar") {
                     performRootToolbarCommand(.toggleVisibility)
                 }
-                .keyboardShortcut("t", modifiers: [.command, .option])
+                .builtInKeyboardShortcut(.toolbarToggleVisibility)
                 .disabled(toolbarVisibility == nil)
                 .modifier(
                     RootToolbarCommandValidationModifier(

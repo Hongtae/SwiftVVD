@@ -37,18 +37,18 @@ public struct TextFormattingCommands: Commands {
             textFormattingButton(
                 "Align Left",
                 command: .alignLeft,
-                shortcut: "{"
+                keyBinding: .textFormattingAlignLeft
             )
             textFormattingButton(
                 "Center",
                 command: .alignCenter,
-                shortcut: "|"
+                keyBinding: .textFormattingAlignCenter
             )
             textFormattingButton("Justify", command: .alignJustify)
             textFormattingButton(
                 "Align Right",
                 command: .alignRight,
-                shortcut: "}"
+                keyBinding: .textFormattingAlignRight
             )
         }
     }
@@ -92,14 +92,12 @@ public struct TextFormattingCommands: Commands {
             textFormattingButton(
                 "Copy Ruler",
                 command: .copyRuler,
-                shortcut: "c",
-                modifiers: [.command, .control]
+                keyBinding: .textFormattingCopyRuler
             )
             textFormattingButton(
                 "Paste Ruler",
                 command: .pasteRuler,
-                shortcut: "v",
-                modifiers: [.command, .control]
+                keyBinding: .textFormattingPasteRuler
             )
         }
     }
@@ -117,13 +115,12 @@ public struct TextFormattingCommands: Commands {
     private func textFormattingButton(
         _ title: LocalizedStringKey,
         command: TextFormattingCommand,
-        shortcut: KeyEquivalent,
-        modifiers: EventModifiers = .command
+        keyBinding: KeyBindingID
     ) -> some View {
         Button(title) {
             performRootTextFormattingCommand(command)
         }
-        .keyboardShortcut(shortcut, modifiers: modifiers)
+        .builtInKeyboardShortcut(keyBinding)
         .modifier(TextFormattingCommandItemModifier(command: command))
     }
 }

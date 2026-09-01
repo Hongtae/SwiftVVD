@@ -15,7 +15,7 @@ public struct SidebarCommands: Commands {
             Button("Show Sidebar") {
                 performRootSidebarCommand()
             }
-            .keyboardShortcut("s", modifiers: [.command, .control])
+            .builtInKeyboardShortcut(.sidebarToggle)
             .modifier(RootSidebarCommandValidationModifier())
         }
     }

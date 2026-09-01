@@ -43,8 +43,8 @@ final class ToolbarCommandsTests: XCTestCase {
         XCTAssertTrue(customize.isEnabled)
         XCTAssertEqual(toggle.keyboardShortcut?.key, "t")
         XCTAssertEqual(
-            toggle.keyboardShortcut?.modifiers,
-            [.command, .option]
+            toggle.keyboardShortcut,
+            builtInKeyboardShortcut(.toolbarToggleVisibility)
         )
 
         try XCTUnwrap(toggle.selectionBehavior?.onSelect)()

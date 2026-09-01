@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "presets": {
+    "apple": {
+      "bindings": {
+        "textEditing.find": { "key": "f", "modifiers": ["command"] },
+        "textEditing.findAndReplace": { "key": "f", "modifiers": ["command", "option"] },
+        "textEditing.findNext": { "key": "g", "modifiers": ["command"] },
+        "textEditing.findPrevious": { "key": "g", "modifiers": ["command", "shift"] },
+        "textEditing.useSelectionForFind": { "key": "e", "modifiers": ["command"] },
+        "textEditing.jumpToSelection": { "key": "j", "modifiers": ["command"] },
+        "textEditing.showSpellingAndGrammar": { "key": ":", "modifiers": ["command"] },
+        "textEditing.checkDocumentNow": { "key": ";", "modifiers": ["command"] },
+        "textFormatting.alignLeft": { "key": "{", "modifiers": ["command"] },
+        "textFormatting.alignCenter": { "key": "|", "modifiers": ["command"] },
+        "textFormatting.alignRight": { "key": "}", "modifiers": ["command"] },
+        "textFormatting.copyRuler": { "key": "c", "modifiers": ["command", "control"] },
+        "textFormatting.pasteRuler": { "key": "v", "modifiers": ["command", "control"] },
+        "toolbar.toggleVisibility": { "key": "t", "modifiers": ["command", "option"] },
+        "sidebar.toggle": { "key": "s", "modifiers": ["command", "control"] },
+        "inspector.toggle": { "key": "i", "modifiers": ["command", "control"] }
+      }
+    },
+    "windows": {
+      "bindings": {
+        "textEditing.find": { "key": "f", "modifiers": ["control"] },
+        "textEditing.findAndReplace": { "key": "f", "modifiers": ["control", "option"] },
+        "textEditing.findNext": { "key": "g", "modifiers": ["control"] },
+        "textEditing.findPrevious": { "key": "g", "modifiers": ["control", "shift"] },
+        "textEditing.useSelectionForFind": { "key": "e", "modifiers": ["control"] },
+        "textEditing.jumpToSelection": { "key": "j", "modifiers": ["control"] },
+        "textEditing.showSpellingAndGrammar": { "key": ":", "modifiers": ["control"] },
+        "textEditing.checkDocumentNow": { "key": ";", "modifiers": ["control"] },
+        "textFormatting.alignLeft": { "key": "{", "modifiers": ["control"] },
+        "textFormatting.alignCenter": { "key": "|", "modifiers": ["control"] },
+        "textFormatting.alignRight": { "key": "}", "modifiers": ["control"] },
+        "textFormatting.copyRuler": { "key": "c", "modifiers": ["control", "option"] },
+        "textFormatting.pasteRuler": { "key": "v", "modifiers": ["control", "option"] },
+        "toolbar.toggleVisibility": { "key": "t", "modifiers": ["control", "option"] },
+        "sidebar.toggle": { "key": "s", "modifiers": ["control", "option"] },
+        "inspector.toggle": { "key": "i", "modifiers": ["control", "option"] }
+      }
+    },
+    "linux": {
+      "bindings": {
+        "textEditing.find": { "key": "f", "modifiers": ["control"] },
+        "textEditing.findAndReplace": { "key": "f", "modifiers": ["control", "option"] },
+        "textEditing.findNext": { "key": "g", "modifiers": ["control"] },
+        "textEditing.findPrevious": { "key": "g", "modifiers": ["control", "shift"] },
+        "textEditing.useSelectionForFind": { "key": "e", "modifiers": ["control"] },
+        "textEditing.jumpToSelection": { "key": "j", "modifiers": ["control"] },
+        "textEditing.showSpellingAndGrammar": { "key": ":", "modifiers": ["control"] },
+        "textEditing.checkDocumentNow": { "key": ";", "modifiers": ["control"] },
+        "textFormatting.alignLeft": { "key": "{", "modifiers": ["control"] },
+        "textFormatting.alignCenter": { "key": "|", "modifiers": ["control"] },
+        "textFormatting.alignRight": { "key": "}", "modifiers": ["control"] },
+        "textFormatting.copyRuler": { "key": "c", "modifiers": ["control", "option"] },
+        "textFormatting.pasteRuler": { "key": "v", "modifiers": ["control", "option"] },
+        "toolbar.toggleVisibility": { "key": "t", "modifiers": ["control", "option"] },
+        "sidebar.toggle": { "key": "s", "modifiers": ["control", "option"] },
+        "inspector.toggle": { "key": "i", "modifiers": ["control", "option"] }
+      }
+    }
+  }
+}

@@ -36,7 +36,7 @@ public struct InspectorCommands: Commands {
                     systemImage: "sidebar.trailing"
                 )
             }
-            .keyboardShortcut("i", modifiers: [.command, .control])
+            .builtInKeyboardShortcut(.inspectorToggle)
             .disabled(inspectorPresented == nil)
         }
     }

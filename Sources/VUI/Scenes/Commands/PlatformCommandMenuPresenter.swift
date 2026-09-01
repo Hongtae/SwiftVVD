@@ -510,7 +510,7 @@ enum WindowMenuSnapshotBuilder {
             isAlternate: item.isAlternate,
             indentationLevel: item.indentationLevel,
             allowsShortcutWhenHidden: item.allowsKeyEquivalentWhenHidden,
-            shortcut: item.keyboardShortcut.map(shortcut),
+            shortcut: item.resolvedKeyboardShortcut.map(shortcut),
             toolTip: item.tooltip,
             action: action
         )
@@ -578,6 +578,7 @@ enum WindowMenuSnapshotBuilder {
         case "\u{F715}": .f18
         case "\u{F716}": .f19
         case "\u{F717}": .f20
+        case "\u{F727}": .insert
         case "\u{F728}": .delete
         case "\u{F729}": .home
         case "\u{F72B}": .end

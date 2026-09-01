@@ -43,6 +43,8 @@ struct PlatformItemList {
         var systemItem: SystemItem?
         var selectionBehavior: SelectionBehavior?
         var keyboardShortcut: KeyboardShortcut?
+        // Present only for framework commands resolved by the active preset.
+        var builtInKeyBinding: KeyBindingID?
         var onHover: ((Bool) -> Void)?
         var buttonRole: ButtonRole?
         var label: NSAttributedString?
@@ -100,6 +102,7 @@ struct PlatformItemList {
             systemItem = nil
             selectionBehavior = nil
             keyboardShortcut = nil
+            builtInKeyBinding = nil
             onHover = nil
             buttonRole = nil
             label = nil

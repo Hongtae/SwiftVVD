@@ -142,9 +142,11 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
     func menuItems() -> PlatformItemList {
         storage.instantiateIfNeeded()
         storage.updateOutputs(at: currentTimestamp)
-        return storage.data.withCurrent {
+        var list = storage.data.withCurrent {
             storage.platformItemList() ?? PlatformItemList()
         }
+        list.resolveBuiltInKeyboardShortcuts()
+        return list
     }
 
     func requestUpdate(after: Double) {

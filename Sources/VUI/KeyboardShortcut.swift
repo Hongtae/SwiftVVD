@@ -56,21 +56,51 @@ extension KeyEquivalent {
             self.init(character)
             return
         }
-        switch event.key {
+        self.init(virtualKey: event.key)
+    }
+
+    init?(virtualKey: VVD.VirtualKey) {
+        if let character = virtualKey.shortcutCharacter {
+            self.init(character)
+            return
+        }
+        switch virtualKey {
         case .escape: self = .escape
+        case .f1: self.init("\u{F704}")
+        case .f2: self.init("\u{F705}")
+        case .f3: self.init("\u{F706}")
+        case .f4: self.init("\u{F707}")
+        case .f5: self.init("\u{F708}")
+        case .f6: self.init("\u{F709}")
+        case .f7: self.init("\u{F70A}")
+        case .f8: self.init("\u{F70B}")
+        case .f9: self.init("\u{F70C}")
+        case .f10: self.init("\u{F70D}")
+        case .f11: self.init("\u{F70E}")
+        case .f12: self.init("\u{F70F}")
+        case .f13: self.init("\u{F710}")
+        case .f14: self.init("\u{F711}")
+        case .f15: self.init("\u{F712}")
+        case .f16: self.init("\u{F713}")
+        case .f17: self.init("\u{F714}")
+        case .f18: self.init("\u{F715}")
+        case .f19: self.init("\u{F716}")
+        case .f20: self.init("\u{F717}")
+        case .insert: self.init("\u{F727}")
+        case .home: self = .home
+        case .pageUp: self = .pageUp
+        case .pageDown: self = .pageDown
+        case .end: self = .end
+        case .delete: self = .deleteForward
+        case .left: self = .leftArrow
+        case .right: self = .rightArrow
+        case .up: self = .upArrow
+        case .down: self = .downArrow
+        case .backspace: self = .delete
         case .tab: self = .tab
         case .space: self = .space
         case .return, .enter: self = .return
-        case .backspace: self = .delete
-        case .delete: self = .deleteForward
-        case .home: self = .home
-        case .end: self = .end
-        case .pageUp: self = .pageUp
-        case .pageDown: self = .pageDown
-        case .up: self = .upArrow
-        case .down: self = .downArrow
-        case .left: self = .leftArrow
-        case .right: self = .rightArrow
+        case .numlock: self = .clear
         default: return nil
         }
     }

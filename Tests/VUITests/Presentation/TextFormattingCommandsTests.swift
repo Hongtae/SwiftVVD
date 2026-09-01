@@ -84,10 +84,9 @@ final class TextFormattingCommandsTests: XCTestCase {
                 $0.textFormattingCommand == expected.command
             })
             XCTAssertEqual(itemTitle(item), expected.title)
-            XCTAssertEqual(item.keyboardShortcut?.key, expected.key)
             XCTAssertEqual(
-                item.keyboardShortcut?.modifiers,
-                expected.modifiers
+                item.keyboardShortcut,
+                expected.keyBinding.map(builtInKeyboardShortcut)
             )
             XCTAssertTrue(item.isEnabled)
             XCTAssertNotNil(item.selectionBehavior?.onSelect)
@@ -262,88 +261,74 @@ final class TextFormattingCommandsTests: XCTestCase {
 private struct ExpectedTextFormattingCommand {
     var command: TextFormattingCommand
     var title: String
-    var key: KeyEquivalent?
-    var modifiers: EventModifiers?
+    var keyBinding: KeyBindingID?
 }
 
 private let expectedTextFormattingCommands = [
     ExpectedTextFormattingCommand(
         command: .alignLeft,
         title: "Align Left",
-        key: "{",
-        modifiers: .command
+        keyBinding: .textFormattingAlignLeft
     ),
     ExpectedTextFormattingCommand(
         command: .alignCenter,
         title: "Center",
-        key: "|",
-        modifiers: .command
+        keyBinding: .textFormattingAlignCenter
     ),
     ExpectedTextFormattingCommand(
         command: .alignJustify,
         title: "Justify",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .alignRight,
         title: "Align Right",
-        key: "}",
-        modifiers: .command
+        keyBinding: .textFormattingAlignRight
     ),
     ExpectedTextFormattingCommand(
         command: .defaultParagraphWritingDirection,
         title: "Default",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .leftToRightParagraphWritingDirection,
         title: "Left to Right",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .rightToLeftParagraphWritingDirection,
         title: "Right to Left",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .defaultSelectionWritingDirection,
         title: "Default",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .leftToRightSelectionWritingDirection,
         title: "Left to Right",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .rightToLeftSelectionWritingDirection,
         title: "Right to Left",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .toggleRuler,
         title: "Show Ruler",
-        key: nil,
-        modifiers: nil
+        keyBinding: nil
     ),
     ExpectedTextFormattingCommand(
         command: .copyRuler,
         title: "Copy Ruler",
-        key: "c",
-        modifiers: [.command, .control]
+        keyBinding: .textFormattingCopyRuler
     ),
     ExpectedTextFormattingCommand(
         command: .pasteRuler,
         title: "Paste Ruler",
-        key: "v",
-        modifiers: [.command, .control]
+        keyBinding: .textFormattingPasteRuler
     ),
 ]
 

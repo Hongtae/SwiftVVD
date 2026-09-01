@@ -123,7 +123,8 @@ let package = Package(
             resources: [
                 .copy("Resources/Fonts"),
                 .copy("Resources/Shaders/SPIRV"),
-                .copy("Resources/Symbols")
+                .copy("Resources/Symbols"),
+                .copy("Resources/Presets")
             ],
             swiftSettings: [
             ]),

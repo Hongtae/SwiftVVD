@@ -410,7 +410,7 @@ final class WindowCommandMenuPresenter {
                 || item.allowsKeyEquivalentWhenHidden
             if participates,
                item.isEnabled,
-               let shortcut = item.keyboardShortcut,
+               let shortcut = item.resolvedKeyboardShortcut,
                shortcut.modifiers == modifiers,
                equivalent(shortcut.key, key),
                let action = item.selectionBehavior?.onSelect {
