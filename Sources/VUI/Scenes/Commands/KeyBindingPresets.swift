@@ -119,6 +119,10 @@ private extension VirtualKey {
 /// Application-defined `keyboardShortcut` values remain literal and do not
 /// pass through this table.
 public enum KeyBindingID: String, CaseIterable, Codable, Sendable {
+    case pasteboardCut = "pasteboard.cut"
+    case pasteboardCopy = "pasteboard.copy"
+    case pasteboardPaste = "pasteboard.paste"
+    case pasteboardSelectAll = "pasteboard.selectAll"
     case textEditingFind = "textEditing.find"
     case textEditingFindAndReplace = "textEditing.findAndReplace"
     case textEditingFindNext = "textEditing.findNext"

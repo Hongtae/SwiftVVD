@@ -347,7 +347,8 @@ final class TextFieldInputTests: XCTestCase {
     }
 
     // ASSERTIONS textFieldClipboardEditingRuntimeObserved
-    func testTextFieldResponderValidatesAndPerformsClipboardCommands() throws {
+    // ASSERTIONS commandsDefaultPasteboardValidationRuntimeObserved
+    func testTextFieldResponderValidatesAndPerformsPasteboardCommands() throws {
         let clipboard = TextFieldTestClipboard()
         let context = TextFieldClipboardAppContext(clipboard: clipboard)
         let previousAppContext = appContext
@@ -374,6 +375,13 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertFalse(responder.canPerformTextEditingCommand(.copy))
         XCTAssertFalse(responder.canPerformTextEditingCommand(.cut))
         XCTAssertFalse(responder.canPerformTextEditingCommand(.paste))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.delete))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.selectAll))
+
+        responder.performTextEditingCommand(.selectAll)
+        Update.dispatchActions()
+        XCTAssertEqual(inputState.selectionOffsets, 0..<model.text.count)
+        XCTAssertEqual(inputState.selectionAffinity, .upstream)
 
         XCTAssertTrue(inputState.setSelection(
             0..<5,
@@ -426,6 +434,31 @@ final class TextFieldInputTests: XCTestCase {
             affinity: .upstream,
             committedText: model.text
         ))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.delete))
+        responder.performTextEditingCommand(.delete)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, " beta gamma")
+        XCTAssertEqual(fieldState.displayText, model.text)
+        XCTAssertEqual(inputState.selectionOffsets, 0..<0)
+        XCTAssertEqual(inputState.selectionAffinity, .downstream)
+
+        clipboard.representations = [
+            ClipboardContentType.utf8PlainText: Data("Omega🙂".utf8)
+        ]
+        responder.performTextEditingCommand(.paste)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "Omega🙂 beta gamma")
+
+        responder.performTextEditingCommand(.selectAll)
+        Update.dispatchActions()
+        XCTAssertEqual(inputState.selectionOffsets, 0..<model.text.count)
+        XCTAssertEqual(inputState.selectionAffinity, .upstream)
+
+        XCTAssertTrue(inputState.setSelection(
+            0..<6,
+            affinity: .upstream,
+            committedText: model.text
+        ))
         clipboard.rejectsWrites = true
         responder.performTextEditingCommand(.cut)
         Update.dispatchActions()
@@ -436,6 +469,8 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertFalse(responder.canPerformTextEditingCommand(.copy))
         XCTAssertFalse(responder.canPerformTextEditingCommand(.cut))
         XCTAssertFalse(responder.canPerformTextEditingCommand(.paste))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.delete))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.selectAll))
     }
 
     func testCaretMetricsUseFontLineHeightAndCompositionWidth() {

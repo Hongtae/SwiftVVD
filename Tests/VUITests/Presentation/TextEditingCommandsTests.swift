@@ -4,8 +4,42 @@ import class VVD.AudioDeviceContext
 import class VVD.GraphicsDeviceContext
 
 final class TextEditingCommandsTests: XCTestCase {
+    func testDefaultPasteboardCommandsExistWithoutApplicationCommands()
+        throws {
+        // ASSERTIONS commandsDefaultEditMenuRuntimeObserved
+        let appGraph = AppGraph(app: DefaultPasteboardCommandsTestApp())
+        setVectorFontRendering(in: appGraph)
+        XCTAssertNil(appGraph.commandsListAttr)
+
+        let windowsController = AppWindowsController()
+        let previousAppContext = appContext
+        appContext = TextEditingCommandsTestAppContext(
+            windowsController: windowsController
+        )
+        defer { appContext = previousAppContext }
+
+        windowsController.syncWindowControllers(
+            sceneListAttr: appGraph.sceneListAttr,
+            commandsListAttr: appGraph.commandsListAttr,
+            rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            focusedValuesAttr: appGraph.focusedValuesAttr,
+            in: appGraph.graph
+        )
+
+        let root = try XCTUnwrap(windowsController.allWindowControllers.first)
+        windowsController.rootWindowDidActivate(root)
+        update(root, ticks: 0..<12)
+
+        XCTAssertEqual(
+            try textEditingItems(in: root).items.compactMap(itemTitle),
+            ["Cut", "Copy", "Paste", "Delete", "Select All"]
+        )
+    }
+
     func testTextEditingCommandsBuildObservedMenuInventoryWithoutResponder()
         throws {
+        // ASSERTIONS commandsDefaultEditMenuRuntimeObserved
+        // ASSERTIONS commandsDefaultPasteboardValidationRuntimeObserved
         // ASSERTIONS commandsTextEditingBodyDisassemblyObserved
         // ASSERTIONS commandsTextEditingMenuRuntimeObserved
         // ASSERTIONS commandsTextEditingResponderRuntimeObserved
@@ -80,8 +114,37 @@ final class TextEditingCommandsTests: XCTestCase {
             ["Start Speaking", "Stop Speaking"]
         )
 
-        let commandItems = flattened(list.items).filter {
-            $0.textEditingCommand != nil
+        let allItems = flattened(list.items)
+        let pasteboardItems = allItems.filter {
+            guard let command = $0.textEditingCommand else { return false }
+            return TextEditingCommand.defaultPasteboardCommands.contains(
+                command
+            )
+        }
+        XCTAssertEqual(pasteboardItems.count, expectedPasteboardCommands.count)
+        for expected in expectedPasteboardCommands {
+            let item = try XCTUnwrap(pasteboardItems.first {
+                $0.textEditingCommand == expected.command
+            })
+            XCTAssertEqual(itemTitle(item), expected.title)
+            XCTAssertEqual(
+                item.keyboardShortcut,
+                expected.keyBinding.map(builtInKeyboardShortcut)
+            )
+            XCTAssertFalse(item.isEnabled)
+            XCTAssertNil(item.selectionBehavior?.onSelect)
+            if case .initialize? = item.commandOperation?.mutation {
+                // Framework defaults initialize before app operations.
+            } else {
+                XCTFail("expected initialize operation for \(expected.title)")
+            }
+        }
+
+        let commandItems = allItems.filter {
+            guard let command = $0.textEditingCommand else { return false }
+            return TextEditingCommand.allTextEditingBodyCommands.contains(
+                command
+            )
         }
         XCTAssertEqual(commandItems.count, expectedCommands.count)
 
@@ -102,6 +165,48 @@ final class TextEditingCommandsTests: XCTestCase {
             XCTAssertNotNil(item.selectionBehavior?.onSelect)
             XCTAssertNil(item.toggleState)
         }
+    }
+
+    func testDefaultPasteboardCommandsSupportAugmentationAndReplacement()
+        throws {
+        // ASSERTIONS commandsDefaultPasteboardAugmentationRuntimeObserved
+        // ASSERTIONS commandsDefaultPasteboardReplacementRuntimeObserved
+        let previousAppContext = appContext
+        appContext = nil
+        defer { appContext = previousAppContext }
+
+        var augmented = _ResolvedCommands()
+        augmented.initializeDefaultPasteboardCommands()
+        CommandGroup(before: .pasteboard) {
+            Button("Before Pasteboard") {}
+        }._resolve(into: &augmented)
+        CommandGroup(after: .pasteboard) {
+            Button("After Pasteboard") {}
+        }._resolve(into: &augmented)
+
+        XCTAssertEqual(
+            try editItems(in: augmented).items.compactMap(itemTitle),
+            [
+                "Before Pasteboard",
+                "Cut",
+                "Copy",
+                "Paste",
+                "Delete",
+                "Select All",
+                "After Pasteboard",
+            ]
+        )
+
+        var replaced = _ResolvedCommands()
+        replaced.initializeDefaultPasteboardCommands()
+        CommandGroup(replacing: .pasteboard) {
+            Button("Replacement Pasteboard") {}
+        }._resolve(into: &replaced)
+
+        XCTAssertEqual(
+            try editItems(in: replaced).items.compactMap(itemTitle),
+            ["Replacement Pasteboard"]
+        )
     }
 
     func testTextEditingCommandsResolveActiveFocusedResponderOnSelection()
@@ -180,9 +285,9 @@ final class TextEditingCommandsTests: XCTestCase {
             try item(for: .makeUpperCase, in: items)
                 .selectionBehavior?.onSelect
         )
-        let staleCopySelection = {
-            windowsController.performRootTextEditingCommand(.copy)
-        }
+        let staleCopySelection = try XCTUnwrap(
+            try item(for: .copy, in: items).selectionBehavior?.onSelect
+        )
 
         windowsController.rootWindowDidActivate(secondRoot)
         updateAll(roots, startingAt: 80)
@@ -241,6 +346,21 @@ final class TextEditingCommandsTests: XCTestCase {
             item: editMenu,
             environment: presenter.environment,
             focusedValues: root.resolvedFocusedValues
+        ).menuItems()
+    }
+
+    private func editItems(
+        in resolved: _ResolvedCommands
+    ) throws -> PlatformItemList {
+        let editMenu = try XCTUnwrap(
+            resolved.mainMenuItems(env: EnvironmentValues()).first {
+                $0.id == .edit
+            }
+        )
+        return MainMenuItemHost(
+            item: editMenu,
+            environment: EnvironmentValues(),
+            focusedValues: FocusedValues()
         ).menuItems()
     }
 
@@ -322,6 +442,39 @@ private struct ExpectedTextEditingCommand {
     var tag: Int?
     var keyBinding: KeyBindingID?
 }
+
+private let expectedPasteboardCommands = [
+    ExpectedTextEditingCommand(
+        command: .cut,
+        title: "Cut",
+        tag: nil,
+        keyBinding: .pasteboardCut
+    ),
+    ExpectedTextEditingCommand(
+        command: .copy,
+        title: "Copy",
+        tag: nil,
+        keyBinding: .pasteboardCopy
+    ),
+    ExpectedTextEditingCommand(
+        command: .paste,
+        title: "Paste",
+        tag: nil,
+        keyBinding: .pasteboardPaste
+    ),
+    ExpectedTextEditingCommand(
+        command: .delete,
+        title: "Delete",
+        tag: nil,
+        keyBinding: nil
+    ),
+    ExpectedTextEditingCommand(
+        command: .selectAll,
+        title: "Select All",
+        tag: nil,
+        keyBinding: .pasteboardSelectAll
+    ),
+]
 
 private let expectedCommands = [
     ExpectedTextEditingCommand(
@@ -465,6 +618,12 @@ private let expectedCommands = [
 ]
 
 private extension TextEditingCommand {
+    static let defaultPasteboardCommands = expectedPasteboardCommands.map(
+        \.command
+    )
+
+    static let allTextEditingBodyCommands = expectedCommands.map(\.command)
+
     static let allFindCommands: [TextEditingCommand] = [
         .find,
         .findAndReplace,
@@ -474,7 +633,8 @@ private extension TextEditingCommand {
         .jumpToSelection,
     ]
 
-    static let allTestCommands = expectedCommands.map(\.command)
+    static let allTestCommands = defaultPasteboardCommands
+        + allTextEditingBodyCommands
 
     var isFindCommand: Bool {
         Self.allFindCommands.contains(self)
@@ -532,6 +692,17 @@ private struct TextEditingCommandsTestApp: App {
         }
         .commandMenuPresentationStyle(.window)
         .commands { TextEditingCommands() }
+    }
+}
+
+private struct DefaultPasteboardCommandsTestApp: App {
+    init() {}
+
+    var body: some Scene {
+        Window("Default pasteboard commands", id: "default-pasteboard") {
+            EmptyView()
+        }
+        .commandMenuPresentationStyle(.window)
     }
 }
 

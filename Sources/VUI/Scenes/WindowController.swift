@@ -97,6 +97,7 @@ class WindowController: WindowDelegate,
             graphAccess.withLock { _ in
                 _AGGraph.withCurrent(graph) {
                     var resolved = _ResolvedCommands()
+                    resolved.initializeDefaultPasteboardCommands()
                     commandsList?.value.resolveOperations(into: &resolved)
                     let environment = environment.value
                     return ResolvedRootCommands(

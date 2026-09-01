@@ -7,6 +7,12 @@ final class KeyBindingPresetsTests: XCTestCase {
     func testBundledPresetsUsePlatformNamedModifierConventions() {
         let presets = KeyBindingPresets.bundled
         let apple: [KeyBindingID: KeyboardShortcut] = [
+            .pasteboardCut: KeyboardShortcut("x", modifiers: .command),
+            .pasteboardCopy: KeyboardShortcut("c", modifiers: .command),
+            .pasteboardPaste: KeyboardShortcut("v", modifiers: .command),
+            .pasteboardSelectAll: KeyboardShortcut(
+                "a", modifiers: .command
+            ),
             .textEditingFind: KeyboardShortcut("f", modifiers: .command),
             .textEditingFindAndReplace: KeyboardShortcut(
                 "f", modifiers: [.command, .option]
@@ -53,6 +59,12 @@ final class KeyBindingPresetsTests: XCTestCase {
             ),
         ]
         let controlBased: [KeyBindingID: KeyboardShortcut] = [
+            .pasteboardCut: KeyboardShortcut("x", modifiers: .control),
+            .pasteboardCopy: KeyboardShortcut("c", modifiers: .control),
+            .pasteboardPaste: KeyboardShortcut("v", modifiers: .control),
+            .pasteboardSelectAll: KeyboardShortcut(
+                "a", modifiers: .control
+            ),
             .textEditingFind: KeyboardShortcut("f", modifiers: .control),
             .textEditingFindAndReplace: KeyboardShortcut(
                 "f", modifiers: [.control, .option]

@@ -1550,6 +1550,10 @@ final class TextFieldResponder: MultiViewResponder,
             return clipboard?.containsData(
                 forType: ClipboardContentType.utf8PlainText
             ) == true
+        case .delete:
+            return inputState.wrappedValue.hasSelection
+        case .selectAll:
+            return true
         case .jumpToSelection:
             return true
         case .makeUpperCase, .makeLowerCase, .capitalize:
@@ -1641,6 +1645,43 @@ final class TextFieldResponder: MultiViewResponder,
                 var state = fieldState.wrappedValue
                 state.displayText = committedText
                 fieldState.wrappedValue = state
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
+            }
+
+        case .delete:
+            Update.enqueueAction {
+                var committedText = text.wrappedValue
+                var editing = inputState.wrappedValue
+                guard editing.replaceSelection(
+                    with: "",
+                    in: &committedText
+                ) else {
+                    return
+                }
+                inputState.wrappedValue = editing
+                text.wrappedValue = committedText
+                var state = fieldState.wrappedValue
+                state.displayText = committedText
+                fieldState.wrappedValue = state
+                self.publishSelection(
+                    editing,
+                    committedText: committedText
+                )
+            }
+
+        case .selectAll:
+            Update.enqueueAction {
+                let committedText = text.wrappedValue
+                var editing = inputState.wrappedValue
+                _ = editing.setSelection(
+                    0..<committedText.count,
+                    affinity: .upstream,
+                    committedText: committedText
+                )
+                inputState.wrappedValue = editing
                 self.publishSelection(
                     editing,
                     committedText: committedText

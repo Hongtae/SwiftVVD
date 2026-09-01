@@ -176,6 +176,8 @@ enum TextEditingCommand: Hashable, Sendable {
     case copy
     case cut
     case paste
+    case delete
+    case selectAll
     case find
     case findAndReplace
     case findNext
@@ -199,6 +201,90 @@ enum TextEditingCommand: Hashable, Sendable {
     case capitalize
     case startSpeaking
     case stopSpeaking
+}
+
+extension _ResolvedCommands {
+    mutating func initializeDefaultPasteboardCommands() {
+        let operation = CommandOperation(
+            mutation: .initialize,
+            placement: .pasteboard,
+            content: DefaultPasteboardCommandItems()
+        )
+        operation.resolver?(operation, &self)
+    }
+}
+
+private struct DefaultPasteboardCommandItems: View {
+    var body: some View {
+        pasteboardButton(
+            "Cut",
+            command: .cut,
+            keyBinding: .pasteboardCut
+        )
+        pasteboardButton(
+            "Copy",
+            command: .copy,
+            keyBinding: .pasteboardCopy
+        )
+        pasteboardButton(
+            "Paste",
+            command: .paste,
+            keyBinding: .pasteboardPaste
+        )
+        pasteboardButton("Delete", command: .delete)
+        pasteboardButton(
+            "Select All",
+            command: .selectAll,
+            keyBinding: .pasteboardSelectAll
+        )
+    }
+
+    private func pasteboardButton(
+        _ title: LocalizedStringKey,
+        command: TextEditingCommand
+    ) -> some View {
+        Button(title) {
+            performRootTextEditingCommand(command)
+        }
+        .modifier(TextEditingCommandItemModifier(command: command, tag: nil))
+        .modifier(DefaultPasteboardCommandValidationModifier(command: command))
+    }
+
+    private func pasteboardButton(
+        _ title: LocalizedStringKey,
+        command: TextEditingCommand,
+        keyBinding: KeyBindingID
+    ) -> some View {
+        Button(title) {
+            performRootTextEditingCommand(command)
+        }
+        .builtInKeyboardShortcut(keyBinding)
+        .modifier(TextEditingCommandItemModifier(command: command, tag: nil))
+        .modifier(DefaultPasteboardCommandValidationModifier(command: command))
+    }
+}
+
+private struct DefaultPasteboardCommandValidationModifier: ViewModifier {
+    var command: TextEditingCommand
+
+    func body(content: Content) -> some View {
+        let isEnabled = canPerformRootTextEditingCommand(command)
+        return content
+            .disabled(!isEnabled)
+            .transformPlatformItemList(
+                AllPlatformItemListFlags.self
+            ) { list in
+                list.modify { item in
+                    item.isEnabled = item.isEnabled && isEnabled
+                    if var selection = item.selectionBehavior {
+                        selection.onSelect = isEnabled ? {
+                            performRootTextEditingCommand(command)
+                        } : nil
+                        item.selectionBehavior = selection
+                    }
+                }
+            }
+    }
 }
 
 protocol TextEditingCommandResponder: AnyObject {

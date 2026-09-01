@@ -3,6 +3,10 @@
   "presets": {
     "apple": {
       "bindings": {
+        "pasteboard.cut": { "key": "x", "modifiers": ["command"] },
+        "pasteboard.copy": { "key": "c", "modifiers": ["command"] },
+        "pasteboard.paste": { "key": "v", "modifiers": ["command"] },
+        "pasteboard.selectAll": { "key": "a", "modifiers": ["command"] },
         "textEditing.find": { "key": "f", "modifiers": ["command"] },
         "textEditing.findAndReplace": { "key": "f", "modifiers": ["command", "option"] },
         "textEditing.findNext": { "key": "g", "modifiers": ["command"] },
@@ -23,6 +27,10 @@
     },
     "windows": {
       "bindings": {
+        "pasteboard.cut": { "key": "x", "modifiers": ["control"] },
+        "pasteboard.copy": { "key": "c", "modifiers": ["control"] },
+        "pasteboard.paste": { "key": "v", "modifiers": ["control"] },
+        "pasteboard.selectAll": { "key": "a", "modifiers": ["control"] },
         "textEditing.find": { "key": "f", "modifiers": ["control"] },
         "textEditing.findAndReplace": { "key": "f", "modifiers": ["control", "option"] },
         "textEditing.findNext": { "key": "g", "modifiers": ["control"] },
@@ -43,6 +51,10 @@
     },
     "linux": {
       "bindings": {
+        "pasteboard.cut": { "key": "x", "modifiers": ["control"] },
+        "pasteboard.copy": { "key": "c", "modifiers": ["control"] },
+        "pasteboard.paste": { "key": "v", "modifiers": ["control"] },
+        "pasteboard.selectAll": { "key": "a", "modifiers": ["control"] },
         "textEditing.find": { "key": "f", "modifiers": ["control"] },
         "textEditing.findAndReplace": { "key": "f", "modifiers": ["control", "option"] },
         "textEditing.findNext": { "key": "g", "modifiers": ["control"] },
