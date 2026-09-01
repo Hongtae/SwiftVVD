@@ -136,8 +136,8 @@ final class Win32HostServicesTests: XCTestCase {
             window.close()
         }
 
-        window.setCursor(.hand, forDeviceID: 0)
-        guard case .hand? = window.cursor(forDeviceID: 0) else {
+        window.setCursor(.pointingHand, forDeviceID: 0)
+        guard case .pointingHand? = window.cursor(forDeviceID: 0) else {
             return XCTFail("Expected the hand cursor override")
         }
         XCTAssertNil(window.cursor(forDeviceID: 1))
@@ -189,6 +189,36 @@ final class Win32HostServicesTests: XCTestCase {
             .custom(image, hotSpot: CGPoint(x: 1, y: 1))
         )
         XCTAssertNotNil(cursor)
+        let nonFinite = Win32CursorHandle(
+            .custom(
+                image,
+                hotSpot: CGPoint(x: CGFloat.infinity, y: CGFloat.nan)
+            )
+        )
+        XCTAssertNotNil(nonFinite)
+    }
+
+    func testCommonSystemCursorCasesUseExpectedNativeResources() throws {
+        let mappings: [(Cursor, UInt)] = [
+            (.arrow, 32512),
+            (.text, 32513),
+            (.wait, 32514),
+            (.crosshair, 32515),
+            (.progress, 32650),
+            (.resizeUpLeftDownRight, 32642),
+            (.resizeUpRightDownLeft, 32643),
+            (.resizeLeftRight, 32644),
+            (.resizeUpDown, 32645),
+            (.move, 32646),
+            (.notAllowed, 32648),
+            (.pointingHand, 32649),
+        ]
+
+        for (cursor, identifier) in mappings {
+            let native = try XCTUnwrap(Win32CursorHandle(cursor))
+            let resource = UnsafePointer<WCHAR>(bitPattern: identifier)
+            XCTAssertEqual(native.handle, LoadCursorW(nil, resource))
+        }
     }
 }
 #endif

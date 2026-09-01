@@ -265,26 +265,32 @@ final class WaylandCursorManager {
         return nil
     }
 
-    private static func themeNames(for cursor: Cursor) -> [String] {
+    static func themeNames(for cursor: Cursor) -> [String] {
         switch cursor {
         case .arrow:
             ["default", "left_ptr", "arrow"]
-        case .cross:
-            ["crosshair", "cross"]
-        case .hand:
-            ["pointer", "hand2", "hand1"]
-        case .iBeam:
+        case .text:
             ["text", "xterm"]
-        case .notAllowed:
-            ["not-allowed", "crossed_circle", "forbidden"]
-        case .resizeLeftRight:
-            ["ew-resize", "size_hor", "sb_h_double_arrow"]
-        case .resizeUpDown:
-            ["ns-resize", "size_ver", "sb_v_double_arrow"]
+        case .wait:
+            ["wait", "watch"]
+        case .crosshair:
+            ["crosshair", "cross"]
+        case .progress:
+            ["progress", "left_ptr_watch", "half-busy", "wait", "watch"]
         case .resizeUpLeftDownRight:
             ["nwse-resize", "size_fdiag", "bd_double_arrow"]
         case .resizeUpRightDownLeft:
             ["nesw-resize", "size_bdiag", "fd_double_arrow"]
+        case .resizeLeftRight:
+            ["ew-resize", "size_hor", "sb_h_double_arrow"]
+        case .resizeUpDown:
+            ["ns-resize", "size_ver", "sb_v_double_arrow"]
+        case .move:
+            ["move", "all-scroll", "fleur", "size_all"]
+        case .notAllowed:
+            ["not-allowed", "crossed_circle", "forbidden"]
+        case .pointingHand:
+            ["pointer", "hand2", "hand1"]
         case .custom:
             []
         }

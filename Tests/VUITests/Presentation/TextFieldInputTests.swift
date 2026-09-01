@@ -560,7 +560,7 @@ final class TextFieldInputTests: XCTestCase {
             time: .zero
         ))
         await Task.yield()
-        XCTAssertEqual(controller.testWindow.cursorChanges, [.iBeam(0)])
+        XCTAssertEqual(controller.testWindow.cursorChanges, [.text(0)])
 
         XCTAssertTrue(responder.endHoverEvent(
             id: eventID,
@@ -569,7 +569,7 @@ final class TextFieldInputTests: XCTestCase {
         await Task.yield()
         XCTAssertEqual(
             controller.testWindow.cursorChanges,
-            [.iBeam(0), .platformDefault(0)]
+            [.text(0), .platformDefault(0)]
         )
     }
 
@@ -1144,7 +1144,7 @@ private struct TextInputChange: Equatable {
 }
 
 private enum TextInputCursorChange: Equatable {
-    case iBeam(Int)
+    case text(Int)
     case platformDefault(Int)
     case other(Int)
 }
@@ -1208,8 +1208,8 @@ private final class TextFieldInputTestWindow: VVD.Window {
             cursors.removeValue(forKey: deviceID)
         }
         switch cursor {
-        case .some(.iBeam):
-            cursorChanges.append(.iBeam(deviceID))
+        case .some(.text):
+            cursorChanges.append(.text(deviceID))
         case .none:
             cursorChanges.append(.platformDefault(deviceID))
         default:

@@ -18,6 +18,7 @@ protocol AppKitView: AnyObject {
     var contentScaleFactor: CGFloat { get }
     var mousePosition: CGPoint { get set }
     var mouseLocked: Bool { get set }
+    var cursorOverride: NSCursor? { get set }
     var textInput: Bool { get set }
     var proxyWindow: AppKitWindow? { get set }
     
@@ -71,6 +72,12 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
     weak var proxyWindow: AppKitWindow?
     private var mouseBoundaryTrackingArea: NSTrackingArea?
+
+    var cursorOverride: NSCursor? {
+        didSet {
+            window?.invalidateCursorRects(for: self)
+        }
+    }
 
     override var isFlipped: Bool { true } // upper-left is origin
     override var acceptsFirstResponder: Bool { true }
@@ -186,6 +193,13 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
         )
         addTrackingArea(trackingArea)
         mouseBoundaryTrackingArea = trackingArea
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if let cursorOverride {
+            addCursorRect(bounds, cursor: cursorOverride)
+        }
     }
 
     override func mouseEntered(with event: NSEvent) { self.postMouseEvent(event) }

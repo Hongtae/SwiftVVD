@@ -60,6 +60,7 @@ final class AppKitWindow: Window {
     private var window: NSWindow?
     private var view: AppKitView?
     private var _menuController: AppKitWindowMenuController?
+    private var cursorOverride: Cursor?
     var nsView: NSView? { view as? NSView }
 
     var menuController: (any WindowMenuController)? {
@@ -342,6 +343,23 @@ final class AppKitWindow: Window {
             return Self.hideCursorCount <= 0
         }
         return false
+    }
+
+    func setCursor(_ cursor: Cursor?, forDeviceID deviceID: Int) {
+        guard deviceID == 0 else { return }
+
+        let nativeCursor = cursor.flatMap(makeAppKitCursor)
+        if cursor != nil && nativeCursor == nil {
+            Log.error("Unable to create AppKit cursor for window: \(title)")
+            return
+        }
+
+        cursorOverride = cursor
+        view?.cursorOverride = nativeCursor
+    }
+
+    func cursor(forDeviceID deviceID: Int) -> Cursor? {
+        deviceID == 0 ? cursorOverride : nil
     }
 
     func lockMouse(_ hold: Bool, forDeviceID deviceID: Int) {

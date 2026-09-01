@@ -123,15 +123,19 @@ private func createCustomCursor(
 
     var info = ICONINFO()
     info.fIcon = false
-    info.xHotspot = DWORD(
-        hotSpot.x.rounded().clamp(min: 0, max: CGFloat(width - 1))
-    )
-    info.yHotspot = DWORD(
-        hotSpot.y.rounded().clamp(min: 0, max: CGFloat(height - 1))
-    )
+    info.xHotspot = clampedCursorHotSpot(hotSpot.x, extent: width)
+    info.yHotspot = clampedCursorHotSpot(hotSpot.y, extent: height)
     info.hbmMask = maskBitmap
     info.hbmColor = colorBitmap
     return CreateIconIndirect(&info)
+}
+
+private func clampedCursorHotSpot(
+    _ value: CGFloat,
+    extent: Int
+) -> DWORD {
+    guard value.isFinite else { return 0 }
+    return DWORD(value.rounded().clamp(min: 0, max: CGFloat(extent - 1)))
 }
 
 final class Win32CursorHandle {
@@ -142,10 +146,14 @@ final class Win32CursorHandle {
         let result: (HCURSOR?, Bool) = switch cursor {
         case .arrow:
             (systemCursor(32512), false) // IDC_ARROW
-        case .iBeam:
+        case .text:
             (systemCursor(32513), false) // IDC_IBEAM
-        case .cross:
+        case .wait:
+            (systemCursor(32514), false) // IDC_WAIT
+        case .crosshair:
             (systemCursor(32515), false) // IDC_CROSS
+        case .progress:
+            (systemCursor(32650), false) // IDC_APPSTARTING
         case .resizeUpLeftDownRight:
             (systemCursor(32642), false) // IDC_SIZENWSE
         case .resizeUpRightDownLeft:
@@ -154,9 +162,11 @@ final class Win32CursorHandle {
             (systemCursor(32644), false) // IDC_SIZEWE
         case .resizeUpDown:
             (systemCursor(32645), false) // IDC_SIZENS
+        case .move:
+            (systemCursor(32646), false) // IDC_SIZEALL
         case .notAllowed:
             (systemCursor(32648), false) // IDC_NO
-        case .hand:
+        case .pointingHand:
             (systemCursor(32649), false) // IDC_HAND
         case let .custom(image, hotSpot):
             (createCustomCursor(image: image, hotSpot: hotSpot), true)

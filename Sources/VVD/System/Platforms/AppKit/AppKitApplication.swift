@@ -19,6 +19,12 @@ final class AppKitApplication: Application, @unchecked Sendable {
     var exitCode: Int = 0
     let running = Atomic<Bool>(false)
 
+    private let systemClipboard = AppKitClipboard()
+
+    var clipboard: (any Clipboard)? {
+        systemClipboard
+    }
+
     func terminate(exitCode : Int) {
         if self.running.load(ordering: .relaxed) {
             DispatchQueue.main.async {

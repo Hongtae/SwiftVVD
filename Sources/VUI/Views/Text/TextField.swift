@@ -1358,7 +1358,7 @@ final class TextFieldResponder: MultiViewResponder,
         guard shouldRequestIBeam != hasRequestedIBeamCursor else { return }
         hasRequestedIBeamCursor = shouldRequestIBeam
         (host as? WindowController)?.requestTextInputCursor(
-            shouldRequestIBeam ? .iBeam : nil
+            shouldRequestIBeam ? .text : nil
         )
     }
 
