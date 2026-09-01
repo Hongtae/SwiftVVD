@@ -64,6 +64,115 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertTrue(glyphs[2].face.isEqual(to: cjk))
     }
 
+    // ASSERTIONS textFallbackPrimaryLineMetricsObserved
+    func testFallbackRunMetricsDoNotExpandThePrimaryLineBox() throws {
+        let primary = CascadeTestTypeface(
+            identifier: "primary",
+            supported: [UnicodeScalar("A")],
+            ascender: 8,
+            descender: -2
+        )
+        let fallback = CascadeTestTypeface(
+            identifier: "fallback",
+            supported: [UnicodeScalar("ㄱ")],
+            ascender: 14,
+            descender: -5
+        )
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([primary, fallback], "Aㄱ")],
+            scaleFactor: 1
+        )
+
+        let lineGlyphs = try XCTUnwrap(resolved.makeGlyphs().first)
+        XCTAssertEqual(lineGlyphs.glyphs.map(\.ascender), [8, 14])
+        XCTAssertEqual(lineGlyphs.glyphs.map(\.descender), [-2, -5])
+        XCTAssertEqual(lineGlyphs.ascender, 8)
+        XCTAssertEqual(lineGlyphs.descender, -2)
+        XCTAssertEqual(lineGlyphs.height, 10)
+
+        let layout = resolved.makeLayout(
+            in: CGSize(width: 100, height: 100),
+            layoutDirection: .leftToRight
+        )
+        let line = try XCTUnwrap(layout.first)
+        XCTAssertEqual(line.typographicBounds.ascent, 8)
+        XCTAssertEqual(line.typographicBounds.descent, 2)
+        XCTAssertEqual(line.count, 2)
+        XCTAssertEqual(line[0].typographicBounds.ascent, 8)
+        XCTAssertEqual(line[0].typographicBounds.descent, 2)
+        XCTAssertEqual(line[1].typographicBounds.ascent, 14)
+        XCTAssertEqual(line[1].typographicBounds.descent, 5)
+    }
+
+    // ASSERTIONS explicitFontRunExpandsLineMetricsObserved
+    func testExplicitLargerFontRunExpandsTheLineBox() throws {
+        let primary = CascadeTestTypeface(
+            identifier: "primary",
+            supported: [UnicodeScalar("A")],
+            ascender: 8,
+            descender: -2
+        )
+        let fallback = CascadeTestTypeface(
+            identifier: "fallback",
+            supported: [UnicodeScalar("ㄱ")],
+            ascender: 14,
+            descender: -5
+        )
+        let explicitlyLarge = CascadeTestTypeface(
+            identifier: "explicit-large",
+            supported: [UnicodeScalar("B")],
+            ascender: 18,
+            descender: -6
+        )
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [
+                .text([primary, fallback], "ㄱ"),
+                .text([explicitlyLarge], "B"),
+            ],
+            scaleFactor: 1
+        )
+
+        let line = try XCTUnwrap(resolved.makeGlyphs().first)
+        XCTAssertEqual(line.ascender, 18)
+        XCTAssertEqual(line.descender, -6)
+        XCTAssertEqual(line.height, 24)
+    }
+
+    func testFallbackTruncationTokenKeepsTheSourcePrimaryLineBox() throws {
+        let primary = CascadeTestTypeface(
+            identifier: "primary",
+            supported: [UnicodeScalar("A")],
+            ascender: 8,
+            descender: -2
+        )
+        let fallback = CascadeTestTypeface(
+            identifier: "fallback",
+            supported: [UnicodeScalar("ㄱ"), UnicodeScalar("…")],
+            ascender: 14,
+            descender: -5
+        )
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([primary, fallback], "ㄱㄱㄱ")],
+            scaleFactor: 1
+        )
+
+        let line = try XCTUnwrap(resolved.makeGlyphs(
+            maxWidth: 12,
+            maxHeight: 100,
+            lineLimit: 1,
+            truncationMode: .tail
+        ).first)
+        let token = try XCTUnwrap(line.glyphs.first {
+            $0.isTruncationToken
+        })
+
+        XCTAssertTrue(token.face.isEqual(to: fallback))
+        XCTAssertEqual(token.ascender, 14)
+        XCTAssertEqual(token.descender, -5)
+        XCTAssertEqual(line.ascender, 8)
+        XCTAssertEqual(line.descender, -2)
+    }
+
     func testBackendLoadsGlyphZeroForUnsupportedScalarInBothPaths() throws {
         let url = try XCTUnwrap(defaultFontURL)
         let data = try Data(contentsOf: url)
@@ -666,6 +775,54 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertGreaterThan(resolved.measure().width, 0)
     }
 
+    // ASSERTIONS textFallbackPrimaryLineMetricsObserved
+    @MainActor
+    func testConfiguredFallbackKeepsSystemPrimaryLineMetrics() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "en_US")
+        environment.defaultFontRenderingMode = .vector()
+        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+            size: 17,
+            weight: .regular,
+            design: .default,
+            renderingMode: .vector()
+        )))
+        let cascade = font.typefaceCascade(
+            in: environment,
+            forContext: SceneResources(),
+            contentScaleFactor: 1
+        )
+        let primary = try XCTUnwrap(cascade.ordinaryFaces.first)
+        let fallback = try XCTUnwrap(cascade.ordinaryFaces.dropFirst().first)
+        let scalar = UnicodeScalar("ㄱ")
+
+        XCTAssertFalse(primary.hasGlyph(for: scalar))
+        XCTAssertTrue(fallback.hasGlyph(for: scalar))
+        XCTAssertTrue(
+            primary.ascender != fallback.ascender ||
+                primary.descender != fallback.descender
+        )
+
+        let latin = try XCTUnwrap(GraphicsContext.ResolvedText(
+            runs: [.text(cascade.runFaces, "A")],
+            scaleFactor: 1
+        ).makeGlyphs().first)
+        let fallbackLine = try XCTUnwrap(GraphicsContext.ResolvedText(
+            runs: [.text(cascade.runFaces, String(scalar))],
+            scaleFactor: 1
+        ).makeGlyphs().first)
+
+        XCTAssertEqual(fallbackLine.glyphs.first?.ascender, fallback.ascender)
+        XCTAssertEqual(fallbackLine.glyphs.first?.descender, fallback.descender)
+        XCTAssertEqual(fallbackLine.ascender, primary.ascender)
+        XCTAssertEqual(fallbackLine.descender, primary.descender)
+        XCTAssertEqual(fallbackLine.height, latin.height)
+    }
+
     // ASSERTIONS textLastResortGlyphObserved
     @MainActor
     func testUnsupportedScalarUsesExplicitLastResortTypeface() throws {
@@ -914,10 +1071,19 @@ private struct UnsupportedScalarStringStyle: FormatStyle {
 private final class CascadeTestTypeface: Typeface {
     let identifier: String
     let supported: Set<UnicodeScalar>
+    let ascender: CGFloat
+    let descender: CGFloat
 
-    init(identifier: String, supported: Set<UnicodeScalar>) {
+    init(
+        identifier: String,
+        supported: Set<UnicodeScalar>,
+        ascender: CGFloat = 8,
+        descender: CGFloat = -2
+    ) {
         self.identifier = identifier
         self.supported = supported
+        self.ascender = ascender
+        self.descender = descender
     }
 
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph? { nil }
@@ -925,9 +1091,9 @@ private final class CascadeTestTypeface: Typeface {
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
         guard hasGlyph(for: c) else { return nil }
         return TypefaceGlyphMetrics(
-            advance: CGSize(width: 8, height: 10),
-            ascender: 8,
-            descender: -2
+            advance: CGSize(width: 8, height: lineHeight),
+            ascender: ascender,
+            descender: descender
         )
     }
 
@@ -942,9 +1108,7 @@ private final class CascadeTestTypeface: Typeface {
         supported.contains(scalar)
     }
 
-    var lineHeight: CGFloat { 10 }
-    var ascender: CGFloat { 8 }
-    var descender: CGFloat { -2 }
+    var lineHeight: CGFloat { ascender - descender }
 
     func isEqual(to other: any Typeface) -> Bool {
         self === (other as AnyObject)

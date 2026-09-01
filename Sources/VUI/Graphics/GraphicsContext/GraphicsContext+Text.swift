@@ -443,8 +443,12 @@ extension GraphicsContext {
             var face: Typeface
             var content: Content = .missing
             var advance: CGSize = .zero     // distance to next glyph
-            var ascender: CGFloat = .zero   // distance from the baseline to the highest or upper grid coordinate
-            var descender: CGFloat = .zero  // distance from the baseline to the lowest
+            // The selected face owns glyph/run metrics and artwork.
+            var ascender: CGFloat = .zero
+            var descender: CGFloat = .zero
+            // The explicit run's primary face owns line measurement.
+            var lineBoxAscender: CGFloat = .zero
+            var lineBoxDescender: CGFloat = .zero
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
             var attributes = _TextAttributeValues()
             var style = _ResolvedTextRunAttributes()
@@ -453,12 +457,19 @@ extension GraphicsContext {
             var characterIndex: Int = 0
             var isTruncationToken: Bool = false
 
+            init(scalar: UnicodeScalar, face: Typeface) {
+                self.scalar = scalar
+                self.face = face
+                self.lineBoxAscender = face.ascender
+                self.lineBoxDescender = face.descender
+            }
+
             var lineAscender: CGFloat {
-                ascender + max(baselineOffset, 0)
+                lineBoxAscender + max(baselineOffset, 0)
             }
 
             var lineDescender: CGFloat {
-                descender + min(baselineOffset, 0)
+                lineBoxDescender + min(baselineOffset, 0)
             }
 
             var contentOffset: CGPoint {
@@ -650,6 +661,8 @@ extension GraphicsContext {
                 var width: CGFloat = .zero
                 var face1 = prevFace
                 var char1 = prevChar
+                let lineBoxAscender = faces[0].ascender
+                let lineBoxDescender = faces[0].descender
 
                 for char2 in unicodeScalars {
                     let supportedFace = faces.first {
@@ -663,6 +676,8 @@ extension GraphicsContext {
                     let makeGlyph = supportedFace != nil || makeMissingGlyph
 
                     var glyph = Glyph(scalar: char2, face: face2)
+                    glyph.lineBoxAscender = lineBoxAscender
+                    glyph.lineBoxDescender = lineBoxDescender
                     if makeGlyph, let metrics = face2.glyphMetrics(for: char2) {
                         glyph.content = .unresolved
                         glyph.advance = metrics.advance
@@ -678,17 +693,16 @@ extension GraphicsContext {
                         glyph.descender = face2.descender
                     }
                     glyphs.append(glyph)
-                    ascender = max(ascender, glyph.ascender)
-                    descender = min(descender, glyph.descender)
+                    ascender = max(ascender, glyph.lineBoxAscender)
+                    descender = min(descender, glyph.lineBoxDescender)
                     width += glyph.advance.width + glyph.kerning.x
                     char1 = char2
                     face1 = face2
                 }
 
                 if glyphs.isEmpty {
-                    let face = faces[0]
-                    ascender = face.ascender
-                    descender = face.descender
+                    ascender = lineBoxAscender
+                    descender = lineBoxDescender
                 }
                 assert((ascender - descender) > 0)
                 return .init(glyphs: glyphs,
@@ -1223,6 +1237,8 @@ extension GraphicsContext {
                 glyph.attributes = source.attributes
                 glyph.style = source.style
                 glyph.baselineOffset = source.baselineOffset
+                glyph.lineBoxAscender = source.lineBoxAscender
+                glyph.lineBoxDescender = source.lineBoxDescender
                 glyph.foregroundColor = source.foregroundColor
                 glyph.characterIndex = characterIndex
                 glyph.isTruncationToken = true
@@ -1557,6 +1573,8 @@ extension GraphicsContext {
                             )
                             glyph.ascender = textGlyphs.ascender
                             glyph.descender = textGlyphs.descender
+                            glyph.lineBoxAscender = textGlyphs.ascender
+                            glyph.lineBoxDescender = textGlyphs.descender
                             glyph.attributes = attributes
                             glyph.style = resolvedStyle
                             glyph.baselineOffset = baselineOffset
@@ -1604,6 +1622,8 @@ extension GraphicsContext {
                                                        offset: CGPoint(x: 0, y: baseline)))
                     glyph.ascender = baseline
                     glyph.descender = min(0, baseline - height)
+                    glyph.lineBoxAscender = glyph.ascender
+                    glyph.lineBoxDescender = glyph.descender
                     glyph.advance.width = width
                     glyph.advance.height = height
                     glyph.attributes = attributes
