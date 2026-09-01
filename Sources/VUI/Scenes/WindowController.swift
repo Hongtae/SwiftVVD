@@ -871,7 +871,9 @@ class WindowController: WindowDelegate,
     ) {
         let visibilityChanged = (windowCommandMenuPresenter != nil)
             != (presenter != nil)
+        windowCommandMenuPresenter?.attach(to: nil)
         windowCommandMenuPresenter = presenter
+        presenter?.attach(to: self)
         viewGraph.valuesNeedingUpdate.insert(.rootView)
         viewChangedWhileDrawing = true
         if visibilityChanged {

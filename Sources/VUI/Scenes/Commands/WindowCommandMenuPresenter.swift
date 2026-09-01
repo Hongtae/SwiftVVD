@@ -34,7 +34,11 @@ final class WindowCommandMenuPresenter {
     private var consumedKeyStreams: Set<KeyStream> = []
     private var pendingOptionKeyStream: KeyStream?
     private var retainedClosingMenuID: MainMenuItem.Identifier?
-    private weak var keyboardOwner: WindowController?
+    private weak var owner: WindowController?
+
+    func attach(to owner: WindowController?) {
+        self.owner = owner
+    }
 
     func update(
         items: [MainMenuItem],
@@ -97,7 +101,7 @@ final class WindowCommandMenuPresenter {
         in owner: WindowController,
         isMenuBoundary: Bool = false
     ) -> Bool {
-        keyboardOwner = owner
+        self.owner = owner
         let stream = KeyStream(deviceID: event.deviceID, key: event.key)
 
         if event.type == .keyUp {
@@ -265,6 +269,36 @@ final class WindowCommandMenuPresenter {
         keyboardSelectedItemID = nil
         keyboardMenuIsActive = false
         synchronizeKeyboardState()
+    }
+
+    func menuHoverChanged(
+        _ id: MainMenuItem.Identifier,
+        isHovered: Bool
+    ) {
+        guard isHovered, let owner else { return }
+        let responders = menuResponders(in: owner)
+        guard let open = responders.first(where: {
+            $0.responder.menuIsOpen
+        }),
+              open.id != id,
+              let next = responders.first(where: {
+                  $0.id == id && $0.responder.isEnabled != false
+              }) else {
+            return
+        }
+
+        owner.viewGraph.data.withCurrent {
+            let selectsFirstItem = keyboardMenuIsActive
+            if selectsFirstItem {
+                keyboardSelectedItemID = next.id
+                synchronizeKeyboardState(responders)
+            }
+            open.responder.dismissMenu()
+            next.responder.present(
+                from: owner,
+                selectsFirstItem: selectsFirstItem
+            )
+        }
     }
 
     private func menuResponders(
@@ -447,7 +481,7 @@ final class WindowCommandMenuPresenter {
         _ responders: [MenuResponder]? = nil
     ) {
         let responders = responders
-            ?? keyboardOwner.map(menuResponders(in:))
+            ?? owner.map(menuResponders(in:))
             ?? []
         for menu in responders {
             menu.responder.updateKeyboardMenuState(
@@ -642,7 +676,13 @@ private struct WindowCommandMenuItem: View {
                     onPresentationChanged: nil
                 )
             )
-            .onHover { isHovered = $0 }
+            .onHover { isHovered in
+                self.isHovered = isHovered
+                presenter.menuHoverChanged(
+                    item.id,
+                    isHovered: isHovered
+                )
+            }
     }
 
     private var menuTitle: Text {

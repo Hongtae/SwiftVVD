@@ -426,6 +426,97 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         controller.dismissAllPresentationChildren()
     }
 
+    @MainActor
+    func testPointerHoverSwitchesTheOpenTopLevelMenu() throws {
+        let previousAppContext = appContext
+        appContext = WindowCommandMenuTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.defaultPresentationHostMode = .overlay
+        environment.defaultFontRenderingMode = .vector()
+        let fileID = MainMenuItem.Identifier.file
+        let editID = MainMenuItem.Identifier.edit
+        let presenter = WindowCommandMenuPresenter()
+        presenter.update(
+            items: [
+                MainMenuItem(
+                    name: "File",
+                    id: fileID,
+                    groups: [CommandAccumulator.Result(
+                        viewContent: AnyView(Button("File Action") {})
+                    )]
+                ),
+                MainMenuItem(
+                    name: "Edit",
+                    id: editID,
+                    groups: [CommandAccumulator.Result(
+                        viewContent: AnyView(Button("Edit Action") {})
+                    )]
+                ),
+            ],
+            environment: environment,
+            hostEnvironment: environment,
+            sceneResources: SceneResources()
+        )
+
+        let controller = WindowController(
+            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            environment: environment,
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Self.self)
+            )
+        )
+        controller.setWindowCommandMenuPresenter(presenter)
+        var tick: UInt64 = 0
+        updateController(controller, tick: &tick)
+
+        let responders = try menuResponders(in: controller)
+        let fileResponder = try XCTUnwrap(responders[fileID])
+        let editResponder = try XCTUnwrap(responders[editID])
+        controller.viewGraph.data.withCurrent {
+            fileResponder.present(from: controller)
+        }
+        updateController(controller, tick: &tick)
+
+        let filePopup = try XCTUnwrap(firstMenuPopup(in: controller))
+        XCTAssertTrue(fileResponder.menuIsOpen)
+        XCTAssertFalse(editResponder.menuIsOpen)
+
+        let editFrame = globalFrame(editResponder)
+        XCTAssertTrue(controller.handleMouseHover(
+            at: CGPoint(x: editFrame.midX, y: editFrame.midY),
+            deviceID: 23,
+            isTopMost: true,
+            at: Time(seconds: 1)
+        ))
+        updateController(controller, tick: &tick, turns: 3)
+
+        let editPopup = try XCTUnwrap(firstMenuPopup(in: controller))
+        XCTAssertFalse(fileResponder.menuIsOpen)
+        XCTAssertTrue(editResponder.menuIsOpen)
+        XCTAssertFalse(filePopup === editPopup)
+        XCTAssertFalse(presenter.keyboardMenuIsActive)
+        XCTAssertNil(presenter.keyboardSelectedItemID)
+
+        let fileFrame = globalFrame(fileResponder)
+        XCTAssertTrue(controller.handleMouseHover(
+            at: CGPoint(x: fileFrame.midX, y: fileFrame.midY),
+            deviceID: 23,
+            isTopMost: true,
+            at: Time(seconds: 2)
+        ))
+        updateController(controller, tick: &tick, turns: 3)
+
+        let reopenedFilePopup = try XCTUnwrap(firstMenuPopup(in: controller))
+        XCTAssertTrue(fileResponder.menuIsOpen)
+        XCTAssertFalse(editResponder.menuIsOpen)
+        XCTAssertFalse(reopenedFilePopup === filePopup)
+        XCTAssertFalse(reopenedFilePopup === editPopup)
+        controller.dismissAllPresentationChildren()
+    }
+
     // ASSERTIONS menuSubmenuActivationTransferObserved
     @MainActor
     func testRendererSubmenuReturnKeepsPopupContentAndChildIdentity() throws {
