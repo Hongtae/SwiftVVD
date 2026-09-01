@@ -537,11 +537,28 @@ struct TextFieldInputState: Equatable {
         affinity: TextSelectionAffinity,
         committedText: String
     ) -> Bool {
-        let lower = min(max(offsets.lowerBound, 0), committedText.count)
-        let upper = min(max(offsets.upperBound, lower), committedText.count)
+        setSelection(
+            anchor: offsets.lowerBound,
+            extent: offsets.upperBound,
+            affinity: affinity,
+            committedText: committedText
+        )
+    }
+
+    @discardableResult
+    mutating func setSelection(
+        anchor: Int,
+        extent: Int,
+        affinity: TextSelectionAffinity,
+        committedText: String
+    ) -> Bool {
+        let anchor = min(max(anchor, 0), committedText.count)
+        let extent = min(max(extent, 0), committedText.count)
+        let lower = min(anchor, extent)
+        let upper = max(anchor, extent)
         let oldOffsets = selectionOffsets
         let oldAffinity = selectionAffinity
-        caretOffset = upper
+        caretOffset = extent
         selectionRange = lower == upper ? nil : lower..<upper
         selectionAffinity = affinity
         composition = ""
@@ -657,9 +674,53 @@ struct TextFieldInputState: Equatable {
 
     mutating func handleKeyDown(
         _ key: VirtualKey,
+        modifiers: KeyboardModifierFlags = [],
         committedText: inout String
     ) -> Bool {
         clampCaret(to: committedText)
+
+        let unsupportedModifiers: KeyboardModifierFlags = [
+            .control,
+            .option,
+            .command,
+        ]
+        guard modifiers.intersection(unsupportedModifiers).isEmpty else {
+            return false
+        }
+
+        if modifiers.contains(.shift) {
+            let anchor: Int
+            if let selectionRange {
+                anchor = caretOffset <= selectionRange.lowerBound
+                    ? selectionRange.upperBound
+                    : selectionRange.lowerBound
+            } else {
+                anchor = caretOffset
+            }
+            let extent: Int
+            switch key {
+            case .left:
+                extent = max(0, caretOffset - 1)
+            case .right:
+                extent = min(committedText.count, caretOffset + 1)
+            case .home:
+                extent = 0
+            case .end:
+                extent = committedText.count
+            default:
+                return false
+            }
+            let affinity: TextSelectionAffinity = extent < anchor
+                ? .upstream
+                : .downstream
+            _ = setSelection(
+                anchor: anchor,
+                extent: extent,
+                affinity: affinity,
+                committedText: committedText
+            )
+            return true
+        }
 
         switch key {
         case .left:
@@ -844,6 +905,101 @@ struct TextFieldInputState: Equatable {
         character == "_" || character.unicodeScalars.allSatisfy {
             CharacterSet.alphanumerics.contains($0)
         }
+    }
+}
+
+struct TextFieldSelectionLayout: Equatable {
+    var characterOffsets: [CGFloat]
+    var leadingInset: CGFloat
+
+    init(
+        characterOffsets: [CGFloat],
+        leadingInset: CGFloat = 0
+    ) {
+        precondition(!characterOffsets.isEmpty)
+        self.characterOffsets = characterOffsets
+        self.leadingInset = leadingInset
+    }
+
+    var characterCount: Int { characterOffsets.count - 1 }
+
+    func characterOffset(
+        atLocalX localX: CGFloat,
+        inputState: TextFieldInputState
+    ) -> Int {
+        guard characterCount > 0 else { return 0 }
+        var x = localX - leadingInset
+
+        if inputState.isFocused,
+           inputState.composition.isEmpty,
+           !inputState.hasSelection {
+            let caret = min(max(inputState.caretOffset, 0), characterCount)
+            let caretX = characterOffsets[caret]
+            let caretWidth: CGFloat = 1
+            if x > caretX, x <= caretX + caretWidth {
+                return caret
+            }
+            if x > caretX + caretWidth {
+                x -= caretWidth
+            }
+        }
+
+        for index in 0..<characterCount {
+            let midpoint = (
+                characterOffsets[index] + characterOffsets[index + 1]
+            ) * 0.5
+            if x < midpoint {
+                return index
+            }
+        }
+        return characterCount
+    }
+
+    static func resolve(
+        text: String,
+        environment: EnvironmentValues,
+        sceneResources: SceneResources,
+        leadingInset: CGFloat
+    ) -> TextFieldSelectionLayout {
+        guard !text.isEmpty else {
+            return TextFieldSelectionLayout(
+                characterOffsets: [0],
+                leadingInset: leadingInset
+            )
+        }
+
+        let context = GraphTextResolutionContext(
+            environment: environment,
+            sceneResources: sceneResources
+        )
+        guard let resolved = Text(verbatim: text)._resolve(
+            context: context,
+            referenceDate: Date()
+        ) else {
+            fatalError("TextField selection layout failed to resolve text")
+        }
+        let measured = resolved.measure()
+        let atoms = resolved.glyphAtoms(in: CGSize(
+            width: max(measured.width + 1, 1),
+            height: max(measured.height + 1, 1)
+        ))
+
+        var atomIndex = atoms.startIndex
+        var offsets: [CGFloat] = [0]
+        offsets.reserveCapacity(text.count + 1)
+        for character in text {
+            var trailing = offsets.last ?? 0
+            for _ in character.unicodeScalars {
+                guard atomIndex < atoms.endIndex else { break }
+                trailing = max(trailing, atoms[atomIndex].bounds.maxX)
+                atomIndex += 1
+            }
+            offsets.append(trailing)
+        }
+        return TextFieldSelectionLayout(
+            characterOffsets: offsets,
+            leadingInset: leadingInset
+        )
     }
 }
 
@@ -1089,7 +1245,8 @@ private struct TextFieldControl: View {
             selection: configuration.selection,
             selectionValue: configuration.selection?.wrappedValue,
             fieldState: configuration.$state,
-            inputState: $inputState
+            inputState: $inputState,
+            contentLeadingInset: drawsBorder ? 6 : 0
         )
     }
 }
@@ -1108,6 +1265,7 @@ private struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
     var selectionValue: TextSelection?
     var fieldState: Binding<TextFieldState>
     var inputState: Binding<TextFieldInputState>
+    var contentLeadingInset: CGFloat
 
     static func _makeView(
         modifier: _GraphValue<Self>,
@@ -1209,6 +1367,18 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         responder.inputState = modifier.inputState
         responder.isEnabled = environment.isEnabled
         responder.isTextFieldCursorEnabled = environment.isTextFieldCursorEnabled
+        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+              let rendererHost = viewGraph.rendererHost else {
+            fatalError(
+                "TextFieldResponderFilter requires an active renderer host"
+            )
+        }
+        responder.selectionLayout = TextFieldSelectionLayout.resolve(
+            text: modifier.text.wrappedValue,
+            environment: environment,
+            sceneResources: rendererHost.sceneResources,
+            leadingInset: modifier.contentLeadingInset
+        )
         responder.synchronizeSelection(modifier.selectionValue)
         responder.helper.update(
             data: (value: TrivialContentResponder(), changed: false),
@@ -1277,6 +1447,7 @@ final class TextFieldResponder: MultiViewResponder,
     }
     var fieldState: Binding<TextFieldState>?
     var inputState: Binding<TextFieldInputState>?
+    var selectionLayout: TextFieldSelectionLayout?
     var isEnabled = true
     var isTextFieldCursorEnabled = true {
         didSet {
@@ -1290,6 +1461,10 @@ final class TextFieldResponder: MultiViewResponder,
     private var consumedKeyStreams: Set<KeyStream> = []
     private var cursorHoverEventIDs: Set<EventID> = []
     private var hasRequestedIBeamCursor = false
+    private var pointerSelectionSession: (
+        eventID: EventID,
+        anchor: Int
+    )?
 
     private struct KeyStream: Hashable {
         var deviceID: Int
@@ -1340,33 +1515,97 @@ final class TextFieldResponder: MultiViewResponder,
         at _: Time
     ) -> GesturePhase<Void> {
         var result: GesturePhase<Void> = .possible(nil)
-        for event in events.values {
-            let phase: EventPhase?
+        for (eventID, event) in events.sorted(by: {
+            $0.key.serial < $1.key.serial
+        }) {
+            let pointer: (phase: EventPhase, location: CGPoint)?
             if let event = event as? MouseEvent,
                event.button == .primary {
-                phase = event.phase
+                pointer = (event.phase, event.globalLocation)
             } else if let event = event as? TouchEvent {
-                phase = event.phase
+                pointer = (event.phase, event.globalLocation)
             } else {
-                phase = nil
+                pointer = nil
             }
-            guard let phase else { continue }
-            switch phase {
+            guard let pointer else { continue }
+            switch pointer.phase {
             case .began:
                 (host as? WindowController)?.focusTextInputResponder(self)
+                if let offset = textOffset(atGlobalPoint: pointer.location) {
+                    pointerSelectionSession = (eventID, offset)
+                    updatePointerSelection(anchor: offset, extent: offset)
+                }
                 result = .active(())
             case .active:
+                guard let session = pointerSelectionSession,
+                      session.eventID == eventID,
+                      let offset = textOffset(
+                        atGlobalPoint: pointer.location
+                      ) else {
+                    continue
+                }
+                updatePointerSelection(
+                    anchor: session.anchor,
+                    extent: offset
+                )
                 result = .active(())
             case .ended:
+                if let session = pointerSelectionSession,
+                   session.eventID == eventID,
+                   let offset = textOffset(
+                    atGlobalPoint: pointer.location
+                   ) {
+                    updatePointerSelection(
+                        anchor: session.anchor,
+                        extent: offset
+                    )
+                }
+                if pointerSelectionSession?.eventID == eventID {
+                    pointerSelectionSession = nil
+                }
                 result = .ended(())
             case .failed:
+                if pointerSelectionSession?.eventID == eventID {
+                    pointerSelectionSession = nil
+                }
                 result = .failed
             }
         }
         return result
     }
 
-    func resetEventSession() {}
+    func resetEventSession() {
+        pointerSelectionSession = nil
+    }
+
+    private func textOffset(atGlobalPoint point: CGPoint) -> Int? {
+        guard let selectionLayout, let inputState else { return nil }
+        var points = [point]
+        helper.transform.convertGlobal(to: .local, points: &points)
+        return selectionLayout.characterOffset(
+            atLocalX: points[0].x,
+            inputState: inputState.wrappedValue
+        )
+    }
+
+    private func updatePointerSelection(anchor: Int, extent: Int) {
+        guard let text, let inputState else { return }
+        Update.enqueueAction {
+            let committedText = text.wrappedValue
+            var editing = inputState.wrappedValue
+            _ = editing.setSelection(
+                anchor: anchor,
+                extent: extent,
+                affinity: .upstream,
+                committedText: committedText
+            )
+            inputState.wrappedValue = editing
+            self.publishSelection(
+                editing,
+                committedText: committedText
+            )
+        }
+    }
 
     func containsTextInputPoint(_ point: CGPoint) -> Bool {
         helper.containsGlobalPoints(
@@ -1492,6 +1731,7 @@ final class TextFieldResponder: MultiViewResponder,
             var previewState = inputState.wrappedValue
             guard previewState.handleKeyDown(
                 event.key,
+                modifiers: event.modifiers,
                 committedText: &previewText
             ) else {
                 return false
@@ -1505,6 +1745,7 @@ final class TextFieldResponder: MultiViewResponder,
                 var editing = inputState.wrappedValue
                 _ = editing.handleKeyDown(
                     event.key,
+                    modifiers: event.modifiers,
                     committedText: &committedText
                 )
                 inputState.wrappedValue = editing

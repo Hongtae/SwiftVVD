@@ -235,6 +235,210 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(text, "A강B")
     }
 
+    // ASSERTIONS textFieldKeyboardSelectionRuntimeObserved
+    func testShiftNavigationExtendsShrinksAndReversesSelection() {
+        var text = "Alpha beta gamma"
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: text)
+        input.collapseSelection(
+            to: 5,
+            affinity: .upstream,
+            committedText: text
+        )
+
+        XCTAssertTrue(input.handleKeyDown(
+            .right,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 5..<6)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        XCTAssertTrue(input.handleKeyDown(
+            .right,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 5..<7)
+
+        XCTAssertTrue(input.handleKeyDown(
+            .left,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 5..<6)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        XCTAssertTrue(input.handleKeyDown(
+            .left,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 5..<5)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        XCTAssertTrue(input.handleKeyDown(
+            .left,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 4..<5)
+        XCTAssertEqual(input.caretOffset, 4)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        input.collapseSelection(
+            to: 8,
+            affinity: .upstream,
+            committedText: text
+        )
+        XCTAssertTrue(input.handleKeyDown(
+            .left,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 7..<8)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+        XCTAssertTrue(input.handleKeyDown(
+            .right,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 8..<8)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        input.collapseSelection(
+            to: 5,
+            affinity: .upstream,
+            committedText: text
+        )
+        XCTAssertTrue(input.handleKeyDown(
+            .home,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 0..<5)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        input.collapseSelection(
+            to: 5,
+            affinity: .upstream,
+            committedText: text
+        )
+        XCTAssertTrue(input.handleKeyDown(
+            .end,
+            modifiers: [.shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input.selectionOffsets, 5..<text.count)
+        XCTAssertEqual(input.selectionAffinity, .downstream)
+
+        let original = input
+        XCTAssertFalse(input.handleKeyDown(
+            .left,
+            modifiers: [.option, .shift],
+            committedText: &text
+        ))
+        XCTAssertEqual(input, original)
+    }
+
+    // ASSERTIONS textFieldPointerSelectionRuntimeObserved
+    func testPointerSelectionLayoutUsesGlyphMidpointsAndCaretGap() {
+        let layout = TextFieldSelectionLayout(
+            characterOffsets: [0, 10, 30, 40],
+            leadingInset: 6
+        )
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: "abc")
+        input.collapseSelection(
+            to: 1,
+            affinity: .upstream,
+            committedText: "abc"
+        )
+
+        XCTAssertEqual(layout.characterOffset(
+            atLocalX: 10,
+            inputState: input
+        ), 0)
+        XCTAssertEqual(layout.characterOffset(
+            atLocalX: 16.5,
+            inputState: input
+        ), 1)
+        XCTAssertEqual(layout.characterOffset(
+            atLocalX: 21,
+            inputState: input
+        ), 1)
+        XCTAssertEqual(layout.characterOffset(
+            atLocalX: 32,
+            inputState: input
+        ), 2)
+        XCTAssertEqual(layout.characterOffset(
+            atLocalX: 100,
+            inputState: input
+        ), 3)
+    }
+
+    // ASSERTIONS textFieldPointerSelectionRuntimeObserved
+    func testTextFieldResponderTracksPointerSelectionAnchor() {
+        let model = TextFieldSelectionModel(text: "abcd")
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: model.text)
+        var fieldState = TextFieldState(displayText: model.text)
+        let responder = TextFieldResponder()
+        responder.text = model.textBinding
+        responder.selection = model.selectionBinding
+        responder.inputState = Binding(
+            get: { input },
+            set: { input = $0 }
+        )
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.selectionLayout = TextFieldSelectionLayout(
+            characterOffsets: [0, 10, 20, 30, 40]
+        )
+
+        let eventID = EventID(type: VUI.MouseEvent.self, serial: 90)
+        func event(_ phase: EventPhase, x: CGFloat) -> VUI.MouseEvent {
+            VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: phase,
+                location: CGPoint(x: x, y: 5),
+                globalLocation: CGPoint(x: x, y: 5),
+                modifiers: []
+            )
+        }
+
+        XCTAssertTrue(responder.consumeEvents(
+            [eventID: event(.began, x: 12)],
+            at: .zero
+        ).isActive)
+        Update.dispatchActions()
+        XCTAssertEqual(input.selectionOffsets, 1..<1)
+
+        XCTAssertTrue(responder.consumeEvents(
+            [eventID: event(.active, x: 36)],
+            at: Time(seconds: 1)
+        ).isActive)
+        Update.dispatchActions()
+        XCTAssertEqual(input.selectionOffsets, 1..<4)
+        XCTAssertEqual(input.caretOffset, 4)
+
+        XCTAssertTrue(responder.consumeEvents(
+            [eventID: event(.ended, x: 26)],
+            at: Time(seconds: 2)
+        ).isEnded)
+        Update.dispatchActions()
+        XCTAssertEqual(input.selectionOffsets, 1..<3)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+        XCTAssertEqual(
+            model.selection,
+            input.textSelection(in: model.text)
+        )
+    }
+
     func testForwardDeleteUsesTextInputAndKeepsTheCharacterOffset() {
         var text = "A강🙂B"
         var input = TextFieldInputState()
@@ -654,6 +858,54 @@ final class TextFieldInputTests: XCTestCase {
             TextInputChange(enabled: true, deviceID: 0),
             TextInputChange(enabled: false, deviceID: 0)
         ])
+    }
+
+    @MainActor
+    // ASSERTIONS textFieldPointerSelectionRuntimeObserved
+    func testMountedTextFieldResolvesCharacterSelectionGeometry() throws {
+        let previousAppContext = appContext
+        appContext = TextFieldClipboardAppContext(clipboard: nil)
+        defer { appContext = previousAppContext }
+
+        let model = TextFieldInputModel()
+        model.text = "A강🙂B"
+        let controller = TextFieldInputHostController(model: model)
+        var redraw = false
+        for tick in 0..<3 {
+            controller.updateView(
+                tick: UInt64(tick),
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 120),
+                redraw: &redraw
+            ) { _, _ in }
+            Update.dispatchActions()
+        }
+
+        var textResponder: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                textResponder = responder
+                return .cancel
+            }
+            return .next
+        }
+        let layout = try XCTUnwrap(textResponder?.selectionLayout)
+
+        XCTAssertEqual(layout.characterCount, model.text.count)
+        XCTAssertEqual(layout.characterOffsets.count, model.text.count + 1)
+        XCTAssertEqual(layout.characterOffsets.first, 0)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(layout.characterOffsets.last),
+            0,
+            "\(layout.characterOffsets)"
+        )
+        for (leading, trailing) in zip(
+            layout.characterOffsets,
+            layout.characterOffsets.dropFirst()
+        ) {
+            XCTAssertGreaterThanOrEqual(trailing, leading)
+        }
     }
 
     @MainActor
@@ -1094,7 +1346,8 @@ final class TextFieldInputTests: XCTestCase {
         _ type: KeyboardEventType,
         window: any VVD.Window,
         key: VirtualKey = .none,
-        text: String = ""
+        text: String = "",
+        modifiers: KeyboardModifierFlags = []
     ) -> KeyboardEvent {
         KeyboardEvent(
             type: type,
@@ -1103,7 +1356,7 @@ final class TextFieldInputTests: XCTestCase {
             key: key,
             text: text,
             isRepeat: false,
-            modifiers: []
+            modifiers: modifiers
         )
     }
 }
