@@ -16,6 +16,58 @@ final class FocusedValuesTests: XCTestCase {
         XCTAssertEqual(values.focusedValuesTestTitle, "Outer")
     }
 
+    func testResolutionPrefersDeeperSceneAndFocusedInnerView() {
+        // ASSERTIONS commandsFocusedValueScopeDepthArbitrationRuntimeObserved
+        // ASSERTIONS commandsOrdinaryFocusedValueSameKeyRuntimeObserved
+        let scenes = FocusedValues(
+            resolving: FocusedValueList(
+                items: [
+                    item(sceneDepth: 0) {
+                        $0.focusedValuesTestTitle = "Root Scene"
+                    },
+                    item(sceneDepth: 1) {
+                        $0.focusedValuesTestTitle = "Destination Scene"
+                    },
+                ]
+            )
+        )
+        XCTAssertEqual(
+            scenes.focusedValuesTestTitle,
+            "Destination Scene"
+        )
+
+        let ordinary = FocusedValues(
+            resolving: FocusedValueList(
+                items: [
+                    item(isFocused: true) {
+                        $0.focusedValuesTestTitle = "Inner"
+                    },
+                    item(isFocused: true) {
+                        $0.focusedValuesTestTitle = "Outer"
+                    },
+                    item(sceneDepth: 0) {
+                        $0.focusedValuesTestTitle = "Scene"
+                    },
+                ]
+            )
+        )
+        XCTAssertEqual(ordinary.focusedValuesTestTitle, "Inner")
+
+        let unfocused = FocusedValues(
+            resolving: FocusedValueList(
+                items: [
+                    item(isFocused: false) {
+                        $0.focusedValuesTestTitle = "Unfocused"
+                    },
+                    item(sceneDepth: 0) {
+                        $0.focusedValuesTestTitle = "Scene"
+                    },
+                ]
+            )
+        )
+        XCTAssertEqual(unfocused.focusedValuesTestTitle, "Scene")
+    }
+
     func testPresentationOverrideRetainsUnshadowedRootValues() {
         // ASSERTIONS commandsPresentationChildOverridesRootFocusRuntimeObserved
         var root = FocusedValues(
@@ -73,6 +125,60 @@ final class FocusedValuesTests: XCTestCase {
         XCTAssertEqual(
             controller.resolvedFocusedValues.focusedValuesTestTitle,
             "Outer"
+        )
+    }
+
+    @MainActor
+    func testOrdinaryFocusedValueFollowsTextFieldFocusTransfer() throws {
+        // ASSERTIONS commandsOrdinaryFocusedValueResponderRuntimeObserved
+        // ASSERTIONS commandsOrdinaryFocusedValueSameKeyRuntimeObserved
+        let model = FocusedValuesTextFieldModel()
+        let controller = FocusedValuesTextFieldController(model: model)
+        let startDate = controller.date
+
+        func render(_ tick: UInt64) {
+            update(
+                controller,
+                tick: tick,
+                seconds: Double(tick),
+                startDate: startDate
+            )
+            Update.dispatchActions()
+        }
+
+        render(0)
+        render(1)
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "Scene"
+        )
+
+        let focus = try XCTUnwrap(model.focusBinding)
+        focus.wrappedValue = .first
+        render(2)
+        render(3)
+        render(4)
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "First Inner"
+        )
+
+        focus.wrappedValue = .second
+        render(5)
+        render(6)
+        render(7)
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "Second Inner"
+        )
+
+        focus.wrappedValue = nil
+        render(8)
+        render(9)
+        render(10)
+        XCTAssertEqual(
+            controller.resolvedFocusedValues.focusedValuesTestTitle,
+            "Scene"
         )
     }
 
@@ -172,12 +278,33 @@ final class FocusedValuesTests: XCTestCase {
     }
 
     private func item(
+        sceneDepth: Int = 0,
         _ update: @escaping (inout FocusedValues) -> Void
     ) -> FocusedValueList.Item {
         FocusedValueList.Item(
             version: DisplayList.Version(forUpdate: ()),
-            isFocused: true,
-            update: update
+            isFocused: false,
+            update: { values in
+                values.storageOptions = [.scene]
+                values.navigationDepth = sceneDepth
+                update(&values)
+            }
+        )
+    }
+
+    private func item(
+        isFocused: Bool,
+        _ update: @escaping (inout FocusedValues) -> Void
+    ) -> FocusedValueList.Item {
+        FocusedValueList.Item(
+            version: DisplayList.Version(forUpdate: ()),
+            isFocused: isFocused,
+            update: { values in
+                values.storageOptions = isFocused
+                    ? [.inFocusedViewHierarchy]
+                    : []
+                update(&values)
+            }
         )
     }
 
@@ -247,5 +374,79 @@ private struct FocusedValueVersionHost: View {
         let _ = capture($title, $unrelated)
         Text(verbatim: "Unrelated \(unrelated)")
             .focusedSceneValue(\.focusedValuesTestTitle, title)
+    }
+}
+
+private enum FocusedValuesTextFieldTarget: Hashable {
+    case first
+    case second
+}
+
+private final class FocusedValuesTextFieldModel {
+    var first = "First"
+    var second = "Second"
+    var focusBinding: FocusState<FocusedValuesTextFieldTarget?>.Binding?
+
+    var firstBinding: Binding<String> {
+        Binding(
+            get: { self.first },
+            set: { self.first = $0 }
+        )
+    }
+
+    var secondBinding: Binding<String> {
+        Binding(
+            get: { self.second },
+            set: { self.second = $0 }
+        )
+    }
+}
+
+private struct FocusedValuesTextFieldHost: View {
+    let model: FocusedValuesTextFieldModel
+    @FocusState private var focused: FocusedValuesTextFieldTarget?
+
+    var body: some View {
+        let _ = model.focusBinding = $focused
+        VStack {
+            TextField("First", text: model.firstBinding)
+                .focused($focused, equals: .first)
+                .focusedValue(
+                    \.focusedValuesTestTitle,
+                    "First Inner"
+                )
+                .frame(width: 300)
+                .focusedValue(
+                    \.focusedValuesTestTitle,
+                    "First Outer"
+                )
+            TextField("Second", text: model.secondBinding)
+                .focused($focused, equals: .second)
+                .focusedValue(
+                    \.focusedValuesTestTitle,
+                    "Second Inner"
+                )
+                .frame(width: 300)
+                .focusedValue(
+                    \.focusedValuesTestTitle,
+                    "Second Outer"
+                )
+        }
+        .focusedSceneValue(\.focusedValuesTestTitle, "Scene")
+        .environment(\.defaultFontRenderingMode, .vector())
+    }
+}
+
+@MainActor
+private final class FocusedValuesTextFieldController: WindowController,
+    @unchecked Sendable {
+    init(model: FocusedValuesTextFieldModel) {
+        super.init(
+            content: FocusedValuesTextFieldHost(model: model),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(FocusedValuesTextFieldController.self)
+            )
+        )
     }
 }

@@ -17,6 +17,9 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
 
         var _viewPhase: Attribute<_GraphInputs.Phase>
         var _modifier: Attribute<FocusedValueModifier>
+        var responder: DefaultLayoutViewResponder
+        var _depth: Attribute<Int>
+        var _focusItem: OptionalAttribute<FocusItem?>
         var content: Content?
         var isFocused: Bool
         var cycleDetector: UpdateCycleDetector
@@ -24,10 +27,16 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
 
         init(
             viewPhase: Attribute<_GraphInputs.Phase>,
-            modifier: Attribute<FocusedValueModifier>
+            modifier: Attribute<FocusedValueModifier>,
+            responder: DefaultLayoutViewResponder,
+            depth: Attribute<Int>,
+            focusItem: OptionalAttribute<FocusItem?>
         ) {
             _viewPhase = viewPhase
             _modifier = modifier
+            self.responder = responder
+            _depth = depth
+            _focusItem = focusItem
             content = nil
             isFocused = false
             cycleDetector = UpdateCycleDetector()
@@ -55,7 +64,14 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
                 needsUpdate = true
             }
 
-            let nextIsFocused = modifier.value.isSceneValue
+            let focusItem = _focusItem.changedValue(options: [])
+            let nextIsFocused: Bool
+            if let focusedResponder = focusItem?.value?.responder
+                as? ViewResponder {
+                nextIsFocused = focusedResponder.isDescendant(of: responder)
+            } else {
+                nextIsFocused = false
+            }
             if isFocused != nextIsFocused {
                 isFocused = nextIsFocused
                 needsUpdate = true
@@ -68,11 +84,24 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
 
             let content = content
             let keyPath = modifier.value.keyPath
+            let isSceneValue = modifier.value.isSceneValue
+            let depth = _depth.value
+            let isFocused = isFocused
             let item = FocusedValueList.Item(
                 version: DisplayList.Version(forUpdate: ()),
                 isFocused: isFocused,
                 update: { focusedValues in
                     guard let content else { return }
+                    focusedValues.storageOptions = []
+                    if isSceneValue {
+                        focusedValues.storageOptions.insert(.scene)
+                        focusedValues.navigationDepth = depth
+                    }
+                    if isFocused {
+                        focusedValues.storageOptions.insert(
+                            .inFocusedViewHierarchy
+                        )
+                    }
                     focusedValues[keyPath: keyPath] = content
                 }
             )
@@ -95,13 +124,51 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
         }
 
         var outputs = body(_Graph(), inputs)
+        guard inputs.preferences.keys.contains(ViewRespondersKey.self) else {
+            return outputs
+        }
+
+        let innerNodes = outputs.preferences.values(for: ViewRespondersKey.self)
+        let innerResponders: Attribute<[ViewResponder]>
+        if innerNodes.isEmpty {
+            innerResponders = graph.makeInput(value: [])
+        } else if innerNodes.count == 1 {
+            innerResponders = Attribute(innerNodes[0])
+        } else {
+            innerResponders = graph.makeRule {
+                var combined = ViewRespondersKey.defaultValue
+                for node in innerNodes {
+                    let next = Attribute<[ViewResponder]>(node).value
+                    ViewRespondersKey.reduce(value: &combined) { next }
+                }
+                return combined
+            }
+        }
+
+        let responder = DefaultLayoutViewResponder(inputs: inputs)
+        let responderOutput = graph.makeStatefulRule(
+            DefaultLayoutResponderFilter(
+                children: innerResponders,
+                responder: responder
+            )
+        )
+        outputs.preferences.setValue(
+            responderOutput.identifier,
+            for: ViewRespondersKey.self
+        )
+
         outputs.preferences.makePreferenceTransformer(
             inputs: inputs.preferences,
             key: FocusedValueList.Key.self,
             transform: graph.makeStatefulRule(
                 Transform(
                     viewPhase: inputs.base.phase,
-                    modifier: modifier._attribute
+                    modifier: modifier._attribute,
+                    responder: responder,
+                    depth: inputs.base[
+                        FocusedValueNavigationDepthInputKey.self
+                    ],
+                    focusItem: inputs[FocusedItemInputKey.self]
                 )
             )
         )
@@ -110,6 +177,32 @@ private struct FocusedValueModifier<Content>: MultiViewModifier {
 }
 
 extension View {
+    public func focusedValue<T>(
+        _ keyPath: WritableKeyPath<FocusedValues, T?>,
+        _ value: T
+    ) -> some View {
+        modifier(
+            FocusedValueModifier(
+                keyPath: keyPath,
+                value: value,
+                isSceneValue: false
+            )
+        )
+    }
+
+    public func focusedValue<T>(
+        _ keyPath: WritableKeyPath<FocusedValues, T?>,
+        _ value: T?
+    ) -> some View {
+        modifier(
+            FocusedValueModifier(
+                keyPath: keyPath,
+                value: value,
+                isSceneValue: false
+            )
+        )
+    }
+
     public func focusedSceneValue<T>(
         _ keyPath: WritableKeyPath<FocusedValues, T?>,
         _ value: T

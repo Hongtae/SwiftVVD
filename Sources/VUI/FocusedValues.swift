@@ -17,6 +17,11 @@ struct FocusedValueScope: Equatable {
         id: ViewIdentity(),
         name: "Scene"
     )
+
+    static let view = FocusedValueScope(
+        id: ViewIdentity(),
+        name: "View"
+    )
 }
 
 public struct FocusedValues {
@@ -26,6 +31,9 @@ public struct FocusedValues {
         init(rawValue: UInt8) {
             self.rawValue = rawValue
         }
+
+        static let inFocusedViewHierarchy = StorageOptions(rawValue: 1 << 0)
+        static let scene = StorageOptions(rawValue: 1 << 1)
     }
 
     struct Entry<Key: FocusedValueKey> {
@@ -46,15 +54,33 @@ public struct FocusedValues {
     public subscript<Key>(key: Key.Type) -> Key.Value?
     where Key: FocusedValueKey {
         get {
-            plist.value(forKey: FocusedValuePropertyKey<Key>.self)?.value
+            var resolved: Entry<Key>?
+            var sceneDepth = Int.min
+            plist.forEachValue(
+                forKey: FocusedValuePropertyKey<Key>.self
+            ) { entry, _ in
+                guard let entry else { return }
+                if entry.scope == .scene {
+                    guard entry.depth > sceneDepth else { return }
+                    resolved = entry
+                    sceneDepth = entry.depth
+                } else if entry.scope == .view,
+                          entry.inFocusedViewHierarchy {
+                    resolved = entry
+                }
+            }
+            return resolved?.value
         }
         set {
+            let isScene = storageOptions.contains(.scene)
             let entry = newValue.map {
                 Entry<Key>(
-                    scope: .scene,
+                    scope: isScene ? .scene : .view,
                     value: $0,
-                    inFocusedViewHierarchy: false,
-                    depth: navigationDepth
+                    inFocusedViewHierarchy: storageOptions.contains(
+                        .inFocusedViewHierarchy
+                    ),
+                    depth: isScene ? navigationDepth : -1
                 )
             }
             plist.setValue(entry, forKey: FocusedValuePropertyKey<Key>.self)
@@ -119,6 +145,19 @@ struct FocusedValueList {
             version.combine(with: item.version)
         }
         return version
+    }
+}
+
+struct FocusedValueNavigationDepthInputKey: ViewInput {
+    static var defaultValue: Attribute<Int> {
+        Attribute(type: Int.self)
+    }
+
+    static func valuesEqual(
+        _ lhs: Attribute<Int>,
+        _ rhs: Attribute<Int>
+    ) -> Bool {
+        lhs == rhs
     }
 }
 

@@ -125,8 +125,10 @@ final class MainMenuItemHostTests: XCTestCase {
                 items: [
                     FocusedValueList.Item(
                         version: DisplayList.Version(forUpdate: ()),
-                        isFocused: true,
+                        isFocused: false,
                         update: { values in
+                            values.storageOptions = [.scene]
+                            values.navigationDepth = 0
                             values.menuHostFocusedTitle = title
                         }
                     )

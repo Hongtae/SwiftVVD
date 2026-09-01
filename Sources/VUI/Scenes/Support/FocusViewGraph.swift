@@ -46,6 +46,8 @@ final class FocusViewGraph: ViewGraphFeature {
         inputs[FocusedValuesInputKey.self] = _focusedValues
         inputs[FocusStoreInputKey.self] = _focusStore
         inputs[FocusBridgeInputKey.self] = OptionalAttribute(bridgeAttribute)
+        inputs.base[FocusedValueNavigationDepthInputKey.self] =
+            graph.data.graph.makeInput(value: 0)
         inputs.preferences.add(FocusedValueList.Key.self)
         inputs.preferences.add(FocusStoreList.Key.self)
     }
