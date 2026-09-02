@@ -29,9 +29,19 @@ final class TextFieldInputTests: XCTestCase {
             text: text,
             prompt: Text("Prompt")
         )
+        let labelConfigured = TextField(text: text) {
+            Text("Label")
+        }
+        let axisConfigured = TextField(text: text, axis: .vertical) {
+            Text("Label")
+        }
 
         XCTAssertNotNil(simple.state.deprecatedActions)
         XCTAssertNil(configured.state.deprecatedActions)
+        XCTAssertNil(labelConfigured.state.deprecatedActions)
+        XCTAssertEqual(labelConfigured.axis, .horizontal)
+        XCTAssertNil(axisConfigured.state.deprecatedActions)
+        XCTAssertEqual(axisConfigured.axis, .vertical)
     }
 
     // ASSERTIONS textFieldLocalizedResourceInitializersObserved

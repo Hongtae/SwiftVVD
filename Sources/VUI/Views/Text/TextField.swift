@@ -33,7 +33,7 @@ public struct TextSelection: Equatable, Hashable {
     }
 
     public var indices: Indices
-    public var affinity: TextSelectionAffinity
+    public internal(set) var affinity: TextSelectionAffinity
 
     public init(range: Range<String.Index>) {
         indices = .selection(range)
@@ -384,7 +384,25 @@ public struct TextField<Label>: View where Label: View {
     public init(
         text: Binding<String>,
         prompt: Text? = nil,
-        axis: Axis = .horizontal,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.init(
+            text: text,
+            isSecure: false,
+            label: label(),
+            axis: .horizontal,
+            prompt: prompt,
+            state: StateOrBinding(wrappedValue: TextFieldState(
+                displayText: text.wrappedValue
+            )),
+            selection: nil
+        )
+    }
+
+    public init(
+        text: Binding<String>,
+        prompt: Text? = nil,
+        axis: Axis,
         @ViewBuilder label: () -> Label
     ) {
         self.init(
