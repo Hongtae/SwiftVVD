@@ -44,6 +44,43 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(axisConfigured.axis, .vertical)
     }
 
+    // ASSERTIONS textFieldRoundedBorderStyleObserved
+    // ASSERTIONS textFieldRoundedBorderStyleMetricsObserved
+    func testRoundedBorderStyleUsesDedicatedBorderedRenderer() {
+        let text = Binding.constant("value")
+        let configuration = TextField<_TextFieldStyleLabel>(
+            text: text,
+            isSecure: false,
+            label: _TextFieldStyleLabel(),
+            axis: .horizontal,
+            prompt: nil,
+            state: StateOrBinding(wrappedValue: TextFieldState(
+                displayText: text.wrappedValue
+            )),
+            selection: nil
+        )
+        let body = RoundedBorderTextFieldStyle()._body(
+            configuration: configuration
+        )
+        let storage = Dictionary(
+            uniqueKeysWithValues: Mirror(reflecting: body).children.compactMap {
+                child -> (String, Any)? in
+                child.label.map { ($0, child.value) }
+            }
+        )
+
+        XCTAssertEqual(storage["drawsBorder"] as? Bool, true)
+        XCTAssertEqual(storage["horizontalInset"] as? CGFloat, 4)
+
+        let styled = TextField("Input", text: text)
+            .textFieldStyle(.roundedBorder)
+        XCTAssertTrue(
+            String(reflecting: type(of: styled)).contains(
+                "TextFieldStyleModifier<VUI.RoundedBorderTextFieldStyle>"
+            )
+        )
+    }
+
     // ASSERTIONS textFieldLocalizedResourceInitializersObserved
     func testLocalizedResourceInitializersUseModernStringBindingRoute() {
         let text = Binding.constant("value")

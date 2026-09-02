@@ -25,7 +25,11 @@ public struct DefaultTextFieldStyle: TextFieldStyle {
     public func _body(
         configuration: TextField<_TextFieldStyleLabel>
     ) -> some View {
-        TextFieldControl(configuration: configuration, drawsBorder: true)
+        TextFieldControl(
+            configuration: configuration,
+            drawsBorder: true,
+            horizontalInset: 6
+        )
     }
 }
 
@@ -35,7 +39,25 @@ public struct PlainTextFieldStyle: TextFieldStyle {
     public func _body(
         configuration: TextField<_TextFieldStyleLabel>
     ) -> some View {
-        TextFieldControl(configuration: configuration, drawsBorder: false)
+        TextFieldControl(
+            configuration: configuration,
+            drawsBorder: false,
+            horizontalInset: 0
+        )
+    }
+}
+
+public struct RoundedBorderTextFieldStyle: TextFieldStyle {
+    public init() {}
+
+    public func _body(
+        configuration: TextField<_TextFieldStyleLabel>
+    ) -> some View {
+        TextFieldControl(
+            configuration: configuration,
+            drawsBorder: true,
+            horizontalInset: 4
+        )
     }
 }
 
@@ -45,6 +67,12 @@ extension TextFieldStyle where Self == DefaultTextFieldStyle {
 
 extension TextFieldStyle where Self == PlainTextFieldStyle {
     public static var plain: PlainTextFieldStyle { PlainTextFieldStyle() }
+}
+
+extension TextFieldStyle where Self == RoundedBorderTextFieldStyle {
+    public static var roundedBorder: RoundedBorderTextFieldStyle {
+        RoundedBorderTextFieldStyle()
+    }
 }
 
 extension View {
@@ -57,6 +85,7 @@ extension View {
 private struct TextFieldControl: View {
     var configuration: TextField<_TextFieldStyleLabel>
     var drawsBorder: Bool
+    var horizontalInset: CGFloat
     @State private var inputState = TextFieldInputState()
     @FocusState private var isFocused: Bool
     @Environment(\.textFieldCompositionCaretStyle)
@@ -73,7 +102,7 @@ private struct TextFieldControl: View {
     private var styledContent: some View {
         if drawsBorder {
             editorContent
-                .padding(.horizontal, 6)
+                .padding(.horizontal, horizontalInset)
                 .padding(.vertical, 4)
                 .background(
                     Color.white,
@@ -181,7 +210,7 @@ private struct TextFieldControl: View {
             selectionValue: configuration.selection?.wrappedValue,
             fieldState: configuration.$state,
             inputState: $inputState,
-            contentLeadingInset: drawsBorder ? 6 : 0
+            contentLeadingInset: horizontalInset
         )
     }
 }
