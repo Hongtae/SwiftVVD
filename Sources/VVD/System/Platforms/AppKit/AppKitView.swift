@@ -745,12 +745,20 @@ private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate,
 
             let deviceID = 0
             let buttonID = event.buttonNumber
+            let clickCount = switch eventType {
+            case .buttonDown, .buttonUp:
+                event.clickCount
+            default:
+                0
+            }
 
             window.postMouseEvent(MouseEvent(type: eventType,
                                              window: window,
                                              device: deviceType,
                                              deviceID: deviceID,
                                              buttonID: buttonID,
+                                             clickCount: clickCount,
+                                             modifiers: KeyboardModifierFlags(event.modifierFlags),
                                              location: location,
                                              delta: delta,
                                              tilt: tilt,

@@ -470,6 +470,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     @MainActor
     func updateActivation() {
+        let previousActiveWindow = self.activeWindow
         let active = self.windowSurfaceMap.values.first {
             $0.value?.activated ?? false
         }
@@ -478,6 +479,10 @@ final class WaylandApplication: Application, @unchecked Sendable {
             self.activeWindow = active
         } else {
             self.activeWindow = nil            
+        }
+        if previousActiveWindow !== self.activeWindow {
+            previousActiveWindow?.resetMouseClickTracking()
+            self.activeWindow?.resetMouseClickTracking()
         }
         let nowActive = self.isActive
         if nowActive != wasActive {
@@ -560,6 +565,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     private struct PointerButtonState {
         weak var target: WaylandWindow?
         var buttonID: Int
+        var clickCount: Int
         var location: CGPoint
         var timestamp: TimeInterval
     }
@@ -634,8 +640,10 @@ final class WaylandApplication: Application, @unchecked Sendable {
         pointerEnterSerial = serial
         pointerTarget = self.window(forSurface: surface)
         pointerLocation = CGPoint(x: x, y: y)
+        let modifiers = keyboardModifierFlags()
         if let target = pointerTarget {
             MainActor.assumeIsolated {
+                target.resetMouseClickTracking()
                 updateCursor(for: target)
                 target.postMouseEvent(MouseEvent(
                     type: .entered,
@@ -643,6 +651,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
                     device: .genericMouse,
                     deviceID: 0,
                     buttonID: 0,
+                    modifiers: modifiers,
                     location: pointerLocation,
                     timestamp: ProcessInfo.processInfo.systemUptime
                 ))
@@ -652,6 +661,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func pointerLeave(serial: UInt32, surface: OpaquePointer?) {
+        let modifiers = keyboardModifierFlags()
         if let target = pointerTarget {
             MainActor.assumeIsolated {
                 target.postMouseEvent(MouseEvent(
@@ -660,9 +670,11 @@ final class WaylandApplication: Application, @unchecked Sendable {
                     device: .genericMouse,
                     deviceID: 0,
                     buttonID: 0,
+                    modifiers: modifiers,
                     location: pointerLocation,
                     timestamp: ProcessInfo.processInfo.systemUptime
                 ))
+                target.resetMouseClickTracking()
             }
         }
         cancelActivePointerButtons()
@@ -676,6 +688,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
     fileprivate func pointerMotion(time: UInt32, x: Double, y: Double) {
         let timestamp = pointerEventClock.timestamp(for: time)
+        let modifiers = keyboardModifierFlags()
         if let target = pointerTarget {
             pointerLocation = CGPoint(x: x, y: y)
             for buttonID in Array(pointerButtonStates.keys) {
@@ -688,6 +701,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
                                       device: .genericMouse,
                                       deviceID: 0,
                                       buttonID: 0,
+                                      modifiers: modifiers,
                                       location: pointerLocation,
                                       timestamp: timestamp))
             }
@@ -700,6 +714,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
         let timestamp = pointerEventClock.timestamp(for: time)
         let buttonID = Int(button) - BTN_MOUSE
         let previousState = pointerButtonStates[buttonID]
+        let modifiers = keyboardModifierFlags()
         if let target = pointerTarget ?? previousState?.target {
             let location = pointerTarget == nil
                 ? previousState?.location ?? pointerLocation
@@ -713,6 +728,9 @@ final class WaylandApplication: Application, @unchecked Sendable {
                     if alt == true && ctrl == true {
                         let movable: WindowStyle = [.title, .closeButton, .minimizeButton, .maximizeButton]
                         if target.style.intersection(movable).isEmpty == false {
+                            MainActor.assumeIsolated {
+                                target.resetMouseClickTracking()
+                            }
                             xdg_toplevel_move(target.xdgToplevel, self.seat, serial)
                             return
                         }
@@ -721,14 +739,24 @@ final class WaylandApplication: Application, @unchecked Sendable {
             }
 
             let type: MouseEventType = state == 0 ? .buttonUp : .buttonDown
+            let clickCount: Int
             if type == .buttonDown {
+                clickCount = MainActor.assumeIsolated {
+                    target.registerMouseButtonDown(
+                        buttonID: buttonID,
+                        location: location,
+                        timestamp: timestamp
+                    )
+                }
                 pointerButtonStates[buttonID] = PointerButtonState(
                     target: target,
                     buttonID: buttonID,
+                    clickCount: clickCount,
                     location: location,
                     timestamp: timestamp
                 )
             } else {
+                clickCount = previousState?.clickCount ?? 0
                 pointerButtonStates.removeValue(forKey: buttonID)
             }
             MainActor.assumeIsolated {
@@ -737,6 +765,8 @@ final class WaylandApplication: Application, @unchecked Sendable {
                                                   device: .genericMouse,
                                                   deviceID: 0,
                                                   buttonID: buttonID,
+                                                  clickCount: clickCount,
+                                                  modifiers: modifiers,
                                                   location: location,
                                                   timestamp: timestamp))
             }
@@ -745,19 +775,27 @@ final class WaylandApplication: Application, @unchecked Sendable {
     }
 
     fileprivate func cancelActivePointerButtons() {
+        if let pointerTarget {
+            MainActor.assumeIsolated {
+                pointerTarget.resetMouseClickTracking()
+            }
+        }
         let states = pointerButtonStates.values.sorted { $0.buttonID < $1.buttonID }
         guard !states.isEmpty else { return }
 
         pointerButtonStates.removeAll()
+        let modifiers = keyboardModifierFlags()
         for state in states {
             guard let target = state.target else { continue }
             MainActor.assumeIsolated {
+                target.resetMouseClickTracking()
                 target.postMouseEvent(MouseEvent(
                     type: .cancelled,
                     window: target,
                     device: .genericMouse,
                     deviceID: 0,
                     buttonID: state.buttonID,
+                    modifiers: modifiers,
                     location: state.location,
                     timestamp: state.timestamp
                 ))
@@ -809,6 +847,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
 
         guard pointerAxisFrame.delta != .zero || phase != nil,
               let timestamp = pointerAxisFrame.timestamp else { return }
+        let modifiers = keyboardModifierFlags()
         MainActor.assumeIsolated {
             target.postMouseEvent(MouseEvent(
                 type: .wheel,
@@ -816,6 +855,7 @@ final class WaylandApplication: Application, @unchecked Sendable {
                 device: .genericMouse,
                 deviceID: 0,
                 buttonID: 2,
+                modifiers: modifiers,
                 location: pointerLocation,
                 delta: pointerAxisFrame.delta,
                 timestamp: timestamp,

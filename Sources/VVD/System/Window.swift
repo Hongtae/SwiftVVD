@@ -82,6 +82,11 @@ public struct MouseEvent {
     public var device: MouseEventDevice
     public var deviceID: Int
     public var buttonID: Int
+    /// Consecutive click count for button-down and its matching button-up.
+    /// Non-click events carry zero.
+    public var clickCount: Int = 0
+    /// Keyboard modifiers active when the pointer event occurred.
+    public var modifiers: KeyboardModifierFlags = []
     public var location: CGPoint
     /// Relative pointer movement or scroll displacement.
     public var delta: CGPoint = .zero

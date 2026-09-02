@@ -207,12 +207,20 @@ final class Win32Window: Window {
     private struct PointerInputState {
         var device: MouseEventDevice
         var buttonID: Int
+        var clickCount: Int
         var location: CGPoint
         var tilt: CGPoint
         var pressure: CGFloat
         var timestamp: TimeInterval
         var touchData: TouchEventData?
         var hasActiveContact: Bool
+    }
+
+    private struct MouseClickSample {
+        var buttonID: Int
+        var pixelLocation: CGPoint
+        var timestamp: TimeInterval
+        var clickCount: Int
     }
 
     typealias HWND = WinSDK.HWND
@@ -245,6 +253,8 @@ final class Win32Window: Window {
     private var mousePosition: CGPoint = .zero
     private var lockedMousePosition: CGPoint = .zero
     private var mouseButtonDownMask: MouseButtonDownMask = []
+    private var mouseButtonClickCounts: [Int: Int] = [:]
+    private var previousMouseClick: MouseClickSample?
     private var mouseLocked: Bool = false
     private var mouseInsideClient: Bool = false
     private var mouseLeaveTrackingArmed: Bool = false
@@ -985,7 +995,7 @@ final class Win32Window: Window {
         )
         ImmReleaseContext(hWnd, hIMC)
 
-        guard didReset != 0 else {
+        guard didReset else {
             self.suppressTextCompositionEvents = false
             return nil
         }
@@ -1021,6 +1031,7 @@ final class Win32Window: Window {
             mousePosition = CGPoint(x: Int(pt.x), y: Int(pt.y)) * (1.0 / self.contentScaleFactor)
         }
         self.mouseButtonDownMask = []
+        self.resetMouseClickTracking()
         self.mouseInsideClient = false
         self.mouseBoundaryTrackingSuspended = self.mouseLocked
         self.pointerStates.removeAll()
@@ -1084,6 +1095,7 @@ final class Win32Window: Window {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
+            modifiers: currentKeyboardModifiers(),
             location: location,
             timestamp: timestamp
         ))
@@ -1101,6 +1113,7 @@ final class Win32Window: Window {
             device: .genericMouse,
             deviceID: 0,
             buttonID: 0,
+            modifiers: currentKeyboardModifiers(),
             location: location,
             timestamp: timestamp
         ))
@@ -1137,6 +1150,7 @@ final class Win32Window: Window {
         // mouse state and rebuild it after the modal presentation ends.
         let timestamp = TimeInterval(GetTickCount64()) / 1_000
         self.cancelActiveMouseButtons(timestamp: timestamp)
+        self.resetMouseClickTracking()
         self.cancelActivePointerEvents(timestamp: timestamp)
         self.mouseLocked = false
         if let hWnd = self.hWnd, GetCapture() == hWnd {
@@ -1168,6 +1182,93 @@ final class Win32Window: Window {
         if leftAlt || rightAlt { modifiers.insert(.option) }
         if leftWin || rightWin { modifiers.insert(.command) }
         return modifiers
+    }
+
+    private func currentKeyboardModifiers() -> KeyboardModifierFlags {
+        func isDown(_ key: Int32) -> Bool {
+            GetKeyState(key) < 0
+        }
+
+        var modifiers: KeyboardModifierFlags = []
+        if GetKeyState(VK_CAPITAL) & 1 != 0 { modifiers.insert(.capsLock) }
+        if isDown(VK_SHIFT) { modifiers.insert(.shift) }
+        if isDown(VK_CONTROL) { modifiers.insert(.control) }
+        if isDown(VK_MENU) { modifiers.insert(.option) }
+        if isDown(VK_LWIN) || isDown(VK_RWIN) { modifiers.insert(.command) }
+        return modifiers
+    }
+
+    private func beginMouseClick(
+        buttonID: Int,
+        pixelLocation: CGPoint,
+        timestamp: TimeInterval
+    ) -> Int {
+        // Count ordinary down messages instead of enabling CS_DBLCLKS so the
+        // sequence can continue through triple and higher-order clicks.
+        let maximumMovement = CGSize(
+            width: max(CGFloat(GetSystemMetrics(SM_CXDOUBLECLK)) * 0.5, 0.0),
+            height: max(CGFloat(GetSystemMetrics(SM_CYDOUBLECLK)) * 0.5, 0.0)
+        )
+        let maximumInterval = TimeInterval(GetDoubleClickTime()) / 1_000
+        let clickCount: Int
+        if let previousMouseClick,
+           previousMouseClick.buttonID == buttonID,
+           timestamp >= previousMouseClick.timestamp,
+           timestamp - previousMouseClick.timestamp <= maximumInterval,
+           abs(pixelLocation.x - previousMouseClick.pixelLocation.x) <= maximumMovement.width,
+           abs(pixelLocation.y - previousMouseClick.pixelLocation.y) <= maximumMovement.height,
+           previousMouseClick.clickCount < Int.max {
+            clickCount = previousMouseClick.clickCount + 1
+        } else {
+            clickCount = 1
+        }
+        previousMouseClick = MouseClickSample(
+            buttonID: buttonID,
+            pixelLocation: pixelLocation,
+            timestamp: timestamp,
+            clickCount: clickCount
+        )
+        mouseButtonClickCounts[buttonID] = clickCount
+        return clickCount
+    }
+
+    private func endMouseClick(buttonID: Int) -> Int {
+        mouseButtonClickCounts.removeValue(forKey: buttonID) ?? 0
+    }
+
+    private func postMouseButtonEvent(
+        type: MouseEventType,
+        buttonID: Int,
+        pixelLocation: CGPoint,
+        timestamp: TimeInterval
+    ) {
+        let clickCount: Int
+        if type == .buttonDown {
+            clickCount = beginMouseClick(
+                buttonID: buttonID,
+                pixelLocation: pixelLocation,
+                timestamp: timestamp
+            )
+        } else {
+            assert(type == .buttonUp)
+            clickCount = endMouseClick(buttonID: buttonID)
+        }
+        postMouseEvent(MouseEvent(
+            type: type,
+            window: self,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: buttonID,
+            clickCount: clickCount,
+            modifiers: currentKeyboardModifiers(),
+            location: pixelLocation * (1.0 / contentScaleFactor),
+            timestamp: timestamp
+        ))
+    }
+
+    private func resetMouseClickTracking() {
+        previousMouseClick = nil
+        mouseButtonClickCounts.removeAll()
     }
 
     private func synchronizeKeyStates() {
@@ -1327,7 +1428,9 @@ final class Win32Window: Window {
         guard downMask.rawValue != 0 else { return false }
 
         self.mouseButtonDownMask = []
+        self.resetMouseClickTracking()
         let location = self.mousePosition(forDeviceID: 0) ?? self.mousePosition
+        let modifiers = self.currentKeyboardModifiers()
         for (mask, buttonID) in Self.mouseButtonMappings where downMask.contains(mask) {
             self.postMouseEvent(MouseEvent(
                 type: .cancelled,
@@ -1335,6 +1438,7 @@ final class Win32Window: Window {
                 device: .genericMouse,
                 deviceID: 0,
                 buttonID: buttonID,
+                modifiers: modifiers,
                 location: location,
                 timestamp: timestamp
             ))
@@ -1353,6 +1457,10 @@ final class Win32Window: Window {
             device: state.device,
             deviceID: Int(pointerID),
             buttonID: state.buttonID,
+            clickCount: type == .buttonDown || type == .buttonUp
+                ? state.clickCount
+                : 0,
+            modifiers: self.currentKeyboardModifiers(),
             location: state.location,
             delta: delta,
             tilt: state.tilt,
@@ -1379,6 +1487,7 @@ final class Win32Window: Window {
                 device: state.device,
                 deviceID: Int(pointerID),
                 buttonID: state.buttonID,
+                modifiers: self.currentKeyboardModifiers(),
                 location: state.location,
                 delta: .zero,
                 tilt: state.tilt,
@@ -1445,6 +1554,9 @@ final class Win32Window: Window {
             let delta = self.pointerDelta(for: pointerID,
                                           type: type,
                                           location: location)
+            let clickCount = type == .buttonDown
+                ? 1
+                : self.pointerStates[pointerID]?.clickCount ?? 0
             let touchData = TouchEventData(
                 majorRadius: hasContactArea
                     ? self.pointerContactMajorRadius(info.rcContact)
@@ -1457,6 +1569,7 @@ final class Win32Window: Window {
                 state: PointerInputState(
                     device: .touch,
                     buttonID: 0,
+                    clickCount: clickCount,
                     location: location,
                     tilt: .zero,
                     pressure: pressure,
@@ -1495,6 +1608,9 @@ final class Win32Window: Window {
             let delta = self.pointerDelta(for: pointerID,
                                           type: type,
                                           location: location)
+            let clickCount = type == .buttonDown
+                ? 1
+                : self.pointerStates[pointerID]?.clickCount ?? 0
             let activeButtonID = self.pointerStates[pointerID].flatMap {
                 $0.hasActiveContact ? $0.buttonID : nil
             }
@@ -1510,6 +1626,7 @@ final class Win32Window: Window {
                 state: PointerInputState(
                     device: .stylus,
                     buttonID: buttonID,
+                    clickCount: clickCount,
                     location: location,
                     tilt: tilt,
                     pressure: pressure,
@@ -2540,6 +2657,7 @@ final class Win32Window: Window {
             case UINT(WM_CANCELMODE):
                 let timestamp = messageTimestamp()
                 _ = window.cancelActiveMouseButtons(timestamp: timestamp)
+                window.resetMouseClickTracking()
                 _ = window.cancelActivePointerEvents(timestamp: timestamp)
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 break
@@ -2590,6 +2708,7 @@ final class Win32Window: Window {
                                                          device: .genericMouse,
                                                          deviceID: 0,
                                                          buttonID: 0,
+                                                         modifiers: window.currentKeyboardModifiers(),
                                                          location: window.mousePosition,
                                                          delta: delta,
                                                          timestamp: timestamp))
@@ -2611,147 +2730,121 @@ final class Win32Window: Window {
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button1)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 0,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonDown,
+                    buttonID: 0,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_LBUTTONUP):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button1)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 0,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonUp,
+                    buttonID: 0,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONDOWN):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button2)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 1,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonDown,
+                    buttonID: 1,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_RBUTTONUP):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button2)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 1,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonUp,
+                    buttonID: 1,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONDOWN):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.insert(.button3)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 2,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonDown,
+                    buttonID: 2,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_MBUTTONUP):
                 if isPointerCompatibilityMouseMessage() { return 0 }
                 window.mouseButtonDownMask.remove(.button3)
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
-
-                window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                 window: window,
-                                                 device: .genericMouse,
-                                                 deviceID: 0,
-                                                 buttonID: 2,
-                                                 location: pos,
-                                                 timestamp: messageTimestamp()))
+                window.postMouseButtonEvent(
+                    type: .buttonUp,
+                    buttonID: 2,
+                    pixelLocation: CGPoint(x: Int(pts.x), y: Int(pts.y)),
+                    timestamp: messageTimestamp()
+                )
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 0
             case UINT(WM_XBUTTONDOWN):
                 if isPointerCompatibilityMouseMessage() { return 1 }
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pixelLocation = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 let xButton = HIWORD(wParam)
                 if xButton == XBUTTON1 {
                     window.mouseButtonDownMask.insert(.button4)
-
-                    window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                     window: window,
-                                                     device: .genericMouse,
-                                                     deviceID: 0,
-                                                     buttonID: 3,
-                                                     location: pos,
-                                                     timestamp: messageTimestamp()))
+                    window.postMouseButtonEvent(
+                        type: .buttonDown,
+                        buttonID: 3,
+                        pixelLocation: pixelLocation,
+                        timestamp: messageTimestamp()
+                    )
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.insert(.button5)
-
-                    window.postMouseEvent(MouseEvent(type: .buttonDown,
-                                                     window: window,
-                                                     device: .genericMouse,
-                                                     deviceID: 0,
-                                                     buttonID: 4,
-                                                     location: pos,
-                                                     timestamp: messageTimestamp()))
+                    window.postMouseButtonEvent(
+                        type: .buttonDown,
+                        buttonID: 4,
+                        pixelLocation: pixelLocation,
+                        timestamp: messageTimestamp()
+                    )
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)
                 return 1 // Return TRUE.
             case UINT(WM_XBUTTONUP):
                 if isPointerCompatibilityMouseMessage() { return 1 }
                 let pts = MAKEPOINTS(lParam)
-                let pos = CGPoint(x: Int(pts.x), y: Int(pts.y)) * (1.0 / window.contentScaleFactor)
+                let pixelLocation = CGPoint(x: Int(pts.x), y: Int(pts.y))
 
                 let xButton = HIWORD(wParam)
                 if xButton == XBUTTON1 {
                     window.mouseButtonDownMask.remove(.button4)
-
-                    window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                     window: window,
-                                                     device: .genericMouse,
-                                                     deviceID: 0,
-                                                     buttonID: 3,
-                                                     location: pos,
-                                                     timestamp: messageTimestamp()))
+                    window.postMouseButtonEvent(
+                        type: .buttonUp,
+                        buttonID: 3,
+                        pixelLocation: pixelLocation,
+                        timestamp: messageTimestamp()
+                    )
                 } else if xButton == XBUTTON2 {
                     window.mouseButtonDownMask.remove(.button5)
-
-                    window.postMouseEvent(MouseEvent(type: .buttonUp,
-                                                     window: window,
-                                                     device: .genericMouse,
-                                                     deviceID: 0,
-                                                     buttonID: 4,
-                                                     location: pos,
-                                                     timestamp: messageTimestamp()))
+                    window.postMouseButtonEvent(
+                        type: .buttonUp,
+                        buttonID: 4,
+                        pixelLocation: pixelLocation,
+                        timestamp: messageTimestamp()
+                    )
                 }
                 PostMessageW(hWnd, UINT(WM_VVDWINDOW_UPDATEMOUSECAPTURE), 0, 0)                  
                 return 1 // Return TRUE.
@@ -2844,6 +2937,7 @@ final class Win32Window: Window {
                                                  device: .genericMouse,
                                                  deviceID: 0,
                                                  buttonID: 2,
+                                                 modifiers: window.currentKeyboardModifiers(),
                                                  location: pos,
                                                  delta: delta,
                                                  timestamp: messageTimestamp(),

@@ -2,13 +2,27 @@
 //  File: UIKitWindow.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
 import Foundation
 internal import QuartzCore
 @_implementationOnly import UIKit
+
+#if !os(watchOS)
+private extension KeyboardModifierFlags {
+    init(_ flags: UIKeyModifierFlags) {
+        self.init()
+        if flags.contains(.alphaShift) { insert(.capsLock) }
+        if flags.contains(.shift) { insert(.shift) }
+        if flags.contains(.control) { insert(.control) }
+        if flags.contains(.alternate) { insert(.option) }
+        if flags.contains(.command) { insert(.command) }
+        if flags.contains(.numericPad) { insert(.numericPad) }
+    }
+}
+#endif
 
 @MainActor
 protocol UIKitView: AnyObject {
@@ -29,6 +43,14 @@ func makeUIKitView() -> UIKitView {
 
 @MainActor
 private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
+
+    private func keyboardModifiers(from event: UIEvent?) -> KeyboardModifierFlags {
+#if os(watchOS)
+        []
+#else
+        event.map { KeyboardModifierFlags($0.modifierFlags) } ?? []
+#endif
+    }
 
     var defaultTextFieldHeight: CGFloat { 30 }
     var defaultTextFieldMargin: CGFloat { 2 }
@@ -280,6 +302,8 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  device: device,
                                                  deviceID: index,
                                                  buttonID: 0,
+                                                 clickCount: Int(touch.tapCount),
+                                                 modifiers: keyboardModifiers(from: event),
                                                  location: pos,
                                                  delta: .zero,
                                                  tilt: tilt,
@@ -312,6 +336,7 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                  device: device,
                                                  deviceID: index,
                                                  buttonID: 0,
+                                                 modifiers: keyboardModifiers(from: event),
                                                  location: pos,
                                                  delta: delta,
                                                  tilt: tilt,
@@ -346,6 +371,8 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                                                      device: device,
                                                      deviceID: index,
                                                      buttonID: 0,
+                                                     clickCount: Int(touch.tapCount),
+                                                     modifiers: keyboardModifiers(from: event),
                                                      location: pos,
                                                      delta: delta,
                                                      tilt: tilt,
@@ -383,6 +410,7 @@ private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
                         device: device,
                         deviceID: index,
                         buttonID: 0,
+                        modifiers: keyboardModifiers(from: event),
                         location: pos,
                         delta: delta,
                         tilt: tilt,

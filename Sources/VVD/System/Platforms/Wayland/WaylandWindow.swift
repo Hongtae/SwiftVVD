@@ -153,7 +153,41 @@ var xdgActivationTokenListener = xdg_activation_token_v1_listener(
 )
 
 @MainActor
+private let waylandMouseClickThresholds: (
+    interval: TimeInterval,
+    maximumMovement: CGFloat
+) = {
+    let environment = ProcessInfo.processInfo.environment
+
+    let interval: TimeInterval
+    if let rawValue = environment["VVD_WAYLAND_MULTI_CLICK_INTERVAL_MS"],
+       let milliseconds = Double(rawValue),
+       milliseconds.isFinite {
+        interval = max(milliseconds, 0) / 1_000
+    } else {
+        interval = 0.4
+    }
+
+    let maximumMovement: CGFloat
+    if let rawValue = environment["VVD_WAYLAND_MULTI_CLICK_DISTANCE"],
+       let value = Double(rawValue),
+       value.isFinite {
+        maximumMovement = CGFloat(max(value, 0))
+    } else {
+        maximumMovement = 4.0
+    }
+    return (interval: interval, maximumMovement: maximumMovement)
+}()
+
+@MainActor
 final class WaylandWindow: Window {
+
+    private struct MouseClickSample {
+        var buttonID: Int
+        var location: CGPoint
+        var timestamp: TimeInterval
+        var clickCount: Int
+    }
 
     fileprivate(set) var activated: Bool = false
     fileprivate(set) var visible: Bool = false
@@ -214,6 +248,7 @@ final class WaylandWindow: Window {
     var eventObservers = WindowEventObserverContainer()
     private(set) var cursorOverride: Cursor?
     private(set) var mouseVisible = true
+    private var previousMouseClick: MouseClickSample?
     private var textInputEnabled = false
 
     private(set) var display: OpaquePointer?
@@ -439,6 +474,39 @@ final class WaylandWindow: Window {
         guard deviceID == 0, mouseVisible != show else { return }
         mouseVisible = show
         WaylandApplication.shared?.updateCursor(for: self)
+    }
+
+    func registerMouseButtonDown(
+        buttonID: Int,
+        location: CGPoint,
+        timestamp: TimeInterval
+    ) -> Int {
+        let clickCount: Int
+        if let previousMouseClick,
+           previousMouseClick.buttonID == buttonID,
+           timestamp >= previousMouseClick.timestamp,
+           timestamp - previousMouseClick.timestamp <=
+               waylandMouseClickThresholds.interval,
+           abs(location.x - previousMouseClick.location.x) <=
+               waylandMouseClickThresholds.maximumMovement,
+           abs(location.y - previousMouseClick.location.y) <=
+               waylandMouseClickThresholds.maximumMovement,
+           previousMouseClick.clickCount < Int.max {
+            clickCount = previousMouseClick.clickCount + 1
+        } else {
+            clickCount = 1
+        }
+        previousMouseClick = MouseClickSample(
+            buttonID: buttonID,
+            location: location,
+            timestamp: timestamp,
+            clickCount: clickCount
+        )
+        return clickCount
+    }
+
+    func resetMouseClickTracking() {
+        previousMouseClick = nil
     }
 
     func isMouseVisible(forDeviceID deviceID: Int) -> Bool {
