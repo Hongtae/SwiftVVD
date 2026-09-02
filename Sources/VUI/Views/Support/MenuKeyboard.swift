@@ -37,6 +37,42 @@ func menuCharactersAreEquivalent(
     foldedMenuCharacter(lhs) == foldedMenuCharacter(rhs)
 }
 
+func menuShortcutAction(
+    key: KeyEquivalent,
+    modifiers: EventModifiers,
+    in list: PlatformItemList
+) -> (() -> Void)? {
+    for item in list.items {
+        let participates = !item.isHidden
+            || item.allowsKeyEquivalentWhenHidden
+        if participates,
+           item.isInterfaceEnabled,
+           let shortcut = item.resolvedKeyboardShortcut,
+           shortcut.modifiers == modifiers,
+           menuCharactersAreEquivalent(shortcut.key.character, key.character),
+           let action = item.selectionBehavior?.onSelect {
+            return action
+        }
+        if let children = item.children,
+           let action = menuShortcutAction(
+               key: key,
+               modifiers: modifiers,
+               in: children
+           ) {
+            return action
+        }
+        if let children = item.labelGroupChildren,
+           let action = menuShortcutAction(
+               key: key,
+               modifiers: modifiers,
+               in: children
+           ) {
+            return action
+        }
+    }
+    return nil
+}
+
 func menuAccessKeyText(
     _ title: String,
     accessKey: Character?,

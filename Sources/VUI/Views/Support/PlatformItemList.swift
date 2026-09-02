@@ -33,6 +33,9 @@ struct PlatformItemList {
         var allowsKeyEquivalentWhenHidden: Bool
         var isHidden: Bool
         var wantsPlatformInterfaceValidation: Bool
+        // Retains target-dependent validation until the presentation surface
+        // consumes the semantic item.
+        var interfaceValidation: (() -> Bool)?
         var isAlternate: Bool
         var isAlternateDespiteNonMatchingKeyEquivalent: Bool
         var indentationLevel: Int
@@ -92,6 +95,7 @@ struct PlatformItemList {
             allowsKeyEquivalentWhenHidden = false
             isHidden = false
             wantsPlatformInterfaceValidation = false
+            interfaceValidation = nil
             isAlternate = false
             isAlternateDespiteNonMatchingKeyEquivalent = false
             indentationLevel = 0
@@ -123,6 +127,25 @@ struct PlatformItemList {
         init(systemItem: SystemItem) {
             self.init()
             self.systemItem = systemItem
+        }
+
+        var isInterfaceEnabled: Bool {
+            isEnabled && (interfaceValidation?() ?? true)
+        }
+
+        mutating func addInterfaceValidation(
+            _ validation: @escaping () -> Bool
+        ) {
+            let previous = interfaceValidation
+            interfaceValidation = {
+                (previous?() ?? true) && validation()
+            }
+        }
+
+        mutating func resolveInterfaceValidation() {
+            guard let interfaceValidation else { return }
+            isEnabled = isEnabled && interfaceValidation()
+            self.interfaceValidation = nil
         }
     }
 
@@ -238,6 +261,14 @@ struct PlatformItemList {
     mutating func modify(_ transform: (inout Item) -> Void) {
         for index in items.indices {
             transform(&items[index])
+        }
+    }
+
+    mutating func resolveInterfaceValidation() {
+        for index in items.indices {
+            items[index].resolveInterfaceValidation()
+            items[index].children?.resolveInterfaceValidation()
+            items[index].labelGroupChildren?.resolveInterfaceValidation()
         }
     }
 

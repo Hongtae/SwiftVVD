@@ -268,18 +268,18 @@ private struct DefaultPasteboardCommandValidationModifier: ViewModifier {
     var command: TextEditingCommand
 
     func body(content: Content) -> some View {
-        let isEnabled = canPerformRootTextEditingCommand(command)
         return content
-            .disabled(!isEnabled)
             .transformPlatformItemList(
                 AllPlatformItemListFlags.self
             ) { list in
                 list.modify { item in
-                    item.isEnabled = item.isEnabled && isEnabled
+                    item.addInterfaceValidation {
+                        canPerformRootTextEditingCommand(command)
+                    }
                     if var selection = item.selectionBehavior {
-                        selection.onSelect = isEnabled ? {
+                        selection.onSelect = {
                             performRootTextEditingCommand(command)
-                        } : nil
+                        }
                         item.selectionBehavior = selection
                     }
                 }
@@ -304,8 +304,8 @@ extension WindowController {
 
     private func textEditingCommandResponder()
         -> (any TextEditingCommandResponder)? {
-        guard let focusedResponder else { return nil }
-        for responder in focusedResponder.sequence {
+        guard let commandFocusedResponder else { return nil }
+        for responder in commandFocusedResponder.sequence {
             if let responder = responder as? any TextEditingCommandResponder {
                 return responder
             }
@@ -338,8 +338,9 @@ private struct TextEditingFindMenuValidationModifier: ViewModifier {
             list.modify { menuItem in
                 menuItem.children?.modify { item in
                     guard let command = item.textEditingCommand else { return }
-                    item.isEnabled = item.isEnabled
-                        && canPerformRootTextEditingCommand(command)
+                    item.addInterfaceValidation {
+                        canPerformRootTextEditingCommand(command)
+                    }
                 }
             }
         }

@@ -1,7 +1,7 @@
+import Foundation
 import XCTest
+@testable import VVD
 @testable import VUI
-import class VVD.AudioDeviceContext
-import class VVD.GraphicsDeviceContext
 
 final class TextEditingCommandsTests: XCTestCase {
     func testDefaultPasteboardCommandsExistWithoutApplicationCommands()
@@ -132,7 +132,7 @@ final class TextEditingCommandsTests: XCTestCase {
                 expected.keyBinding.map(builtInKeyboardShortcut)
             )
             XCTAssertFalse(item.isEnabled)
-            XCTAssertNil(item.selectionBehavior?.onSelect)
+            XCTAssertNotNil(item.selectionBehavior?.onSelect)
             if case .initialize? = item.commandOperation?.mutation {
                 // Framework defaults initialize before app operations.
             } else {
@@ -207,6 +207,93 @@ final class TextEditingCommandsTests: XCTestCase {
             try editItems(in: replaced).items.compactMap(itemTitle),
             ["Replacement Pasteboard"]
         )
+    }
+
+    func testDefaultPasteboardShortcutTargetsActiveModalResponder() throws {
+        // ASSERTIONS commandsPresentationChildShortcutRuntimeObserved
+        // ASSERTIONS commandsDefaultPasteboardValidationRuntimeObserved
+        let appGraph = AppGraph(app: DefaultPasteboardCommandsTestApp())
+        setVectorFontRendering(in: appGraph)
+        let windowsController = AppWindowsController()
+        let previousAppContext = appContext
+        appContext = TextEditingCommandsTestAppContext(
+            windowsController: windowsController
+        )
+        defer { appContext = previousAppContext }
+
+        windowsController.syncWindowControllers(
+            sceneListAttr: appGraph.sceneListAttr,
+            commandsListAttr: appGraph.commandsListAttr,
+            rootEnvironmentAttr: appGraph.rootEnvironmentAttr,
+            focusedValuesAttr: appGraph.focusedValuesAttr,
+            in: appGraph.graph
+        )
+
+        let root = try XCTUnwrap(windowsController.allWindowControllers.first)
+        windowsController.rootWindowDidActivate(root)
+        update(root, ticks: 0..<12)
+
+        let responder = RecordingTextEditingResponder(
+            enabledCommands: [.copy]
+        )
+        let modal: ModalWindowController = root.viewGraph.data.withCurrent {
+            let graph = root.viewGraph.data.graph
+            let content = AnyView(EmptyView())
+            let contentAttribute: Attribute<AnyView> = graph.makeInput(
+                value: content
+            )
+            let modal = ModalWindowController(
+                crossGraphContent: contentAttribute,
+                sourceGraph: graph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(
+                        RecordingTextEditingResponder.self,
+                        index: 9
+                    )
+                ),
+                parentController: root,
+                usesPlatformWindow: false
+            )
+            root.addModal(
+                child: modal,
+                session: .sheet(SheetPreference(
+                    content: content,
+                    onDismiss: nil,
+                    namespaceID: Namespace.ID(id: 90_001),
+                    itemID: nil,
+                    drawsBackground: true,
+                    placement: .automatic,
+                    activeInspector: nil,
+                    usesPlatformWindow: false
+                ))
+            )
+            return modal
+        }
+        modal.focusTextInputResponder(responder)
+
+        XCTAssertTrue(windowsController.canPerformRootTextEditingCommand(.copy))
+        let shortcut = builtInKeyboardShortcut(.pasteboardCopy)
+        XCTAssertEqual(shortcut.key.character, "c")
+        let modifiers = platformModifiers(shortcut.modifiers)
+        XCTAssertTrue(modal.handleKeyboardEvent(event: KeyboardEvent(
+            type: .keyDown,
+            window: nil,
+            deviceID: 7,
+            key: .c,
+            text: "c",
+            modifiers: modifiers
+        )))
+        XCTAssertTrue(modal.handleKeyboardEvent(event: KeyboardEvent(
+            type: .keyUp,
+            window: nil,
+            deviceID: 7,
+            key: .c,
+            text: "c",
+            modifiers: modifiers
+        )))
+        update(root, ticks: 12..<24)
+        XCTAssertEqual(responder.performedCommands, [.copy])
     }
 
     func testTextEditingCommandsResolveActiveFocusedResponderOnSelection()
@@ -426,6 +513,20 @@ final class TextEditingCommandsTests: XCTestCase {
             ) { _, _ in }
         }
     }
+
+    private func platformModifiers(
+        _ modifiers: EventModifiers
+    ) -> KeyboardModifierFlags {
+        var result: KeyboardModifierFlags = []
+        if modifiers.contains(.capsLock) { result.insert(.capsLock) }
+        if modifiers.contains(.shift) { result.insert(.shift) }
+        if modifiers.contains(.control) { result.insert(.control) }
+        if modifiers.contains(.option) { result.insert(.option) }
+        if modifiers.contains(.command) { result.insert(.command) }
+        if modifiers.contains(.numericPad) { result.insert(.numericPad) }
+        if modifiers.contains(.function) { result.insert(.function) }
+        return result
+    }
 }
 
 private func setVectorFontRendering<A: App>(in appGraph: AppGraph<A>) {
@@ -643,7 +744,8 @@ private extension TextEditingCommand {
 
 private final class RecordingTextEditingResponder:
     ResponderNode,
-    TextEditingCommandResponder {
+    TextEditingCommandResponder,
+    TextInputResponder {
     var enabledCommands: Set<TextEditingCommand>
     var performedCommands: [TextEditingCommand] = []
 
@@ -661,6 +763,12 @@ private final class RecordingTextEditingResponder:
     func performTextEditingCommand(_ command: TextEditingCommand) {
         performedCommands.append(command)
     }
+
+    func handleTextInputEvent(_ event: KeyboardEvent) -> Bool { false }
+
+    func textInputFocusDidChange(_ focused: Bool) {}
+
+    func containsTextInputPoint(_ point: CGPoint) -> Bool { false }
 }
 
 private final class TextEditingCommandWindowController:
@@ -686,7 +794,7 @@ private func textEditingWindowKey(index: UInt8) -> WindowKey {
 private struct TextEditingCommandsTestApp: App {
     init() {}
 
-    var body: some Scene {
+    var body: some VUI.Scene {
         Window("Text editing commands", id: "text-editing-commands") {
             EmptyView()
         }
@@ -698,7 +806,7 @@ private struct TextEditingCommandsTestApp: App {
 private struct DefaultPasteboardCommandsTestApp: App {
     init() {}
 
-    var body: some Scene {
+    var body: some VUI.Scene {
         Window("Default pasteboard commands", id: "default-pasteboard") {
             EmptyView()
         }

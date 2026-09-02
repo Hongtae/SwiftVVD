@@ -307,6 +307,59 @@ final class PlatformCommandMenuPresenterTests: XCTestCase {
         XCTAssertNil(menuController.delegate)
     }
 
+    func testSemanticPlatformPresenterHandlesPresentationShortcut() {
+        // ASSERTIONS commandsPresentationChildShortcutRuntimeObserved
+        let counter = PlatformMenuActionCounter()
+        let controller = WindowController(
+            content: EmptyView(),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(Self.self)
+            )
+        )
+        let presenter = PlatformCommandMenuPresenter(owner: controller)
+        presenter.update(
+            items: [
+                MainMenuItem(
+                    name: "Edit",
+                    id: .edit,
+                    groups: [
+                        CommandAccumulator.Result(
+                            viewContent: AnyView(
+                                Button("Run") {
+                                    counter.value += 1
+                                }
+                                .keyboardShortcut(
+                                    "r",
+                                    modifiers: [.control, .shift]
+                                )
+                            )
+                        ),
+                    ]
+                ),
+            ],
+            environment: EnvironmentValues()
+        )
+
+        XCTAssertTrue(presenter.handleShortcutKeyboardEvent(KeyboardEvent(
+            type: .keyDown,
+            window: nil,
+            deviceID: 11,
+            key: .r,
+            text: "r",
+            modifiers: [.control, .shift]
+        )))
+        XCTAssertEqual(counter.value, 1)
+        XCTAssertTrue(presenter.handleShortcutKeyboardEvent(KeyboardEvent(
+            type: .keyUp,
+            window: nil,
+            deviceID: 11,
+            key: .r,
+            text: "r",
+            modifiers: [.control, .shift]
+        )))
+    }
+
     private func selectionBehavior(
         action: @escaping () -> Void
     ) -> PlatformItemList.Item.SelectionBehavior {

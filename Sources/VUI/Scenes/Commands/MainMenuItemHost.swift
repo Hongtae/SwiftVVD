@@ -139,13 +139,18 @@ final class MainMenuItemHost: ViewRendererHost, ViewGraphRootValueUpdater {
         )
     }
 
-    func menuItems() -> PlatformItemList {
+    func menuItems(
+        resolvingInterfaceValidation: Bool = true
+    ) -> PlatformItemList {
         storage.instantiateIfNeeded()
         storage.updateOutputs(at: currentTimestamp)
         var list = storage.data.withCurrent {
             storage.platformItemList() ?? PlatformItemList()
         }
         list.resolveBuiltInKeyboardShortcuts()
+        if resolvingInterfaceValidation {
+            list.resolveInterfaceValidation()
+        }
         return list
     }
 

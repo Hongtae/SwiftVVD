@@ -155,8 +155,8 @@ extension WindowController {
 
     private func textFormattingCommandResponder()
         -> (any TextFormattingCommandResponder)? {
-        guard let focusedResponder else { return nil }
-        for responder in focusedResponder.sequence {
+        guard let commandFocusedResponder else { return nil }
+        for responder in commandFocusedResponder.sequence {
             if let responder = responder as? any TextFormattingCommandResponder {
                 return responder
             }

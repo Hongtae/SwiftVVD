@@ -686,6 +686,36 @@ class WindowController: WindowDelegate,
         guard owner.textInputFocusController === self else { return nil }
         return owner.textInputFocusedResponder
     }
+    // Commands remain owned by the static root while their target follows the
+    // active modal or presentation child.
+    var commandFocusedResponder: ResponderNode? {
+        let activeModal: ModalWindowController? = modalChildren.withLock { entries in
+            guard let first = entries.first, first.initiated else {
+                return nil
+            }
+            return first.controller
+        }
+        if let activeModal {
+            return activeModal.commandFocusedResponder
+        }
+
+        let presentationEntries = presentationChildren.withLock { $0 }
+        if let activePlatformChild = presentationEntries.reversed().first(
+            where: {
+                $0.initiated && !$0.isOverlay
+                    && $0.controller.windowContext?.state.activated == true
+            }
+        )?.controller {
+            return activePlatformChild.commandFocusedResponder
+        }
+        for entry in presentationEntries.reversed()
+            where entry.initiated && entry.isOverlay {
+            if let responder = entry.controller.commandFocusedResponder {
+                return responder
+            }
+        }
+        return focusedResponder
+    }
     var nextGestureUpdateTime: Time {
         viewGraph.nextUpdate.gestures.time
     }
@@ -1766,10 +1796,7 @@ class WindowController: WindowDelegate,
     }
 
     private func notifyRootCommandFocusActivated() {
-        var root = self
-        while let parent = root.parentWindow {
-            root = parent
-        }
+        let root = staticRootWindowController
         root.rootCommandsSource?.owner?.rootWindowDidActivate(root)
     }
 
@@ -1958,6 +1985,24 @@ class WindowController: WindowDelegate,
     private var _lastKeyboardEventHandler: KeyboardEventHandlerStream? = nil
     private var _lastMouseEventHandler: ObjectIdentifier? = nil
 
+    private var staticRootWindowController: WindowController {
+        var root = self
+        while let parent = root.parentWindow {
+            root = parent
+        }
+        return root
+    }
+
+    private func handleRootCommandShortcut(_ event: KeyboardEvent) -> Bool {
+        if let presenter = windowCommandMenuPresenter {
+            return presenter.handleShortcutKeyboardEvent(event, in: self)
+        }
+        if let presenter = platformCommandMenuPresenter {
+            return presenter.handleShortcutKeyboardEvent(event)
+        }
+        return false
+    }
+
     @discardableResult
     func handleKeyboardEvent(event: KeyboardEvent) -> Bool {
         handleKeyboardEvent(event: event, at: currentTimestamp)
@@ -1979,6 +2024,13 @@ class WindowController: WindowDelegate,
                 event,
                 in: self
             ) == true {
+                return true
+            }
+            // Presentation children have no independent Commands source. Give
+            // the static root a shortcut-only pass before text input handling.
+            let staticRoot = self.staticRootWindowController
+            if staticRoot !== self,
+               staticRoot.handleRootCommandShortcut(event) {
                 return true
             }
             self.contextMenuRecognizer.handleKeyboardEvent(event)

@@ -96,6 +96,36 @@ final class WindowCommandMenuPresenter {
     }
 
     @discardableResult
+    func handleShortcutKeyboardEvent(
+        _ event: KeyboardEvent,
+        in owner: WindowController
+    ) -> Bool {
+        self.owner = owner
+        let stream = KeyStream(deviceID: event.deviceID, key: event.key)
+        if event.type == .keyUp {
+            return consumedKeyStreams.remove(stream) != nil
+        }
+        guard event.type == .keyDown,
+              let key = KeyEquivalent(platformEvent: event) else {
+            return false
+        }
+
+        let responders = menuResponders(in: owner)
+        guard let action = shortcutAction(
+            key: key,
+            modifiers: EventModifiers(platformFlags: event.modifiers),
+            responders: responders,
+            in: owner
+        ) else {
+            return false
+        }
+        consumedKeyStreams.insert(stream)
+        leaveKeyboardMenu(using: responders)
+        Update.enqueueAction(action)
+        return true
+    }
+
+    @discardableResult
     func handleKeyboardEvent(
         _ event: KeyboardEvent,
         in owner: WindowController,
@@ -422,7 +452,7 @@ final class WindowCommandMenuPresenter {
     ) -> (() -> Void)? {
         owner.viewGraph.data.withCurrent {
             for menu in responders {
-                if let action = Self.shortcutAction(
+                if let action = menuShortcutAction(
                     key: key,
                     modifiers: modifiers,
                     in: menu.responder.itemList.value
@@ -432,49 +462,6 @@ final class WindowCommandMenuPresenter {
             }
             return nil
         }
-    }
-
-    private static func shortcutAction(
-        key: KeyEquivalent,
-        modifiers: EventModifiers,
-        in list: PlatformItemList
-    ) -> (() -> Void)? {
-        for item in list.items {
-            let participates = !item.isHidden
-                || item.allowsKeyEquivalentWhenHidden
-            if participates,
-               item.isEnabled,
-               let shortcut = item.resolvedKeyboardShortcut,
-               shortcut.modifiers == modifiers,
-               equivalent(shortcut.key, key),
-               let action = item.selectionBehavior?.onSelect {
-                return action
-            }
-            if let children = item.children,
-               let action = shortcutAction(
-                    key: key,
-                    modifiers: modifiers,
-                    in: children
-               ) {
-                return action
-            }
-            if let children = item.labelGroupChildren,
-               let action = shortcutAction(
-                    key: key,
-                    modifiers: modifiers,
-                    in: children
-               ) {
-                return action
-            }
-        }
-        return nil
-    }
-
-    private static func equivalent(
-        _ lhs: KeyEquivalent,
-        _ rhs: KeyEquivalent
-    ) -> Bool {
-        menuCharactersAreEquivalent(lhs.character, rhs.character)
     }
 
     private func synchronizeKeyboardState(

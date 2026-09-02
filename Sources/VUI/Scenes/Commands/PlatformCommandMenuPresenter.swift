@@ -58,6 +58,11 @@ enum RootCommandMenuPresenterSelection: Equatable {
 // state from the already resolved list.
 final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
                                           @unchecked Sendable {
+    private struct KeyStream: Hashable {
+        var deviceID: Int
+        var key: VirtualKey
+    }
+
     private struct Entry {
         var item: MainMenuItem
         var host: MainMenuItemHost
@@ -78,6 +83,7 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
     private var materializationEnvironment = EnvironmentValues()
     private var focusedValues = FocusedValues()
     private var conversionTask: Task<Void, Never>?
+    private var consumedShortcutKeyStreams: Set<KeyStream> = []
 
     init(owner: WindowController) {
         self.owner = owner
@@ -132,6 +138,44 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
         }
     }
 
+    @discardableResult
+    func handleShortcutKeyboardEvent(_ event: KeyboardEvent) -> Bool {
+        let stream = KeyStream(deviceID: event.deviceID, key: event.key)
+        if event.type == .keyUp {
+            return consumedShortcutKeyStreams.remove(stream) != nil
+        }
+        guard event.type == .keyDown,
+              let key = KeyEquivalent(platformEvent: event) else {
+            return false
+        }
+
+        for index in entries.indices {
+            if entries[index].cachedItems == nil
+                || invalidEntryIDs.contains(entries[index].item.id) {
+                let host = entries[index].host
+                host.currentTimestamp = owner?.currentTimestamp
+                    ?? Time(seconds: 0)
+                entries[index].cachedItems = host.menuItems(
+                    resolvingInterfaceValidation: false
+                )
+            }
+            guard let items = entries[index].cachedItems,
+                  let action = menuShortcutAction(
+                      key: key,
+                      modifiers: EventModifiers(
+                          platformFlags: event.modifiers
+                      ),
+                      in: items
+                  ) else {
+                continue
+            }
+            consumedShortcutKeyStreams.insert(stream)
+            Update.enqueueAction(action)
+            return true
+        }
+        return false
+    }
+
     @MainActor
     func attach(to window: any PlatformWindow) {
         attach(to: window.menuController)
@@ -153,6 +197,7 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
         }
         entries.removeAll()
         invalidEntryIDs.removeAll()
+        consumedShortcutKeyStreams.removeAll()
 
         let generation = nextGeneration()
         Task { @MainActor [controllerBridge] in
@@ -184,7 +229,9 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
             where invalidEntryIDs.contains(entries[index].item.id) {
             let host = entries[index].host
             host.currentTimestamp = time
-            entries[index].cachedItems = host.menuItems()
+            entries[index].cachedItems = host.menuItems(
+                resolvingInterfaceValidation: false
+            )
         }
         invalidEntryIDs.removeAll()
 
@@ -192,7 +239,10 @@ final class PlatformCommandMenuPresenter: MainMenuItemHostDelegate,
             for: entries.map { (id: $0.item.id, title: $0.item.name) }
         )
         let pendingMenus = entries.compactMap { entry -> PendingWindowMenu? in
-            guard let items = entry.cachedItems else { return nil }
+            guard var items = entry.cachedItems else { return nil }
+            // Keep the semantic cache dynamic for presentation-child
+            // shortcuts, but publish a validation snapshot to the backend.
+            items.resolveInterfaceValidation()
             return PendingWindowMenu(
                 id: entry.menuID,
                 title: entry.item.name,

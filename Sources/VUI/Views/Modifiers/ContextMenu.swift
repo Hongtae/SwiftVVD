@@ -439,6 +439,7 @@ func contextMenuPresentationItems(
     var result: [ContextMenuPresentationItem] = []
     for (index, sourceItem) in items.enumerated() {
         var item = sourceItem
+        item.resolveInterfaceValidation()
         if item.systemItem == nil,
            item.selectionBehavior?.onSelect == nil {
             item.isEnabled = false

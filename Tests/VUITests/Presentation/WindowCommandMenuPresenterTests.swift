@@ -151,11 +151,14 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
             modifiers: [.command, .shift]
         )
         XCTAssertTrue(
-            presenter.handleKeyboardEvent(shortcutDown, in: controller)
+            presenter.handleShortcutKeyboardEvent(
+                shortcutDown,
+                in: controller
+            )
         )
         XCTAssertEqual(disabledInvocations, 0)
         XCTAssertEqual(nestedInvocations, 1)
-        XCTAssertTrue(presenter.handleKeyboardEvent(
+        XCTAssertTrue(presenter.handleShortcutKeyboardEvent(
             keyboardEvent(
                 .keyUp,
                 key: .r,
