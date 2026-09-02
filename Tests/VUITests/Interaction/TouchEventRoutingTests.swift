@@ -28,6 +28,7 @@ final class TouchEventRoutingTests: XCTestCase {
             device: .touch,
             deviceID: 7,
             buttonID: 0,
+            modifiers: [.option, .command],
             location: CGPoint(x: 210, y: 120),
             tilt: CGPoint(x: 0.75, y: 0.5),
             pressure: 2.5,
@@ -47,6 +48,45 @@ final class TouchEventRoutingTests: XCTestCase {
         XCTAssertEqual(event.altitude.radians, 0.5)
         XCTAssertEqual(event.azimuth.radians, 0.75)
         XCTAssertEqual(event.touchType, .direct)
+        XCTAssertEqual(event.modifiers, [.option, .command])
+    }
+
+    @MainActor
+    func testPlatformMouseMetadataReachesMouseEventListener() throws {
+        let recorder = MouseEventRecorder()
+        let controller = WindowController(
+            content: MouseEventRoutingRoot(recorder: recorder),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(MouseEventRoutingRoot.self)
+            )
+        )
+
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 240),
+            redraw: &redraw
+        ) { _, _ in }
+
+        XCTAssertTrue(controller.handleMouseEvent(event: VVD.MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            clickCount: 3,
+            modifiers: [.shift, .control],
+            location: CGPoint(x: 210, y: 120),
+            timestamp: 3
+        )))
+
+        XCTAssertEqual(recorder.events.count, 1)
+        let event = try XCTUnwrap(recorder.events.first)
+        XCTAssertEqual(event.phase, .began)
+        XCTAssertEqual(event.clickCount, 3)
+        XCTAssertEqual(event.modifiers, [.shift, .control])
     }
 
     @MainActor
@@ -260,6 +300,10 @@ private final class TouchEventRecorder: @unchecked Sendable {
     var phases: [EventPhase] = []
 }
 
+private final class MouseEventRecorder: @unchecked Sendable {
+    var events: [VUI.MouseEvent] = []
+}
+
 private final class HoverStateRecorder: @unchecked Sendable {
     var states: [Bool] = []
 }
@@ -287,6 +331,28 @@ private struct TouchEventRoutingRoot: View {
                             recorder.phases.append(.failed)
                         }
                     ))
+                )
+            )
+    }
+}
+
+private struct MouseEventRoutingRoot: View {
+    let recorder: MouseEventRecorder
+
+    var body: some View {
+        Color.green
+            .frame(width: 420, height: 240)
+            .gesture(
+                ModifierGesture(
+                    content: EventListener<VUI.MouseEvent>(),
+                    modifier: CallbacksGesture(
+                        callbacks: FullGestureCallbacks<VUI.MouseEvent>(
+                            possible: nil,
+                            changed: { recorder.events.append($0) },
+                            ended: { recorder.events.append($0) },
+                            failed: nil
+                        )
+                    )
                 )
             )
     }

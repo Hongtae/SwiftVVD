@@ -318,6 +318,8 @@ struct MouseEvent: EventType,
     var location: CGPoint
     var globalLocation: CGPoint
     var modifiers: EventModifiers
+    // Preserves backend click granularity for controls that own text selection.
+    var clickCount: Int = 0
 
     var radius: CGFloat { 0.0 }
     var kind: SpatialEvent.Kind? { .mouse }

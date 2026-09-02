@@ -309,7 +309,7 @@ class WindowController: WindowDelegate,
                 maximumPossibleForce: Double(
                     touchData?.maximumPossiblePressure ?? 1
                 ),
-                modifiers: [],
+                modifiers: EventModifiers(platformFlags: event.modifiers),
                 altitude: Angle(radians: Double(event.tilt.y)),
                 azimuth: Angle(radians: Double(event.tilt.x)),
                 touchType: event.device == .stylus ? .pencil : .direct
@@ -322,7 +322,8 @@ class WindowController: WindowDelegate,
             phase: phase,
             location: event.location,
             globalLocation: event.location,
-            modifiers: []
+            modifiers: EventModifiers(platformFlags: event.modifiers),
+            clickCount: event.clickCount
         )
     }
 

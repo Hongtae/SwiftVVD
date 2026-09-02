@@ -437,6 +437,126 @@ final class TextFieldInputTests: XCTestCase {
             model.selection,
             input.textSelection(in: model.text)
         )
+
+        let reverseEventID = EventID(
+            type: VUI.MouseEvent.self,
+            serial: 91
+        )
+        XCTAssertTrue(responder.consumeEvents(
+            [reverseEventID: event(.began, x: 36)],
+            at: Time(seconds: 3)
+        ).isActive)
+        Update.dispatchActions()
+        XCTAssertEqual(input.selectionOffsets, 4..<4)
+
+        XCTAssertTrue(responder.consumeEvents(
+            [reverseEventID: event(.ended, x: 12)],
+            at: Time(seconds: 4)
+        ).isEnded)
+        Update.dispatchActions()
+        XCTAssertEqual(input.selectionOffsets, 1..<4)
+        XCTAssertEqual(input.caretOffset, 1)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+    }
+
+    // ASSERTIONS textFieldPointerSelectionRuntimeObserved
+    func testTextFieldResponderUsesPointerModifiersAndClickCount() {
+        let model = TextFieldSelectionModel(text: "Alpha beta gamma")
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: model.text)
+        var fieldState = TextFieldState(displayText: model.text)
+        let responder = TextFieldResponder()
+        responder.text = model.textBinding
+        responder.selection = model.selectionBinding
+        responder.inputState = Binding(
+            get: { input },
+            set: { input = $0 }
+        )
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.selectionLayout = TextFieldSelectionLayout(
+            characterOffsets: (0...model.text.count).map {
+                CGFloat($0 * 10)
+            }
+        )
+
+        var serial = 100
+        func sendClick(
+            x: CGFloat,
+            clickCount: Int,
+            modifiers: EventModifiers = []
+        ) {
+            serial += 1
+            let eventID = EventID(
+                type: VUI.MouseEvent.self,
+                serial: serial
+            )
+            func event(_ phase: EventPhase) -> VUI.MouseEvent {
+                VUI.MouseEvent(
+                    timestamp: Time(seconds: Double(serial)),
+                    binding: nil,
+                    button: .primary,
+                    phase: phase,
+                    location: CGPoint(x: x, y: 5),
+                    globalLocation: CGPoint(x: x, y: 5),
+                    modifiers: modifiers,
+                    clickCount: clickCount
+                )
+            }
+
+            XCTAssertTrue(responder.consumeEvents(
+                [eventID: event(.began)],
+                at: .zero
+            ).isActive)
+            Update.dispatchActions()
+            XCTAssertTrue(responder.consumeEvents(
+                [eventID: event(.ended)],
+                at: .zero
+            ).isEnded)
+            Update.dispatchActions()
+        }
+
+        sendClick(x: 82, clickCount: 2)
+        XCTAssertEqual(input.selectionOffsets, 6..<10)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        sendClick(x: 122, clickCount: 3)
+        XCTAssertEqual(input.selectionOffsets, 0..<model.text.count)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        input.collapseSelection(
+            to: 2,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        sendClick(x: 82, clickCount: 2, modifiers: [.shift])
+        XCTAssertEqual(input.selectionOffsets, 2..<8)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        input.collapseSelection(
+            to: 5,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        sendClick(x: 122, clickCount: 3, modifiers: [.shift])
+        XCTAssertEqual(input.selectionOffsets, 5..<12)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+
+        _ = input.setSelection(
+            anchor: 1,
+            extent: 6,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        sendClick(x: 92, clickCount: 1, modifiers: [.shift])
+        XCTAssertEqual(input.selectionOffsets, 1..<9)
+        XCTAssertEqual(input.selectionAffinity, .upstream)
+        XCTAssertEqual(
+            model.selection,
+            input.textSelection(in: model.text)
+        )
     }
 
     func testForwardDeleteUsesTextInputAndKeepsTheCharacterOffset() {

@@ -469,6 +469,13 @@ struct TextFieldInputState: Equatable {
         selectionRange ?? caretOffset..<caretOffset
     }
 
+    var selectionAnchor: Int {
+        guard let selectionRange else { return caretOffset }
+        return caretOffset <= selectionRange.lowerBound
+            ? selectionRange.upperBound
+            : selectionRange.lowerBound
+    }
+
     var hasSelection: Bool {
         selectionRange?.isEmpty == false
     }
@@ -689,14 +696,7 @@ struct TextFieldInputState: Equatable {
         }
 
         if modifiers.contains(.shift) {
-            let anchor: Int
-            if let selectionRange {
-                anchor = caretOffset <= selectionRange.lowerBound
-                    ? selectionRange.upperBound
-                    : selectionRange.lowerBound
-            } else {
-                anchor = caretOffset
-            }
+            let anchor = selectionAnchor
             let extent: Int
             switch key {
             case .left:
@@ -785,16 +785,24 @@ struct TextFieldInputState: Equatable {
         if let selectionRange, selectionRange.isEmpty == false {
             return selectionRange
         }
+        return wordRange(at: caretOffset, in: committedText)
+    }
+
+    func wordRange(
+        at characterOffset: Int,
+        in committedText: String
+    ) -> Range<Int>? {
         let characters = Array(committedText)
         guard characters.isEmpty == false else { return nil }
+        let characterOffset = min(max(characterOffset, 0), characters.count)
 
         let seed: Int
-        if caretOffset < characters.count,
-           Self.isWordCharacter(characters[caretOffset]) {
-            seed = caretOffset
-        } else if caretOffset > 0,
-                  Self.isWordCharacter(characters[caretOffset - 1]) {
-            seed = caretOffset - 1
+        if characterOffset < characters.count,
+           Self.isWordCharacter(characters[characterOffset]) {
+            seed = characterOffset
+        } else if characterOffset > 0,
+                  Self.isWordCharacter(characters[characterOffset - 1]) {
+            seed = characterOffset - 1
         } else {
             return nil
         }
@@ -1518,12 +1526,27 @@ final class TextFieldResponder: MultiViewResponder,
         for (eventID, event) in events.sorted(by: {
             $0.key.serial < $1.key.serial
         }) {
-            let pointer: (phase: EventPhase, location: CGPoint)?
+            let pointer: (
+                phase: EventPhase,
+                location: CGPoint,
+                modifiers: EventModifiers,
+                clickCount: Int
+            )?
             if let event = event as? MouseEvent,
                event.button == .primary {
-                pointer = (event.phase, event.globalLocation)
+                pointer = (
+                    event.phase,
+                    event.globalLocation,
+                    event.modifiers,
+                    event.clickCount
+                )
             } else if let event = event as? TouchEvent {
-                pointer = (event.phase, event.globalLocation)
+                pointer = (
+                    event.phase,
+                    event.globalLocation,
+                    event.modifiers,
+                    1
+                )
             } else {
                 pointer = nil
             }
@@ -1532,8 +1555,21 @@ final class TextFieldResponder: MultiViewResponder,
             case .began:
                 (host as? WindowController)?.focusTextInputResponder(self)
                 if let offset = textOffset(atGlobalPoint: pointer.location) {
-                    pointerSelectionSession = (eventID, offset)
-                    updatePointerSelection(anchor: offset, extent: offset)
+                    if pointer.modifiers.contains(.shift) {
+                        let anchor = inputState?.wrappedValue.selectionAnchor
+                            ?? offset
+                        pointerSelectionSession = (eventID, anchor)
+                        updatePointerSelection(anchor: anchor, extent: offset)
+                    } else if pointer.clickCount == 2 {
+                        pointerSelectionSession = nil
+                        updatePointerWordSelection(at: offset)
+                    } else if pointer.clickCount == 3 {
+                        pointerSelectionSession = nil
+                        updatePointerLineSelection()
+                    } else {
+                        pointerSelectionSession = (eventID, offset)
+                        updatePointerSelection(anchor: offset, extent: offset)
+                    }
                 }
                 result = .active(())
             case .active:
@@ -1604,6 +1640,45 @@ final class TextFieldResponder: MultiViewResponder,
                 editing,
                 committedText: committedText
             )
+        }
+    }
+
+    private func updatePointerWordSelection(at offset: Int) {
+        guard let text, let inputState else { return }
+        Update.enqueueAction {
+            let committedText = text.wrappedValue
+            var editing = inputState.wrappedValue
+            if let range = editing.wordRange(at: offset, in: committedText) {
+                _ = editing.setSelection(
+                    range,
+                    affinity: .upstream,
+                    committedText: committedText
+                )
+            } else {
+                editing.collapseSelection(
+                    to: offset,
+                    affinity: .upstream,
+                    committedText: committedText
+                )
+            }
+            inputState.wrappedValue = editing
+            self.publishSelection(editing, committedText: committedText)
+        }
+    }
+
+    private func updatePointerLineSelection() {
+        guard let text, let inputState else { return }
+        Update.enqueueAction {
+            let committedText = text.wrappedValue
+            var editing = inputState.wrappedValue
+            _ = editing.setSelection(
+                anchor: 0,
+                extent: committedText.count,
+                affinity: .upstream,
+                committedText: committedText
+            )
+            inputState.wrappedValue = editing
+            self.publishSelection(editing, committedText: committedText)
         }
     }
 
