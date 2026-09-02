@@ -670,8 +670,8 @@ struct SystemFontProvider: TypefaceProvider {
                 guard let layoutFont = VVD.Font(data: data) else {
                     return nil
                 }
-                layoutFont.setStyle(
-                    pointSize: self.size,
+                layoutFont.setPointSize(
+                    self.size,
                     dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
                 )
                 switch renderingMode {
@@ -689,8 +689,7 @@ struct SystemFontProvider: TypefaceProvider {
                         options.outlineThickness * contentScaleFactor
                     font.isBitmapPreferred = options.isBitmapPreferred
                     font.isColorEnabled = options.isColorEnabled
-                    font.setStyle(pointSize: self.size,
-                                  dpi: (dpi, dpi))
+                    font.setPointSize(self.size, dpi: (dpi, dpi))
                     return TextureTypeface(
                         textureFont: font,
                         layoutFont: layoutFont,
@@ -701,8 +700,7 @@ struct SystemFontProvider: TypefaceProvider {
                     guard let font = VVD.Font(data: data) else {
                         return nil
                     }
-                    font.setStyle(pointSize: self.size,
-                                  dpi: (dpi, dpi))
+                    font.setPointSize(self.size, dpi: (dpi, dpi))
                     return VectorTypeface(
                         font: font,
                         embolden:
@@ -814,8 +812,8 @@ struct BundledFontProvider: TypefaceProvider {
             faceIndex: resource.faceIndex
         ) else { return nil }
         guard applyVariations(to: layoutFont) else { return nil }
-        layoutFont.setStyle(
-            pointSize: size,
+        layoutFont.setPointSize(
+            size,
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
         switch renderingMode {
@@ -836,7 +834,7 @@ struct BundledFontProvider: TypefaceProvider {
                 options.outlineThickness * contentScaleFactor
             font.isBitmapPreferred = options.isBitmapPreferred
             font.isColorEnabled = options.isColorEnabled
-            font.setStyle(pointSize: size, dpi: (dpi, dpi))
+            font.setPointSize(size, dpi: (dpi, dpi))
             return TextureTypeface(
                 textureFont: font,
                 layoutFont: layoutFont,
@@ -849,7 +847,7 @@ struct BundledFontProvider: TypefaceProvider {
                 faceIndex: resource.faceIndex
             ) else { return nil }
             guard applyVariations(to: font) else { return nil }
-            font.setStyle(pointSize: size, dpi: (dpi, dpi))
+            font.setPointSize(size, dpi: (dpi, dpi))
             return VectorTypeface(
                 font: font,
                 embolden: logicalEmbolden * contentScaleFactor,

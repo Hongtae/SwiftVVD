@@ -7,9 +7,9 @@
 
 import Foundation
 
-public class TextureFont: Font {
+public class TextureFont: Font, @unchecked Sendable {
     
-    public struct GlyphData {
+    public struct GlyphData: @unchecked Sendable {
         public let texture: Texture?
         public let offset: CGPoint      // glyph offset from baseline
         public let advance: CGSize      // distance to next glyph
@@ -47,15 +47,33 @@ public class TextureFont: Font {
     private var glyphMap: [UnicodeScalar: GlyphData] = [:]
     private var textures: [GlyphAtlasKind: [GlyphTextureAtlas]] = [:]
     private var numGlyphsLoaded: Int = 0
+    private var _boldStrength: CGFloat = .zero
+    private var _outlineThickness: CGFloat = .zero
 
     public let deviceContext: GraphicsDeviceContext
 
-    public var boldStrength: CGFloat = .zero {
-        didSet { if oldValue != boldStrength { self.clearCache() } }
+    public var boldStrength: CGFloat {
+        get { self.withLockedFace { _ in self._boldStrength } }
+        set {
+            self.withLockedFace { _ in
+                if self._boldStrength != newValue {
+                    self._boldStrength = newValue
+                    self.clearCacheLocked()
+                }
+            }
+        }
     }
 
-    public var outlineThickness: CGFloat = .zero {
-        didSet { if oldValue != outlineThickness { self.clearCache() } }
+    public var outlineThickness: CGFloat {
+        get { self.withLockedFace { _ in self._outlineThickness } }
+        set {
+            self.withLockedFace { _ in
+                if self._outlineThickness != newValue {
+                    self._outlineThickness = newValue
+                    self.clearCacheLocked()
+                }
+            }
+        }
     }
 
     public init?(
@@ -124,36 +142,41 @@ public class TextureFont: Font {
 
     public func glyphData(for c: UnicodeScalar) -> GlyphData? {
         if c.value == 0 { return nil }
-        var cachedData = self.withFaceLock { self.glyphMap[c] }
-        if let cachedData {
-            return cachedData
-        }
 
-        let loaded = self.withGlyphBitmap(
-            for: c,
-            embolden: self.boldStrength,
-            outline: self.outlineThickness
-        ) { data, glyphMetrics, bmp, metrics in
+        return self.withLockedFace { lockedFace in
+            if let cachedData = self.glyphMap[c] {
+                return cachedData
+            }
+
+            guard let bitmap = self.loadGlyphBitmap(
+                for: c,
+                embolden: self._boldStrength,
+                outline: self._outlineThickness,
+                using: lockedFace
+            ) else { return nil }
+
             var frame: CGRect = .zero
-            let offset = CGPoint(x: bmp.left, y: bmp.top)
-            let texture = self.cacheGlyphTexture(width: bmp.width,
-                                                 height: bmp.rows,
-                                                 data: data,
-                                                 metrics: metrics,
-                                                 pixelMode: bmp.pixelMode,
-                                                 frame: &frame)
-            self.glyphMap[c] = GlyphData(texture: texture,
-                                         offset: offset,
-                                         advance: glyphMetrics.advance,
-                                         frame: frame,
-                                         ascender: glyphMetrics.ascender,
-                                         descender: glyphMetrics.descender)
-            cachedData = self.glyphMap[c]
+            let info = bitmap.bitmapInfo
+            let metrics = bitmap.glyphMetrics
+            let texture = self.cacheGlyphTexture(
+                width: info.width,
+                height: info.rows,
+                data: bitmap.data,
+                metrics: bitmap.sizeMetrics,
+                pixelMode: info.pixelMode,
+                frame: &frame
+            )
+            let glyph = GlyphData(
+                texture: texture,
+                offset: CGPoint(x: info.left, y: info.top),
+                advance: metrics.advance,
+                frame: frame,
+                ascender: metrics.ascender,
+                descender: metrics.descender
+            )
+            self.glyphMap[c] = glyph
+            return glyph
         }
-        if loaded {
-            return cachedData
-        }
-        return nil
     }
 
     private func cacheGlyphTexture(width: UInt32,

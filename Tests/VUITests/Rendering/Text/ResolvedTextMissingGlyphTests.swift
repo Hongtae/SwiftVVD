@@ -1,8 +1,98 @@
+import Dispatch
+import Synchronization
 import XCTest
 import VVD
 @testable import VUI
 
 final class ResolvedTextMissingGlyphTests: XCTestCase {
+    func testBackendFontTypesAreSendable() {
+        func requireSendable<T: Sendable>(_: T.Type) {}
+
+        requireSendable(VVD.Font.self)
+        requireSendable(VVD.TextureFont.self)
+    }
+
+    func testBackendFontSerializesConcurrentFaceAccessAndLifecycle() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let data = try Data(contentsOf: url)
+        let font = try XCTUnwrap(VVD.Font(data: data))
+        let failures = Mutex<[String]>([])
+
+        DispatchQueue.concurrentPerform(iterations: 64) { iteration in
+            switch iteration % 4 {
+            case 0:
+                font.setPointSize(
+                    CGFloat(12 + iteration % 8),
+                    dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+                )
+            case 1:
+                if font.glyphMetrics(for: UnicodeScalar("A")) == nil {
+                    failures.withLock { $0.append("glyphMetrics") }
+                }
+            case 2:
+                let loaded = font.withGlyphBitmap(
+                    for: UnicodeScalar("B"),
+                    embolden: 0,
+                    outline: 0
+                ) { _, _, _, _ in
+                    _ = font.pointSize
+                    _ = font.baseMetrics
+                }
+                if !loaded {
+                    failures.withLock { $0.append("withGlyphBitmap") }
+                }
+            default:
+                if !font.hasGlyph(for: UnicodeScalar("C")) {
+                    failures.withLock { $0.append("hasGlyph") }
+                }
+            }
+        }
+
+        DispatchQueue.concurrentPerform(iterations: 32) { _ in
+            guard let temporaryFont = VVD.Font(data: data),
+                  temporaryFont.glyphMetrics(for: UnicodeScalar("A")) != nil else {
+                failures.withLock { $0.append("faceLifecycle") }
+                return
+            }
+        }
+
+        XCTAssertTrue(
+            failures.withLock { $0.isEmpty },
+            failures.withLock { $0.joined(separator: ", ") }
+        )
+    }
+
+    func testBackendTextureFontSerializesConcurrentGlyphCaching() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.TextureFont(
+            deviceContext: deviceContext,
+            data: Data(contentsOf: url)
+        ))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        let textureIDs = Mutex<[ObjectIdentifier]>([])
+        let failures = Mutex<[String]>([])
+        DispatchQueue.concurrentPerform(iterations: 16) { _ in
+            guard let texture = font.glyphData(for: UnicodeScalar("A"))?.texture else {
+                failures.withLock { $0.append("glyphData") }
+                return
+            }
+            textureIDs.withLock { $0.append(ObjectIdentifier(texture)) }
+        }
+
+        XCTAssertTrue(
+            failures.withLock { $0.isEmpty },
+            failures.withLock { $0.joined(separator: ", ") }
+        )
+        XCTAssertEqual(Set(textureIDs.withLock { $0 }).count, 1)
+    }
+
     // ASSERTIONS textZeroWidthScalarLineMetricsObserved
     func testUnsupportedBundledFontGlyphKeepsZeroWidthLineMetrics() throws {
         let provider = SystemFontProvider(
@@ -177,8 +267,8 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let url = try XCTUnwrap(defaultFontURL)
         let data = try Data(contentsOf: url)
         let font = try XCTUnwrap(VVD.Font(data: data))
-        font.setStyle(
-            pointSize: 17,
+        font.setPointSize(
+            17,
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
         let scalar = UnicodeScalar("\u{0378}")

@@ -6,33 +6,45 @@
 //
 
 import Foundation
+import Synchronization
 
-public class GraphicsDeviceContext {
+public class GraphicsDeviceContext: @unchecked Sendable {
+    private struct State: @unchecked Sendable {
+        var deviceResources: [String: AnyObject] = [:]
+        var queues: [CommandQueue] = []
+    }
+
     public let device: GraphicsDevice
-    public var cachedDeviceResources: [String: AnyObject] = [:]
-    public var cachedQueues: [CommandQueue] = []
+    private let state = Mutex(State())
+
+    public var cachedDeviceResources: [String: AnyObject] {
+        get { state.withLock { $0.deviceResources } }
+        set { state.withLock { $0.deviceResources = newValue } }
+    }
+
+    public var cachedQueues: [CommandQueue] {
+        get { state.withLock { $0.queues } }
+        set { state.withLock { $0.queues = newValue } }
+    }
 
     public init(device: GraphicsDevice) {
         self.device = device
     }
 
-    deinit {
-        self.cachedDeviceResources.removeAll()     
-        self.cachedQueues.removeAll()
-    }
-
     public func commandQueue(flags: CommandQueueFlags = []) -> CommandQueue? {
-        if let queue = self.cachedQueues.first(where: {
-            $0.flags.intersection(flags) == flags
-        }) {
-            return queue;
-        }
+        state.withLock {
+            if let queue = $0.queues.first(where: {
+                $0.flags.intersection(flags) == flags
+            }) {
+                return queue
+            }
 
-        if let queue = device.makeCommandQueue(flags: flags) {
-            cachedQueues.append(queue)
-            return queue
+            if let queue = device.makeCommandQueue(flags: flags) {
+                $0.queues.append(queue)
+                return queue
+            }
+            return nil
         }
-        return nil
     }
 
     public func renderQueue() -> CommandQueue? {
