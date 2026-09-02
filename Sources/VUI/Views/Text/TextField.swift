@@ -451,6 +451,33 @@ extension View {
     }
 }
 
+private struct TextFieldCaretBlinkIntervalKey: EnvironmentKey {
+    static let defaultValue: TimeInterval = 0.5
+}
+
+extension EnvironmentValues {
+    /// The duration of each visible or hidden text-field caret phase.
+    ///
+    /// Non-finite values and values no greater than 1/30 second disable
+    /// blinking.
+    public var textFieldCaretBlinkInterval: TimeInterval {
+        get { self[TextFieldCaretBlinkIntervalKey.self] }
+        set { self[TextFieldCaretBlinkIntervalKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Sets the duration of each visible or hidden text-field caret phase.
+    ///
+    /// Non-finite values and values no greater than 1/30 second disable
+    /// blinking.
+    public func textFieldCaretBlinkInterval(
+        _ interval: TimeInterval
+    ) -> some View {
+        environment(\.textFieldCaretBlinkInterval, interval)
+    }
+}
+
 enum TextFieldInputResult: Equatable {
     case changed
     case submit
@@ -931,26 +958,9 @@ struct TextFieldSelectionLayout: Equatable {
 
     var characterCount: Int { characterOffsets.count - 1 }
 
-    func characterOffset(
-        atLocalX localX: CGFloat,
-        inputState: TextFieldInputState
-    ) -> Int {
+    func characterOffset(atLocalX localX: CGFloat) -> Int {
         guard characterCount > 0 else { return 0 }
-        var x = localX - leadingInset
-
-        if inputState.isFocused,
-           inputState.composition.isEmpty,
-           !inputState.hasSelection {
-            let caret = min(max(inputState.caretOffset, 0), characterCount)
-            let caretX = characterOffsets[caret]
-            let caretWidth: CGFloat = 1
-            if x > caretX, x <= caretX + caretWidth {
-                return caret
-            }
-            if x > caretX + caretWidth {
-                x -= caretWidth
-            }
-        }
+        let x = localX - leadingInset
 
         for index in 0..<characterCount {
             let midpoint = (
@@ -1064,7 +1074,7 @@ private struct TextFieldCaretLayout: Layout {
 }
 
 struct TextFieldCaret: View {
-    static let blinkInterval: TimeInterval = 0.5
+    static let blinkIntervalThreshold: TimeInterval = 1.0 / 30.0
 
     enum Presentation: Equatable {
         case insertionPoint(compositionText: String?, blinks: Bool)
@@ -1074,15 +1084,25 @@ struct TextFieldCaret: View {
     var compositionText: String?
     var defaultWidth: CGFloat
     var compositionStyle: TextFieldCompositionCaretStyle
+    // Changing this identity restarts the visible phase of the blink timeline.
+    var blinkResetID: Int
+    @Environment(\.textFieldCaretBlinkInterval)
+    private var configuredBlinkInterval
+
+    private var blinkInterval: TimeInterval {
+        Self.resolvedBlinkInterval(configuredBlinkInterval)
+    }
 
     init(
         compositionText: String?,
         defaultWidth: CGFloat = 1,
-        compositionStyle: TextFieldCompositionCaretStyle = .enclosing
+        compositionStyle: TextFieldCompositionCaretStyle = .enclosing,
+        blinkResetID: Int = 0
     ) {
         self.compositionText = compositionText
         self.defaultWidth = defaultWidth
         self.compositionStyle = compositionStyle
+        self.blinkResetID = blinkResetID
     }
 
     @ViewBuilder
@@ -1103,21 +1123,35 @@ struct TextFieldCaret: View {
             }
 
         case .insertionPoint(nil, true):
-            let start = Date()
-            TimelineView(.periodic(
-                from: start,
-                by: Self.blinkInterval
-            )) { context in
+            if blinkInterval > 0 {
+                let start = Date()
+                TimelineView(.periodic(
+                    from: start,
+                    by: blinkInterval
+                )) { context in
+                    insertionCaret
+                        .opacity(Self.isBlinkVisible(
+                            at: context.date,
+                            from: start,
+                            interval: blinkInterval
+                        ) ? 1 : 0)
+                }
+                .id(blinkResetID)
+            } else {
                 insertionCaret
-                    .opacity(Self.isBlinkVisible(
-                        at: context.date,
-                        from: start
-                    ) ? 1 : 0)
             }
 
         case .insertionPoint:
             insertionCaret
         }
+    }
+
+    static func resolvedBlinkInterval(
+        _ interval: TimeInterval
+    ) -> TimeInterval {
+        guard interval.isFinite,
+              interval > blinkIntervalThreshold else { return 0 }
+        return interval
     }
 
     static func presentation(
@@ -1141,9 +1175,10 @@ struct TextFieldCaret: View {
     static func isBlinkVisible(
         at date: Date,
         from start: Date,
-        interval: TimeInterval = blinkInterval
+        interval: TimeInterval = TextFieldCaretBlinkIntervalKey.defaultValue
     ) -> Bool {
-        precondition(interval > 0)
+        let interval = resolvedBlinkInterval(interval)
+        guard interval > 0 else { return true }
         let elapsed = max(date.timeIntervalSince(start), 0)
         return Int(floor(elapsed / interval)).isMultiple(of: 2)
     }
@@ -1209,31 +1244,23 @@ private struct TextFieldControl: View {
         let defaultCaretWidth: CGFloat = 1
         HStack(spacing: 0) {
             if text.isEmpty && inputState.composition.isEmpty {
-                if inputState.isFocused {
-                    TextFieldCaret(
-                        compositionText: nil,
-                        defaultWidth: defaultCaretWidth
-                    )
-                }
-                if let prompt = configuration.prompt {
-                    prompt.foregroundStyle(Color.secondary)
-                } else {
-                    configuration.label.foregroundStyle(Color.secondary)
-                }
+                promptContent
+                    .overlay(alignment: .leading) {
+                        if inputState.isFocused {
+                            TextFieldCaret(
+                                compositionText: nil,
+                                defaultWidth: defaultCaretWidth,
+                                blinkResetID: inputState.caretOffset
+                            )
+                        }
+                    }
             } else {
                 Text(segments.leading)
                 if segments.selected.isEmpty == false {
                     Text(segments.selected)
                         .foregroundStyle(Color.white)
                         .background(Color.blue)
-                } else if inputState.composition.isEmpty {
-                    if inputState.isFocused {
-                        TextFieldCaret(
-                            compositionText: nil,
-                            defaultWidth: defaultCaretWidth
-                        )
-                    }
-                } else {
+                } else if inputState.composition.isEmpty == false {
                     TextFieldCaret(
                         compositionText: inputState.composition,
                         defaultWidth: defaultCaretWidth,
@@ -1241,10 +1268,30 @@ private struct TextFieldControl: View {
                     )
                 }
                 Text(segments.trailing)
+                    .overlay(alignment: .leading) {
+                        if inputState.isFocused,
+                           inputState.composition.isEmpty,
+                           segments.selected.isEmpty {
+                            TextFieldCaret(
+                                compositionText: nil,
+                                defaultWidth: defaultCaretWidth,
+                                blinkResetID: inputState.caretOffset
+                            )
+                        }
+                    }
             }
             Spacer(minLength: 0)
         }
         .frame(minHeight: 18)
+    }
+
+    @ViewBuilder
+    private var promptContent: some View {
+        if let prompt = configuration.prompt {
+            prompt.foregroundStyle(Color.secondary)
+        } else {
+            configuration.label.foregroundStyle(Color.secondary)
+        }
     }
 
     private var inputModifier: TextFieldInputModifier {
@@ -1617,13 +1664,10 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     private func textOffset(atGlobalPoint point: CGPoint) -> Int? {
-        guard let selectionLayout, let inputState else { return nil }
+        guard let selectionLayout, inputState != nil else { return nil }
         var points = [point]
         helper.transform.convertGlobal(to: .local, points: &points)
-        return selectionLayout.characterOffset(
-            atLocalX: points[0].x,
-            inputState: inputState.wrappedValue
-        )
+        return selectionLayout.characterOffset(atLocalX: points[0].x)
     }
 
     private func updatePointerSelection(anchor: Int, extent: Int) {

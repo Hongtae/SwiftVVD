@@ -374,39 +374,18 @@ final class TextFieldInputTests: XCTestCase {
     }
 
     // ASSERTIONS textFieldPointerSelectionRuntimeObserved
-    func testPointerSelectionLayoutUsesGlyphMidpointsAndCaretGap() {
+    func testPointerSelectionLayoutUsesGlyphMidpointsWithoutCaretGap() {
         let layout = TextFieldSelectionLayout(
             characterOffsets: [0, 10, 30, 40],
             leadingInset: 6
         )
-        var input = TextFieldInputState()
-        input.setFocused(true, committedText: "abc")
-        input.collapseSelection(
-            to: 1,
-            affinity: .upstream,
-            committedText: "abc"
-        )
 
-        XCTAssertEqual(layout.characterOffset(
-            atLocalX: 10,
-            inputState: input
-        ), 0)
-        XCTAssertEqual(layout.characterOffset(
-            atLocalX: 16.5,
-            inputState: input
-        ), 1)
-        XCTAssertEqual(layout.characterOffset(
-            atLocalX: 21,
-            inputState: input
-        ), 1)
-        XCTAssertEqual(layout.characterOffset(
-            atLocalX: 32,
-            inputState: input
-        ), 2)
-        XCTAssertEqual(layout.characterOffset(
-            atLocalX: 100,
-            inputState: input
-        ), 3)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 10), 0)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 16.5), 1)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 21), 1)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 26), 2)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 32), 2)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 100), 3)
     }
 
     // ASSERTIONS textFieldPointerSelectionRuntimeObserved
@@ -908,6 +887,51 @@ final class TextFieldInputTests: XCTestCase {
         ))
     }
 
+    func testCaretBlinkIntervalEnvironmentOverridesDefaultPhase() {
+        var environment = EnvironmentValues()
+        XCTAssertEqual(environment.textFieldCaretBlinkInterval, 0.5)
+
+        environment.textFieldCaretBlinkInterval = 0.25
+        XCTAssertEqual(environment.textFieldCaretBlinkInterval, 0.25)
+
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        XCTAssertTrue(TextFieldCaret.isBlinkVisible(
+            at: start.addingTimeInterval(0.249),
+            from: start,
+            interval: environment.textFieldCaretBlinkInterval
+        ))
+        XCTAssertFalse(TextFieldCaret.isBlinkVisible(
+            at: start.addingTimeInterval(0.25),
+            from: start,
+            interval: environment.textFieldCaretBlinkInterval
+        ))
+        XCTAssertTrue(TextFieldCaret.isBlinkVisible(
+            at: start.addingTimeInterval(0.5),
+            from: start,
+            interval: environment.textFieldCaretBlinkInterval
+        ))
+    }
+
+    func testInvalidAndTooFrequentCaretBlinkIntervalsDisableBlinking() {
+        let threshold = TextFieldCaret.blinkIntervalThreshold
+        let disabledIntervals: [TimeInterval] = [
+            0, -1, threshold / 2, threshold,
+            .infinity, -.infinity, .nan
+        ]
+        for interval in disabledIntervals {
+            XCTAssertEqual(TextFieldCaret.resolvedBlinkInterval(interval), 0)
+            XCTAssertTrue(TextFieldCaret.isBlinkVisible(
+                at: Date(timeIntervalSinceReferenceDate: 1_000),
+                from: Date(timeIntervalSinceReferenceDate: 0),
+                interval: interval
+            ))
+        }
+        XCTAssertEqual(
+            TextFieldCaret.resolvedBlinkInterval(threshold.nextUp),
+            threshold.nextUp
+        )
+    }
+
     @MainActor
     func testMountedTextFieldRoutesCompositionAndTogglesPlatformInput() async throws {
         let model = TextFieldInputModel()
@@ -1169,6 +1193,64 @@ final class TextFieldInputTests: XCTestCase {
         ) {
             XCTAssertGreaterThanOrEqual(trailing, leading)
         }
+    }
+
+    @MainActor
+    // ASSERTIONS textFieldCaretOverlayGeometryObserved
+    func testMountedInsertionCaretDoesNotIncreaseTextFieldWidth() throws {
+        let model = TextFieldInputModel()
+        model.text = "ABCD"
+        let controller = TextFieldIntrinsicHostController(model: model)
+        var redraw = false
+
+        func renderFrame(_ tick: UInt64) {
+            controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 420, height: 120),
+                redraw: &redraw
+            ) { _, _ in }
+            Update.dispatchActions()
+        }
+
+        func intrinsicWidth() throws -> CGFloat {
+            try controller.viewGraph.data.withCurrent {
+                try XCTUnwrap(controller.viewGraph.rootLayoutComputer)
+                    .value.sizeThatFits(.unspecified).width
+            }
+        }
+
+        renderFrame(0)
+        let unfocusedWidth = try intrinsicWidth()
+
+        var textResponder: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                textResponder = responder
+                return .cancel
+            }
+            return .next
+        }
+        let responder = try XCTUnwrap(textResponder)
+        controller.focusTextInputResponder(responder)
+        Update.dispatchActions()
+
+        var editing = try XCTUnwrap(responder.inputState).wrappedValue
+        editing.collapseSelection(
+            to: 1,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        responder.inputState?.wrappedValue = editing
+        renderFrame(1)
+        renderFrame(2)
+
+        XCTAssertEqual(
+            try intrinsicWidth(),
+            unfocusedWidth,
+            accuracy: 0.0001
+        )
     }
 
     @MainActor
@@ -1879,6 +1961,26 @@ private final class TextFieldInputHostController: WindowController,
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(TextFieldInputHostController.self)
+            )
+        )
+    }
+}
+
+@MainActor
+private final class TextFieldIntrinsicHostController: WindowController,
+    @unchecked Sendable {
+    let testWindow = TextFieldInputTestWindow()
+
+    override var window: (any VVD.Window)? { testWindow }
+
+    init(model: TextFieldInputModel) {
+        super.init(
+            content: TextField("Input", text: model.binding)
+                .textFieldStyle(.plain)
+                .environment(\.defaultFontRenderingMode, .vector()),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(TextFieldIntrinsicHostController.self)
             )
         )
     }
