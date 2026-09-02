@@ -105,6 +105,26 @@ struct StyleContextInput: ViewInput {
     var description: String { "StyleContextInput" }
 }
 
+// Extends inherited context membership using T's type without storing a value.
+struct StyleContextWriter<T: StyleContext>: ViewModifier, _GraphInputsModifier {
+    typealias Body = Never
+
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        let current = inputs.customInputs.value(forKey: StyleContextInput.self)
+        let new = current.pushing(T.self)
+        inputs.customInputs.setValue(new, forKey: StyleContextInput.self)
+    }
+}
+
+// Resets inherited context membership to the default no-style context.
+struct DefaultStyleContextWriter: ViewModifier, _GraphInputsModifier {
+    typealias Body = Never
+
+    static func _makeInputs(modifier: _GraphValue<Self>, inputs: inout _GraphInputs) {
+        inputs.customInputs.setValue(.defaultValue, forKey: StyleContextInput.self)
+    }
+}
+
 // Menu-related context management (retained until Menu is fully rewritten).
 struct _SubmenuRegistration: @unchecked Sendable {
     var close: () -> Void
