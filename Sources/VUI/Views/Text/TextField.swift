@@ -75,7 +75,10 @@ struct SearchFieldConfiguration {
 }
 
 struct TextFieldState {
-    struct FormatActions {}
+    struct FormatActions {
+        var validate: (String) -> Bool
+        var finalize: (String) -> String?
+    }
 
     struct DeprecatedActions {
         var editingChanged: (Bool) -> Void
@@ -109,6 +112,241 @@ struct TextFieldState {
         self.hasSuggestions = hasSuggestions
         self.isPresentingSuggestions = isPresentingSuggestions
         self.isEditing = isEditing
+    }
+}
+
+struct FormatInputToString<Format>: Projection
+where Format: ParseableFormatStyle, Format.FormatOutput == String {
+    var format: Format
+
+    func get(base: Format.FormatInput) -> String {
+        format.format(base)
+    }
+
+    func set(base: inout Format.FormatInput, newValue: String) {
+        guard let value = try? format.parseStrategy.parse(newValue) else {
+            return
+        }
+        base = value
+    }
+}
+
+struct OptionalFormatInputToString<Format>: Projection
+where Format: ParseableFormatStyle, Format.FormatOutput == String {
+    var format: Format
+
+    func get(base: Format.FormatInput?) -> String {
+        base.map(format.format) ?? ""
+    }
+
+    func set(base: inout Format.FormatInput?, newValue: String) {
+        if newValue.isEmpty {
+            base = nil
+        } else if let value = try? format.parseStrategy.parse(newValue) {
+            base = value
+        }
+    }
+}
+
+final class AnyToFormattedString<Value>: Projection {
+    let formatter: Formatter
+
+    init(_ formatter: Formatter) {
+        self.formatter = formatter
+    }
+
+    static func == (
+        lhs: AnyToFormattedString<Value>,
+        rhs: AnyToFormattedString<Value>
+    ) -> Bool {
+        lhs.formatter == rhs.formatter
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(formatter)
+    }
+
+    func get(base: Value) -> String {
+        Self.formattedString(for: base, formatter: formatter) ?? ""
+    }
+
+    func set(base: inout Value, newValue: String) {
+        _ = Self.applyFormatting(
+            to: &base,
+            string: newValue,
+            formatter: formatter
+        )
+    }
+
+    static func applyFormatting(
+        to value: inout Value,
+        string: String,
+        formatter: Formatter
+    ) -> Bool {
+#if canImport(ObjectiveC)
+        var object: AnyObject?
+        var errorDescription: NSString?
+        guard formatter.getObjectValue(
+            &object,
+            for: string,
+            errorDescription: &errorDescription
+        ), let object else {
+            return false
+        }
+#else
+        // swift-corelibs-foundation does not expose Formatter's generic
+        // reverse-conversion entry point. Use only concrete public parsers.
+        let object: Any?
+        switch formatter {
+        case let formatter as NumberFormatter:
+            object = formatter.number(from: string)
+        case let formatter as DateFormatter:
+            object = formatter.date(from: string)
+        case let formatter as ISO8601DateFormatter:
+            object = formatter.date(from: string)
+        default:
+            object = nil
+        }
+        guard let object else {
+            return false
+        }
+#endif
+        guard let formatted = object as? Value else {
+            return false
+        }
+        value = formatted
+        return true
+    }
+
+    static func formattedString(
+        for value: Value,
+        formatter: Formatter
+    ) -> String? {
+#if canImport(ObjectiveC)
+        return formatter.string(for: value)
+#else
+        // Formatter.string(for:) requires a concrete implementation in
+        // swift-corelibs-foundation. Call only formatter APIs implemented there.
+        switch formatter {
+        case let formatter as NumberFormatter:
+            return formatter.string(for: value)
+        case let formatter as DateFormatter:
+            guard let date = value as? Date else {
+                return nil
+            }
+            return formatter.string(from: date)
+        case let formatter as ISO8601DateFormatter:
+            guard let date = value as? Date else {
+                return nil
+            }
+            return formatter.string(from: date)
+        case let formatter as ByteCountFormatter:
+            guard let byteCount = value as? Double else {
+                return nil
+            }
+            return formatter.string(fromByteCount: Int64(byteCount))
+        case let formatter as DateIntervalFormatter:
+            guard let interval = value as? DateInterval else {
+                return nil
+            }
+            return formatter.string(from: interval)
+        default:
+            return nil
+        }
+#endif
+    }
+}
+
+enum TextFieldFormattingUtilities {
+    static func makeStateAndText<Format>(
+        value: Binding<Format.FormatInput>,
+        format: Format
+    ) -> (TextFieldState, Binding<String>)
+    where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        let text = value.projecting(FormatInputToString(format: format))
+        let actions = TextFieldState.FormatActions(
+            validate: { input in
+                (try? format.parseStrategy.parse(input)) != nil
+            },
+            finalize: { input in
+                guard let parsed = try? format.parseStrategy.parse(input) else {
+                    return nil
+                }
+                return format.format(parsed)
+            }
+        )
+        return (
+            TextFieldState(
+                displayText: text.wrappedValue,
+                formatActions: actions
+            ),
+            text
+        )
+    }
+
+    static func makeStateAndText<Format>(
+        value: Binding<Format.FormatInput?>,
+        format: Format
+    ) -> (TextFieldState, Binding<String>)
+    where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        let text = value.projecting(
+            OptionalFormatInputToString(format: format)
+        )
+        let actions = TextFieldState.FormatActions(
+            validate: { input in
+                input.isEmpty
+                    || (try? format.parseStrategy.parse(input)) != nil
+            },
+            finalize: { input in
+                if input.isEmpty {
+                    return ""
+                }
+                if let parsed = try? format.parseStrategy.parse(input) {
+                    return format.format(parsed)
+                }
+                return nil
+            }
+        )
+        return (
+            TextFieldState(
+                displayText: text.wrappedValue,
+                formatActions: actions
+            ),
+            text
+        )
+    }
+
+    static func makeStateAndText<Value>(
+        value: Binding<Value>,
+        formatter: Formatter,
+        deprecatedActions: TextFieldState.DeprecatedActions?
+    ) -> (TextFieldState, Binding<String>) {
+        let text = value.projecting(AnyToFormattedString(formatter))
+        let actions = TextFieldState.FormatActions(
+            validate: { _ in true },
+            finalize: { input in
+                var candidate = value.wrappedValue
+                guard AnyToFormattedString<Value>.applyFormatting(
+                    to: &candidate,
+                    string: input,
+                    formatter: formatter
+                ) else {
+                    return nil
+                }
+                return AnyToFormattedString<Value>.formattedString(
+                    for: candidate,
+                    formatter: formatter
+                )
+            }
+        )
+        return (
+            TextFieldState(
+                displayText: text.wrappedValue,
+                formatActions: actions,
+                deprecatedActions: deprecatedActions
+            ),
+            text
+        )
     }
 }
 
@@ -220,6 +458,16 @@ extension TextField where Label == Text {
         )
     }
 
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        text: Binding<String>
+    ) {
+        self.init(text: text) {
+            Text(titleResource)
+        }
+    }
+
     public init(
         _ titleKey: LocalizedStringKey,
         text: Binding<String>,
@@ -227,6 +475,17 @@ extension TextField where Label == Text {
     ) {
         self.init(text: text, prompt: prompt) {
             Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        text: Binding<String>,
+        prompt: Text?
+    ) {
+        self.init(text: text, prompt: prompt) {
+            Text(titleResource)
         }
     }
 
@@ -240,6 +499,17 @@ extension TextField where Label == Text {
         }
     }
 
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        text: Binding<String>,
+        axis: Axis
+    ) {
+        self.init(text: text, axis: axis) {
+            Text(titleResource)
+        }
+    }
+
     public init(
         _ titleKey: LocalizedStringKey,
         text: Binding<String>,
@@ -248,6 +518,18 @@ extension TextField where Label == Text {
     ) {
         self.init(text: text, prompt: prompt, axis: axis) {
             Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        text: Binding<String>,
+        prompt: Text?,
+        axis: Axis
+    ) {
+        self.init(text: text, prompt: prompt, axis: axis) {
+            Text(titleResource)
         }
     }
 
@@ -361,16 +643,243 @@ extension TextField where Label == Text {
     }
 }
 
-public struct _TextFieldStyleLabel: View, ViewAlias {
-    public typealias Body = Never
+extension TextField {
+    public init<Format>(
+        value: Binding<Format.FormatInput?>,
+        format: Format,
+        prompt: Text? = nil,
+        @ViewBuilder label: () -> Label
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        let (state, text) = TextFieldFormattingUtilities.makeStateAndText(
+            value: value,
+            format: format
+        )
+        self.init(
+            text: text,
+            isSecure: false,
+            label: label(),
+            axis: .horizontal,
+            prompt: prompt,
+            state: StateOrBinding(wrappedValue: state),
+            selection: nil
+        )
+    }
+
+    public init<Format>(
+        value: Binding<Format.FormatInput>,
+        format: Format,
+        prompt: Text? = nil,
+        @ViewBuilder label: () -> Label
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        let (state, text) = TextFieldFormattingUtilities.makeStateAndText(
+            value: value,
+            format: format
+        )
+        self.init(
+            text: text,
+            isSecure: false,
+            label: label(),
+            axis: .horizontal,
+            prompt: prompt,
+            state: StateOrBinding(wrappedValue: state),
+            selection: nil
+        )
+    }
+
+    public init<Value>(
+        value: Binding<Value>,
+        formatter: Formatter,
+        prompt: Text? = nil,
+        @ViewBuilder label: () -> Label
+    ) {
+        let (state, text) = TextFieldFormattingUtilities.makeStateAndText(
+            value: value,
+            formatter: formatter,
+            deprecatedActions: nil
+        )
+        self.init(
+            text: text,
+            isSecure: false,
+            label: label(),
+            axis: .horizontal,
+            prompt: prompt,
+            state: StateOrBinding(wrappedValue: state),
+            selection: nil
+        )
+    }
 }
 
-extension _TextFieldStyleLabel: PrimitiveView {}
+extension TextField where Label == Text {
+    public init<Format>(
+        _ titleKey: LocalizedStringKey,
+        value: Binding<Format.FormatInput?>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(titleKey)
+        }
+    }
 
-public protocol TextFieldStyle {
-    associatedtype _Body: View
-    @ViewBuilder func _body(configuration: TextField<Self._Label>) -> Self._Body
-    typealias _Label = _TextFieldStyleLabel
+    @_disfavoredOverload
+    public init<Format>(
+        _ titleResource: LocalizedStringResource,
+        value: Binding<Format.FormatInput?>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Title, Format>(
+        _ title: Title,
+        value: Binding<Format.FormatInput?>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Title: StringProtocol,
+        Format: ParseableFormatStyle,
+        Format.FormatOutput == String
+    {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(title)
+        }
+    }
+
+    public init<Format>(
+        _ titleKey: LocalizedStringKey,
+        value: Binding<Format.FormatInput>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Format>(
+        _ titleResource: LocalizedStringResource,
+        value: Binding<Format.FormatInput>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Format: ParseableFormatStyle, Format.FormatOutput == String {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Title, Format>(
+        _ title: Title,
+        value: Binding<Format.FormatInput>,
+        format: Format,
+        prompt: Text? = nil
+    ) where Title: StringProtocol,
+        Format: ParseableFormatStyle,
+        Format.FormatOutput == String
+    {
+        self.init(value: value, format: format, prompt: prompt) {
+            Text(title)
+        }
+    }
+
+    public init<Value>(
+        _ titleKey: LocalizedStringKey,
+        value: Binding<Value>,
+        formatter: Formatter,
+        prompt: Text?
+    ) {
+        self.init(value: value, formatter: formatter, prompt: prompt) {
+            Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Value>(
+        _ titleResource: LocalizedStringResource,
+        value: Binding<Value>,
+        formatter: Formatter,
+        prompt: Text?
+    ) {
+        self.init(value: value, formatter: formatter, prompt: prompt) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Title, Value>(
+        _ title: Title,
+        value: Binding<Value>,
+        formatter: Formatter,
+        prompt: Text?
+    ) where Title: StringProtocol {
+        self.init(value: value, formatter: formatter, prompt: prompt) {
+            Text(title)
+        }
+    }
+
+    public init<Value>(
+        _ titleKey: LocalizedStringKey,
+        value: Binding<Value>,
+        formatter: Formatter
+    ) {
+        let (state, text) = TextFieldFormattingUtilities.makeStateAndText(
+            value: value,
+            formatter: formatter,
+            deprecatedActions: TextFieldState.DeprecatedActions(
+                editingChanged: { _ in },
+                commit: {}
+            )
+        )
+        self.init(
+            text: text,
+            isSecure: false,
+            label: Text(titleKey),
+            axis: .horizontal,
+            prompt: nil,
+            state: StateOrBinding(wrappedValue: state),
+            selection: nil
+        )
+    }
+
+    @_disfavoredOverload
+    public init<Value>(
+        _ titleResource: LocalizedStringResource,
+        value: Binding<Value>,
+        formatter: Formatter
+    ) {
+        self.init(value: value, formatter: formatter, prompt: nil) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<Title, Value>(
+        _ title: Title,
+        value: Binding<Value>,
+        formatter: Formatter
+    ) where Title: StringProtocol {
+        let (state, text) = TextFieldFormattingUtilities.makeStateAndText(
+            value: value,
+            formatter: formatter,
+            deprecatedActions: TextFieldState.DeprecatedActions(
+                editingChanged: { _ in },
+                commit: {}
+            )
+        )
+        self.init(
+            text: text,
+            isSecure: false,
+            label: Text(title),
+            axis: .horizontal,
+            prompt: nil,
+            state: StateOrBinding(wrappedValue: state),
+            selection: nil
+        )
+    }
 }
 
 struct ResolvedTextFieldStyle: StyleableView {
@@ -386,41 +895,6 @@ struct ResolvedTextFieldStyle: StyleableView {
 
     static var defaultStyleModifier: DefaultStyleModifier {
         TextFieldStyleModifier(style: DefaultTextFieldStyle())
-    }
-}
-
-public struct DefaultTextFieldStyle: TextFieldStyle {
-    public init() {}
-
-    public func _body(
-        configuration: TextField<_TextFieldStyleLabel>
-    ) -> some View {
-        TextFieldControl(configuration: configuration, drawsBorder: true)
-    }
-}
-
-public struct PlainTextFieldStyle: TextFieldStyle {
-    public init() {}
-
-    public func _body(
-        configuration: TextField<_TextFieldStyleLabel>
-    ) -> some View {
-        TextFieldControl(configuration: configuration, drawsBorder: false)
-    }
-}
-
-extension TextFieldStyle where Self == DefaultTextFieldStyle {
-    public static var automatic: DefaultTextFieldStyle { DefaultTextFieldStyle() }
-}
-
-extension TextFieldStyle where Self == PlainTextFieldStyle {
-    public static var plain: PlainTextFieldStyle { PlainTextFieldStyle() }
-}
-
-extension View {
-    public func textFieldStyle<S>(_ style: S) -> some View
-    where S: TextFieldStyle {
-        modifier(TextFieldStyleModifier(style: style))
     }
 }
 
@@ -1202,117 +1676,13 @@ struct TextFieldCaret: View {
     }
 }
 
-private struct TextFieldControl: View {
-    var configuration: TextField<_TextFieldStyleLabel>
-    var drawsBorder: Bool
-    @State private var inputState = TextFieldInputState()
-    @FocusState private var isFocused: Bool
-    @Environment(\.textFieldCompositionCaretStyle)
-    private var compositionCaretStyle
-
-    var body: some View {
-        if drawsBorder {
-            editorContent
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(
-                    Color.white,
-                    in: RoundedRectangle(cornerRadius: 5)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(
-                            inputState.isFocused
-                                ? Color.blue
-                                : Color(white: 0.72),
-                            lineWidth: inputState.isFocused ? 2 : 1
-                        )
-                }
-                .modifier(inputModifier)
-                .focused($isFocused)
-        } else {
-            editorContent
-                .modifier(inputModifier)
-                .focused($isFocused)
-        }
-    }
-
-    @ViewBuilder
-    private var editorContent: some View {
-        let text = configuration._text.wrappedValue
-        let segments = inputState.displaySegments(in: text)
-        let defaultCaretWidth: CGFloat = 1
-        HStack(spacing: 0) {
-            if text.isEmpty && inputState.composition.isEmpty {
-                promptContent
-                    .overlay(alignment: .leading) {
-                        if inputState.isFocused {
-                            TextFieldCaret(
-                                compositionText: nil,
-                                defaultWidth: defaultCaretWidth,
-                                blinkResetID: inputState.caretOffset
-                            )
-                        }
-                    }
-            } else {
-                Text(segments.leading)
-                if segments.selected.isEmpty == false {
-                    Text(segments.selected)
-                        .foregroundStyle(Color.white)
-                        .background(Color.blue)
-                } else if inputState.composition.isEmpty == false {
-                    TextFieldCaret(
-                        compositionText: inputState.composition,
-                        defaultWidth: defaultCaretWidth,
-                        compositionStyle: compositionCaretStyle
-                    )
-                }
-                Text(segments.trailing)
-                    .overlay(alignment: .leading) {
-                        if inputState.isFocused,
-                           inputState.composition.isEmpty,
-                           segments.selected.isEmpty {
-                            TextFieldCaret(
-                                compositionText: nil,
-                                defaultWidth: defaultCaretWidth,
-                                blinkResetID: inputState.caretOffset
-                            )
-                        }
-                    }
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(minHeight: 18)
-    }
-
-    @ViewBuilder
-    private var promptContent: some View {
-        if let prompt = configuration.prompt {
-            prompt.foregroundStyle(Color.secondary)
-        } else {
-            configuration.label.foregroundStyle(Color.secondary)
-        }
-    }
-
-    private var inputModifier: TextFieldInputModifier {
-        TextFieldInputModifier(
-            text: configuration._text,
-            selection: configuration.selection,
-            selectionValue: configuration.selection?.wrappedValue,
-            fieldState: configuration.$state,
-            inputState: $inputState,
-            contentLeadingInset: drawsBorder ? 6 : 0
-        )
-    }
-}
-
 protocol TextInputResponder: AnyObject {
     func handleTextInputEvent(_ event: VVD.KeyboardEvent) -> Bool
     func textInputFocusDidChange(_ focused: Bool)
     func containsTextInputPoint(_ point: CGPoint) -> Bool
 }
 
-private struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
+struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
     var text: Binding<String>
@@ -1420,6 +1790,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         responder.selection = modifier.selection
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
+        responder.synchronizeTextValue()
         responder.triggerSubmission = environment.triggerSubmission
         responder.isEnabled = environment.isEnabled
         responder.isTextFieldCursorEnabled = environment.isTextFieldCursorEnabled
@@ -1430,7 +1801,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
             )
         }
         responder.selectionLayout = TextFieldSelectionLayout.resolve(
-            text: modifier.text.wrappedValue,
+            text: responder.currentTextValue(),
             environment: environment,
             sceneResources: rendererHost.sceneResources,
             leadingInset: modifier.contentLeadingInset
@@ -1488,7 +1859,15 @@ final class TextFieldResponder: MultiViewResponder,
     ExclusiveResponderEventConsumer, TextInputResponder,
     TextEditingCommandResponder, HoverEventObserver {
     var helper = ContentResponderHelper<TrivialContentResponder>()
-    var text: Binding<String>?
+    var text: Binding<String>? {
+        didSet {
+            if text == nil {
+                observedTextValue = nil
+            } else if observedTextValue == nil {
+                observedTextValue = text?.wrappedValue
+            }
+        }
+    }
     var selection: Binding<TextSelection?>? {
         didSet {
             let location = selection.map {
@@ -1513,6 +1892,7 @@ final class TextFieldResponder: MultiViewResponder,
         }
     }
     private var selectionLocation: ObjectIdentifier?
+    private var observedTextValue: String?
     private var selectionBindingValue: TextSelection?
     private var hasSelectionBindingValue = false
     private var consumedKeyStreams: Set<KeyStream> = []
@@ -1526,6 +1906,72 @@ final class TextFieldResponder: MultiViewResponder,
     private struct KeyStream: Hashable {
         var deviceID: Int
         var key: VirtualKey
+    }
+
+    func currentTextValue() -> String {
+        guard let text else { return "" }
+        guard let state = fieldState?.wrappedValue,
+              state.formatActions != nil else {
+            return text.wrappedValue
+        }
+        return state.displayText
+    }
+
+    func synchronizeTextValue() {
+        guard let text, let fieldState else { return }
+        let projectedValue = text.wrappedValue
+        guard let observedTextValue else {
+            self.observedTextValue = projectedValue
+            return
+        }
+        guard observedTextValue != projectedValue else { return }
+        self.observedTextValue = projectedValue
+
+        let state = fieldState.wrappedValue
+        let acceptsExternalValue = !state.isEditing
+            || state.formatActions?.validate(state.displayText) != false
+        guard acceptsExternalValue,
+              state.displayText != projectedValue else {
+            return
+        }
+        Update.enqueueAction { [weak self] in
+            guard let self,
+                  self.text?.wrappedValue == projectedValue,
+                  let fieldState = self.fieldState else {
+                return
+            }
+            var state = fieldState.wrappedValue
+            guard state.displayText != projectedValue else { return }
+            state.displayText = projectedValue
+            fieldState.wrappedValue = state
+        }
+    }
+
+    private func storeTextValue(
+        _ value: String,
+        text: Binding<String>,
+        fieldState: Binding<TextFieldState>
+    ) {
+        text.wrappedValue = value
+        observedTextValue = text.wrappedValue
+        var state = fieldState.wrappedValue
+        state.displayText = value
+        fieldState.wrappedValue = state
+    }
+
+    private func finalizeTextValue(
+        text: Binding<String>,
+        state: inout TextFieldState
+    ) -> String {
+        guard let formatActions = state.formatActions else {
+            return text.wrappedValue
+        }
+        let finalized = formatActions.finalize(state.displayText)
+            ?? text.wrappedValue
+        text.wrappedValue = finalized
+        observedTextValue = text.wrappedValue
+        state.displayText = finalized
+        return finalized
     }
 
     override var features: Features {
@@ -1671,9 +2117,9 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     private func updatePointerSelection(anchor: Int, extent: Int) {
-        guard let text, let inputState else { return }
+        guard text != nil, let inputState else { return }
         Update.enqueueAction {
-            let committedText = text.wrappedValue
+            let committedText = self.currentTextValue()
             var editing = inputState.wrappedValue
             _ = editing.setSelection(
                 anchor: anchor,
@@ -1690,9 +2136,9 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     private func updatePointerWordSelection(at offset: Int) {
-        guard let text, let inputState else { return }
+        guard text != nil, let inputState else { return }
         Update.enqueueAction {
-            let committedText = text.wrappedValue
+            let committedText = self.currentTextValue()
             var editing = inputState.wrappedValue
             if let range = editing.wordRange(at: offset, in: committedText) {
                 _ = editing.setSelection(
@@ -1713,9 +2159,9 @@ final class TextFieldResponder: MultiViewResponder,
     }
 
     private func updatePointerLineSelection() {
-        guard let text, let inputState else { return }
+        guard text != nil, let inputState else { return }
         Update.enqueueAction {
-            let committedText = text.wrappedValue
+            let committedText = self.currentTextValue()
             var editing = inputState.wrappedValue
             _ = editing.setSelection(
                 anchor: 0,
@@ -1773,25 +2219,40 @@ final class TextFieldResponder: MultiViewResponder,
     func textInputFocusDidChange(_ focused: Bool) {
         guard let text, let fieldState, let inputState else { return }
         Update.enqueueAction {
+            var state = fieldState.wrappedValue
+            if focused, !state.isEditing, state.formatActions != nil {
+                let projectedValue = text.wrappedValue
+                state.displayText = projectedValue
+                self.observedTextValue = projectedValue
+            }
+            var committedText = state.formatActions == nil
+                ? text.wrappedValue
+                : state.displayText
+            if !focused, state.isEditing {
+                committedText = self.finalizeTextValue(
+                    text: text,
+                    state: &state
+                )
+            }
+
             var editing = inputState.wrappedValue
-            editing.setFocused(focused, committedText: text.wrappedValue)
+            editing.setFocused(focused, committedText: committedText)
             if focused,
                let selection = self.selection?.wrappedValue {
                 _ = editing.setSelection(
                     selection,
-                    committedText: text.wrappedValue
+                    committedText: committedText
                 )
             } else if !focused {
                 editing.collapseSelection(
                     to: 0,
                     affinity: .downstream,
-                    committedText: text.wrappedValue
+                    committedText: committedText
                 )
             }
             inputState.wrappedValue = editing
-            self.publishSelection(editing, committedText: text.wrappedValue)
+            self.publishSelection(editing, committedText: committedText)
 
-            var state = fieldState.wrappedValue
             guard state.isEditing != focused else { return }
             state.isEditing = focused
             fieldState.wrappedValue = state
@@ -1811,36 +2272,52 @@ final class TextFieldResponder: MultiViewResponder,
         case .textComposition:
             Update.enqueueAction {
                 var editing = inputState.wrappedValue
+                let committedText = self.currentTextValue()
                 editing.replaceComposition(
                     with: event.text,
-                    committedText: text.wrappedValue
+                    committedText: committedText
                 )
                 inputState.wrappedValue = editing
                 self.publishSelection(
                     editing,
-                    committedText: text.wrappedValue
+                    committedText: committedText
                 )
             }
             return true
 
         case .textInput:
             Update.enqueueAction {
-                var committedText = text.wrappedValue
+                var committedText = self.currentTextValue()
                 var editing = inputState.wrappedValue
                 let result = editing.handleTextInput(
                     event.text,
                     committedText: &committedText
                 )
-                inputState.wrappedValue = editing
                 if result == .changed {
-                    text.wrappedValue = committedText
-                    var state = fieldState.wrappedValue
-                    state.displayText = committedText
-                    fieldState.wrappedValue = state
+                    self.storeTextValue(
+                        committedText,
+                        text: text,
+                        fieldState: fieldState
+                    )
                 } else if result == .submit {
-                    fieldState.wrappedValue.deprecatedActions?.commit()
+                    var state = fieldState.wrappedValue
+                    let editingText = committedText
+                    committedText = self.finalizeTextValue(
+                        text: text,
+                        state: &state
+                    )
+                    if committedText != editingText {
+                        editing.collapseSelection(
+                            to: min(editing.caretOffset, committedText.count),
+                            affinity: .upstream,
+                            committedText: committedText
+                        )
+                    }
+                    fieldState.wrappedValue = state
+                    state.deprecatedActions?.commit()
                     self.triggerSubmission?(.text)
                 }
+                inputState.wrappedValue = editing
                 self.publishSelection(
                     editing,
                     committedText: committedText
@@ -1849,7 +2326,7 @@ final class TextFieldResponder: MultiViewResponder,
             return true
 
         case .keyDown:
-            var previewText = text.wrappedValue
+            var previewText = currentTextValue()
             var previewState = inputState.wrappedValue
             guard previewState.handleKeyDown(
                 event.key,
@@ -1863,7 +2340,8 @@ final class TextFieldResponder: MultiViewResponder,
                 key: event.key
             ))
             Update.enqueueAction {
-                var committedText = text.wrappedValue
+                var committedText = self.currentTextValue()
+                let originalText = committedText
                 var editing = inputState.wrappedValue
                 _ = editing.handleKeyDown(
                     event.key,
@@ -1871,11 +2349,12 @@ final class TextFieldResponder: MultiViewResponder,
                     committedText: &committedText
                 )
                 inputState.wrappedValue = editing
-                if text.wrappedValue != committedText {
-                    text.wrappedValue = committedText
-                    var state = fieldState.wrappedValue
-                    state.displayText = committedText
-                    fieldState.wrappedValue = state
+                if originalText != committedText {
+                    self.storeTextValue(
+                        committedText,
+                        text: text,
+                        fieldState: fieldState
+                    )
                 }
                 self.publishSelection(
                     editing,
@@ -1901,7 +2380,7 @@ final class TextFieldResponder: MultiViewResponder,
         clipboard: (any Clipboard)?
     ) -> Bool {
         guard isEnabled,
-              let text,
+              text != nil,
               let inputState,
               inputState.wrappedValue.isFocused else {
             return false
@@ -1921,7 +2400,7 @@ final class TextFieldResponder: MultiViewResponder,
             return true
         case .makeUpperCase, .makeLowerCase, .capitalize:
             return inputState.wrappedValue.transformationRange(
-                in: text.wrappedValue
+                in: currentTextValue()
             ) != nil
         default:
             return false
@@ -1940,8 +2419,9 @@ final class TextFieldResponder: MultiViewResponder,
         case .copy:
             guard let clipboard else { return }
             Update.enqueueAction {
+                let committedText = self.currentTextValue()
                 guard let selectedText = inputState.wrappedValue.selectedText(
-                    in: text.wrappedValue
+                    in: committedText
                 ) else {
                     return
                 }
@@ -1954,8 +2434,9 @@ final class TextFieldResponder: MultiViewResponder,
         case .cut:
             guard let clipboard else { return }
             Update.enqueueAction {
+                var committedText = self.currentTextValue()
                 guard let selectedText = inputState.wrappedValue.selectedText(
-                    in: text.wrappedValue
+                    in: committedText
                 ) else {
                     return
                 }
@@ -1967,7 +2448,6 @@ final class TextFieldResponder: MultiViewResponder,
                 } catch {
                     return
                 }
-                var committedText = text.wrappedValue
                 var editing = inputState.wrappedValue
                 guard editing.replaceSelection(
                     with: "",
@@ -1976,10 +2456,11 @@ final class TextFieldResponder: MultiViewResponder,
                     return
                 }
                 inputState.wrappedValue = editing
-                text.wrappedValue = committedText
-                var state = fieldState.wrappedValue
-                state.displayText = committedText
-                fieldState.wrappedValue = state
+                self.storeTextValue(
+                    committedText,
+                    text: text,
+                    fieldState: fieldState
+                )
                 self.publishSelection(
                     editing,
                     committedText: committedText
@@ -1995,7 +2476,7 @@ final class TextFieldResponder: MultiViewResponder,
                       let replacement = String(data: data, encoding: .utf8) else {
                     return
                 }
-                var committedText = text.wrappedValue
+                var committedText = self.currentTextValue()
                 var editing = inputState.wrappedValue
                 guard editing.replaceSelection(
                     with: replacement,
@@ -2004,10 +2485,11 @@ final class TextFieldResponder: MultiViewResponder,
                     return
                 }
                 inputState.wrappedValue = editing
-                text.wrappedValue = committedText
-                var state = fieldState.wrappedValue
-                state.displayText = committedText
-                fieldState.wrappedValue = state
+                self.storeTextValue(
+                    committedText,
+                    text: text,
+                    fieldState: fieldState
+                )
                 self.publishSelection(
                     editing,
                     committedText: committedText
@@ -2016,7 +2498,7 @@ final class TextFieldResponder: MultiViewResponder,
 
         case .delete:
             Update.enqueueAction {
-                var committedText = text.wrappedValue
+                var committedText = self.currentTextValue()
                 var editing = inputState.wrappedValue
                 guard editing.replaceSelection(
                     with: "",
@@ -2025,10 +2507,11 @@ final class TextFieldResponder: MultiViewResponder,
                     return
                 }
                 inputState.wrappedValue = editing
-                text.wrappedValue = committedText
-                var state = fieldState.wrappedValue
-                state.displayText = committedText
-                fieldState.wrappedValue = state
+                self.storeTextValue(
+                    committedText,
+                    text: text,
+                    fieldState: fieldState
+                )
                 self.publishSelection(
                     editing,
                     committedText: committedText
@@ -2037,7 +2520,7 @@ final class TextFieldResponder: MultiViewResponder,
 
         case .selectAll:
             Update.enqueueAction {
-                let committedText = text.wrappedValue
+                let committedText = self.currentTextValue()
                 var editing = inputState.wrappedValue
                 _ = editing.setSelection(
                     0..<committedText.count,
@@ -2058,7 +2541,7 @@ final class TextFieldResponder: MultiViewResponder,
 
         case .makeUpperCase, .makeLowerCase, .capitalize:
             Update.enqueueAction {
-                var committedText = text.wrappedValue
+                var committedText = self.currentTextValue()
                 var editing = inputState.wrappedValue
                 let transformed = editing.transformSelection(
                     in: &committedText
@@ -2076,10 +2559,11 @@ final class TextFieldResponder: MultiViewResponder,
                 }
                 guard transformed else { return }
                 inputState.wrappedValue = editing
-                text.wrappedValue = committedText
-                var state = fieldState.wrappedValue
-                state.displayText = committedText
-                fieldState.wrappedValue = state
+                self.storeTextValue(
+                    committedText,
+                    text: text,
+                    fieldState: fieldState
+                )
                 self.publishSelection(
                     editing,
                     committedText: committedText
@@ -2098,15 +2582,16 @@ final class TextFieldResponder: MultiViewResponder,
         }
         selectionBindingValue = selectionValue
         hasSelectionBindingValue = true
-        guard let selectionValue, let text,
+        guard let selectionValue, text != nil,
               let inputState else {
             return
         }
         Update.enqueueAction {
+            let committedText = self.currentTextValue()
             var editing = inputState.wrappedValue
             guard editing.setSelection(
                 selectionValue,
-                committedText: text.wrappedValue
+                committedText: committedText
             ) else {
                 return
             }

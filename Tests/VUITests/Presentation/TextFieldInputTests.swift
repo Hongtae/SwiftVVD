@@ -34,6 +34,400 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertNil(configured.state.deprecatedActions)
     }
 
+    // ASSERTIONS textFieldLocalizedResourceInitializersObserved
+    func testLocalizedResourceInitializersUseModernStringBindingRoute() {
+        let text = Binding.constant("value")
+        let resource = LocalizedStringResource("Resource")
+        let basic = TextField(resource, text: text)
+        let prompted = TextField(
+            resource,
+            text: text,
+            prompt: Text("Prompt")
+        )
+        let axis = TextField(resource, text: text, axis: .horizontal)
+        let promptedAxis = TextField(
+            resource,
+            text: text,
+            prompt: Text("Prompt"),
+            axis: .horizontal
+        )
+
+        for field in [basic, prompted, axis, promptedAxis] {
+            XCTAssertNil(field.state.deprecatedActions)
+            XCTAssertEqual(field.axis, .horizontal)
+        }
+        XCTAssertNil(basic.prompt)
+        XCTAssertNotNil(prompted.prompt)
+        XCTAssertNil(axis.prompt)
+        XCTAssertNotNil(promptedAxis.prompt)
+    }
+
+    // ASSERTIONS textFieldFormattedValueStructureObserved
+    func testFormattedValueInitializersBuildProjectedTextAndActionStorage() {
+        var value = 42
+        let valueBinding = Binding(
+            get: { value },
+            set: { value = $0 }
+        )
+        let format = IntegerFormatStyle<Int>.number
+        let formatted = TextField(
+            "Value",
+            value: valueBinding,
+            format: format
+        )
+
+        XCTAssertEqual(formatted._text.wrappedValue, "42")
+        XCTAssertNotNil(formatted.state.formatActions)
+        XCTAssertNil(formatted.state.deprecatedActions)
+        formatted._text.wrappedValue = "43"
+        XCTAssertEqual(value, 43)
+        formatted._text.wrappedValue = "-"
+        XCTAssertEqual(value, 43)
+
+        var optionalValue: Int? = 42
+        let optional = TextField(
+            "Optional",
+            value: Binding(
+                get: { optionalValue },
+                set: { optionalValue = $0 }
+            ),
+            format: format
+        )
+        optional._text.wrappedValue = ""
+        XCTAssertNil(optionalValue)
+        XCTAssertEqual(optional._text.wrappedValue, "")
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.allowsFloats = false
+        let legacyStorage = TextField(
+            "Legacy storage",
+            value: valueBinding,
+            formatter: formatter
+        )
+        let modernStorage = TextField(
+            "Modern storage",
+            value: valueBinding,
+            formatter: formatter,
+            prompt: nil
+        )
+        XCTAssertNotNil(legacyStorage.state.formatActions)
+        XCTAssertNotNil(legacyStorage.state.deprecatedActions)
+        XCTAssertNotNil(modernStorage.state.formatActions)
+        XCTAssertNil(modernStorage.state.deprecatedActions)
+        modernStorage._text.wrappedValue = "1,234"
+        XCTAssertEqual(value, 1_234)
+        modernStorage._text.wrappedValue = "-"
+        XCTAssertEqual(value, 1_234)
+    }
+
+    func testConcreteFormatterParsersUpdateBindings() {
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.calendar = calendar
+        dateFormatter.timeZone = timeZone
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        var date = Date(timeIntervalSince1970: 0)
+        let dateField = TextField(
+            "Date",
+            value: Binding(
+                get: { date },
+                set: { date = $0 }
+            ),
+            formatter: dateFormatter,
+            prompt: nil
+        )
+        dateField._text.wrappedValue = "2026-09-03"
+        XCTAssertEqual(
+            date,
+            calendar.date(from: DateComponents(
+                year: 2026,
+                month: 9,
+                day: 3
+            ))
+        )
+
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.timeZone = timeZone
+        var isoDate = Date(timeIntervalSince1970: 0)
+        let isoField = TextField(
+            "ISO 8601 Date",
+            value: Binding(
+                get: { isoDate },
+                set: { isoDate = $0 }
+            ),
+            formatter: isoFormatter,
+            prompt: nil
+        )
+        XCTAssertEqual(
+            isoField._text.wrappedValue,
+            "1970-01-01T00:00:00Z"
+        )
+        let input = "2026-09-03T12:34:56Z"
+        isoField._text.wrappedValue = input
+        XCTAssertEqual(isoFormatter.string(from: isoDate), input)
+    }
+
+    func testConcreteOutputOnlyFormattersProduceStrings() {
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let byteCountFormatter = ByteCountFormatter()
+        byteCountFormatter.countStyle = .decimal
+        let byteCountField = TextField(
+            "Byte Count",
+            value: Binding.constant(1_000.0),
+            formatter: byteCountFormatter,
+            prompt: nil
+        )
+        XCTAssertFalse(byteCountField._text.wrappedValue.isEmpty)
+
+        let dateIntervalFormatter = DateIntervalFormatter()
+        dateIntervalFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateIntervalFormatter.timeZone = timeZone
+        let dateIntervalField = TextField(
+            "Date Interval",
+            value: Binding.constant(DateInterval(
+                start: Date(timeIntervalSince1970: 0),
+                duration: 3_600
+            )),
+            formatter: dateIntervalFormatter,
+            prompt: nil
+        )
+        XCTAssertFalse(dateIntervalField._text.wrappedValue.isEmpty)
+    }
+
+#if !canImport(ObjectiveC)
+    func testUnsupportedConcreteFormatterFailsWithoutCallingAbstractMethods() {
+        var value = "value"
+        let field = TextField(
+            "Unsupported Formatter",
+            value: Binding(
+                get: { value },
+                set: { value = $0 }
+            ),
+            formatter: Formatter(),
+            prompt: nil
+        )
+
+        XCTAssertEqual(field._text.wrappedValue, "")
+        field._text.wrappedValue = "replacement"
+        XCTAssertEqual(value, "value")
+    }
+#endif
+
+    // ASSERTIONS textFieldFormattedValueEditingObserved
+    // ASSERTIONS textFieldFormattedValueFinalizationObserved
+    func testFormattedValueResponderRetainsInvalidInputAndFinalizesOnSubmit() {
+        var value = 42
+        let field = TextField(
+            "Value",
+            value: Binding(
+                get: { value },
+                set: { value = $0 }
+            ),
+            format: IntegerFormatStyle<Int>.number
+        )
+        var state = field.state
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: field._text.wrappedValue)
+        let responder = TextFieldResponder()
+        responder.text = field._text
+        responder.fieldState = Binding(
+            get: { state },
+            set: { state = $0 }
+        )
+        responder.inputState = Binding(
+            get: { input },
+            set: { input = $0 }
+        )
+        responder.textInputFocusDidChange(true)
+        Update.dispatchActions()
+
+        func replaceAll(with text: String) {
+            XCTAssertTrue(input.setSelection(
+                0..<responder.currentTextValue().count,
+                affinity: .upstream,
+                committedText: responder.currentTextValue()
+            ))
+            XCTAssertTrue(responder.handleTextInputEvent(KeyboardEvent(
+                type: .textInput,
+                window: nil,
+                deviceID: 0,
+                key: .none,
+                text: text
+            )))
+            Update.dispatchActions()
+        }
+
+        replaceAll(with: "-")
+        XCTAssertEqual(value, 42)
+        XCTAssertEqual(state.displayText, "-")
+        XCTAssertEqual(responder.currentTextValue(), "-")
+
+        replaceAll(with: "\r")
+        XCTAssertEqual(value, 42)
+        XCTAssertEqual(state.displayText, "42")
+        XCTAssertEqual(responder.currentTextValue(), "42")
+
+        replaceAll(with: "001")
+        XCTAssertEqual(value, 1)
+        XCTAssertEqual(state.displayText, "001")
+        XCTAssertEqual(responder.currentTextValue(), "001")
+
+        replaceAll(with: "\r")
+        XCTAssertEqual(value, 1)
+        XCTAssertEqual(state.displayText, "1")
+        XCTAssertEqual(responder.currentTextValue(), "1")
+
+        replaceAll(with: "-")
+        XCTAssertEqual(state.displayText, "-")
+        responder.textInputFocusDidChange(false)
+        Update.dispatchActions()
+        XCTAssertEqual(value, 1)
+        XCTAssertEqual(state.displayText, "1")
+        XCTAssertFalse(state.isEditing)
+    }
+
+    // ASSERTIONS textFieldFormattedValueExternalSyncObserved
+    func testFormattedValueExternalChangesRespectIntermediateValidation() {
+        var value = 42
+        let field = TextField(
+            "Value",
+            value: Binding(
+                get: { value },
+                set: { value = $0 }
+            ),
+            format: IntegerFormatStyle<Int>.number
+        )
+        var state = field.state
+        state.isEditing = true
+        var input = TextFieldInputState()
+        input.setFocused(true, committedText: field._text.wrappedValue)
+        let responder = TextFieldResponder()
+        responder.text = field._text
+        responder.fieldState = Binding(
+            get: { state },
+            set: { state = $0 }
+        )
+        responder.inputState = Binding(
+            get: { input },
+            set: { input = $0 }
+        )
+
+        state.displayText = "-"
+        value = 88
+        responder.synchronizeTextValue()
+        Update.dispatchActions()
+        XCTAssertEqual(state.displayText, "-")
+
+        state.displayText = "43"
+        value = 99
+        responder.synchronizeTextValue()
+        Update.dispatchActions()
+        XCTAssertEqual(state.displayText, "99")
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.allowsFloats = false
+        var formatterValue = 42
+        let formatterField = TextField(
+            "Formatter",
+            value: Binding(
+                get: { formatterValue },
+                set: { formatterValue = $0 }
+            ),
+            formatter: formatter,
+            prompt: nil
+        )
+        var formatterState = formatterField.state
+        formatterState.isEditing = true
+        let formatterResponder = TextFieldResponder()
+        formatterResponder.text = formatterField._text
+        formatterResponder.fieldState = Binding(
+            get: { formatterState },
+            set: { formatterState = $0 }
+        )
+        formatterResponder.inputState = Binding.constant(input)
+
+        formatterState.displayText = "-"
+        formatterValue = 88
+        formatterResponder.synchronizeTextValue()
+        Update.dispatchActions()
+        XCTAssertEqual(formatterState.displayText, "88")
+    }
+
+    @MainActor
+    // ASSERTIONS textFieldFormattedValueEditingObserved
+    // ASSERTIONS textFieldFormattedValueFinalizationObserved
+    // ASSERTIONS textFieldFormattedValueExternalSyncObserved
+    func testMountedFormattedValueUsesEditorDisplayAndExternalSyncRules() throws {
+        let model = TextFieldFormattedValueModel()
+        let mounted = try mountTextField(
+            TextFieldFormattedValueHost(model: model)
+        )
+        var tick: UInt64 = 1
+        var redraw = false
+
+        func renderFrame() {
+            mounted.controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: mounted.controller.date,
+                contentSize: CGSize(width: 420, height: 120),
+                redraw: &redraw
+            ) { _, _ in }
+            tick += 1
+            Update.dispatchActions()
+        }
+
+        func replaceAll(with text: String) {
+            mounted.responder.performTextEditingCommand(.selectAll)
+            Update.dispatchActions()
+            XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+                event: keyboardEvent(
+                    .textInput,
+                    window: mounted.controller.testWindow,
+                    text: text
+                )
+            ))
+            Update.dispatchActions()
+            renderFrame()
+        }
+
+        XCTAssertEqual(mounted.responder.currentTextValue(), "42")
+        replaceAll(with: "-")
+        XCTAssertEqual(model.value, 42)
+        XCTAssertEqual(mounted.responder.currentTextValue(), "-")
+
+        Update.enqueueAction {
+            model.binding?.wrappedValue = 88
+        }
+        Update.dispatchActions()
+        renderFrame()
+        renderFrame()
+        XCTAssertEqual(mounted.responder.currentTextValue(), "-")
+
+        replaceAll(with: "\r")
+        XCTAssertEqual(model.value, 88)
+        XCTAssertEqual(mounted.responder.currentTextValue(), "88")
+
+        replaceAll(with: "001")
+        XCTAssertEqual(model.value, 1)
+        XCTAssertEqual(mounted.responder.currentTextValue(), "001")
+
+        Update.enqueueAction {
+            model.binding?.wrappedValue = 99
+        }
+        Update.dispatchActions()
+        renderFrame()
+        renderFrame()
+        XCTAssertEqual(mounted.responder.currentTextValue(), "99")
+    }
+
     // ASSERTIONS textFieldSubmissionStructureObserved
     func testSubmissionModifiersPreserveObservedStorageAndTriggerValues() {
         XCTAssertEqual(SubmitTriggers.text.rawValue, 1)
@@ -1745,6 +2139,30 @@ private final class TextFieldInputModel {
             get: { self.text },
             set: { self.text = $0 }
         )
+    }
+}
+
+private final class TextFieldFormattedValueModel {
+    var binding: Binding<Int>?
+
+    var value: Int {
+        binding?.wrappedValue ?? 42
+    }
+}
+
+private struct TextFieldFormattedValueHost: View {
+    var model: TextFieldFormattedValueModel
+    @State private var value = 42
+
+    var body: some View {
+        let binding = $value
+        model.binding = binding
+        return TextField(
+            "Value",
+            value: binding,
+            format: IntegerFormatStyle<Int>.number
+        )
+        .textFieldStyle(.plain)
     }
 }
 
