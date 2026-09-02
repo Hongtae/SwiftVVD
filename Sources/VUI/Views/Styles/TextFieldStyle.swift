@@ -82,11 +82,171 @@ extension View {
     }
 }
 
+private struct TextFieldViewportLayout: Layout {
+    var contentOffset: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let contentSize = subview.sizeThatFits(.unspecified)
+        let width: CGFloat
+        if let proposedWidth = proposal.width, proposedWidth.isFinite {
+            width = max(proposedWidth, 0)
+        } else {
+            width = contentSize.width
+        }
+        return CGSize(width: width, height: contentSize.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        let contentSize = subview.sizeThatFits(.unspecified)
+        let maximumOffset = max(contentSize.width - bounds.width, 0)
+        let resolvedOffset = min(max(contentOffset, 0), maximumOffset)
+        subview.place(
+            at: CGPoint(
+                x: bounds.minX - resolvedOffset,
+                y: bounds.minY + (bounds.height - contentSize.height) * 0.5
+            ),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(contentSize)
+        )
+    }
+}
+
+private final class TextFieldViewportClipContainer: PlatformGroupFactory {
+    var clipBounds = CGRect.zero
+
+    var platformGroupContainer: AnyObject { self }
+
+    func renderPlatformGroup(
+        contents: DisplayList,
+        in context: GraphicsContext,
+        render: (DisplayList, GraphicsContext) -> Void
+    ) {
+        var context = context
+        context.clip(to: Path(clipBounds))
+        render(contents, context)
+    }
+}
+
+private struct TextFieldViewportClipDisplayList: StatefulRule {
+    typealias Value = DisplayList
+
+    var identity: _DisplayList_Identity
+    var position: Attribute<CGPoint>
+    var size: Attribute<ViewSize>
+    var containerPosition: Attribute<CGPoint>
+    var content: OptionalAttribute<DisplayList>
+    var options: DisplayList.Options
+    var container: TextFieldViewportClipContainer?
+
+    mutating func updateValue() {
+        if container == nil {
+            container = TextFieldViewportClipContainer()
+        }
+        guard let container else {
+            fatalError("TextField viewport failed to create its clip owner")
+        }
+
+        // Platform-group effects draw in their container's coordinate space.
+        let frame = CGRect(
+            origin: CGPoint(
+                x: position.value.x - containerPosition.value.x,
+                y: position.value.y - containerPosition.value.y
+            ),
+            size: size.value.value
+        )
+        container.clipBounds = frame
+
+        let contents = content.value ?? DisplayList()
+        var item = DisplayList.Item(
+            effect: .platformGroup(container),
+            contents: contents,
+            frame: frame,
+            identity: identity,
+            version: DisplayList.Version(forUpdate: ())
+        )
+        item.canonicalize(options: options)
+
+        var result = DisplayList()
+        result.items.append(item)
+        result.recordInterpolationBounds(frame)
+        result.numericValue = contents.numericValue
+        _AGGraph.setStatefulOutput(result)
+    }
+}
+
+private struct TextFieldViewportClipModifier: ViewModifier, MultiViewModifier {
+    typealias Body = Never
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "TextFieldViewportClipModifier._makeView called outside AG context"
+            )
+        }
+        var outputs = body(_Graph(), inputs)
+        guard let content = outputs.preferences.reducedValue(
+            for: DisplayList.Key.self,
+            in: graph
+        ) else {
+            return outputs
+        }
+
+        var identityInputs = inputs
+        let displayList = graph.makeStatefulRule(
+            TextFieldViewportClipDisplayList(
+                identity: identityInputs.pushIdentity(),
+                position: inputs.position,
+                size: inputs.size,
+                containerPosition: inputs.containerPosition,
+                content: OptionalAttribute(content),
+                options: inputs[DisplayList.Options.self],
+                container: nil
+            )
+        )
+        outputs.preferences.setValue(
+            displayList.identifier,
+            for: DisplayList.Key.self
+        )
+        return outputs
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard _AGGraph.current != nil else {
+            fatalError(
+                "TextFieldViewportClipModifier._makeViewList called outside AG context"
+            )
+        }
+        var outputs = body(_Graph(), inputs)
+        outputs.multiModifier(modifier, inputs: inputs)
+        return outputs
+    }
+}
+
 private struct TextFieldControl: View {
     var configuration: TextField<_TextFieldStyleLabel>
     var drawsBorder: Bool
     var horizontalInset: CGFloat
     @State private var inputState = TextFieldInputState()
+    @State private var viewportState = TextFieldViewportState()
     @FocusState private var isFocused: Bool
     @Environment(\.textFieldCompositionCaretStyle)
     private var compositionCaretStyle
@@ -151,47 +311,53 @@ private struct TextFieldControl: View {
             : configuration.state.displayText
         let segments = inputState.displaySegments(in: text)
         let defaultCaretWidth: CGFloat = 1
-        HStack(spacing: 0) {
-            if text.isEmpty && inputState.composition.isEmpty {
-                promptContent
-                    .overlay(alignment: .leading) {
-                        if inputState.isFocused {
-                            TextFieldCaret(
-                                compositionText: nil,
-                                defaultWidth: defaultCaretWidth,
-                                blinkResetID: inputState.caretOffset
-                            )
+        TextFieldViewportLayout(
+            contentOffset: viewportState.contentOffset
+        ) {
+            HStack(spacing: 0) {
+                if text.isEmpty && inputState.composition.isEmpty {
+                    promptContent
+                        .overlay(alignment: .leading) {
+                            if inputState.isFocused {
+                                TextFieldCaret(
+                                    compositionText: nil,
+                                    defaultWidth: defaultCaretWidth,
+                                    blinkResetID: inputState.caretOffset
+                                )
+                            }
                         }
+                } else {
+                    Text(segments.leading)
+                    if segments.selected.isEmpty == false {
+                        Text(segments.selected)
+                            .foregroundStyle(Color.white)
+                            .background(Color.blue)
+                    } else if inputState.composition.isEmpty == false {
+                        TextFieldCaret(
+                            compositionText: inputState.composition,
+                            defaultWidth: defaultCaretWidth,
+                            compositionStyle: compositionCaretStyle
+                        )
                     }
-            } else {
-                Text(segments.leading)
-                if segments.selected.isEmpty == false {
-                    Text(segments.selected)
-                        .foregroundStyle(Color.white)
-                        .background(Color.blue)
-                } else if inputState.composition.isEmpty == false {
-                    TextFieldCaret(
-                        compositionText: inputState.composition,
-                        defaultWidth: defaultCaretWidth,
-                        compositionStyle: compositionCaretStyle
-                    )
+                    Text(segments.trailing)
+                        .overlay(alignment: .leading) {
+                            if inputState.isFocused,
+                               inputState.composition.isEmpty,
+                               segments.selected.isEmpty {
+                                TextFieldCaret(
+                                    compositionText: nil,
+                                    defaultWidth: defaultCaretWidth,
+                                    blinkResetID: inputState.caretOffset
+                                )
+                            }
+                        }
                 }
-                Text(segments.trailing)
-                    .overlay(alignment: .leading) {
-                        if inputState.isFocused,
-                           inputState.composition.isEmpty,
-                           segments.selected.isEmpty {
-                            TextFieldCaret(
-                                compositionText: nil,
-                                defaultWidth: defaultCaretWidth,
-                                blinkResetID: inputState.caretOffset
-                            )
-                        }
-                    }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minHeight: 18)
         }
-        .frame(minHeight: 18)
+        .modifier(TextFieldViewportClipModifier())
     }
 
     @ViewBuilder
@@ -210,6 +376,8 @@ private struct TextFieldControl: View {
             selectionValue: configuration.selection?.wrappedValue,
             fieldState: configuration.$state,
             inputState: $inputState,
+            viewportState: $viewportState,
+            viewportValue: viewportState,
             contentLeadingInset: horizontalInset
         )
     }

@@ -1435,24 +1435,96 @@ struct TextFieldInputState: Equatable {
     }
 }
 
+enum TextFieldViewportRequest: Equatable {
+    case leading
+    case trailing
+    case reveal(Int)
+    case center(Range<Int>)
+}
+
+struct TextFieldViewportState: Equatable {
+    var contentOffset: CGFloat = 0
+    var request: TextFieldViewportRequest?
+
+    mutating func request(_ request: TextFieldViewportRequest) {
+        self.request = request
+    }
+
+    @discardableResult
+    mutating func resolve(
+        characterOffsets: [CGFloat],
+        viewportWidth: CGFloat
+    ) -> Bool {
+        precondition(!characterOffsets.isEmpty)
+        let oldValue = self
+        let viewportWidth = max(viewportWidth, 0)
+        let contentWidth = max(characterOffsets.last ?? 0, 0)
+        let maximumOffset = max(contentWidth - viewportWidth, 0)
+        contentOffset = min(max(contentOffset, 0), maximumOffset)
+
+        if viewportWidth > 0, let request {
+            switch request {
+            case .leading:
+                contentOffset = 0
+            case .trailing:
+                contentOffset = maximumOffset
+            case .reveal(let characterOffset):
+                let index = min(
+                    max(characterOffset, 0),
+                    characterOffsets.count - 1
+                )
+                let position = characterOffsets[index]
+                if position < contentOffset
+                    || position > contentOffset + viewportWidth {
+                    contentOffset = min(
+                        max(position - viewportWidth * 0.5, 0),
+                        maximumOffset
+                    )
+                }
+            case .center(let characterRange):
+                let lower = min(
+                    max(characterRange.lowerBound, 0),
+                    characterOffsets.count - 1
+                )
+                let upper = min(
+                    max(characterRange.upperBound, lower),
+                    characterOffsets.count - 1
+                )
+                let midpoint = (
+                    characterOffsets[lower] + characterOffsets[upper]
+                ) * 0.5
+                contentOffset = min(
+                    max(midpoint - viewportWidth * 0.5, 0),
+                    maximumOffset
+                )
+            }
+            self.request = nil
+        }
+        return self != oldValue
+    }
+}
+
 struct TextFieldSelectionLayout: Equatable {
     var characterOffsets: [CGFloat]
     var leadingInset: CGFloat
+    var viewportOffset: CGFloat
 
     init(
         characterOffsets: [CGFloat],
-        leadingInset: CGFloat = 0
+        leadingInset: CGFloat = 0,
+        viewportOffset: CGFloat = 0
     ) {
         precondition(!characterOffsets.isEmpty)
         self.characterOffsets = characterOffsets
         self.leadingInset = leadingInset
+        self.viewportOffset = viewportOffset
     }
 
     var characterCount: Int { characterOffsets.count - 1 }
 
     func characterOffset(atLocalX localX: CGFloat) -> Int {
         guard characterCount > 0 else { return 0 }
-        let x = localX - leadingInset
+        let x = localX - leadingInset + viewportOffset
 
         for index in 0..<characterCount {
             let midpoint = (
@@ -1469,12 +1541,14 @@ struct TextFieldSelectionLayout: Equatable {
         text: String,
         environment: EnvironmentValues,
         sceneResources: SceneResources,
-        leadingInset: CGFloat
+        leadingInset: CGFloat,
+        viewportOffset: CGFloat
     ) -> TextFieldSelectionLayout {
         guard !text.isEmpty else {
             return TextFieldSelectionLayout(
                 characterOffsets: [0],
-                leadingInset: leadingInset
+                leadingInset: leadingInset,
+                viewportOffset: viewportOffset
             )
         }
 
@@ -1508,7 +1582,8 @@ struct TextFieldSelectionLayout: Equatable {
         }
         return TextFieldSelectionLayout(
             characterOffsets: offsets,
-            leadingInset: leadingInset
+            leadingInset: leadingInset,
+            viewportOffset: viewportOffset
         )
     }
 }
@@ -1708,6 +1783,8 @@ struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
     var selectionValue: TextSelection?
     var fieldState: Binding<TextFieldState>
     var inputState: Binding<TextFieldInputState>
+    var viewportState: Binding<TextFieldViewportState>
+    var viewportValue: TextFieldViewportState
     var contentLeadingInset: CGFloat
 
     static func _makeView(
@@ -1808,6 +1885,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         responder.selection = modifier.selection
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
+        responder.viewportState = modifier.viewportState
         responder.synchronizeTextValue()
         responder.triggerSubmission = environment.triggerSubmission
         responder.isEnabled = environment.isEnabled
@@ -1818,11 +1896,21 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
                 "TextFieldResponderFilter requires an active renderer host"
             )
         }
-        responder.selectionLayout = TextFieldSelectionLayout.resolve(
+        let viewportWidth = max(
+            size.value.value.width - modifier.contentLeadingInset * 2,
+            0
+        )
+        responder.updateSelectionLayout(
             text: responder.currentTextValue(),
             environment: environment,
             sceneResources: rendererHost.sceneResources,
-            leadingInset: modifier.contentLeadingInset
+            leadingInset: modifier.contentLeadingInset,
+            viewportOffset: modifier.viewportValue.contentOffset,
+            viewportWidth: viewportWidth
+        )
+        responder.resolveViewport(
+            modifier.viewportValue,
+            viewportWidth: viewportWidth
         )
         responder.synchronizeSelection(modifier.selectionValue)
         responder.helper.update(
@@ -1900,6 +1988,7 @@ final class TextFieldResponder: MultiViewResponder,
     }
     var fieldState: Binding<TextFieldState>?
     var inputState: Binding<TextFieldInputState>?
+    var viewportState: Binding<TextFieldViewportState>?
     var triggerSubmission: TriggerSubmitAction?
     var selectionLayout: TextFieldSelectionLayout?
     var isEnabled = true
@@ -1920,10 +2009,90 @@ final class TextFieldResponder: MultiViewResponder,
         eventID: EventID,
         anchor: Int
     )?
+    private var selectionLayoutText: String?
+    private var selectionLayoutResolver:
+        ((String, CGFloat) -> TextFieldSelectionLayout)?
+    private var viewportWidth: CGFloat = 0
 
     private struct KeyStream: Hashable {
         var deviceID: Int
         var key: VirtualKey
+    }
+
+    func updateSelectionLayout(
+        text: String,
+        environment: EnvironmentValues,
+        sceneResources: SceneResources,
+        leadingInset: CGFloat,
+        viewportOffset: CGFloat,
+        viewportWidth: CGFloat
+    ) {
+        let resolver: (String, CGFloat) -> TextFieldSelectionLayout = {
+            text, viewportOffset in
+            TextFieldSelectionLayout.resolve(
+                text: text,
+                environment: environment,
+                sceneResources: sceneResources,
+                leadingInset: leadingInset,
+                viewportOffset: viewportOffset
+            )
+        }
+        selectionLayoutResolver = resolver
+        selectionLayoutText = text
+        selectionLayout = resolver(text, viewportOffset)
+        self.viewportWidth = viewportWidth
+    }
+
+    func resolveViewport(
+        _ value: TextFieldViewportState,
+        viewportWidth: CGFloat
+    ) {
+        guard let viewportState,
+              let characterOffsets = selectionLayout?.characterOffsets else {
+            return
+        }
+        var resolved = value
+        guard resolved.resolve(
+            characterOffsets: characterOffsets,
+            viewportWidth: viewportWidth
+        ) else {
+            return
+        }
+        Update.enqueueAction {
+            var current = viewportState.wrappedValue
+            guard current.resolve(
+                characterOffsets: characterOffsets,
+                viewportWidth: viewportWidth
+            ) else {
+                return
+            }
+            viewportState.wrappedValue = current
+        }
+    }
+
+    private func requestViewport(_ request: TextFieldViewportRequest) {
+        guard let viewportState else { return }
+        var state = viewportState.wrappedValue
+        state.request(request)
+        let text = currentTextValue()
+        // Text mutations can request a viewport update before the modifier
+        // filter has measured the new value. Refresh those offsets first.
+        if selectionLayoutText != text,
+           let selectionLayoutResolver {
+            selectionLayout = selectionLayoutResolver(
+                text,
+                state.contentOffset
+            )
+            selectionLayoutText = text
+        }
+        if let characterOffsets = selectionLayout?.characterOffsets {
+            _ = state.resolve(
+                characterOffsets: characterOffsets,
+                viewportWidth: viewportWidth
+            )
+            selectionLayout?.viewportOffset = state.contentOffset
+        }
+        viewportState.wrappedValue = state
     }
 
     func currentTextValue() -> String {
@@ -2255,12 +2424,19 @@ final class TextFieldResponder: MultiViewResponder,
 
             var editing = inputState.wrappedValue
             editing.setFocused(focused, committedText: committedText)
-            if focused,
-               let selection = self.selection?.wrappedValue {
-                _ = editing.setSelection(
-                    selection,
-                    committedText: committedText
-                )
+            if focused {
+                if let selection = self.selection?.wrappedValue {
+                    _ = editing.setSelection(
+                        selection,
+                        committedText: committedText
+                    )
+                } else {
+                    _ = editing.setSelection(
+                        0..<committedText.count,
+                        affinity: .upstream,
+                        committedText: committedText
+                    )
+                }
             } else if !focused {
                 editing.collapseSelection(
                     to: 0,
@@ -2270,6 +2446,7 @@ final class TextFieldResponder: MultiViewResponder,
             }
             inputState.wrappedValue = editing
             self.publishSelection(editing, committedText: committedText)
+            self.requestViewport(.leading)
 
             guard state.isEditing != focused else { return }
             state.isEditing = focused
@@ -2300,6 +2477,7 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                self.requestViewport(.reveal(editing.caretOffset))
             }
             return true
 
@@ -2340,6 +2518,9 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                if result == .changed {
+                    self.requestViewport(.reveal(editing.caretOffset))
+                }
             }
             return true
 
@@ -2378,6 +2559,16 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                switch event.key {
+                case .home:
+                    self.requestViewport(.leading)
+                case .end:
+                    self.requestViewport(.trailing)
+                case .left, .right:
+                    self.requestViewport(.reveal(editing.caretOffset))
+                default:
+                    break
+                }
             }
             return true
 
@@ -2483,6 +2674,7 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                self.requestViewport(.reveal(editing.caretOffset))
             }
 
         case .paste:
@@ -2512,6 +2704,7 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                self.requestViewport(.reveal(editing.caretOffset))
             }
 
         case .delete:
@@ -2534,6 +2727,7 @@ final class TextFieldResponder: MultiViewResponder,
                     editing,
                     committedText: committedText
                 )
+                self.requestViewport(.reveal(editing.caretOffset))
             }
 
         case .selectAll:
@@ -2553,9 +2747,11 @@ final class TextFieldResponder: MultiViewResponder,
             }
 
         case .jumpToSelection:
-            // The single-line renderer always keeps the complete value in its
-            // current bounds, so there is no additional viewport transition.
-            return
+            Update.enqueueAction {
+                self.requestViewport(.center(
+                    inputState.wrappedValue.selectionOffsets
+                ))
+            }
 
         case .makeUpperCase, .makeLowerCase, .capitalize:
             Update.enqueueAction {

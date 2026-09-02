@@ -295,11 +295,11 @@ final class TextFieldInputTests: XCTestCase {
         Update.dispatchActions()
 
         func replaceAll(with text: String) {
-            XCTAssertTrue(input.setSelection(
+            _ = input.setSelection(
                 0..<responder.currentTextValue().count,
                 affinity: .upstream,
                 committedText: responder.currentTextValue()
-            ))
+            )
             XCTAssertTrue(responder.handleTextInputEvent(KeyboardEvent(
                 type: .textInput,
                 window: nil,
@@ -829,6 +829,68 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(layout.characterOffset(atLocalX: 100), 3)
     }
 
+    // ASSERTIONS textFieldSingleLineViewportOwnershipObserved
+    // ASSERTIONS textFieldSingleLineViewportTransitionsObserved
+    func testSingleLineViewportResolvesNavigationAndCenteringRequests() {
+        let offsets = stride(from: 0, through: 100, by: 10).map { CGFloat($0) }
+        var viewport = TextFieldViewportState()
+
+        viewport.request(.trailing)
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: offsets,
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 70)
+        XCTAssertNil(viewport.request)
+
+        viewport.request(.reveal(8))
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: offsets,
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 70)
+
+        viewport.request(.reveal(4))
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: offsets,
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 25)
+
+        viewport.request(.leading)
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: offsets,
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 0)
+
+        viewport.request(.center(4..<6))
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: offsets,
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 35)
+
+        XCTAssertTrue(viewport.resolve(
+            characterOffsets: [0, 10, 20],
+            viewportWidth: 30
+        ))
+        XCTAssertEqual(viewport.contentOffset, 0)
+    }
+
+    // ASSERTIONS textFieldSingleLineViewportTransitionsObserved
+    func testPointerSelectionLayoutIncludesViewportOffset() {
+        let layout = TextFieldSelectionLayout(
+            characterOffsets: [0, 10, 20, 30, 40, 50],
+            leadingInset: 4,
+            viewportOffset: 30
+        )
+
+        XCTAssertEqual(layout.characterOffset(atLocalX: 4), 3)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 9), 4)
+        XCTAssertEqual(layout.characterOffset(atLocalX: 19), 5)
+    }
+
     // ASSERTIONS textFieldPointerSelectionRuntimeObserved
     func testTextFieldResponderTracksPointerSelectionAnchor() {
         let model = TextFieldSelectionModel(text: "abcd")
@@ -1071,13 +1133,47 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(input.selectionAffinity, .upstream)
     }
 
+    // ASSERTIONS textFieldFocusSelectionRuntimeObserved
+    // ASSERTIONS textFieldSingleLineViewportTransitionsObserved
+    func testProgrammaticFocusSelectsValueAndRequestsLeadingViewport() {
+        let model = TextFieldSelectionModel(text: "Alpha beta gamma")
+        var fieldState = TextFieldState(displayText: model.text)
+        var inputState = TextFieldInputState()
+        var viewportState = TextFieldViewportState(contentOffset: 80)
+        let responder = TextFieldResponder()
+        responder.text = model.textBinding
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.inputState = Binding(
+            get: { inputState },
+            set: { inputState = $0 }
+        )
+        responder.viewportState = Binding(
+            get: { viewportState },
+            set: { viewportState = $0 }
+        )
+
+        responder.textInputFocusDidChange(true)
+        Update.dispatchActions()
+
+        XCTAssertTrue(inputState.isFocused)
+        XCTAssertEqual(inputState.selectionOffsets, 0..<model.text.count)
+        XCTAssertEqual(inputState.selectionAffinity, .upstream)
+        XCTAssertEqual(viewportState.contentOffset, 80)
+        XCTAssertEqual(viewportState.request, .leading)
+    }
+
     // ASSERTIONS textFieldCommandResponderOwnershipObserved
     // ASSERTIONS textFieldTextEditingCommandsValidationObserved
     // ASSERTIONS textFieldTextEditingCommandsTransformationObserved
+    // ASSERTIONS textFieldSingleLineViewportTransitionsObserved
     func testTextFieldResponderPublishesObservedFindAndTransformSemantics() {
         let model = TextFieldSelectionModel(text: "Alpha beta gamma")
         var fieldState = TextFieldState(displayText: model.text)
         var inputState = TextFieldInputState()
+        var viewportState = TextFieldViewportState(contentOffset: 100)
         inputState.setFocused(true, committedText: model.text)
 
         let responder = TextFieldResponder()
@@ -1090,6 +1186,16 @@ final class TextFieldInputTests: XCTestCase {
         responder.inputState = Binding(
             get: { inputState },
             set: { inputState = $0 }
+        )
+        responder.viewportState = Binding(
+            get: { viewportState },
+            set: { viewportState = $0 }
+        )
+        responder.selectionLayout = TextFieldSelectionLayout(
+            characterOffsets: (0...model.text.count).map {
+                CGFloat($0 * 10)
+            },
+            viewportOffset: viewportState.contentOffset
         )
 
         let selectionEnd = model.text.index(
@@ -1109,6 +1215,14 @@ final class TextFieldInputTests: XCTestCase {
         ))
         XCTAssertTrue(responder.canPerformTextEditingCommand(.jumpToSelection))
         XCTAssertTrue(responder.canPerformTextEditingCommand(.makeUpperCase))
+
+        responder.performTextEditingCommand(.jumpToSelection)
+        Update.dispatchActions()
+        XCTAssertEqual(viewportState.request, .center(0..<5))
+        responder.resolveViewport(viewportState, viewportWidth: 50)
+        Update.dispatchActions()
+        XCTAssertEqual(viewportState.contentOffset, 0)
+        XCTAssertNil(viewportState.request)
 
         responder.performTextEditingCommand(.makeUpperCase)
         Update.dispatchActions()
@@ -1498,6 +1612,15 @@ final class TextFieldInputTests: XCTestCase {
                     actions.append("outer:\(chainModel.text)")
                 }
         )
+        var chainInput = try XCTUnwrap(
+            chainController.responder.inputState
+        ).wrappedValue
+        chainInput.collapseSelection(
+            to: chainModel.text.count,
+            affinity: .upstream,
+            committedText: chainModel.text
+        )
+        chainController.responder.inputState?.wrappedValue = chainInput
         XCTAssertTrue(chainController.controller.handleKeyboardEvent(
             event: keyboardEvent(
                 .textInput,
@@ -1634,6 +1757,219 @@ final class TextFieldInputTests: XCTestCase {
         ) {
             XCTAssertGreaterThanOrEqual(trailing, leading)
         }
+    }
+
+    @MainActor
+    // ASSERTIONS textFieldSingleLineViewportOwnershipObserved
+    // ASSERTIONS textFieldSingleLineViewportTransitionsObserved
+    func testMountedSingleLineTextFieldOwnsAndUpdatesItsViewport() throws {
+        let previousAppContext = appContext
+        appContext = TextFieldClipboardAppContext(clipboard: nil)
+        defer { appContext = previousAppContext }
+
+        let model = TextFieldSelectionModel(
+            text: "Alpha beta gamma delta epsilon zeta eta theta iota kappa"
+        )
+        let mounted = try mountTextField(
+            TextField(
+                "Input",
+                text: model.textBinding,
+                selection: model.selectionBinding
+            )
+            .frame(width: 160)
+        )
+        var tick: UInt64 = 1
+        var redraw = false
+
+        func renderFrame() {
+            mounted.controller.updateView(
+                tick: tick,
+                delta: 0,
+                date: mounted.controller.date,
+                contentSize: CGSize(width: 420, height: 120),
+                redraw: &redraw
+            ) { _, _ in }
+            tick += 1
+            Update.dispatchActions()
+        }
+
+        func viewportClip(
+            in displayList: DisplayList
+        ) -> DisplayList.EffectItem? {
+            for effect in displayList.effects {
+                if case .platformGroup(let factory) = effect.effect,
+                   String(reflecting: type(of: factory)).contains(
+                    "TextFieldViewportClipContainer"
+                   ) {
+                    return effect
+                }
+                if let nested = viewportClip(in: effect.contents) {
+                    return nested
+                }
+            }
+            return nil
+        }
+
+        renderFrame()
+        renderFrame()
+
+        let initialViewport = try XCTUnwrap(
+            mounted.responder.viewportState
+        ).wrappedValue
+        XCTAssertEqual(initialViewport.contentOffset, 0)
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.inputState)
+                .wrappedValue.selectionOffsets,
+            0..<model.text.count
+        )
+
+        let initialDisplayList = try mounted.controller.viewGraph.data
+            .withCurrent {
+                try XCTUnwrap(
+                    mounted.controller.viewGraph.rootDisplayList?.value
+                )
+            }
+        let clip = try XCTUnwrap(viewportClip(in: initialDisplayList))
+        XCTAssertEqual(clip.frame.width, 148, accuracy: 0.001)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(clip.contents.interpolationBounds).width,
+            clip.frame.width
+        )
+
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .keyDown,
+                window: mounted.controller.testWindow,
+                key: .end
+            )
+        ))
+        Update.dispatchActions()
+        renderFrame()
+        renderFrame()
+
+        let trailingViewport = try XCTUnwrap(
+            mounted.responder.viewportState
+        ).wrappedValue
+        XCTAssertGreaterThan(trailingViewport.contentOffset, 0)
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.inputState)
+                .wrappedValue.selectionOffsets,
+            model.text.count..<model.text.count
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.selectionLayout).viewportOffset,
+            trailingViewport.contentOffset,
+            accuracy: 0.001
+        )
+
+        let externalSelection = selection(
+            in: model.text,
+            offsets: 6..<10,
+            affinity: .automatic
+        )
+        mounted.responder.synchronizeSelection(externalSelection)
+        Update.dispatchActions()
+        renderFrame()
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.viewportState)
+                .wrappedValue.contentOffset,
+            trailingViewport.contentOffset,
+            accuracy: 0.001
+        )
+
+        let selectionLayout = try XCTUnwrap(
+            mounted.responder.selectionLayout
+        )
+        var expectedViewport = trailingViewport
+        expectedViewport.request(.center(6..<10))
+        XCTAssertTrue(expectedViewport.resolve(
+            characterOffsets: selectionLayout.characterOffsets,
+            viewportWidth: clip.frame.width
+        ))
+
+        mounted.responder.performTextEditingCommand(.jumpToSelection)
+        Update.dispatchActions()
+        renderFrame()
+        renderFrame()
+        let centeredViewport = try XCTUnwrap(
+            mounted.responder.viewportState
+        ).wrappedValue
+        XCTAssertEqual(
+            centeredViewport.contentOffset,
+            expectedViewport.contentOffset,
+            accuracy: 0.001
+        )
+
+        let clickLocalX: CGFloat = 20
+        let expectedClickOffset = try XCTUnwrap(
+            mounted.responder.selectionLayout
+        ).characterOffset(atLocalX: clickLocalX)
+        var clickPoints = [CGPoint(x: clickLocalX, y: 10)]
+        mounted.responder.helper.transform.convertGlobal(
+            from: .local,
+            points: &clickPoints
+        )
+        let clickID = EventID(type: VUI.MouseEvent.self, serial: 700)
+        func clickEvent(_ phase: EventPhase) -> VUI.MouseEvent {
+            VUI.MouseEvent(
+                timestamp: .zero,
+                binding: nil,
+                button: .primary,
+                phase: phase,
+                location: clickPoints[0],
+                globalLocation: clickPoints[0],
+                modifiers: [],
+                clickCount: 1
+            )
+        }
+        XCTAssertTrue(mounted.responder.consumeEvents(
+            [clickID: clickEvent(.began)],
+            at: .zero
+        ).isActive)
+        Update.dispatchActions()
+        XCTAssertTrue(mounted.responder.consumeEvents(
+            [clickID: clickEvent(.ended)],
+            at: .zero
+        ).isEnded)
+        Update.dispatchActions()
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.inputState)
+                .wrappedValue.selectionOffsets,
+            expectedClickOffset..<expectedClickOffset
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.viewportState)
+                .wrappedValue.contentOffset,
+            centeredViewport.contentOffset,
+            accuracy: 0.001
+        )
+
+        mounted.responder.synchronizeSelection(TextSelection(
+            insertionPoint: model.text.startIndex
+        ))
+        Update.dispatchActions()
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: mounted.controller.testWindow,
+                text: "X"
+            )
+        ))
+        Update.dispatchActions()
+        renderFrame()
+        renderFrame()
+        XCTAssertTrue(model.text.hasPrefix("X"))
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.inputState)
+                .wrappedValue.selectionOffsets,
+            1..<1
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(mounted.responder.viewportState)
+                .wrappedValue.contentOffset,
+            0,
+            accuracy: 0.001
+        )
     }
 
     @MainActor
