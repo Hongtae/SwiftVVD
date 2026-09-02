@@ -34,6 +34,38 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertNil(configured.state.deprecatedActions)
     }
 
+    // ASSERTIONS textFieldSubmissionStructureObserved
+    func testSubmissionModifiersPreserveObservedStorageAndTriggerValues() {
+        XCTAssertEqual(SubmitTriggers.text.rawValue, 1)
+        XCTAssertEqual(SubmitTriggers.search.rawValue, 4)
+        XCTAssertEqual(
+            SubmitTriggers.text.union(.search).rawValue,
+            5
+        )
+
+        let submitted = Text("Value").onSubmit(of: [.text, .search]) {}
+        let onSubmitModifier = Mirror(reflecting: submitted).children.first {
+            $0.label == "modifier"
+        }?.value
+        XCTAssertEqual(
+            onSubmitModifier.map {
+                Mirror(reflecting: $0).children.compactMap(\.label)
+            },
+            ["allowed", "action", "_existingTrigger"]
+        )
+
+        let scope = Text("Value").submitScope()
+        let scopeModifier = Mirror(reflecting: scope).children.first {
+            $0.label == "modifier"
+        }?.value
+        XCTAssertEqual(
+            scopeModifier.map {
+                Mirror(reflecting: $0).children.compactMap(\.label)
+            },
+            ["isBlocking", "triggersToBlock", "_triggerSubmission"]
+        )
+    }
+
     // ASSERTIONS textFieldStructureObserved
     // ASSERTIONS textFieldSelectionBindingRuntimeObserved
     func testSelectionInitializerStoresTheExternalSelectionBinding() {
@@ -981,6 +1013,117 @@ final class TextFieldInputTests: XCTestCase {
     }
 
     @MainActor
+    // ASSERTIONS textFieldSubmissionChainRuntimeObserved
+    // ASSERTIONS textFieldSubmitScopeRuntimeObserved
+    // ASSERTIONS textFieldSubmissionFocusLifetimeObserved
+    func testMountedTextFieldRoutesSubmissionChainsAndRetainsFocus() throws {
+        var actions: [String] = []
+
+        let chainModel = TextFieldInputModel()
+        chainModel.text = "alpha"
+        let chainController = try mountTextField(
+            TextField("Chain", text: chainModel.binding)
+                .onSubmit(of: .text) {
+                    actions.append("inner:\(chainModel.text)")
+                }
+                .onSubmit(of: [.text, .search]) {
+                    actions.append("middle:\(chainModel.text)")
+                }
+                .onSubmit(of: .text) {
+                    actions.append("outer:\(chainModel.text)")
+                }
+        )
+        XCTAssertTrue(chainController.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: chainController.controller.testWindow,
+                text: "!"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(chainModel.text, "alpha!")
+        XCTAssertTrue(chainController.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: chainController.controller.testWindow,
+                text: "\r"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(actions, [
+            "outer:alpha!",
+            "middle:alpha!",
+            "inner:alpha!",
+        ])
+        XCTAssertTrue(
+            chainController.controller.focusedResponder
+                === chainController.responder
+        )
+
+        actions.removeAll()
+        let filteredModel = TextFieldInputModel()
+        let filteredController = try mountTextField(
+            TextField("Filtered", text: filteredModel.binding)
+                .onSubmit(of: .text) { actions.append("inner") }
+                .onSubmit(of: .search) { actions.append("search") }
+                .onSubmit(of: .text) { actions.append("outer") }
+        )
+        XCTAssertTrue(filteredController.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: filteredController.controller.testWindow,
+                text: "\r"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(actions, ["inner"])
+
+        actions.removeAll()
+        let blockedModel = TextFieldInputModel()
+        let blockedController = try mountTextField(
+            VStack {
+                Group {
+                    TextField("Blocked", text: blockedModel.binding)
+                        .onSubmit(of: .text) { actions.append("local") }
+                }
+                .submitScope()
+            }
+            .onSubmit(of: .text) { actions.append("ancestor") }
+        )
+        XCTAssertTrue(blockedController.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: blockedController.controller.testWindow,
+                text: "\r"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(actions, ["local"])
+
+        actions.removeAll()
+        let unblockedModel = TextFieldInputModel()
+        let unblockedController = try mountTextField(
+            VStack {
+                Group {
+                    TextField("Unblocked", text: unblockedModel.binding)
+                        .onSubmit(of: .text) { actions.append("local") }
+                }
+                .submitScope(false)
+            }
+            .onSubmit(of: .text) { actions.append("ancestor") }
+        )
+        XCTAssertTrue(unblockedController.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: unblockedController.controller.testWindow,
+                text: "\r"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(actions, ["ancestor", "local"])
+    }
+
+    @MainActor
     // ASSERTIONS textFieldPointerSelectionRuntimeObserved
     func testMountedTextFieldResolvesCharacterSelectionGeometry() throws {
         let previousAppContext = appContext
@@ -1479,10 +1622,48 @@ final class TextFieldInputTests: XCTestCase {
             modifiers: modifiers
         )
     }
+
+    @MainActor
+    private func mountTextField<Content: View>(
+        _ content: Content
+    ) throws -> (
+        controller: TextFieldSubmissionHostController,
+        responder: TextFieldResponder
+    ) {
+        let controller = TextFieldSubmissionHostController(content: content)
+        var redraw = false
+        controller.updateView(
+            tick: 0,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 420, height: 120),
+            redraw: &redraw
+        ) { _, _ in }
+
+        var textResponder: TextFieldResponder?
+        _ = controller.responderNode?.visit { responder in
+            if let responder = responder as? TextFieldResponder {
+                textResponder = responder
+                return .cancel
+            }
+            return .next
+        }
+        let responder = try XCTUnwrap(textResponder)
+        controller.focusTextInputResponder(responder)
+        Update.dispatchActions()
+        return (controller, responder)
+    }
 }
 
 private final class TextFieldInputModel {
     var text = ""
+
+    var binding: Binding<String> {
+        Binding(
+            get: { self.text },
+            set: { self.text = $0 }
+        )
+    }
 }
 
 private final class TextFieldSelectionModel {
@@ -1698,6 +1879,26 @@ private final class TextFieldInputHostController: WindowController,
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(TextFieldInputHostController.self)
+            )
+        )
+    }
+}
+
+@MainActor
+private final class TextFieldSubmissionHostController: WindowController,
+    @unchecked Sendable {
+    let testWindow = TextFieldInputTestWindow()
+
+    override var window: (any VVD.Window)? { testWindow }
+
+    init<Content: View>(content: Content) {
+        super.init(
+            content: content
+                .frame(width: 300)
+                .environment(\.defaultFontRenderingMode, .vector()),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(TextFieldSubmissionHostController.self)
             )
         )
     }

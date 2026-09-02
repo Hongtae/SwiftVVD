@@ -1373,6 +1373,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         responder.selection = modifier.selection
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
+        responder.triggerSubmission = environment.triggerSubmission
         responder.isEnabled = environment.isEnabled
         responder.isTextFieldCursorEnabled = environment.isTextFieldCursorEnabled
         guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
@@ -1455,6 +1456,7 @@ final class TextFieldResponder: MultiViewResponder,
     }
     var fieldState: Binding<TextFieldState>?
     var inputState: Binding<TextFieldInputState>?
+    var triggerSubmission: TriggerSubmitAction?
     var selectionLayout: TextFieldSelectionLayout?
     var isEnabled = true
     var isTextFieldCursorEnabled = true {
@@ -1793,6 +1795,7 @@ final class TextFieldResponder: MultiViewResponder,
                     fieldState.wrappedValue = state
                 } else if result == .submit {
                     fieldState.wrappedValue.deprecatedActions?.commit()
+                    self.triggerSubmission?(.text)
                 }
                 self.publishSelection(
                     editing,
