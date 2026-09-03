@@ -1583,20 +1583,14 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         context: any TextResolutionContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText? {
-        var font = self.font ?? context.environment.effectiveFont
-        if let fontWeight {
-            font = font.weight(fontWeight)
-        } else if boldValue == true {
-            font = font.bold()
-        }
-        if italicValue == true {
-            font = font.italic()
-        }
+        let (font, fontEnvironment) = _resolvedFont(
+            in: context.environment
+        )
         var resolutionContext = context
+        resolutionContext.environment = fontEnvironment
         resolutionContext.environment.font = font
-        font = font.resolved(in: context.environment)
         let faces = font.typefaceCascade(
-            in: context.environment,
+            in: fontEnvironment,
             forContext: context.sceneResources,
             contentScaleFactor: context.contentScaleFactor
         ).runFaces
@@ -1710,6 +1704,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         hasher.combine(environment.defaultFontRenderingMode)
         hasher.combine(environment.displayScale)
         hasher.combine(environment._contentScaleFactor)
+        hasher.combine(environment.fontModifiers)
         for modifier in modifiers {
             modifier.hashResolution(into: &hasher)
         }
@@ -1808,18 +1803,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             return nil
         }
 
-        var font = self.font ?? context.environment.effectiveFont
-        if let fontWeight {
-            font = font.weight(fontWeight)
-        } else if boldValue == true {
-            font = font.bold()
-        }
-        if italicValue == true {
-            font = font.italic()
-        }
-        font = font.resolved(in: context.environment)
+        let (font, fontEnvironment) = _resolvedFont(
+            in: context.environment
+        )
         let faces = font.typefaceCascade(
-            in: context.environment,
+            in: fontEnvironment,
             forContext: context.sceneResources,
             contentScaleFactor: context.contentScaleFactor
         ).runFaces
@@ -1838,6 +1826,33 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             )
             return (variant, resolved)
         }
+    }
+
+    private func _resolvedFont(
+        in environment: EnvironmentValues
+    ) -> (Font, EnvironmentValues) {
+        var font = self.font ?? environment.effectiveFont
+        if let fontWeight {
+            font = font.weight(fontWeight)
+        } else if boldValue == true {
+            font = font.bold()
+        }
+        if italicValue == true {
+            font = font.italic()
+        }
+
+        var environment = environment
+        if let monospacedValue {
+            environment.replaceMonospacedFontModifier(
+                with: monospacedValue
+            )
+        }
+        if usesMonospacedDigits {
+            environment.addMonospacedDigitFontModifier()
+        }
+        font = font.resolved(in: environment)
+        environment.font = font
+        return (font, environment)
     }
 }
 
@@ -1872,6 +1887,33 @@ final class ItalicTextModifier: AnyTextModifier {
     override func hashResolution(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(ItalicTextModifier.self))
         hasher.combine(isActive)
+    }
+}
+
+final class MonospacedTextModifier: AnyTextModifier {
+    let isActive: Bool
+
+    init(isActive: Bool) {
+        self.isActive = isActive
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? MonospacedTextModifier)?.isActive == isActive
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(MonospacedTextModifier.self))
+        hasher.combine(isActive)
+    }
+}
+
+final class MonospacedDigitTextModifier: AnyTextModifier {
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        other is MonospacedDigitTextModifier
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(MonospacedDigitTextModifier.self))
     }
 }
 
@@ -2044,6 +2086,36 @@ extension Text {
             }
         }
         return nil
+    }
+
+    public func monospaced(_ isActive: Bool = true) -> Text {
+        modified(with: .anyTextModifier(MonospacedTextModifier(
+            isActive: isActive
+        )))
+    }
+
+    var monospacedValue: Bool? {
+        for modifier in modifiers {
+            guard case let .anyTextModifier(value) = modifier,
+                  let value = value as? MonospacedTextModifier else {
+                continue
+            }
+            return value.isActive
+        }
+        return nil
+    }
+
+    public func monospacedDigit() -> Text {
+        modified(with: .anyTextModifier(MonospacedDigitTextModifier()))
+    }
+
+    var usesMonospacedDigits: Bool {
+        modifiers.contains { modifier in
+            guard case let .anyTextModifier(value) = modifier else {
+                return false
+            }
+            return value is MonospacedDigitTextModifier
+        }
     }
 
     public func strikethrough(

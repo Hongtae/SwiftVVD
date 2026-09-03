@@ -1094,6 +1094,272 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
 
     // ASSERTIONS textMonospacedFallbackNaturalAdvanceObserved
     // ASSERTIONS textFieldMonospacedFallbackStableHeightObserved
+    // ASSERTIONS fontMonospacedModifierProviderObserved
+    // ASSERTIONS fontMonospacedDigitModifierProviderObserved
+    func testMonospacedFontModifiersPreserveProviderStructureAndOrder() throws {
+        let base = VUI.Font.system(
+            size: 17,
+            weight: .regular,
+            design: .default
+        )
+        let monospaced = base.monospaced()
+        let inactive = base.monospaced(false)
+        let digits = base.monospacedDigit()
+
+        XCTAssertNotNil(monospaced.provider.fontBox as?
+            VUI.Font.StaticModifierProvider<VUI.Font.MonospacedModifier>)
+        XCTAssertNotNil(inactive.provider.fontBox as?
+            VUI.Font.StaticModifierProvider<
+                VUI.Font.UndoModifier<VUI.Font.MonospacedModifier>
+            >)
+        XCTAssertNotNil(digits.provider.fontBox as?
+            VUI.Font.StaticModifierProvider<
+                VUI.Font.MonospacedDigitModifier
+            >)
+
+        let environment = EnvironmentValues()
+        let resolvedMonospaced = try XCTUnwrap(
+            monospaced.resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let resolvedInactive = try XCTUnwrap(
+            inactive.resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let resolvedTrueThenFalse = try XCTUnwrap(
+            base.monospaced().monospaced(false)
+                .resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let resolvedFalseThenTrue = try XCTUnwrap(
+            base.monospaced(false).monospaced()
+                .resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let resolvedExplicitDesign = try XCTUnwrap(
+            VUI.Font.system(size: 17, design: .monospaced)
+                .monospaced(false)
+                .resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let resolvedWeighted = try XCTUnwrap(
+            monospaced.weight(.bold)
+                .resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+
+        XCTAssertEqual(resolvedMonospaced.design, .monospaced)
+        XCTAssertEqual(resolvedInactive.design, .default)
+        XCTAssertEqual(resolvedTrueThenFalse.design, .monospaced)
+        XCTAssertEqual(resolvedFalseThenTrue.design, .monospaced)
+        XCTAssertEqual(resolvedExplicitDesign.design, .monospaced)
+        XCTAssertEqual(resolvedWeighted.design, .monospaced)
+        XCTAssertEqual(resolvedWeighted.weight, .bold)
+    }
+
+    // ASSERTIONS monospacedDigitFeatureAvailabilityObserved
+    func testSystemMonospacedDigitUsesBundledTabularAdvances() throws {
+        let font = VUI.Font.system(size: 17).monospacedDigit()
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let provider = try XCTUnwrap(
+            font.resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+        let face = try XCTUnwrap(provider.makeTypeface(
+            MissingGlyphTestAppContext(),
+            dpi: UInt32(defaultDPI)
+        ))
+        let advances = try "0123456789".unicodeScalars.map { scalar in
+            try XCTUnwrap(face.glyphMetrics(for: scalar)?.advance.width)
+        }
+
+        XCTAssertEqual(advances.count, 10)
+        for advance in advances.dropFirst() {
+            XCTAssertEqual(advance, advances[0], accuracy: 0.001)
+        }
+    }
+
+    // ASSERTIONS viewMonospacedEnvironmentModifierObserved
+    // ASSERTIONS viewMonospacedNearestModifierWinsObserved
+    func testInheritedMonospacedModifierUsesContentNearestValue() throws {
+        let base = VUI.Font.system(size: 17)
+        var environment = EnvironmentValues()
+        environment.fontModifiers = [
+            .monospaced(false),
+            .monospaced(true),
+        ]
+        let contentNearestTrue = try XCTUnwrap(
+            base.resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+
+        environment.fontModifiers = [
+            .monospaced(true),
+            .monospaced(false),
+        ]
+        let contentNearestFalse = try XCTUnwrap(
+            base.resolved(in: environment).provider.fontBox as?
+                SystemFontProvider
+        )
+
+        XCTAssertEqual(contentNearestTrue.design, .monospaced)
+        XCTAssertEqual(contentNearestFalse.design, .default)
+
+        let trueThenFalse = try recordedFontModifiers {
+            $0.monospaced().monospaced(false)
+        }
+        let falseThenTrue = try recordedFontModifiers {
+            $0.monospaced(false).monospaced()
+        }
+        let repeatedTrue = try recordedFontModifiers {
+            $0.monospaced().monospaced()
+        }
+        let trueFalseTrue = try recordedFontModifiers {
+            $0.monospaced().monospaced(false).monospaced()
+        }
+        let falseTrueFalse = try recordedFontModifiers {
+            $0.monospaced(false).monospaced().monospaced(false)
+        }
+        XCTAssertEqual(
+            trueThenFalse.compactMap(\.monospacedValue),
+            [false, true]
+        )
+        XCTAssertEqual(
+            falseThenTrue.compactMap(\.monospacedValue),
+            [true, false]
+        )
+        XCTAssertEqual(
+            repeatedTrue.compactMap(\.monospacedValue),
+            [true]
+        )
+        XCTAssertEqual(
+            trueFalseTrue.compactMap(\.monospacedValue),
+            [false, true]
+        )
+        XCTAssertEqual(
+            falseTrueFalse.compactMap(\.monospacedValue),
+            [true, false]
+        )
+    }
+
+    private func recordedFontModifiers<Content: View>(
+        transform: (FontModifierEnvironmentProbe) -> Content
+    ) throws -> [AnyFontModifier] {
+        let recorder = FontModifierEnvironmentRecorder()
+        let content = transform(FontModifierEnvironmentProbe(
+            recorder: recorder
+        ))
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+
+        context.withCurrent {
+            let source = graph.makeInput(value: content)
+            let environment = graph.makeInput(value: EnvironmentValues())
+            _ = Content._makeView(
+                view: _GraphValue(_attribute: source),
+                inputs: _ViewInputs(
+                    base: _GraphInputs(
+                        time: graph.makeInput(value: Time(seconds: 0)),
+                        phase: graph.makeInput(value: _GraphInputs.Phase()),
+                        environment: environment,
+                        transaction: graph.makeInput(value: Transaction())
+                    ),
+                    customInputs: PropertyList(),
+                    preferences: PreferencesInputs(
+                        keys: PreferenceKeys(),
+                        hostKeys: graph.makeInput(value: PreferenceKeys())
+                    ),
+                    transform: graph.makeInput(value: ViewTransform()),
+                    position: graph.makeInput(value: CGPoint.zero),
+                    containerPosition: graph.makeInput(value: CGPoint.zero),
+                    size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+                    safeAreaInsets: OptionalAttribute(),
+                    containerSize: OptionalAttribute(),
+                    stackOrientation: nil
+                )
+            )
+        }
+        return try XCTUnwrap(recorder.modifiers)
+    }
+
+    // ASSERTIONS textMonospacedModifierCarrierObserved
+    // ASSERTIONS textMonospacedModifierFirstWinsObserved
+    @MainActor
+    func testTextMonospacedModifierUsesFirstLocalValue() throws {
+        let trueThenFalse = Text(verbatim: "AiW")
+            .monospaced()
+            .monospaced(false)
+        let falseThenTrue = Text(verbatim: "AiW")
+            .monospaced(false)
+            .monospaced()
+        let digitText = Text(verbatim: "012").monospacedDigit()
+
+        XCTAssertEqual(trueThenFalse.monospacedValue, true)
+        XCTAssertEqual(falseThenTrue.monospacedValue, false)
+        XCTAssertTrue(digitText.usesMonospacedDigits)
+        XCTAssertTrue(trueThenFalse.modifiers.contains { modifier in
+            guard case let .anyTextModifier(value) = modifier else {
+                return false
+            }
+            return value is MonospacedTextModifier
+        })
+        XCTAssertTrue(digitText.modifiers.contains { modifier in
+            guard case let .anyTextModifier(value) = modifier else {
+                return false
+            }
+            return value is MonospacedDigitTextModifier
+        })
+
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        environment.fontModifiers = [.monospaced(true)]
+        let inheritedTrueContext = GraphTextResolutionContext(
+            environment: environment,
+            sceneResources: SceneResources()
+        )
+        let localFalseText = try XCTUnwrap(
+            Text(verbatim: "A")
+                .font(.system(size: 17))
+                .monospaced(false)
+                ._resolve(
+                    context: inheritedTrueContext,
+                    referenceDate: Date()
+                )
+        )
+        let localFalse = try XCTUnwrap(
+            localFalseText
+                .makeGlyphs()
+                .first?.glyphs.first?.face as? VectorTypeface
+        )
+        XCTAssertEqual(localFalse.font.familyName, "Roboto")
+
+        environment.fontModifiers = [.monospaced(false)]
+        let inheritedFalseContext = GraphTextResolutionContext(
+            environment: environment,
+            sceneResources: SceneResources()
+        )
+        let localTrueText = try XCTUnwrap(
+            Text(verbatim: "A")
+                .font(.system(size: 17))
+                .monospaced()
+                ._resolve(
+                    context: inheritedFalseContext,
+                    referenceDate: Date()
+                )
+        )
+        let localTrue = try XCTUnwrap(
+            localTrueText
+                .makeGlyphs()
+                .first?.glyphs.first?.face as? VectorTypeface
+        )
+        XCTAssertEqual(localTrue.font.familyName, "Roboto Mono")
+    }
+
     @MainActor
     func testSystemMonospacedFontBuildsConfiguredCJKCascade() throws {
         let previousAppContext = appContext
@@ -1347,6 +1613,31 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
 
         XCTAssertEqual(glyph.scalar, UnicodeScalar("\u{0378}"))
         XCTAssertGreaterThan(glyph.advance.width, 0)
+    }
+}
+
+private final class FontModifierEnvironmentRecorder {
+    var modifiers: [AnyFontModifier]?
+}
+
+private struct FontModifierEnvironmentProbe: View, TestPrimitiveView {
+    typealias Body = Never
+
+    let recorder: FontModifierEnvironmentRecorder
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "FontModifierEnvironmentProbe._makeView called outside an active graph."
+            )
+        }
+        view._attribute.value.recorder.modifiers =
+            inputs.base.cachedEnvironment.value.environment.value.fontModifiers
+        let layout = graph.makeInput(value: LayoutComputer.fixed(.zero))
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
     }
 }
 
