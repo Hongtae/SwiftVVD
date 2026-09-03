@@ -592,22 +592,16 @@ final class AttributedTextCoreVisualTests: XCTestCase {
             underlineThickness: CGFloat
         )] = [
             (
-                "Roboto/Roboto-Regular.ttf",
+                "Roboto/Roboto-VariableFont_wdth,wght.ttf",
                 21.1328,
                 -2.9297,
                 1.9531
             ),
             (
-                "NanumSquareNeo/NanumSquareNeo-bRg.ttf",
+                "NanumSquareNeo/NanumSquareNeo-Variable.ttf",
                 21,
                 -8,
                 2
-            ),
-            (
-                "NanumGothic/NanumGothic.ttf",
-                20,
-                -10.4,
-                2.32
             ),
         ]
 
@@ -618,6 +612,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
                 )
                 .standardizedFileURL
             let font = try XCTUnwrap(VVD.Font(path: fontURL.path), item.path)
+            XCTAssertTrue(font.setVariationCoordinates([0x7767_6874: 400]))
             font.pointSize = 40
 
             let metrics = try XCTUnwrap(

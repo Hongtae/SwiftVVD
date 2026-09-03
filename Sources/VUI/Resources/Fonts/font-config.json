@@ -1,37 +1,50 @@
 {
-  "version": 1,
+  "version": 2,
   "fonts": {
     "Roboto": {
       "sources": [
         {
-          "weight": 100,
-          "file": "Roboto/Roboto-Thin.ttf",
-          "faceIndex": 0
+          "file": "Roboto/Roboto-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
         },
         {
-          "weight": 300,
-          "file": "Roboto/Roboto-Light.ttf",
-          "faceIndex": 0
+          "file": "Roboto/Roboto-Italic-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "italic": true,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "RobotoMono": {
+      "sources": [
+        {
+          "file": "RobotoMono/RobotoMono-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 700
+          }
         },
         {
-          "weight": 400,
-          "file": "Roboto/Roboto-Regular.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 500,
-          "file": "Roboto/Roboto-Medium.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 700,
-          "file": "Roboto/Roboto-Bold.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 900,
-          "file": "Roboto/Roboto-Black.ttf",
-          "faceIndex": 0
+          "file": "RobotoMono/RobotoMono-Italic-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "italic": true,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 700
+          }
         }
       ],
       "syntheticWeight": false
@@ -39,54 +52,13 @@
     "NanumSquareNeo": {
       "sources": [
         {
-          "weight": 300,
-          "file": "NanumSquareNeo/NanumSquareNeo-aLt.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 400,
-          "file": "NanumSquareNeo/NanumSquareNeo-bRg.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 700,
-          "file": "NanumSquareNeo/NanumSquareNeo-cBd.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 800,
-          "file": "NanumSquareNeo/NanumSquareNeo-dEb.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 900,
-          "file": "NanumSquareNeo/NanumSquareNeo-eHv.ttf",
-          "faceIndex": 0
-        }
-      ],
-      "syntheticWeight": false
-    },
-    "NanumGothic": {
-      "sources": [
-        {
-          "weight": 300,
-          "file": "NanumGothic/NanumGothicLight.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 400,
-          "file": "NanumGothic/NanumGothic.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 700,
-          "file": "NanumGothic/NanumGothicBold.ttf",
-          "faceIndex": 0
-        },
-        {
-          "weight": 800,
-          "file": "NanumGothic/NanumGothicExtraBold.ttf",
-          "faceIndex": 0
+          "file": "NanumSquareNeo/NanumSquareNeo-Variable.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
         }
       ],
       "syntheticWeight": false
@@ -112,6 +84,27 @@
       ],
       "syntheticWeight": false
     },
+    "NotoSansMonoCJK": {
+      "sources": [
+        {
+          "file": "NotoSansMonoCJK/NotoSansMonoCJK-VF.otf.ttc",
+          "faceIndex": 0,
+          "localeFaceIndices": {
+            "ja": 0,
+            "ko": 1,
+            "zh-Hans": 2,
+            "zh-Hant": 3,
+            "zh-HK": 4
+          },
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
     "LastResort": {
       "sources": [
         {
@@ -123,12 +116,25 @@
       "syntheticWeight": false
     }
   },
-  "systemFont": "Roboto",
   "defaultLocale": "en",
-  "locales": {
-    "en": ["Roboto", "NotoSansCJK"],
-    "ko": ["NanumSquareNeo", "NotoSansCJK"],
-    "ja": ["NotoSansCJK", "Roboto"]
+  "designs": {
+    "default": {
+      "systemFont": "Roboto",
+      "locales": {
+        "en": ["Roboto", "NotoSansCJK"],
+        "ko": ["NanumSquareNeo", "NotoSansCJK"],
+        "ja": ["NotoSansCJK", "Roboto"],
+        "zh-Hans": ["NotoSansCJK", "Roboto"],
+        "zh-Hant": ["NotoSansCJK", "Roboto"],
+        "zh-HK": ["NotoSansCJK", "Roboto"]
+      }
+    },
+    "monospaced": {
+      "systemFont": "RobotoMono",
+      "locales": {
+        "en": ["RobotoMono", "NotoSansMonoCJK"]
+      }
+    }
   },
   "missingGlyphFont": "LastResort"
 }

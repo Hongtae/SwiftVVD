@@ -407,7 +407,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
     func testBundledConfigurationResolvesExactLanguageAndDefaultLocale() {
         let configuration = BundledFontCatalog.shared.configuration
 
-        XCTAssertEqual(configuration.version, 1)
+        XCTAssertEqual(configuration.version, 2)
         XCTAssertEqual(configuration.defaultLocale, "en")
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "en_US"))
@@ -429,14 +429,34 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 .map(\.rawValue),
             ["Roboto", "NotoSansCJK"]
         )
+        XCTAssertEqual(
+            configuration.fonts(for: Locale(identifier: "zh_Hans_CN"))
+                .map(\.rawValue),
+            ["NotoSansCJK", "Roboto"]
+        )
+        XCTAssertEqual(
+            configuration.fonts(
+                for: Locale(identifier: "ko_KR"),
+                design: .monospaced
+            ).map(\.rawValue),
+            ["RobotoMono", "NotoSansMonoCJK"]
+        )
         XCTAssertEqual(configuration.systemFont.rawValue, "Roboto")
+        XCTAssertEqual(
+            configuration.systemFont(for: .monospaced).rawValue,
+            "RobotoMono"
+        )
+        XCTAssertEqual(
+            configuration.systemFont(for: .rounded).rawValue,
+            "Roboto"
+        )
         XCTAssertEqual(configuration.missingGlyphFont.rawValue, "LastResort")
     }
 
     func testBundledConfigurationRejectsTerminalFontInLocaleCascade() {
         let data = Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "fonts": {
             "Roboto": {
               "sources": [{
@@ -455,10 +475,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
               "syntheticWeight": false
             }
           },
-          "systemFont": "Roboto",
           "defaultLocale": "en",
-          "locales": {
-            "en": ["Roboto", "NotoSansCJK"]
+          "designs": {
+            "default": {
+              "systemFont": "Roboto",
+              "locales": {
+                "en": ["Roboto", "NotoSansCJK"]
+              }
+            }
           },
           "missingGlyphFont": "Roboto"
         }
@@ -475,7 +499,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
     func testBundledConfigurationRequiresDeclaredDefaultLocale() {
         let data = Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "fonts": {
             "Roboto": {
               "sources": [{
@@ -502,10 +526,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
               "syntheticWeight": false
             }
           },
-          "systemFont": "Roboto",
           "defaultLocale": "ko",
-          "locales": {
-            "en": ["Roboto", "NotoSansCJK"]
+          "designs": {
+            "default": {
+              "systemFont": "Roboto",
+              "locales": {
+                "en": ["Roboto", "NotoSansCJK"]
+              }
+            }
           },
           "missingGlyphFont": "LastResort"
         }
@@ -522,7 +550,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
     func testBundledConfigurationLoadsFontFilesAndFacesFromData() throws {
         let data = Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "fonts": {
             "Primary": {
               "sources": [{
@@ -548,10 +576,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
               "syntheticWeight": false
             }
           },
-          "systemFont": "Primary",
           "defaultLocale": "en",
-          "locales": {
-            "en": ["Primary"]
+          "designs": {
+            "default": {
+              "systemFont": "Primary",
+              "locales": {
+                "en": ["Primary"]
+              }
+            }
           },
           "missingGlyphFont": "Terminal"
         }
@@ -580,7 +612,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
     func testBundledConfigurationRejectsUnsafeFontFilePath() {
         let data = Data(#"""
         {
-          "version": 1,
+          "version": 2,
           "fonts": {
             "Primary": {
               "sources": [{
@@ -591,10 +623,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
               "syntheticWeight": true
             }
           },
-          "systemFont": "Primary",
           "defaultLocale": "en",
-          "locales": {
-            "en": ["Primary"]
+          "designs": {
+            "default": {
+              "systemFont": "Primary",
+              "locales": {
+                "en": ["Primary"]
+              }
+            }
           },
           "missingGlyphFont": "Primary"
         }
@@ -611,72 +647,56 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         }
     }
 
-    func testBundledCatalogMapsFontWeightsToStaticFiles() throws {
+    func testBundledCatalogMapsVariableWeightsAndItalicSources() throws {
         let catalog = BundledFontCatalog.shared
         let locale = Locale(identifier: "en")
 
         func file(
             _ family: String,
-            _ weight: VUI.Font.Weight
+            _ weight: VUI.Font.Weight,
+            isItalic: Bool = false
         ) throws -> String {
             try XCTUnwrap(catalog.resource(
                 for: BundledFontID(family),
                 locale: locale,
-                weight: weight.value
+                weight: weight.value,
+                isItalic: isItalic
             )).url.lastPathComponent
         }
 
-        XCTAssertEqual(try file("Roboto", .ultraLight), "Roboto-Thin.ttf")
-        XCTAssertEqual(try file("Roboto", .thin), "Roboto-Thin.ttf")
-        XCTAssertEqual(try file("Roboto", .light), "Roboto-Light.ttf")
-        XCTAssertEqual(try file("Roboto", .regular), "Roboto-Regular.ttf")
-        XCTAssertEqual(try file("Roboto", .medium), "Roboto-Medium.ttf")
-        XCTAssertEqual(try file("Roboto", .semibold), "Roboto-Bold.ttf")
-        XCTAssertEqual(try file("Roboto", .bold), "Roboto-Bold.ttf")
-        XCTAssertEqual(try file("Roboto", .heavy), "Roboto-Black.ttf")
-        XCTAssertEqual(try file("Roboto", .black), "Roboto-Black.ttf")
-
-        XCTAssertEqual(
-            try file("NanumSquareNeo", .light),
-            "NanumSquareNeo-aLt.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumSquareNeo", .regular),
-            "NanumSquareNeo-bRg.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumSquareNeo", .semibold),
-            "NanumSquareNeo-cBd.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumSquareNeo", .heavy),
-            "NanumSquareNeo-dEb.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumSquareNeo", .black),
-            "NanumSquareNeo-eHv.ttf"
-        )
-
-        XCTAssertEqual(
-            try file("NanumGothic", .light),
-            "NanumGothicLight.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumGothic", .regular),
-            "NanumGothic.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumGothic", .bold),
-            "NanumGothicBold.ttf"
-        )
-        XCTAssertEqual(
-            try file("NanumGothic", .heavy),
-            "NanumGothicExtraBold.ttf"
-        )
-        XCTAssertFalse(
-            catalog.configuration.fonts(for: Locale(identifier: "ko"))
-                .contains(BundledFontID("NanumGothic"))
-        )
+        let weights: [VUI.Font.Weight] = [
+            .ultraLight,
+            .thin,
+            .light,
+            .regular,
+            .medium,
+            .semibold,
+            .bold,
+            .heavy,
+            .black,
+        ]
+        for weight in weights {
+            XCTAssertEqual(
+                try file("Roboto", weight),
+                "Roboto-VariableFont_wdth,wght.ttf"
+            )
+            XCTAssertEqual(
+                try file("Roboto", weight, isItalic: true),
+                "Roboto-Italic-VariableFont_wdth,wght.ttf"
+            )
+            XCTAssertEqual(
+                try file("RobotoMono", weight),
+                "RobotoMono-VariableFont_wght.ttf"
+            )
+            XCTAssertEqual(
+                try file("RobotoMono", weight, isItalic: true),
+                "RobotoMono-Italic-VariableFont_wght.ttf"
+            )
+            XCTAssertEqual(
+                try file("NanumSquareNeo", weight),
+                "NanumSquareNeo-Variable.ttf"
+            )
+        }
     }
 
     func testBundledCatalogSelectsLocaleSpecificNotoCollectionFaces() throws {
@@ -723,6 +743,47 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         }
     }
 
+    func testBundledCatalogSelectsLocaleSpecificNotoMonoCollectionFaces()
+        throws {
+        let catalog = BundledFontCatalog.shared
+        let family = BundledFontID("NotoSansMonoCJK")
+        let localesAndIndices = [
+            ("ja", 0),
+            ("ko", 1),
+            ("zh-Hans", 2),
+            ("zh-Hant", 3),
+            ("zh-HK", 4),
+        ]
+        for (locale, expectedIndex) in localesAndIndices {
+            XCTAssertEqual(try XCTUnwrap(catalog.resource(
+                for: family,
+                locale: Locale(identifier: locale)
+            )).faceIndex, expectedIndex)
+        }
+
+        let japanese = try XCTUnwrap(catalog.resource(
+            for: family,
+            locale: Locale(identifier: "ja")
+        ))
+        let data = try Data(contentsOf: japanese.url)
+        let expectedFamilies = [
+            "Noto Sans Mono CJK JP",
+            "Noto Sans Mono CJK KR",
+            "Noto Sans Mono CJK SC",
+            "Noto Sans Mono CJK TC",
+            "Noto Sans Mono CJK HK",
+        ]
+        for (faceIndex, familyName) in expectedFamilies.enumerated() {
+            let font = try XCTUnwrap(VVD.Font(
+                data: data,
+                faceIndex: faceIndex
+            ))
+            XCTAssertEqual(font.faceIndex, faceIndex)
+            XCTAssertEqual(font.numFaces, expectedFamilies.count)
+            XCTAssertEqual(font.familyName, familyName)
+        }
+    }
+
     func testNotoVariableCollectionAcceptsWeightDesignCoordinates() throws {
         let resource = try XCTUnwrap(BundledFontCatalog.shared.resource(
             for: BundledFontID("NotoSansCJK"),
@@ -744,6 +805,49 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertTrue(font.setVariationCoordinates([weightTag: 400]))
         XCTAssertEqual(font.variationCoordinates[weightTag], 400)
         XCTAssertFalse(font.setVariationCoordinates([0x6261_6421: 400]))
+    }
+
+    func testNotoMonoVariableCollectionClampsToAvailableWeightRange()
+        throws {
+        let catalog = BundledFontCatalog.shared
+        let family = BundledFontID("NotoSansMonoCJK")
+        let resource = try XCTUnwrap(catalog.resource(
+            for: family,
+            locale: Locale(identifier: "ko")
+        ))
+        let font = try XCTUnwrap(VVD.Font(
+            data: Data(contentsOf: resource.url),
+            faceIndex: resource.faceIndex
+        ))
+        let weightTag: UInt32 = 0x7767_6874
+        let axis = try XCTUnwrap(font.variationAxes.first {
+            $0.tag == weightTag
+        })
+
+        XCTAssertEqual(axis.minimumValue, 400)
+        XCTAssertEqual(axis.defaultValue, 400)
+        XCTAssertEqual(axis.maximumValue, 700)
+
+        let light = try XCTUnwrap(BundledFontProvider(
+            family: family,
+            locale: Locale(identifier: "ko"),
+            size: 17,
+            weight: .light,
+            renderingMode: .vector(),
+            isItalic: false,
+            catalog: catalog
+        ))
+        let black = try XCTUnwrap(BundledFontProvider(
+            family: family,
+            locale: Locale(identifier: "ko"),
+            size: 17,
+            weight: .black,
+            renderingMode: .vector(),
+            isItalic: false,
+            catalog: catalog
+        ))
+        XCTAssertEqual(light.variations.first?.value, 400)
+        XCTAssertEqual(black.variations.first?.value, 700)
     }
 
     func testBundledNotoProviderUsesVariableWeightWithoutSyntheticWeight() throws {
@@ -770,6 +874,129 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
 
         XCTAssertEqual(face.embolden, 0)
         XCTAssertEqual(face.font.variationCoordinates[weightTag], 700)
+    }
+
+    func testExternalFileFontLoadsOnlyLocalURLAndAppliesVariableWeight()
+        throws {
+        let resource = try XCTUnwrap(BundledFontCatalog.shared.resource(
+            for: BundledFontID("RobotoMono"),
+            locale: Locale(identifier: "en")
+        ))
+        let font = VUI.Font.file(
+            resource.url,
+            size: 17,
+            weight: .bold,
+            design: .monospaced,
+            renderingMode: .vector()
+        )
+        let provider = try XCTUnwrap(
+            font.provider.fontBox as? ExternalFontProvider
+        )
+        let face = try XCTUnwrap(provider.makeTypeface(
+            MissingGlyphTestAppContext(),
+            dpi: UInt32(defaultDPI)
+        ) as? VectorTypeface)
+
+        XCTAssertEqual(
+            face.font.filePath,
+            resource.url.standardizedFileURL.path
+        )
+        XCTAssertEqual(face.font.familyName, "Roboto Mono")
+        XCTAssertEqual(face.font.variationCoordinates[0x7767_6874], 700)
+        XCTAssertEqual(face.embolden, 0)
+
+        let remote = VUI.Font.file(
+            try XCTUnwrap(URL(string: "https://example.com/font.ttf")),
+            size: 17,
+            renderingMode: .vector()
+        )
+        let remoteProvider = try XCTUnwrap(
+            remote.provider.fontBox as? ExternalFontProvider
+        )
+        XCTAssertNil(remoteProvider.makeTypeface(
+            MissingGlyphTestAppContext(),
+            dpi: UInt32(defaultDPI)
+        ))
+    }
+
+    func testExternalDataFontRetainsCollectionFaceAndClampsVariableWeight()
+        throws {
+        let resource = try XCTUnwrap(BundledFontCatalog.shared.resource(
+            for: BundledFontID("NotoSansMonoCJK"),
+            locale: Locale(identifier: "ja")
+        ))
+        let data = try Data(contentsOf: resource.url)
+        let font = VUI.Font.data(
+            data,
+            size: 17,
+            weight: .black,
+            design: .monospaced,
+            faceIndex: 1,
+            renderingMode: .vector()
+        )
+        let provider = try XCTUnwrap(
+            font.provider.fontBox as? ExternalFontProvider
+        )
+        let face = try XCTUnwrap(provider.makeTypeface(
+            MissingGlyphTestAppContext(),
+            dpi: UInt32(defaultDPI)
+        ) as? VectorTypeface)
+
+        XCTAssertEqual(face.font.familyName, "Noto Sans Mono CJK KR")
+        XCTAssertEqual(face.font.faceIndex, 1)
+        XCTAssertNotNil(face.font.fontData)
+        XCTAssertEqual(face.font.variationCoordinates[0x7767_6874], 700)
+        XCTAssertEqual(face.embolden, 0)
+
+        let retainedCopy = font
+        XCTAssertEqual(font, retainedCopy)
+        XCTAssertNotEqual(
+            font,
+            VUI.Font.data(
+                data,
+                size: 17,
+                weight: .black,
+                design: .monospaced,
+                faceIndex: 1,
+                renderingMode: .vector()
+            )
+        )
+    }
+
+    @MainActor
+    func testExternalFontUsesSelectedDesignFallbackCascade() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        let resource = try XCTUnwrap(BundledFontCatalog.shared.resource(
+            for: BundledFontID("RobotoMono"),
+            locale: Locale(identifier: "en")
+        ))
+        let font = VUI.Font.file(
+            resource.url,
+            size: 17,
+            weight: .regular,
+            design: .monospaced,
+            renderingMode: .vector()
+        )
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "ko_KR")
+        environment.defaultFontRenderingMode = .vector()
+        let cascade = font.typefaceCascade(
+            in: environment,
+            forContext: SceneResources(),
+            contentScaleFactor: 1
+        )
+
+        XCTAssertEqual(
+            (cascade.ordinaryFaces.first as? VectorTypeface)?.font.familyName,
+            "Roboto Mono"
+        )
+        XCTAssertTrue(cascade.ordinaryFaces.contains {
+            $0.identifier == "deferred:NotoSansMonoCJK:1"
+        })
+        XCTAssertNotNil(cascade.missingGlyphFace)
     }
 
     @MainActor
@@ -863,6 +1090,76 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[0]))
         XCTAssertTrue(glyphs[2].face.isEqual(to: cascade.ordinaryFaces[1]))
         XCTAssertGreaterThan(resolved.measure().width, 0)
+    }
+
+    // ASSERTIONS textMonospacedFallbackNaturalAdvanceObserved
+    // ASSERTIONS textFieldMonospacedFallbackStableHeightObserved
+    @MainActor
+    func testSystemMonospacedFontBuildsConfiguredCJKCascade() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "ko_KR")
+        environment.defaultFontRenderingMode = .vector()
+        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+            size: 17,
+            weight: .bold,
+            design: .monospaced,
+            renderingMode: .vector()
+        )))
+        let cascade = font.typefaceCascade(
+            in: environment,
+            forContext: SceneResources(),
+            contentScaleFactor: 1
+        )
+        let latin = UnicodeScalar("A")
+        let korean = UnicodeScalar("한")
+
+        XCTAssertEqual(cascade.ordinaryFaces.count, 2)
+        XCTAssertTrue(cascade.ordinaryFaces[0].hasGlyph(for: latin))
+        XCTAssertFalse(cascade.ordinaryFaces[0].hasGlyph(for: korean))
+        XCTAssertTrue(cascade.ordinaryFaces[1].hasGlyph(for: korean))
+
+        let primary = try XCTUnwrap(
+            cascade.ordinaryFaces[0] as? VectorTypeface
+        )
+        XCTAssertEqual(primary.font.familyName, "Roboto Mono")
+        XCTAssertEqual(
+            primary.font.variationCoordinates[0x7767_6874],
+            700
+        )
+        XCTAssertEqual(primary.embolden, 0)
+        XCTAssertEqual(
+            cascade.ordinaryFaces[1].identifier,
+            "deferred:NotoSansMonoCJK:1"
+        )
+
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text(cascade.runFaces, "A한A")],
+            scaleFactor: 1
+        )
+        let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
+        XCTAssertEqual(glyphs.map(\.scalar), [latin, korean, latin])
+        XCTAssertTrue(glyphs[0].face.isEqual(to: cascade.ordinaryFaces[0]))
+        XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[1]))
+        XCTAssertEqual(glyphs[0].advance.width, glyphs[2].advance.width)
+        XCTAssertNotEqual(glyphs[1].advance.width, glyphs[0].advance.width)
+
+        let latinText = GraphicsContext.ResolvedText(
+            runs: [.text(cascade.runFaces, "A")],
+            scaleFactor: 1
+        )
+        let fallbackText = GraphicsContext.ResolvedText(
+            runs: [.text(cascade.runFaces, "한")],
+            scaleFactor: 1
+        )
+        XCTAssertEqual(resolved.measure().height, latinText.measure().height)
+        XCTAssertEqual(
+            fallbackText.measure().height,
+            latinText.measure().height
+        )
     }
 
     // ASSERTIONS textFallbackPrimaryLineMetricsObserved

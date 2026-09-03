@@ -29,6 +29,7 @@ struct BundledFontSource: Equatable, Sendable {
     let file: String
     let faceIndex: Int
     let localeFaceIndices: [String: Int]
+    let isItalic: Bool
     let weight: CGFloat?
     let weightAxis: BundledFontWeightAxis?
 
@@ -69,12 +70,19 @@ struct BundledFontDescriptor: Equatable, Sendable {
     let sources: [BundledFontSource]
     let appliesSyntheticWeight: Bool
 
-    func source(for requestedWeight: CGFloat) -> BundledFontSource {
+    func source(
+        for requestedWeight: CGFloat,
+        isItalic: Bool = false
+    ) -> BundledFontSource {
+        let matchingStyle = sources.filter { $0.isItalic == isItalic }
+        let candidates = matchingStyle.isEmpty
+            ? sources.filter { !$0.isItalic }
+            : matchingStyle
         let regularWeight = Font.Weight.regular.value
         let requestedWeight = requestedWeight.isFinite
             ? requestedWeight
             : regularWeight
-        return sources.enumerated().min { lhs, rhs in
+        return candidates.enumerated().min { lhs, rhs in
             let lhsDistance = lhs.element.weightDistance(
                 from: requestedWeight
             )
@@ -117,6 +125,8 @@ enum FontFallbackConfigurationError: Error, Equatable {
     case invalidFaceLocale(BundledFontID, String)
     case invalidWeightConfiguration(BundledFontID)
     case invalidWeightAxis(BundledFontID)
+    case invalidDesign(String)
+    case missingDefaultDesign
     case undefinedFont(BundledFontID)
     case invalidSystemFont(BundledFontID)
     case invalidMissingGlyphFont(BundledFontID)
@@ -138,6 +148,7 @@ struct FontFallbackConfiguration: Sendable {
         let file: String
         let faceIndex: Int
         let localeFaceIndices: [String: Int]?
+        let italic: Bool?
         let weight: CGFloat?
         let weightAxis: WeightAxis?
     }
@@ -147,25 +158,33 @@ struct FontFallbackConfiguration: Sendable {
         let syntheticWeight: Bool
     }
 
+    private struct DesignSource: Decodable {
+        let systemFont: String
+        let locales: [String: [String]]
+    }
+
     private struct Source: Decodable {
         let version: Int
         let fonts: [String: FontFamilySource]
-        let systemFont: String
         let defaultLocale: String
-        let locales: [String: [String]]
+        let designs: [String: DesignSource]
         let missingGlyphFont: String
     }
 
     let version: Int
     let fontDescriptors: [BundledFontID: BundledFontDescriptor]
-    let systemFont: BundledFontID
     let defaultLocale: String
-    let locales: [String: [BundledFontID]]
+    let systemFonts: [Font.Design: BundledFontID]
+    let designLocales: [Font.Design: [String: [BundledFontID]]]
     let missingGlyphFont: BundledFontID
+
+    var systemFont: BundledFontID {
+        systemFont(for: .default)
+    }
 
     init(data: Data) throws {
         let source = try JSONDecoder().decode(Source.self, from: data)
-        guard source.version == 1 else {
+        guard source.version == 2 else {
             throw FontFallbackConfigurationError.unsupportedVersion(
                 source.version
             )
@@ -261,21 +280,37 @@ struct FontFallbackConfiguration: Sendable {
                     file: source.file,
                     faceIndex: source.faceIndex,
                     localeFaceIndices: localeFaceIndices,
+                    isItalic: source.italic ?? false,
                     weight: weight,
                     weightAxis: weightAxis
                 ))
             }
 
-            let staticWeights = sources.compactMap(\.weight)
-            guard Set(staticWeights).count == staticWeights.count else {
+            guard sources.contains(where: { !$0.isItalic }) else {
                 throw FontFallbackConfigurationError
                     .invalidWeightConfiguration(fontID)
             }
-            if font.syntheticWeight {
-                guard sources.count == 1,
-                      sources[0].weight == Font.Weight.regular.value else {
+            for styleSources in Dictionary(
+                grouping: sources,
+                by: \.isItalic
+            ).values {
+                let staticWeights = styleSources.compactMap(\.weight)
+                guard Set(staticWeights).count == staticWeights.count else {
                     throw FontFallbackConfigurationError
                         .invalidWeightConfiguration(fontID)
+                }
+            }
+            if font.syntheticWeight {
+                for styleSources in Dictionary(
+                    grouping: sources,
+                    by: \.isItalic
+                ).values {
+                    guard styleSources.count == 1,
+                          styleSources[0].weight ==
+                            Font.Weight.regular.value else {
+                        throw FontFallbackConfigurationError
+                            .invalidWeightConfiguration(fontID)
+                    }
                 }
             }
 
@@ -285,10 +320,6 @@ struct FontFallbackConfiguration: Sendable {
             )
         }
 
-        let systemFont = BundledFontID(source.systemFont)
-        guard fontDescriptors[systemFont] != nil else {
-            throw FontFallbackConfigurationError.invalidSystemFont(systemFont)
-        }
         let missingGlyphFont = BundledFontID(source.missingGlyphFont)
         guard fontDescriptors[missingGlyphFont] != nil else {
             throw FontFallbackConfigurationError.invalidMissingGlyphFont(
@@ -296,61 +327,105 @@ struct FontFallbackConfiguration: Sendable {
             )
         }
 
-        var locales: [String: [BundledFontID]] = [:]
-        for (identifier, fonts) in source.locales {
-            let canonical = Self.canonicalIdentifier(identifier)
-            guard !canonical.isEmpty,
-                  Locale(identifier: identifier).language.languageCode != nil
-            else {
-                throw FontFallbackConfigurationError.invalidLocale(identifier)
-            }
-            guard !fonts.isEmpty else {
-                throw FontFallbackConfigurationError.emptyLocale(identifier)
-            }
-            let fontIDs = fonts.map { BundledFontID($0) }
-            for fontID in fontIDs where fontDescriptors[fontID] == nil {
-                throw FontFallbackConfigurationError.undefinedFont(fontID)
-            }
-            guard fontIDs.allSatisfy({ $0 != missingGlyphFont }) else {
-                throw FontFallbackConfigurationError.terminalFontInLocale(
-                    identifier
-                )
-            }
-
-            var unique: Set<BundledFontID> = []
-            for font in fontIDs where !unique.insert(font).inserted {
-                throw FontFallbackConfigurationError.duplicateFont(
-                    identifier,
-                    font
-                )
-            }
-            guard locales.updateValue(fontIDs, forKey: canonical) == nil else {
-                throw FontFallbackConfigurationError.invalidLocale(identifier)
-            }
-        }
-
         let defaultLocale = Self.canonicalIdentifier(source.defaultLocale)
-        guard locales[defaultLocale] != nil else {
-            throw FontFallbackConfigurationError.invalidDefaultLocale(
-                source.defaultLocale
-            )
+        var systemFonts: [Font.Design: BundledFontID] = [:]
+        var designLocales: [Font.Design: [String: [BundledFontID]]] = [:]
+        for (identifier, designSource) in source.designs {
+            guard let design = Self.design(for: identifier) else {
+                throw FontFallbackConfigurationError.invalidDesign(identifier)
+            }
+            let systemFont = BundledFontID(designSource.systemFont)
+            guard fontDescriptors[systemFont] != nil else {
+                throw FontFallbackConfigurationError.invalidSystemFont(
+                    systemFont
+                )
+            }
+
+            var locales: [String: [BundledFontID]] = [:]
+            for (localeIdentifier, fonts) in designSource.locales {
+                let canonical = Self.canonicalIdentifier(localeIdentifier)
+                guard !canonical.isEmpty,
+                      Locale(identifier: localeIdentifier)
+                        .language.languageCode != nil else {
+                    throw FontFallbackConfigurationError.invalidLocale(
+                        localeIdentifier
+                    )
+                }
+                guard !fonts.isEmpty else {
+                    throw FontFallbackConfigurationError.emptyLocale(
+                        localeIdentifier
+                    )
+                }
+                let fontIDs = fonts.map { BundledFontID($0) }
+                for fontID in fontIDs where fontDescriptors[fontID] == nil {
+                    throw FontFallbackConfigurationError.undefinedFont(fontID)
+                }
+                guard fontIDs.allSatisfy({ $0 != missingGlyphFont }) else {
+                    throw FontFallbackConfigurationError
+                        .terminalFontInLocale(localeIdentifier)
+                }
+
+                var unique: Set<BundledFontID> = []
+                for font in fontIDs where !unique.insert(font).inserted {
+                    throw FontFallbackConfigurationError.duplicateFont(
+                        localeIdentifier,
+                        font
+                    )
+                }
+                guard locales.updateValue(
+                    fontIDs,
+                    forKey: canonical
+                ) == nil else {
+                    throw FontFallbackConfigurationError.invalidLocale(
+                        localeIdentifier
+                    )
+                }
+            }
+            guard locales[defaultLocale] != nil else {
+                throw FontFallbackConfigurationError.invalidDefaultLocale(
+                    source.defaultLocale
+                )
+            }
+            systemFonts[design] = systemFont
+            designLocales[design] = locales
+        }
+        guard systemFonts[.default] != nil else {
+            throw FontFallbackConfigurationError.missingDefaultDesign
         }
 
         self.version = source.version
         self.fontDescriptors = fontDescriptors
-        self.systemFont = systemFont
         self.defaultLocale = defaultLocale
-        self.locales = locales
+        self.systemFonts = systemFonts
+        self.designLocales = designLocales
         self.missingGlyphFont = missingGlyphFont
     }
 
-    func fonts(for locale: Locale) -> [BundledFontID] {
+    func systemFont(for design: Font.Design) -> BundledFontID {
+        systemFonts[design] ?? systemFonts[.default]!
+    }
+
+    func fonts(
+        for locale: Locale,
+        design: Font.Design = .default
+    ) -> [BundledFontID] {
+        let locales = designLocales[design] ?? designLocales[.default]!
         for candidate in Self.candidateIdentifiers(for: locale) {
             if let fonts = locales[candidate] {
                 return fonts
             }
         }
         return locales[defaultLocale]!
+    }
+
+    private static func design(for identifier: String) -> Font.Design? {
+        switch identifier {
+        case "default": .default
+        case "serif": .serif
+        case "rounded": .rounded
+        case "monospaced": .monospaced
+        default: nil
+        }
     }
 
     private static func isValidResourcePath(_ path: String) -> Bool {
@@ -449,13 +524,17 @@ struct BundledFontCatalog: Sendable {
     func resource(
         for family: BundledFontID,
         locale: Locale,
-        weight: CGFloat = Font.Weight.regular.value
+        weight: CGFloat = Font.Weight.regular.value,
+        isItalic: Bool = false
     ) -> BundledFontResource? {
         guard let descriptor = configuration.fontDescriptors[family],
               let resourceURL = Bundle.module.resourceURL else {
             return nil
         }
-        let source = descriptor.source(for: weight)
+        let source = descriptor.source(
+            for: weight,
+            isItalic: isItalic
+        )
         let url = resourceURL
             .appendingPathComponent("Fonts", isDirectory: true)
             .appendingPathComponent(source.file, isDirectory: false)

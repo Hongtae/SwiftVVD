@@ -49,15 +49,22 @@ extension EnvironmentValues {
 }
 
 var defaultFontURL: URL? {
-    Bundle.module.url(forResource: "Roboto-Regular",
-                      withExtension: "ttf",
-                      subdirectory: "Fonts/Roboto")
+    let catalog = BundledFontCatalog.shared
+    let configuration = catalog.configuration
+    return catalog.resource(
+        for: configuration.systemFont(for: .default),
+        locale: Locale(identifier: configuration.defaultLocale)
+    )?.url
 }
 
 var defaultItalicFontURL: URL? {
-    Bundle.module.url(forResource: "Roboto-Italic",
-                      withExtension: "ttf",
-                      subdirectory: "Fonts/Roboto")
+    let catalog = BundledFontCatalog.shared
+    let configuration = catalog.configuration
+    return catalog.resource(
+        for: configuration.systemFont(for: .default),
+        locale: Locale(identifier: configuration.defaultLocale),
+        isItalic: true
+    )?.url
 }
 
 struct BundledFontResource: Hashable {
@@ -649,72 +656,18 @@ struct SystemFontProvider: TypefaceProvider {
         _ context: AppContext,
         dpi: UInt32
     ) -> Typeface? {
-        precondition(dpi > 0, "The font DPI must be positive.")
-        let contentScaleFactor = CGFloat(dpi) / CGFloat(defaultDPI)
-        if let url = isItalic ? defaultItalicFontURL : defaultFontURL {
-            var data = context.resourceData(forURL: url)
-            if data == nil {
-                do {
-                    Log.debug("Loading font resource: \(url)")
-                    let d = try Data(contentsOf: url, options: [])
-                    data = d.makeFixedAddressStorage()
-                    if data != nil {
-                        context.setResource(data: data, forURL: url)
-                    }
-                } catch {
-                    Log.error("Error on loading data: \(error)")
-                }
-            }
-            if let data {
-                let logicalEmbolden = Self.embolden(for: self.weight)
-                guard let layoutFont = VVD.Font(data: data) else {
-                    return nil
-                }
-                layoutFont.setPointSize(
-                    self.size,
-                    dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
-                )
-                switch renderingMode {
-                case .automatic:
-                    fatalError("Unresolved font rendering mode")
-                case let .bitmap(options):
-                    guard let device = context.graphicsDeviceContext,
-                          let font = VVD.TextureFont(deviceContext: device,
-                                                     data: data) else {
-                        return nil
-                    }
-                    font.boldStrength =
-                        logicalEmbolden * contentScaleFactor
-                    font.outlineThickness =
-                        options.outlineThickness * contentScaleFactor
-                    font.isBitmapPreferred = options.isBitmapPreferred
-                    font.isColorEnabled = options.isColorEnabled
-                    font.setPointSize(self.size, dpi: (dpi, dpi))
-                    return TextureTypeface(
-                        textureFont: font,
-                        layoutFont: layoutFont,
-                        renderScale: contentScaleFactor,
-                        logicalEmbolden: logicalEmbolden
-                    )
-                case let .vector(options):
-                    guard let font = VVD.Font(data: data) else {
-                        return nil
-                    }
-                    font.setPointSize(self.size, dpi: (dpi, dpi))
-                    return VectorTypeface(
-                        font: font,
-                        embolden:
-                            logicalEmbolden * contentScaleFactor,
-                        outlineThickness:
-                            options.outlineThickness * contentScaleFactor,
-                        layoutFont: layoutFont,
-                        renderScale: contentScaleFactor,
-                        logicalEmbolden: logicalEmbolden
-                    )
-                }
-            }
-        }
-        return nil
+        let catalog = BundledFontCatalog.shared
+        let configuration = catalog.configuration
+        guard let provider = BundledFontProvider(
+            family: configuration.systemFont(for: design),
+            locale: Locale(identifier: configuration.defaultLocale),
+            size: size,
+            weight: weight,
+            renderingMode: renderingMode,
+            isItalic: isItalic,
+            catalog: catalog
+        ) else { return nil }
+        return provider.makeTypeface(context, dpi: dpi)
     }
 }
 
@@ -740,6 +693,50 @@ struct BundledFontProvider: TypefaceProvider {
         self.renderingMode = renderingMode
         self.variations = variations
         self.appliesSyntheticWeight = appliesSyntheticWeight
+    }
+
+    init?(
+        family: BundledFontID,
+        locale: Locale,
+        size: CGFloat,
+        weight: Font.Weight,
+        renderingMode: Font.RenderingMode,
+        isItalic: Bool,
+        catalog: BundledFontCatalog
+    ) {
+        guard let descriptor = catalog.configuration.fontDescriptors[family],
+              let resource = catalog.resource(
+                for: family,
+                locale: locale,
+                weight: weight.value,
+                isItalic: isItalic
+              ) else {
+            return nil
+        }
+        let source = descriptor.source(
+            for: weight.value,
+            isItalic: isItalic
+        )
+        let variations: [BundledFontVariation]
+        if let weightAxis = source.weightAxis {
+            variations = [BundledFontVariation(
+                tag: weightAxis.tag,
+                value: min(
+                    max(weight.value, weightAxis.minimum),
+                    weightAxis.maximum
+                )
+            )]
+        } else {
+            variations = []
+        }
+        self.init(
+            resource: resource,
+            size: size,
+            weight: weight,
+            renderingMode: renderingMode,
+            variations: variations,
+            appliesSyntheticWeight: descriptor.appliesSyntheticWeight
+        )
     }
 
     func resolved(in environment: EnvironmentValues) -> Self {
@@ -867,6 +864,217 @@ struct BundledFontProvider: TypefaceProvider {
                 ($0.tag, $0.value)
             })
         )
+    }
+}
+
+final class ExternalFontData: @unchecked Sendable {
+    let storage: any FixedAddressStorageData
+
+    init(_ data: Data) {
+        self.storage = data.makeFixedAddressStorage()
+    }
+}
+
+enum ExternalFontSource: Hashable, @unchecked Sendable {
+    case file(URL)
+    case data(ExternalFontData)
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.file(lhs), .file(rhs)):
+            return lhs == rhs
+        case let (.data(lhs), .data(rhs)):
+            return lhs === rhs
+        default:
+            return false
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        switch self {
+        case let .file(url):
+            hasher.combine(0)
+            hasher.combine(url)
+        case let .data(data):
+            hasher.combine(1)
+            hasher.combine(ObjectIdentifier(data))
+        }
+    }
+
+    func makeFont(faceIndex: Int) -> VVD.Font? {
+        switch self {
+        case let .file(url):
+            guard url.isFileURL else {
+                Log.error("Font.file requires a local file URL: \(url)")
+                return nil
+            }
+            return VVD.Font(
+                path: url.standardizedFileURL.path,
+                faceIndex: faceIndex
+            )
+        case let .data(data):
+            return VVD.Font(data: data.storage, faceIndex: faceIndex)
+        }
+    }
+
+    func makeTextureFont(
+        deviceContext: GraphicsDeviceContext,
+        faceIndex: Int
+    ) -> VVD.TextureFont? {
+        switch self {
+        case let .file(url):
+            guard url.isFileURL else {
+                Log.error("Font.file requires a local file URL: \(url)")
+                return nil
+            }
+            return VVD.TextureFont(
+                deviceContext: deviceContext,
+                path: url.standardizedFileURL.path,
+                faceIndex: faceIndex
+            )
+        case let .data(data):
+            return VVD.TextureFont(
+                deviceContext: deviceContext,
+                data: data.storage,
+                faceIndex: faceIndex
+            )
+        }
+    }
+}
+
+struct ExternalFontProvider: TypefaceProvider {
+    private static let weightVariationTag: UInt32 = 0x7767_6874
+
+    let source: ExternalFontSource
+    let size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+    let faceIndex: Int
+    let renderingMode: Font.RenderingMode
+
+    func resolved(in environment: EnvironmentValues) -> Self {
+        guard case .automatic = renderingMode else {
+            return self
+        }
+
+        let renderingMode: Font.RenderingMode
+        switch environment.defaultFontRenderingMode {
+        case let .bitmap(options):
+            renderingMode = .bitmap(options)
+        case let .vector(options):
+            renderingMode = .vector(options)
+        }
+        return Self(
+            source: source,
+            size: size,
+            weight: weight,
+            design: design,
+            faceIndex: faceIndex,
+            renderingMode: renderingMode
+        )
+    }
+
+    func isEqual(to: any TypefaceProvider) -> Bool {
+        guard let other = to as? Self else { return false }
+        return source == other.source &&
+            size == other.size &&
+            weight == other.weight &&
+            design == other.design &&
+            faceIndex == other.faceIndex &&
+            renderingMode == other.renderingMode
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(source)
+        hasher.combine(size)
+        hasher.combine(weight)
+        hasher.combine(design)
+        hasher.combine(faceIndex)
+        hasher.combine(renderingMode)
+    }
+
+    func makeTypeface(
+        _ context: AppContext,
+        dpi: UInt32
+    ) -> Typeface? {
+        precondition(dpi > 0, "The font DPI must be positive.")
+        let contentScaleFactor = CGFloat(dpi) / CGFloat(defaultDPI)
+        guard let layoutFont = source.makeFont(faceIndex: faceIndex),
+              applyRequestedWeight(to: layoutFont) else {
+            return nil
+        }
+        let usesVariableWeight = layoutFont.variationAxes.contains {
+            $0.tag == Self.weightVariationTag
+        }
+        let requestedWeight = weight.value.isFinite
+            ? weight
+            : .regular
+        let logicalEmbolden = usesVariableWeight
+            ? 0
+            : SystemFontProvider.embolden(for: requestedWeight)
+        layoutFont.setPointSize(
+            size,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        switch renderingMode {
+        case .automatic:
+            fatalError("Unresolved font rendering mode")
+        case let .bitmap(options):
+            guard let device = context.graphicsDeviceContext,
+                  let font = source.makeTextureFont(
+                    deviceContext: device,
+                    faceIndex: faceIndex
+                  ),
+                  applyRequestedWeight(to: font) else {
+                return nil
+            }
+            font.boldStrength = logicalEmbolden * contentScaleFactor
+            font.outlineThickness =
+                options.outlineThickness * contentScaleFactor
+            font.isBitmapPreferred = options.isBitmapPreferred
+            font.isColorEnabled = options.isColorEnabled
+            font.setPointSize(size, dpi: (dpi, dpi))
+            return TextureTypeface(
+                textureFont: font,
+                layoutFont: layoutFont,
+                renderScale: contentScaleFactor,
+                logicalEmbolden: logicalEmbolden
+            )
+        case let .vector(options):
+            guard let font = source.makeFont(faceIndex: faceIndex),
+                  applyRequestedWeight(to: font) else {
+                return nil
+            }
+            font.setPointSize(size, dpi: (dpi, dpi))
+            return VectorTypeface(
+                font: font,
+                embolden: logicalEmbolden * contentScaleFactor,
+                outlineThickness:
+                    options.outlineThickness * contentScaleFactor,
+                layoutFont: layoutFont,
+                renderScale: contentScaleFactor,
+                logicalEmbolden: logicalEmbolden
+            )
+        }
+    }
+
+    private func applyRequestedWeight(to font: VVD.Font) -> Bool {
+        guard let axis = font.variationAxes.first(where: {
+            $0.tag == Self.weightVariationTag
+        }) else {
+            return true
+        }
+        let requested = weight.value.isFinite
+            ? weight.value
+            : Font.Weight.regular.value
+        let value = min(
+            max(requested, axis.minimumValue),
+            axis.maximumValue
+        )
+        return font.setVariationCoordinates([
+            Self.weightVariationTag: value
+        ])
     }
 }
 
@@ -1053,12 +1261,17 @@ public struct Font: Hashable, Sendable {
     ) -> TypefaceCascade {
         let font = resolved(in: environment)
         let system = font.provider.fontBox as? SystemFontProvider
+        let external = font.provider.fontBox as? ExternalFontProvider
         let catalog = BundledFontCatalog.shared
         let locale = environment.locale
-        let families = catalog.configuration.fonts(for: locale)
+        let design = system?.design ?? external?.design ?? .default
+        let families = catalog.configuration.fonts(
+            for: locale,
+            design: design
+        )
 
         let size = font.pointSizeForSymbolMetrics ?? 17
-        let weight = system?.weight ?? .regular
+        let weight = system?.weight ?? external?.weight ?? .regular
         let renderingMode = font.bundledRenderingMode(in: environment)
         let primary = font.typeface(forContext: context, dpi: dpi)
 
@@ -1069,7 +1282,8 @@ public struct Font: Hashable, Sendable {
 
         for family in families {
             let face: Typeface?
-            if family == catalog.configuration.systemFont, let system {
+            if family == catalog.configuration.systemFont(for: design),
+               let system {
                 face = primary ?? Font(
                     provider: AnyFontBox(system)
                 ).typeface(forContext: context, dpi: dpi)
@@ -1083,6 +1297,7 @@ public struct Font: Hashable, Sendable {
                     catalog: catalog,
                     context: context,
                     dpi: dpi,
+                    isItalic: system?.isItalic ?? false,
                     deferLoading: true
                 )
             }
@@ -1103,6 +1318,7 @@ public struct Font: Hashable, Sendable {
             catalog: catalog,
             context: context,
             dpi: dpi,
+            isItalic: false,
             deferLoading: true
         )
         return TypefaceCascade(
@@ -1120,45 +1336,26 @@ public struct Font: Hashable, Sendable {
         catalog: BundledFontCatalog,
         context: SceneResources,
         dpi: UInt32,
+        isItalic: Bool,
         deferLoading: Bool = false
     ) -> Typeface? {
         guard appContext != nil else { return nil }
-        guard let descriptor = catalog.configuration.fontDescriptors[family],
-              let resource = catalog.resource(
-                  for: family,
-                  locale: locale,
-                  weight: weight.value
-              ) else {
-            return nil
-        }
-        let source = descriptor.source(for: weight.value)
-
-        let variations: [BundledFontVariation]
-        if let weightAxis = source.weightAxis {
-            variations = [BundledFontVariation(
-                tag: weightAxis.tag,
-                value: min(
-                    max(weight.value, weightAxis.minimum),
-                    weightAxis.maximum
-                )
-            )]
-        } else {
-            variations = []
-        }
-        let bundledFont = Font(provider: AnyFontBox(BundledFontProvider(
-            resource: resource,
+        guard let provider = BundledFontProvider(
+            family: family,
+            locale: locale,
             size: size,
             weight: weight,
             renderingMode: renderingMode,
-            variations: variations,
-            appliesSyntheticWeight: descriptor.appliesSyntheticWeight
-        )))
+            isItalic: isItalic,
+            catalog: catalog
+        ) else { return nil }
+        let bundledFont = Font(provider: AnyFontBox(provider))
         if deferLoading {
             return DeferredTypeface(
                 font: bundledFont,
                 context: context,
                 dpi: dpi,
-                identifier: "\(family.rawValue):\(resource.faceIndex)"
+                identifier: "\(family.rawValue):\(provider.resource.faceIndex)"
             )
         }
         return bundledFont.typeface(forContext: context, dpi: dpi)
@@ -1172,6 +1369,8 @@ public struct Font: Hashable, Sendable {
             return system.renderingMode
         case let bundled as BundledFontProvider:
             return bundled.renderingMode
+        case let external as ExternalFontProvider:
+            return external.renderingMode
         case let fixed as FixedFontProvider:
             if fixed.face is TextureTypeface {
                 return .bitmap()
@@ -1197,6 +1396,8 @@ public struct Font: Hashable, Sendable {
             system.size
         case let bundled as BundledFontProvider:
             bundled.size
+        case let external as ExternalFontProvider:
+            external.size
         case let custom as CustomFontProvider:
             custom.size
         case let fixed as FixedFontProvider:
@@ -1241,7 +1442,7 @@ extension Font {
         case vector(RenderingMode.Vector = .init())
     }
 
-    public enum Design: Hashable {
+    public enum Design: Hashable, Sendable {
         case `default`
         case serif
         case rounded
@@ -1365,6 +1566,50 @@ extension Font {
             design: design,
             renderingMode: .vector(.init(
                 outlineThickness: outlineThickness)))
+        return Font(provider: AnyFontBox(provider))
+    }
+
+    /// Creates a font backed by a local file URL.
+    ///
+    /// Remote URLs are not loaded. Download them first and pass their contents
+    /// to `data(_:size:weight:design:faceIndex:renderingMode:)`.
+    public static func file(
+        _ url: URL,
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        design: Font.Design = .default,
+        faceIndex: Int = 0,
+        renderingMode: Font.RenderingMode = .automatic
+    ) -> Font {
+        let sourceURL = url.isFileURL ? url.standardizedFileURL : url
+        let provider = ExternalFontProvider(
+            source: .file(sourceURL),
+            size: size,
+            weight: weight,
+            design: design,
+            faceIndex: faceIndex,
+            renderingMode: renderingMode
+        )
+        return Font(provider: AnyFontBox(provider))
+    }
+
+    /// Creates a font backed by a retained copy of in-memory font data.
+    public static func data(
+        _ data: Data,
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        design: Font.Design = .default,
+        faceIndex: Int = 0,
+        renderingMode: Font.RenderingMode = .automatic
+    ) -> Font {
+        let provider = ExternalFontProvider(
+            source: .data(ExternalFontData(data)),
+            size: size,
+            weight: weight,
+            design: design,
+            faceIndex: faceIndex,
+            renderingMode: renderingMode
+        )
         return Font(provider: AnyFontBox(provider))
     }
 
