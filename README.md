@@ -40,6 +40,7 @@ Cross-Platform Game Engine for swift programming language.
 
 ## Included External Libraries
 - [FreeType](https://freetype.org/)
+- [HarfBuzz](https://harfbuzz.github.io/)
 - [jpeg](https://ijg.org/)
 - [libFLAC](https://xiph.org/flac/)
 - [libogg](https://xiph.org/ogg/)
@@ -47,11 +48,12 @@ Cross-Platform Game Engine for swift programming language.
 - [libvorbis](https://xiph.org/vorbis/)
 - [LZ4](https://github.com/lz4/lz4)
 - [LZMA](https://www.7-zip.org/sdk.html)
+- [miniaudio](https://github.com/mackron/miniaudio)
 - [minimp3](https://github.com/lieff/minimp3)
+- [SPIRV-Cross](https://github.com/khronosgroup/spirv-cross)
+- [TinyGLTF](https://github.com/syoyo/tinygltf)
 - [zlib](https://github.com/madler/zlib)
 - [Zstd](https://github.com/facebook/zstd)
-- [TinyGLTF](https://github.com/syoyo/tinygltf)
-- [miniaudio](https://github.com/mackron/miniaudio)
 
 ---
 ## Samples

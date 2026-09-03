@@ -8,6 +8,7 @@
 import Foundation
 import Synchronization
 import FreeType
+import HarfBuzz
 
 //////////////////////////////////////////////////////////////////////////////
 // The coordinate system of the font has a positive Y value
