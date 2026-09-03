@@ -35,6 +35,7 @@ private struct SampleLocalizedError: LocalizedError {
 
 struct ContentView: View {
     @State private var contentScaleFactorOverride: CGFloat?
+    @State private var usesVectorFontRendering = false
     @Environment(\.displayScale) private var displayScale
     @Environment(\._contentScaleFactorOverride)
     private var setContentScaleFactorOverride
@@ -215,6 +216,10 @@ struct ContentView: View {
             \.modalSessionUsingPlatformWindow,
             usesPlatformPresentationWindows
         )
+        .environment(
+            \.defaultFontRenderingMode,
+            usesVectorFontRendering ? .vector() : .bitmap()
+        )
     }
 
     private func settingsContent() -> some View {
@@ -234,6 +239,13 @@ struct ContentView: View {
             Divider()
 
             Toggle(
+                "Vector Font Rendering",
+                isOn: $usesVectorFontRendering
+            )
+
+            Divider()
+
+            Toggle(
                 "Open Test Modals in Platform Windows",
                 isOn: $usesPlatformPresentationWindows
             )
@@ -247,7 +259,7 @@ struct ContentView: View {
             }
         }
         .padding(24)
-        .frame(width: 440, height: 280)
+        .frame(width: 440, height: 330)
     }
 
     private func contentScaleButton(
