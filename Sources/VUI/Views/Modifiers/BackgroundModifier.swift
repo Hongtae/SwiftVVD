@@ -52,15 +52,23 @@ public struct _BackgroundStyleModifier<Style>: MultiViewModifier, PrimitiveViewM
         let mainOutputs = body(_Graph(), inputs)
         let sizeAttr = inputs.size
         let positionAttr = inputs.position
+        let containerPositionAttr = inputs.containerPosition
         let environmentAttr = inputs.base.cachedEnvironment.value.environment
         let dlAttr: Attribute<DisplayList> = graph.makeRule {
             let m = modifier._attribute.value
             let viewSize = sizeAttr.value.value
             let position = positionAttr.value
+            let containerPosition = containerPositionAttr.value
             let environment = environmentAttr.value.untrackedCopy()
             var list = DisplayList()
             if viewSize.width > 0 && viewSize.height > 0 {
-                let frame = CGRect(origin: position, size: viewSize)
+                let frame = CGRect(
+                    origin: CGPoint(
+                        x: position.x - containerPosition.x,
+                        y: position.y - containerPosition.y
+                    ),
+                    size: viewSize
+                )
                 let path = Rectangle().path(in: frame)
                 list.appendShapeItem(
                     path: path,

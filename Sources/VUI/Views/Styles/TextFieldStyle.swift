@@ -157,7 +157,6 @@ private struct TextFieldViewportClipDisplayList: StatefulRule {
             fatalError("TextField viewport failed to create its clip owner")
         }
 
-        // Platform-group effects draw in their container's coordinate space.
         let frame = CGRect(
             origin: CGPoint(
                 x: position.value.x - containerPosition.value.x,
@@ -165,7 +164,9 @@ private struct TextFieldViewportClipDisplayList: StatefulRule {
             ),
             size: size.value.value
         )
-        container.clipBounds = frame
+        // The effect frame places this local platform group in its parent.
+        // Both its contents and clip must therefore remain group-relative.
+        container.clipBounds = CGRect(origin: .zero, size: frame.size)
 
         let contents = content.value ?? DisplayList()
         var item = DisplayList.Item(
@@ -198,7 +199,15 @@ private struct TextFieldViewportClipModifier: ViewModifier, MultiViewModifier {
                 "TextFieldViewportClipModifier._makeView called outside AG context"
             )
         }
-        var outputs = body(_Graph(), inputs)
+        let cachedEnvironmentAttribute = inputs.base.cachedEnvironment
+        var cachedEnvironment = cachedEnvironmentAttribute.value
+        let position = cachedEnvironment.animatedPosition(for: inputs)
+        let size = cachedEnvironment.animatedSize(for: inputs)
+        cachedEnvironmentAttribute.value = cachedEnvironment
+
+        var childInputs = inputs
+        childInputs.containerPosition = position
+        var outputs = body(_Graph(), childInputs)
         guard let content = outputs.preferences.reducedValue(
             for: DisplayList.Key.self,
             in: graph
@@ -210,8 +219,8 @@ private struct TextFieldViewportClipModifier: ViewModifier, MultiViewModifier {
         let displayList = graph.makeStatefulRule(
             TextFieldViewportClipDisplayList(
                 identity: identityInputs.pushIdentity(),
-                position: inputs.position,
-                size: inputs.size,
+                position: position,
+                size: size,
                 containerPosition: inputs.containerPosition,
                 content: OptionalAttribute(content),
                 options: inputs[DisplayList.Options.self],

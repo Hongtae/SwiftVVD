@@ -1777,6 +1777,7 @@ final class TextFieldInputTests: XCTestCase {
                 selection: model.selectionBinding
             )
             .frame(width: 160)
+            .textFieldCaretBlinkInterval(0)
         )
         var tick: UInt64 = 1
         var redraw = false
@@ -1810,6 +1811,29 @@ final class TextFieldInputTests: XCTestCase {
             return nil
         }
 
+        func shapeFillFrames(in list: DisplayList) -> [CGRect] {
+            var result: [CGRect] = []
+            for item in list.items {
+                switch item.value {
+                case let .content(content):
+                    if content.command.record.kind == .shapeFill {
+                        result.append(item.frame)
+                    }
+                case let .effect(_, contents):
+                    result.append(contentsOf: shapeFillFrames(in: contents))
+                case let .states(states):
+                    for (_, contents) in states {
+                        result.append(
+                            contentsOf: shapeFillFrames(in: contents)
+                        )
+                    }
+                case .empty:
+                    break
+                }
+            }
+            return result
+        }
+
         renderFrame()
         renderFrame()
 
@@ -1831,10 +1855,43 @@ final class TextFieldInputTests: XCTestCase {
             }
         let clip = try XCTUnwrap(viewportClip(in: initialDisplayList))
         XCTAssertEqual(clip.frame.width, 148, accuracy: 0.001)
+        let contentBounds = try XCTUnwrap(
+            clip.contents.interpolationBounds
+        )
+        XCTAssertEqual(contentBounds.minX, 0, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(contentBounds.minY, 0)
+        XCTAssertLessThan(contentBounds.minY, clip.frame.height)
         XCTAssertGreaterThan(
-            try XCTUnwrap(clip.contents.interpolationBounds).width,
+            contentBounds.width,
             clip.frame.width
         )
+
+        var editing = try XCTUnwrap(mounted.responder.inputState).wrappedValue
+        editing.collapseSelection(
+            to: 1,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        mounted.responder.inputState?.wrappedValue = editing
+        renderFrame()
+        renderFrame()
+
+        let caretDisplayList = try mounted.controller.viewGraph.data
+            .withCurrent {
+                try XCTUnwrap(
+                    mounted.controller.viewGraph.rootDisplayList?.value
+                )
+            }
+        let caretClip = try XCTUnwrap(viewportClip(in: caretDisplayList))
+        let caretFrame = try XCTUnwrap(
+            shapeFillFrames(in: caretClip.contents).first {
+                abs($0.width - 1) < 0.001
+            }
+        )
+        XCTAssertGreaterThanOrEqual(caretFrame.minX, 0)
+        XCTAssertLessThanOrEqual(caretFrame.maxX, caretClip.frame.width)
+        XCTAssertGreaterThanOrEqual(caretFrame.minY, 0)
+        XCTAssertLessThanOrEqual(caretFrame.maxY, caretClip.frame.height)
 
         XCTAssertTrue(mounted.controller.handleKeyboardEvent(
             event: keyboardEvent(
@@ -1861,7 +1918,6 @@ final class TextFieldInputTests: XCTestCase {
             trailingViewport.contentOffset,
             accuracy: 0.001
         )
-
         let externalSelection = selection(
             in: model.text,
             offsets: 6..<10,
