@@ -1571,14 +1571,28 @@ struct TextFieldSelectionLayout: Equatable {
         var atomIndex = atoms.startIndex
         var offsets: [CGFloat] = [0]
         offsets.reserveCapacity(text.count + 1)
+        var scalarIndex = 0
         for character in text {
+            let nextScalarIndex =
+                scalarIndex + character.unicodeScalars.count
+            let characterRange = scalarIndex..<nextScalarIndex
             var trailing = offsets.last ?? 0
-            for _ in character.unicodeScalars {
-                guard atomIndex < atoms.endIndex else { break }
-                trailing = max(trailing, atoms[atomIndex].bounds.maxX)
+            while atomIndex < atoms.endIndex,
+                  atoms[atomIndex].sourceRange.upperBound <=
+                    characterRange.lowerBound {
                 atomIndex += 1
             }
+            var index = atomIndex
+            while index < atoms.endIndex,
+                  atoms[index].sourceRange.lowerBound <
+                    characterRange.upperBound {
+                if atoms[index].sourceRange.overlaps(characterRange) {
+                    trailing = max(trailing, atoms[index].bounds.maxX)
+                }
+                index += 1
+            }
             offsets.append(trailing)
+            scalarIndex = nextScalarIndex
         }
         return TextFieldSelectionLayout(
             characterOffsets: offsets,

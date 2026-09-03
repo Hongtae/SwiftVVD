@@ -21,8 +21,16 @@ final class TerminalFallbackTypeface: Typeface {
         base.glyph(for: scalar)
     }
 
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        base.glyph(at: index)
+    }
+
     func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? {
         base.glyphMetrics(for: scalar)
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        base.glyphMetrics(at: index)
     }
 
     func kernAdvance(
@@ -34,6 +42,20 @@ final class TerminalFallbackTypeface: Typeface {
 
     func hasGlyph(for _: UnicodeScalar) -> Bool {
         false
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        base.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        )
     }
 
     var lineHeight: CGFloat { base.lineHeight }
@@ -54,6 +76,86 @@ final class TerminalFallbackTypeface: Typeface {
 
     func hashIdentity(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(TerminalFallbackTypeface.self))
+        base.hashIdentity(into: &hasher)
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+        base.purgeResources(reason: reason)
+    }
+}
+
+final class ShapingFeatureTypeface: Typeface {
+    let base: Typeface
+    let features: [TypefaceShapingFeature]
+
+    init(_ base: Typeface, features: [TypefaceShapingFeature]) {
+        precondition(!features.isEmpty)
+        self.base = base
+        self.features = features
+    }
+
+    func glyph(for scalar: UnicodeScalar) -> TypefaceGlyph? {
+        base.glyph(for: scalar)
+    }
+
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        base.glyph(at: index)
+    }
+
+    func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        base.glyphMetrics(for: scalar)
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        base.glyphMetrics(at: index)
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        base.kernAdvance(left: left, right: right)
+    }
+
+    func hasGlyph(for scalar: UnicodeScalar) -> Bool {
+        base.hasGlyph(for: scalar)
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features requestedFeatures: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        base.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features + requestedFeatures
+        )
+    }
+
+    var lineHeight: CGFloat { base.lineHeight }
+    var ascender: CGFloat { base.ascender }
+    var descender: CGFloat { base.descender }
+    var decorationMetrics: TypefaceDecorationMetrics? {
+        base.decorationMetrics
+    }
+    var resolvedMetrics: ResolvedFontMetrics { base.resolvedMetrics }
+    var identifier: String {
+        "features:\(features):\(base.identifier)"
+    }
+
+    func isEqual(to other: any Typeface) -> Bool {
+        guard let other = other as? ShapingFeatureTypeface else {
+            return false
+        }
+        return features == other.features && base.isEqual(to: other.base)
+    }
+
+    func hashIdentity(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(ShapingFeatureTypeface.self))
+        hasher.combine(features)
         base.hashIdentity(into: &hasher)
     }
 
@@ -105,8 +207,16 @@ final class DeferredTypeface: Typeface {
         resolved.glyph(for: scalar)
     }
 
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        resolved.glyph(at: index)
+    }
+
     func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? {
         resolved.glyphMetrics(for: scalar)
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        resolved.glyphMetrics(at: index)
     }
 
     func kernAdvance(
@@ -118,6 +228,20 @@ final class DeferredTypeface: Typeface {
 
     func hasGlyph(for scalar: UnicodeScalar) -> Bool {
         resolved.hasGlyph(for: scalar)
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        resolved.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        )
     }
 
     var lineHeight: CGFloat { resolved.lineHeight }
@@ -151,9 +275,18 @@ final class DeferredTypeface: Typeface {
 struct TypefaceCascade {
     let ordinaryFaces: [Typeface]
     let missingGlyphFace: Typeface?
+    var shapingFeatures: [TypefaceShapingFeature] = []
 
     var runFaces: [Typeface] {
+        let ordinaryFaces = ordinaryFaces.map(applyingShapingFeatures)
         guard let missingGlyphFace else { return ordinaryFaces }
-        return ordinaryFaces + [TerminalFallbackTypeface(missingGlyphFace)]
+        return ordinaryFaces + [TerminalFallbackTypeface(
+            applyingShapingFeatures(missingGlyphFace)
+        )]
+    }
+
+    private func applyingShapingFeatures(_ face: Typeface) -> Typeface {
+        guard !shapingFeatures.isEmpty else { return face }
+        return ShapingFeatureTypeface(face, features: shapingFeatures)
     }
 }

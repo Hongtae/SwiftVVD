@@ -87,6 +87,128 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertFalse(commands.isEmpty)
     }
 
+    // ASSERTIONS textShapingClusterRuntimeObserved
+    func testResolvedTextConsumesShapedGlyphIndicesAndSourceClusters() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+        let face = VectorTypeface(font: font)
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "office")],
+            scaleFactor: 1
+        )
+
+        let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
+        XCTAssertEqual(
+            glyphs.compactMap(\.sourceRange),
+            [0..<1, 1..<4, 4..<5, 5..<6]
+        )
+        XCTAssertTrue(glyphs.allSatisfy { $0.glyphIndex != nil })
+        for glyph in glyphs {
+            XCTAssertNotNil(face.glyph(at: try XCTUnwrap(glyph.glyphIndex)))
+        }
+
+        let layout = resolved.makeLayout(
+            in: CGSize(width: 200, height: 100),
+            layoutDirection: .leftToRight
+        )
+        let run = try XCTUnwrap(layout.first?.first)
+        XCTAssertEqual(run.count, 4)
+        XCTAssertEqual(run.characterIndices.map(\.value), [0, 1, 4, 5])
+
+        let combining = GraphicsContext.ResolvedText(
+            runs: [.text([face], "e\u{301}x")],
+            scaleFactor: 1
+        )
+        let combiningRun = try XCTUnwrap(combining.makeLayout(
+            in: CGSize(width: 200, height: 100),
+            layoutDirection: .leftToRight
+        ).first?.first)
+        XCTAssertEqual(combiningRun.count, 2)
+        XCTAssertEqual(combiningRun.characterIndices.map(\.value), [0, 2])
+        XCTAssertEqual(
+            combining.glyphAtoms(
+                in: CGSize(width: 200, height: 100)
+            ).map(\.sourceRange),
+            [0..<2, 2..<3]
+        )
+    }
+
+    // ASSERTIONS textShapingClusterRuntimeObserved
+    func testResolvedTextKeepsCombiningClusterAtomicAcrossWrapping() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+        let face = VectorTypeface(font: font)
+        let resolved = GraphicsContext.ResolvedText(
+            runs: [.text([face], "Ae\u{301}\u{323}B")],
+            scaleFactor: 1
+        )
+        let unwrapped = try XCTUnwrap(resolved.makeGlyphs().first)
+        let combiningGlyphs = unwrapped.glyphs.filter {
+            $0.sourceRange == 1..<4
+        }
+        XCTAssertGreaterThan(
+            combiningGlyphs.count,
+            1,
+            "ranges: \(unwrapped.glyphs.compactMap(\.sourceRange))"
+        )
+
+        let firstClusterWidth = try XCTUnwrap(
+            unwrapped.glyphs.first?.advance.width
+        )
+        let wrapped = resolved.makeGlyphs(
+            maxWidth: max(Int(floor(firstClusterWidth)), 1),
+            maxHeight: .max
+        )
+        var clusterLines: [Range<Int>: Set<Int>] = [:]
+        for (lineIndex, line) in wrapped.enumerated() {
+            for range in line.glyphs.compactMap(\.sourceRange) {
+                clusterLines[range, default: []].insert(lineIndex)
+            }
+        }
+        XCTAssertTrue(clusterLines.values.allSatisfy { $0.count == 1 })
+    }
+
+    // ASSERTIONS textShapingClusterRuntimeObserved
+    @MainActor
+    func testTextFieldSelectionMapsLigatureInteriorsToClusterTrailingEdge()
+        throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let layout = TextFieldSelectionLayout.resolve(
+            text: "office",
+            environment: environment,
+            sceneResources: SceneResources(),
+            leadingInset: 0,
+            viewportOffset: 0
+        )
+
+        XCTAssertEqual(layout.characterOffsets.count, 7)
+        XCTAssertLessThan(layout.characterOffsets[1], layout.characterOffsets[2])
+        XCTAssertEqual(
+            layout.characterOffsets[2],
+            layout.characterOffsets[3],
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            layout.characterOffsets[3],
+            layout.characterOffsets[4],
+            accuracy: 0.001
+        )
+        XCTAssertLessThan(layout.characterOffsets[4], layout.characterOffsets[5])
+    }
+
     func testBackendFontSerializesConcurrentFaceAccessAndLifecycle() throws {
         let url = try XCTUnwrap(defaultFontURL)
         let data = try Data(contentsOf: url)
@@ -1237,7 +1359,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
     }
 
     // ASSERTIONS monospacedDigitFeatureAvailabilityObserved
+    @MainActor
     func testSystemMonospacedDigitUsesBundledTabularAdvances() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
         let font = VUI.Font.system(size: 17).monospacedDigit()
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = .vector()
@@ -1257,6 +1384,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         for advance in advances.dropFirst() {
             XCTAssertEqual(advance, advances[0], accuracy: 0.001)
         }
+
+        let cascade = font.typefaceCascade(
+            in: environment,
+            forContext: SceneResources(),
+            contentScaleFactor: 1
+        )
+        XCTAssertEqual(cascade.shapingFeatures.map(\.tag), [0x746e_756d])
+        XCTAssertTrue(cascade.runFaces.first is ShapingFeatureTypeface)
     }
 
     // ASSERTIONS viewMonospacedEnvironmentModifierObserved

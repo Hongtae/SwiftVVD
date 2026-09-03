@@ -93,6 +93,7 @@ public struct TextProxy {
 
 fileprivate struct _TextLayoutRunStorage: Equatable {
     var glyphRange: Range<Int>
+    var clusterGlyphRanges: [Range<Int>]
     var attributes: _TextAttributeValues
     var style: _ResolvedTextRunAttributes
 }
@@ -342,8 +343,31 @@ extension Text {
                 line.storage.lines[line.index].runs[index].glyphRange
             }
 
+            var clusterGlyphRanges: [Range<Int>] {
+                line.storage.lines[line.index].runs[index].clusterGlyphRanges
+            }
+
+            func glyphRange(for clusters: Range<Int>) -> Range<Int> {
+                precondition(
+                    clusters.lowerBound >= 0 &&
+                        clusters.upperBound <= clusterGlyphRanges.count
+                )
+                guard !clusters.isEmpty else {
+                    let position = clusters.lowerBound ==
+                        clusterGlyphRanges.count
+                        ? glyphRange.upperBound
+                        : clusterGlyphRanges[clusters.lowerBound].lowerBound
+                    return position..<position
+                }
+                let lower = clusterGlyphRanges[clusters.lowerBound].lowerBound
+                let upper = clusterGlyphRanges[
+                    clusters.upperBound - 1
+                ].upperBound
+                return lower..<upper
+            }
+
             public var startIndex: Int { 0 }
-            public var endIndex: Int { glyphRange.count }
+            public var endIndex: Int { clusterGlyphRanges.count }
 
             public subscript(index: Int) -> RunSlice {
                 self[index ..< index + 1]
@@ -371,11 +395,11 @@ extension Text {
             }
 
             public var characterIndices: [CharacterIndex] {
-                glyphRange.map {
+                clusterGlyphRanges.map {
                     CharacterIndex(
                         value: line.storage.lines[
                             line.index
-                        ].glyphs[$0].characterIndex
+                        ].glyphs[$0.lowerBound].characterIndex
                     )
                 }
             }
@@ -427,10 +451,9 @@ extension Text {
             public subscript<T>(key: T.Type) -> T? where T: TextAttribute { run[key] }
 
             public var typographicBounds: TypographicBounds {
-                let base = run.glyphRange.lowerBound
                 var bounds = run.line.storage.bounds(
                     line: run.line.index,
-                    glyphRange: (base + indices.lowerBound)..<(base + indices.upperBound)
+                    glyphRange: run.glyphRange(for: indices)
                 )
                 bounds.origin.x += run.lineOrigin.x
                 bounds.origin.y += run.lineOrigin.y
@@ -505,9 +528,21 @@ extension GraphicsContext.ResolvedText {
                 } else {
                     runs.append(_TextLayoutRunStorage(
                         glyphRange: glyphIndex..<(glyphIndex + 1),
+                        clusterGlyphRanges: [],
                         attributes: glyph.attributes,
                         style: glyph.style
                     ))
+                }
+            }
+            for index in runs.indices {
+                let glyphRange = runs[index].glyphRange
+                let glyphs = Array(line.glyphs[glyphRange])
+                runs[index].clusterGlyphRanges = Self.clusterRanges(
+                    in: glyphs
+                ).map {
+                    let lower = glyphRange.lowerBound + $0.lowerBound
+                    let upper = glyphRange.lowerBound + $0.upperBound
+                    return lower..<upper
                 }
             }
             let result = _TextLayoutLineStorage(
@@ -552,8 +587,7 @@ extension GraphicsContext {
         options: Text.Layout.DrawingOptions = []
     ) {
         let run = slice.run
-        let base = run.glyphRange.lowerBound
-        let glyphRange = (base + slice.indices.lowerBound)..<(base + slice.indices.upperBound)
+        let glyphRange = run.glyphRange(for: slice.indices)
         guard let lineGlyphs = run.line.storage.lineGlyphs(line: run.line.index, glyphRange: glyphRange) else {
             return
         }

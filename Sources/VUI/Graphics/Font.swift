@@ -172,11 +172,34 @@ struct TypefaceGlyphMetrics {
     var descender: CGFloat
 }
 
+typealias TypefaceShapingDirection = VVD.Font.ShapingDirection
+typealias TypefaceShapingFeature = VVD.Font.ShapingFeature
+
+struct TypefaceShapedGlyph {
+    var index: UInt32
+    var sourceRange: Range<Int>
+    var advance: CGSize
+    var offset: CGPoint
+}
+
+struct TypefaceShapedText {
+    var glyphs: [TypefaceShapedGlyph]
+    var direction: TypefaceShapingDirection
+}
+
 protocol Typeface {
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph?
+    func glyph(at index: UInt32) -> TypefaceGlyph?
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics?
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics?
     func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
     func hasGlyph(for: UnicodeScalar) -> Bool
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText?
 
     var lineHeight: CGFloat { get }
     var ascender: CGFloat { get }
@@ -191,8 +214,37 @@ protocol Typeface {
 }
 
 extension Typeface {
+    func glyph(at index: UInt32) -> TypefaceGlyph? { nil }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        nil
+    }
+
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
         guard let glyph = glyph(for: c) else { return nil }
+        switch glyph {
+        case let .texture(data):
+            return TypefaceGlyphMetrics(
+                advance: data.advance,
+                ascender: data.ascender,
+                descender: data.descender
+            )
+        case let .vector(data):
+            return TypefaceGlyphMetrics(
+                advance: data.metrics.advance,
+                ascender: data.metrics.ascender,
+                descender: data.metrics.descender
+            )
+        }
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        guard let glyph = glyph(at: index) else { return nil }
         switch glyph {
         case let .texture(data):
             return TypefaceGlyphMetrics(
@@ -375,6 +427,50 @@ private struct ScaleInvariantTypefaceMetrics {
         )
     }
 
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        guard let metrics = font.glyphMetrics(
+            at: index,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: (glyph.advance.width + embolden) * renderScale,
+                        height: glyph.advance.height * renderScale
+                    ),
+                    offset: glyph.offset * renderScale
+                )
+            },
+            direction: shaped.direction
+        )
+    }
+
     func kernAdvance(
         left: UnicodeScalar,
         right: UnicodeScalar
@@ -451,6 +547,10 @@ struct TextureTypeface: VVDFontBackedTypeface {
         return nil
     }
 
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        textureFont.glyphData(at: index).map(TypefaceGlyph.texture)
+    }
+
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
         if let layoutMetrics {
             return layoutMetrics.glyphMetrics(for: c)
@@ -465,6 +565,61 @@ struct TextureTypeface: VVDFontBackedTypeface {
             advance: metrics.advance,
             ascender: metrics.ascender,
             descender: metrics.descender
+        )
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(at: index)
+        }
+        guard let metrics = textureFont.glyphMetrics(
+            at: index,
+            embolden: textureFont.boldStrength
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        if let layoutMetrics {
+            return layoutMetrics.shape(
+                text,
+                direction: direction,
+                language: language,
+                features: features
+            )
+        }
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: glyph.advance.width + textureFont.boldStrength,
+                        height: glyph.advance.height
+                    ),
+                    offset: glyph.offset
+                )
+            },
+            direction: shaped.direction
         )
     }
 
@@ -498,7 +653,7 @@ final class VectorTypeface: VVDFontBackedTypeface {
         case unavailable
     }
 
-    private let cache = Mutex<[UnicodeScalar: CacheEntry]>([:])
+    private let cache = Mutex<[UInt32: CacheEntry]>([:])
 
     init(font: VVD.Font,
          embolden: CGFloat = 0,
@@ -573,6 +728,61 @@ final class VectorTypeface: VVDFontBackedTypeface {
         )
     }
 
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(at: index)
+        }
+        guard let metrics = font.glyphMetrics(
+            at: index,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        if let layoutMetrics {
+            return layoutMetrics.shape(
+                text,
+                direction: direction,
+                language: language,
+                features: features
+            )
+        }
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: glyph.advance.width + embolden,
+                        height: glyph.advance.height
+                    ),
+                    offset: glyph.offset
+                )
+            },
+            direction: shaped.direction
+        )
+    }
+
     func kernAdvance(
         left: UnicodeScalar,
         right: UnicodeScalar
@@ -582,7 +792,17 @@ final class VectorTypeface: VVDFontBackedTypeface {
     }
 
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
-        if let cached = cache.withLock({ $0[c] }) {
+        guard let metrics = font.glyphMetrics(
+            for: c,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return glyph(at: metrics.index)
+    }
+
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        if let cached = cache.withLock({ $0[index] }) {
             switch cached {
             case let .glyph(data):
                 return .vector(data)
@@ -595,7 +815,7 @@ final class VectorTypeface: VVDFontBackedTypeface {
         var hasOpenContour = false
 
         let metrics = font.decomposeGlyphOutline(
-            for: c,
+            at: index,
             embolden: embolden,
             outline: outlineThickness) { command in
             switch command {
@@ -619,15 +839,15 @@ final class VectorTypeface: VVDFontBackedTypeface {
         path = path.applying(CGAffineTransform(scaleX: 1, y: -1))
         guard let metrics else {
             cache.withLock { cache in
-                cache[c] = cache[c] ?? .unavailable
+                cache[index] = cache[index] ?? .unavailable
             }
             return nil
         }
 
         let result = GlyphData(metrics: metrics, path: path)
         let cached = cache.withLock { cache in
-            let cached = cache[c] ?? .glyph(result)
-            cache[c] = cached
+            let cached = cache[index] ?? .glyph(result)
+            cache[index] = cached
             return cached
         }
         switch cached {
@@ -655,10 +875,12 @@ protocol TypefaceProvider {
     ) -> Typeface?
 
     var isShareable: Bool { get }
+    var shapingFeatures: [TypefaceShapingFeature] { get }
 }
 
 protocol StaticFontModifier {
     static func modify(_ font: Font) -> Font
+    static var shapingFeatures: [TypefaceShapingFeature] { get }
 }
 
 protocol StaticModifierProviderProtocol {
@@ -669,10 +891,15 @@ protocol StaticModifierProviderProtocol {
 
 extension TypefaceProvider {
     var isShareable: Bool { true }
+    var shapingFeatures: [TypefaceShapingFeature] { [] }
 
     func resolved(in environment: EnvironmentValues) -> Self {
         self
     }
+}
+
+extension StaticFontModifier {
+    static var shapingFeatures: [TypefaceShapingFeature] { [] }
 }
 
 struct SystemFontProvider: TypefaceProvider {
@@ -1255,6 +1482,9 @@ class AnyFontBox: @unchecked Sendable {
         )
     }
     var isShareable: Bool { fontBox.isShareable }
+    var shapingFeatures: [TypefaceShapingFeature] {
+        fontBox.shapingFeatures
+    }
 }
 
 public struct Font: Hashable, Sendable {
@@ -1389,6 +1619,18 @@ public struct Font: Hashable, Sendable {
         forContext context: SceneResources,
         dpi: UInt32
     ) -> TypefaceCascade {
+        var shapingFeatures = provider.shapingFeatures
+        if environment.fontModifiers.usesMonospacedDigits {
+            shapingFeatures.append(
+                contentsOf: MonospacedDigitModifier.shapingFeatures
+            )
+        }
+        var uniqueShapingFeatures: [TypefaceShapingFeature] = []
+        for feature in shapingFeatures where
+            !uniqueShapingFeatures.contains(feature) {
+            uniqueShapingFeatures.append(feature)
+        }
+
         let font = resolved(in: environment)
         let system = font.provider.fontBox as? SystemFontProvider
         let external = font.provider.fontBox as? ExternalFontProvider
@@ -1453,7 +1695,8 @@ public struct Font: Hashable, Sendable {
         )
         return TypefaceCascade(
             ordinaryFaces: ordinaryFaces,
-            missingGlyphFace: missingGlyphFace
+            missingGlyphFace: missingGlyphFace,
+            shapingFeatures: uniqueShapingFeatures
         )
     }
 
@@ -1589,6 +1832,10 @@ extension Font {
         var isShareable: Bool {
             modifiedFont.provider.isShareable
         }
+
+        var shapingFeatures: [TypefaceShapingFeature] {
+            base.provider.shapingFeatures + Modifier.shapingFeatures
+        }
     }
 
     struct MonospacedModifier: StaticFontModifier {
@@ -1598,6 +1845,10 @@ extension Font {
     }
 
     struct MonospacedDigitModifier: StaticFontModifier {
+        static let shapingFeatures: [TypefaceShapingFeature] = [
+            TypefaceShapingFeature(tag: 0x746e_756d)
+        ]
+
         static func modify(_ font: Font) -> Font {
             font
         }

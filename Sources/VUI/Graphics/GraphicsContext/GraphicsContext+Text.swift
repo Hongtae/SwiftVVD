@@ -441,8 +441,11 @@ extension GraphicsContext {
 
             var scalar: UnicodeScalar
             var face: Typeface
+            var glyphIndex: UInt32?
+            var sourceRange: Range<Int>?
             var content: Content = .missing
             var advance: CGSize = .zero     // distance to next glyph
+            var positionOffset: CGPoint = .zero
             // The selected face owns glyph/run metrics and artwork.
             var ascender: CGFloat = .zero
             var descender: CGFloat = .zero
@@ -484,6 +487,31 @@ extension GraphicsContext {
             }
         }
 
+        static func sameCluster(_ lhs: Glyph, _ rhs: Glyph) -> Bool {
+            guard let lhsRange = lhs.sourceRange,
+                  let rhsRange = rhs.sourceRange else {
+                return false
+            }
+            return lhsRange == rhsRange &&
+                lhs.isTruncationToken == rhs.isTruncationToken &&
+                lhs.attributes == rhs.attributes &&
+                lhs.style == rhs.style &&
+                lhs.face.isEqual(to: rhs.face)
+        }
+
+        static func clusterRanges(in glyphs: [Glyph]) -> [Range<Int>] {
+            guard !glyphs.isEmpty else { return [] }
+            var ranges: [Range<Int>] = []
+            var lowerBound = glyphs.startIndex
+            for index in glyphs.indices.dropFirst() where
+                !sameCluster(glyphs[index - 1], glyphs[index]) {
+                ranges.append(lowerBound..<index)
+                lowerBound = index
+            }
+            ranges.append(lowerBound..<glyphs.endIndex)
+            return ranges
+        }
+
         struct LineGlyphs {
             var glyphs: [Glyph]
             var ascender: CGFloat
@@ -497,6 +525,7 @@ extension GraphicsContext {
 
         struct GlyphAtom {
             var scalar: UnicodeScalar
+            var sourceRange: Range<Int>
             var bounds: CGRect
         }
 
@@ -519,27 +548,45 @@ extension GraphicsContext {
             var lineOriginY: CGFloat = 0
 
             for line in lines {
+                let clusterCount = Self.clusterRanges(in: line.glyphs).count
                 let fallbackAdvance = line.width > 0 || line.glyphs.isEmpty
                     ? CGFloat.zero
-                    : width / CGFloat(line.glyphs.count)
+                    : width / CGFloat(clusterCount)
                 var glyphOriginX: CGFloat = 0
+                var pendingAtom: GlyphAtom?
                 for (index, glyph) in line.glyphs.enumerated() {
+                    let continuesCluster = index > 0 &&
+                        Self.sameCluster(glyph, line.glyphs[index - 1])
                     let advance = glyph.advance.width > 0
                         ? glyph.advance.width
-                        : fallbackAdvance
+                        : (continuesCluster ? 0 : fallbackAdvance)
                     if index != 0 {
                         glyphOriginX += glyph.kerning.x
                     }
-                    atoms.append(GlyphAtom(
+                    let atom = GlyphAtom(
                         scalar: glyph.scalar,
+                        sourceRange: glyph.sourceRange ??
+                            glyph.characterIndex..<(glyph.characterIndex + 1),
                         bounds: CGRect(
                             x: glyphOriginX * scale,
                             y: lineOriginY * scale,
                             width: advance * scale,
                             height: line.height * scale
                         )
-                    ))
+                    )
+                    if var pending = pendingAtom, continuesCluster {
+                        pending.bounds = pending.bounds.union(atom.bounds)
+                        pendingAtom = pending
+                    } else {
+                        if let pendingAtom {
+                            atoms.append(pendingAtom)
+                        }
+                        pendingAtom = atom
+                    }
                     glyphOriginX += advance
+                }
+                if let pendingAtom {
+                    atoms.append(pendingAtom)
                 }
                 lineOriginY += line.height
             }
@@ -642,6 +689,12 @@ extension GraphicsContext {
         }
 
         struct TextGlyphs {
+            private struct SourceSpan {
+                var range: Range<Int>
+                var face: Typeface
+                var makesGlyphs: Bool
+            }
+
             let glyphs: [Glyph]
             let width: CGFloat
             var height: CGFloat { ascender - descender }
@@ -655,6 +708,7 @@ extension GraphicsContext {
                              prevFace: Typeface?,
                              prevChar: UnicodeScalar) -> Self {
                 assert(faces.isEmpty == false)
+                let scalars = Array(unicodeScalars)
                 var glyphs: [Glyph] = []
                 var ascender: CGFloat = .zero
                 var descender: CGFloat = .zero
@@ -664,40 +718,166 @@ extension GraphicsContext {
                 let lineBoxAscender = faces[0].ascender
                 let lineBoxDescender = faces[0].descender
 
-                for char2 in unicodeScalars {
-                    let supportedFace = faces.first {
-                        $0.hasGlyph(for: char2)
+                var spans: [SourceSpan] = []
+                func appendSpan(
+                    _ range: Range<Int>,
+                    face: Typeface,
+                    makesGlyphs: Bool
+                ) {
+                    guard !range.isEmpty else { return }
+                    if let index = spans.indices.last,
+                       spans[index].range.upperBound == range.lowerBound,
+                       spans[index].makesGlyphs == makesGlyphs,
+                       spans[index].face.isEqual(to: face) {
+                        spans[index].range =
+                            spans[index].range.lowerBound..<range.upperBound
+                    } else {
+                        spans.append(SourceSpan(
+                            range: range,
+                            face: face,
+                            makesGlyphs: makesGlyphs
+                        ))
                     }
-                    let makeMissingGlyph = drawMissingGlyphs &&
-                        !char2.properties.isDefaultIgnorableCodePoint
-                    let face2 = supportedFace ?? (
-                        makeMissingGlyph ? faces[faces.count - 1] : faces[0]
-                    )
-                    let makeGlyph = supportedFace != nil || makeMissingGlyph
+                }
 
-                    var glyph = Glyph(scalar: char2, face: face2)
-                    glyph.lineBoxAscender = lineBoxAscender
-                    glyph.lineBoxDescender = lineBoxDescender
-                    if makeGlyph, let metrics = face2.glyphMetrics(for: char2) {
-                        glyph.content = .unresolved
-                        glyph.advance = metrics.advance
-                        glyph.ascender = metrics.ascender
-                        glyph.descender = metrics.descender
-                        if let face1, face1.isEqual(to: face2) {
-                            glyph.kerning = face1.kernAdvance(left: char1, right: char2)
-                        } else {
-                            glyph.kerning = .zero
-                        }
-                    } else {    // no glyph
-                        glyph.ascender = face2.ascender
-                        glyph.descender = face2.descender
+                let source = String(unicodeScalars)
+                var scalarIndex = 0
+                for character in source {
+                    let characterScalars = Array(character.unicodeScalars)
+                    let range = scalarIndex..<(scalarIndex + characterScalars.count)
+                    scalarIndex = range.upperBound
+                    let visibleScalars = characterScalars.filter {
+                        !$0.properties.isDefaultIgnorableCodePoint
                     }
+                    if visibleScalars.isEmpty {
+                        appendSpan(range, face: faces[0], makesGlyphs: false)
+                    } else if let face = faces.first(where: { face in
+                        visibleScalars.allSatisfy(face.hasGlyph(for:))
+                    }) {
+                        appendSpan(range, face: face, makesGlyphs: true)
+                    } else {
+                        for index in range {
+                            let scalar = scalars[index]
+                            let supportedFace = faces.first {
+                                $0.hasGlyph(for: scalar)
+                            }
+                            let makeMissingGlyph = drawMissingGlyphs &&
+                                !scalar.properties.isDefaultIgnorableCodePoint
+                            let face = supportedFace ?? (
+                                makeMissingGlyph ? faces[faces.count - 1] : faces[0]
+                            )
+                            appendSpan(
+                                index..<(index + 1),
+                                face: face,
+                                makesGlyphs:
+                                    supportedFace != nil || makeMissingGlyph
+                            )
+                        }
+                    }
+                }
+
+                func append(_ glyph: Glyph) {
                     glyphs.append(glyph)
                     ascender = max(ascender, glyph.lineBoxAscender)
                     descender = min(descender, glyph.lineBoxDescender)
                     width += glyph.advance.width + glyph.kerning.x
-                    char1 = char2
-                    face1 = face2
+                }
+
+                func appendScalarGlyphs(_ span: SourceSpan) {
+                    for index in span.range {
+                        let scalar = scalars[index]
+                        var glyph = Glyph(scalar: scalar, face: span.face)
+                        glyph.sourceRange = index..<(index + 1)
+                        glyph.lineBoxAscender = lineBoxAscender
+                        glyph.lineBoxDescender = lineBoxDescender
+                        if span.makesGlyphs,
+                           let metrics = span.face.glyphMetrics(for: scalar) {
+                            glyph.content = .unresolved
+                            glyph.advance = metrics.advance
+                            glyph.ascender = metrics.ascender
+                            glyph.descender = metrics.descender
+                            if let face1, face1.isEqual(to: span.face) {
+                                glyph.kerning = face1.kernAdvance(
+                                    left: char1,
+                                    right: scalar
+                                )
+                            }
+                        } else {
+                            glyph.ascender = span.face.ascender
+                            glyph.descender = span.face.descender
+                        }
+                        append(glyph)
+                        char1 = scalar
+                        face1 = span.face
+                    }
+                }
+
+                for span in spans {
+                    let spanText = String(
+                        decoding: scalars[span.range].map(\.value),
+                        as: Unicode.UTF32.self
+                    )
+                    guard span.makesGlyphs,
+                          let shaped = span.face.shape(
+                            spanText,
+                            direction: nil,
+                            language: nil,
+                            features: []
+                          ),
+                          shaped.direction == .leftToRight,
+                          !shaped.glyphs.isEmpty else {
+                        appendScalarGlyphs(span)
+                        continue
+                    }
+
+                    guard shaped.glyphs.allSatisfy({ glyph in
+                        !glyph.sourceRange.isEmpty &&
+                            glyph.sourceRange.lowerBound >= 0 &&
+                            glyph.sourceRange.upperBound <= span.range.count
+                    }) else {
+                        appendScalarGlyphs(span)
+                        continue
+                    }
+
+                    for (index, shapedGlyph) in shaped.glyphs.enumerated() {
+                        let sourceRange = (
+                            span.range.lowerBound +
+                                shapedGlyph.sourceRange.lowerBound
+                        )..<(
+                            span.range.lowerBound +
+                                shapedGlyph.sourceRange.upperBound
+                        )
+                        let scalar = scalars[sourceRange.lowerBound]
+                        var glyph = Glyph(scalar: scalar, face: span.face)
+                        glyph.glyphIndex = shapedGlyph.index
+                        glyph.sourceRange = sourceRange
+                        glyph.advance = shapedGlyph.advance
+                        glyph.positionOffset = shapedGlyph.offset
+                        glyph.lineBoxAscender = lineBoxAscender
+                        glyph.lineBoxDescender = lineBoxDescender
+                        if let metrics = span.face.glyphMetrics(
+                            at: shapedGlyph.index
+                        ) {
+                            glyph.content = .unresolved
+                            glyph.ascender = metrics.ascender
+                            glyph.descender = metrics.descender
+                        } else {
+                            glyph.ascender = span.face.ascender
+                            glyph.descender = span.face.descender
+                        }
+                        if index == 0,
+                           let face1,
+                           face1.isEqual(to: span.face) {
+                            glyph.kerning = face1.kernAdvance(
+                                left: char1,
+                                right: scalar
+                            )
+                        }
+                        append(glyph)
+                    }
+
+                    char1 = scalars[span.range.upperBound - 1]
+                    face1 = span.face
                 }
 
                 if glyphs.isEmpty {
@@ -705,11 +885,14 @@ extension GraphicsContext {
                     descender = lineBoxDescender
                 }
                 assert((ascender - descender) > 0)
-                return .init(glyphs: glyphs,
-                             width: width,
-                             ascender: ascender,
-                             descender: descender,
-                             lastFace: face1, lastCharacter: char1)
+                return .init(
+                    glyphs: glyphs,
+                    width: width,
+                    ascender: ascender,
+                    descender: descender,
+                    lastFace: face1,
+                    lastCharacter: char1
+                )
             }
         }
 
@@ -740,7 +923,11 @@ extension GraphicsContext {
             for line in makeGlyphs() {
                 for glyph in line.glyphs {
                     guard case .unresolved = glyph.content else { continue }
-                    _ = glyph.face.glyph(for: glyph.scalar)
+                    if let index = glyph.glyphIndex {
+                        _ = glyph.face.glyph(at: index)
+                    } else {
+                        _ = glyph.face.glyph(for: glyph.scalar)
+                    }
                 }
             }
         }
@@ -838,10 +1025,13 @@ extension GraphicsContext {
             Self.forEachGlyph(in: lineGlyphs) { glyph, baseline in
                 switch glyph.content {
                 case .unresolved:
-                    guard glyph.scalar != UnicodeScalar(0),
-                          case let .texture(data) = glyph.face.glyph(
-                            for: glyph.scalar
-                          ) else {
+                    let content: TypefaceGlyph?
+                    if let index = glyph.glyphIndex {
+                        content = glyph.face.glyph(at: index)
+                    } else {
+                        content = glyph.face.glyph(for: glyph.scalar)
+                    }
+                    guard case let .texture(data) = content else {
                         return
                     }
                     appendTexture(
@@ -1043,8 +1233,10 @@ extension GraphicsContext {
                         : .zero
                     offset += kerning
                     let baseline = CGPoint(
-                        x: glyph.contentOffset.x + offset.x,
-                        y: line.ascender + offset.y - glyph.baselineOffset
+                        x: glyph.contentOffset.x + offset.x +
+                            glyph.positionOffset.x,
+                        y: line.ascender + offset.y - glyph.baselineOffset -
+                            glyph.positionOffset.y
                     )
                     callback(glyph, baseline)
                     offset.x += glyph.advance.width
@@ -1072,34 +1264,33 @@ extension GraphicsContext {
                     result + glyph.advance.width + glyph.kerning.x
                 } - (glyphs.first?.kerning.x ?? 0) // ignore first kerning
             }
-            // Returns the index of the character that matches the wrapable character condition.
-            let getBreakableIndex = { (glyphs: [Glyph]) -> Int? in
-                if glyphs.isEmpty { return nil }
-                var index = glyphs.endIndex
-                while index != glyphs.startIndex {
-                    let index2 = glyphs.index(before: index)
-                    let scalar = glyphs[index2].scalar
+            // Returns the glyph index immediately after a breakable cluster.
+            let getBreakableSplitIndex = { (glyphs: [Glyph]) -> Int? in
+                let clusters = Self.clusterRanges(in: glyphs)
+                for clusterIndex in clusters.indices.reversed() {
+                    let cluster = clusters[clusterIndex]
+                    let scalar = glyphs[cluster.lowerBound].scalar
                     if breakables.contains(scalar) {
                         var beforeNumber = false
                         var afterNumber = false
-                        if index != glyphs.endIndex {
-                            beforeNumber = decimalNumbers.contains(glyphs[index].scalar)
+                        if clusterIndex + 1 < clusters.endIndex {
+                            beforeNumber = decimalNumbers.contains(
+                                glyphs[clusters[clusterIndex + 1].lowerBound].scalar
+                            )
                         }
-                        if index2 != glyphs.startIndex {
-                            let index3 = glyphs.index(before: index2)
-                            afterNumber = decimalNumbers.contains(glyphs[index3].scalar)
+                        if clusterIndex > clusters.startIndex {
+                            afterNumber = decimalNumbers.contains(
+                                glyphs[clusters[clusterIndex - 1].lowerBound].scalar
+                            )
                         }
                         if breakableNotBeforeDN.contains(scalar) && beforeNumber {
-                            index = index2
                             continue
                         }
                         if breakableNotBetweenDN.contains(scalar) && beforeNumber && afterNumber {
-                            index = index2
                             continue
                         }
-                        return index2
+                        return cluster.upperBound
                     }
-                    index = index2
                 }
                 return nil
             }
@@ -1108,19 +1299,22 @@ extension GraphicsContext {
                 (glyphs: [Glyph], maxWidth: Int) -> (first: [Glyph], second: [Glyph]) in
                 var first = glyphs
                 var second: [Glyph] = []
-                while first.count > 1 && Int(ceil(getGlyphsWidth(first))) > maxWidth {
-                    if let index = getBreakableIndex(first),
-                       first.index(after: index) != first.endIndex {
-                        let index2 = first.index(after: index)
+                while Self.clusterRanges(in: first).count > 1 &&
+                        Int(ceil(getGlyphsWidth(first))) > maxWidth {
+                    if let splitIndex = getBreakableSplitIndex(first),
+                       splitIndex != first.endIndex {
                         second.insert(
-                            contentsOf: first[index2...],
+                            contentsOf: first[splitIndex...],
                             at: second.startIndex
                         )
-                        first.removeSubrange(index2...)
-                    } else {
-                        if let s2 = first.popLast() {
-                            second.insert(s2, at: second.startIndex)
-                        }
+                        first.removeSubrange(splitIndex...)
+                    } else if let cluster =
+                        Self.clusterRanges(in: first).last {
+                        second.insert(
+                            contentsOf: first[cluster],
+                            at: second.startIndex
+                        )
+                        first.removeSubrange(cluster)
                     }
                 }
                 return (first: first, second: second)
@@ -1141,7 +1335,7 @@ extension GraphicsContext {
             var wrappedLines: [LineGlyphs] = []
             for sourceLine in lines {
                 var line = sourceLine
-                while line.glyphs.count > 1,
+                while Self.clusterRanges(in: line.glyphs).count > 1,
                       Int(ceil(line.width)) > maxWidth {
                     let split = splitLineGlyphs(line.glyphs, maxWidth)
                     guard !split.second.isEmpty else { break }
@@ -1241,6 +1435,7 @@ extension GraphicsContext {
                 glyph.lineBoxDescender = source.lineBoxDescender
                 glyph.foregroundColor = source.foregroundColor
                 glyph.characterIndex = characterIndex
+                glyph.sourceRange = characterIndex..<(characterIndex + 1)
                 glyph.isTruncationToken = true
                 glyph.advance.width += (
                     source.style.tracking ??
@@ -1259,16 +1454,19 @@ extension GraphicsContext {
             ) -> [Glyph]? {
                 if let explicitBoundary,
                    let source = glyphs.last {
-                    var prefix = glyphs
+                    var prefix = Self.clusterRanges(in: glyphs).map {
+                        Array(glyphs[$0])
+                    }
                     while true {
+                        let flattenedPrefix = prefix.flatMap { $0 }
                         guard let ellipsis = makeEllipsis(
                             inheriting: source,
                             characterIndex: explicitBoundary.characterIndex,
-                            after: prefix.last
+                            after: flattenedPrefix.last
                         ) else {
                             return nil
                         }
-                        var candidate = prefix + [ellipsis]
+                        var candidate = flattenedPrefix + [ellipsis]
                         if !candidate.isEmpty {
                             candidate[0].kerning = .zero
                         }
@@ -1280,14 +1478,19 @@ extension GraphicsContext {
                     }
                 }
 
-                guard glyphs.count > 1 else { return nil }
+                let clusters = Self.clusterRanges(in: glyphs).map {
+                    Array(glyphs[$0])
+                }
+                guard clusters.count > 1 else { return nil }
                 for prefixCount in stride(
-                    from: glyphs.count - 1,
+                    from: clusters.count - 1,
                     through: 0,
                     by: -1
                 ) {
-                    let source = glyphs[prefixCount]
-                    var prefix = Array(glyphs[..<prefixCount])
+                    guard let source = clusters[prefixCount].first else {
+                        continue
+                    }
+                    var prefix = clusters[..<prefixCount].flatMap { $0 }
                     let previous = prefix.last
                     guard let ellipsis = makeEllipsis(
                         inheriting: source,
@@ -1306,7 +1509,10 @@ extension GraphicsContext {
             }
 
             func headTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
-                guard glyphs.count > 1,
+                let clusters = Self.clusterRanges(in: glyphs).map {
+                    Array(glyphs[$0])
+                }
+                guard clusters.count > 1,
                       let source = glyphs.first,
                       let ellipsis = makeEllipsis(
                         inheriting: source,
@@ -1316,11 +1522,11 @@ extension GraphicsContext {
                     return nil
                 }
                 for suffixCount in stride(
-                    from: glyphs.count - 1,
+                    from: clusters.count - 1,
                     through: 0,
                     by: -1
                 ) {
-                    var suffix = Array(glyphs.suffix(suffixCount))
+                    var suffix = clusters.suffix(suffixCount).flatMap { $0 }
                     if !suffix.isEmpty {
                         suffix[0].kerning = adjacencyKerning(
                             from: ellipsis,
@@ -1336,13 +1542,18 @@ extension GraphicsContext {
             }
 
             func middleTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
-                guard glyphs.count > 1 else { return nil }
+                let clusters = Self.clusterRanges(in: glyphs).map {
+                    Array(glyphs[$0])
+                }
+                guard clusters.count > 1 else { return nil }
 
                 var selectedPrefixCount = 0
                 var selectedEllipsis: Glyph?
-                for prefixCount in 0..<glyphs.count {
-                    let source = glyphs[prefixCount]
-                    let prefix = Array(glyphs[..<prefixCount])
+                for prefixCount in 0..<clusters.count {
+                    guard let source = clusters[prefixCount].first else {
+                        continue
+                    }
+                    let prefix = clusters[..<prefixCount].flatMap { $0 }
                     guard let ellipsis = makeEllipsis(
                         inheriting: source,
                         characterIndex: source.characterIndex,
@@ -1376,14 +1587,14 @@ extension GraphicsContext {
                 }
 
                 let maximumSuffixCount =
-                    glyphs.count - selectedPrefixCount - 1
-                let prefix = Array(glyphs[..<selectedPrefixCount])
+                    clusters.count - selectedPrefixCount - 1
+                let prefix = clusters[..<selectedPrefixCount].flatMap { $0 }
                 for suffixCount in stride(
                     from: maximumSuffixCount,
                     through: 0,
                     by: -1
                 ) {
-                    var suffix = Array(glyphs.suffix(suffixCount))
+                    var suffix = clusters.suffix(suffixCount).flatMap { $0 }
                     if !suffix.isEmpty {
                         suffix[0].kerning = adjacencyKerning(
                             from: ellipsis,
@@ -1517,8 +1728,21 @@ extension GraphicsContext {
                         ) * scaleFactor
                         let baselineOffset =
                             (resolvedStyle.baselineOffset ?? 0) * scaleFactor
+                        let runStartIndex = characterIndex
+                        characterIndex += scalars.count
                         let runGlyphs = textGlyphs.glyphs.map { glyph in
                             var glyph = glyph
+                            if let range = glyph.sourceRange {
+                                glyph.sourceRange = (
+                                    runStartIndex + range.lowerBound
+                                )..<(
+                                    runStartIndex + range.upperBound
+                                )
+                                glyph.characterIndex =
+                                    runStartIndex + range.lowerBound
+                            } else {
+                                glyph.characterIndex = runStartIndex
+                            }
                             glyph.attributes = attributes
                             glyph.style = resolvedStyle
                             glyph.baselineOffset = baselineOffset
@@ -1527,8 +1751,6 @@ extension GraphicsContext {
                             glyph.advance.width += spacing
                             return glyph
                         }
-                        let runStartIndex = characterIndex
-                        characterIndex += scalars.count
                         if runGlyphs.isEmpty {
                             ascender = max(
                                 ascender,
@@ -1539,8 +1761,7 @@ extension GraphicsContext {
                                 textGlyphs.descender + min(baselineOffset, 0)
                             )
                         } else {
-                            for (index, var glyph) in runGlyphs.enumerated() {
-                                glyph.characterIndex = runStartIndex + index
+                            for var glyph in runGlyphs {
                                 if glyphs.isEmpty {
                                     glyph.kerning = .zero
                                 }
@@ -1583,8 +1804,12 @@ extension GraphicsContext {
                             return glyph
                         }()
                         boundary.scalar = UnicodeScalar("\n")
+                        boundary.glyphIndex = nil
+                        boundary.sourceRange =
+                            characterIndex..<(characterIndex + 1)
                         boundary.content = .missing
                         boundary.advance = .zero
+                        boundary.positionOffset = .zero
                         boundary.kerning = .zero
                         boundary.characterIndex = characterIndex
                         boundary.isTruncationToken = false
@@ -1628,6 +1853,8 @@ extension GraphicsContext {
                     glyph.advance.height = height
                     glyph.attributes = attributes
                     glyph.characterIndex = characterIndex
+                    glyph.sourceRange =
+                        characterIndex..<(characterIndex + 1)
                     glyphs.append(glyph)
                     characterIndex += 1
 
