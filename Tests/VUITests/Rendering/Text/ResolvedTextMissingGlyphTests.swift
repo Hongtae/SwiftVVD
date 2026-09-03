@@ -12,6 +12,81 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         requireSendable(VVD.TextureFont.self)
     }
 
+    func testBackendFontShapesLigaturesAndPreservesScalarClusters() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        let ligature = try XCTUnwrap(font.shape("ffi"))
+        let disabledFeature = try XCTUnwrap(VVD.Font.ShapingFeature(
+            tag: "liga",
+            value: 0
+        ))
+        let separate = try XCTUnwrap(font.shape(
+            "ffi",
+            features: [disabledFeature]
+        ))
+
+        XCTAssertLessThan(ligature.glyphs.count, separate.glyphs.count)
+        XCTAssertEqual(ligature.glyphs.first?.sourceRange, 0..<3)
+        XCTAssertEqual(separate.glyphs.map(\.sourceRange), [0..<1, 1..<2, 2..<3])
+    }
+
+    func testBackendFontShapesCombiningSequenceAsSourceCluster() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        let shaped = try XCTUnwrap(font.shape("e\u{301}"))
+
+        XCTAssertFalse(shaped.glyphs.isEmpty)
+        XCTAssertTrue(shaped.glyphs.allSatisfy { $0.sourceRange == 0..<2 })
+        XCTAssertGreaterThan(
+            shaped.glyphs.reduce(CGFloat.zero) { $0 + $1.advance.width },
+            0
+        )
+    }
+
+    func testBackendFontGuessesRightToLeftShapingDirection() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+
+        let shaped = try XCTUnwrap(font.shape("مرحبا"))
+
+        XCTAssertEqual(shaped.direction, .rightToLeft)
+    }
+
+    func testBackendFontLoadsShapedGlyphByIndex() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        let shaped = try XCTUnwrap(font.shape("ffi"))
+        let glyph = try XCTUnwrap(shaped.glyphs.first)
+
+        XCTAssertNotNil(font.glyphMetrics(at: glyph.index))
+        XCTAssertTrue(font.withGlyphBitmap(
+            at: glyph.index,
+            embolden: 0,
+            outline: 0
+        ) { _, _, _, _ in })
+
+        var commands: [VVD.Font.OutlineCommand] = []
+        XCTAssertNotNil(font.decomposeGlyphOutline(
+            at: glyph.index
+        ) { commands.append($0) })
+        XCTAssertFalse(commands.isEmpty)
+    }
+
     func testBackendFontSerializesConcurrentFaceAccessAndLifecycle() throws {
         let url = try XCTUnwrap(defaultFontURL)
         let data = try Data(contentsOf: url)
@@ -75,6 +150,10 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             17,
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
+
+        let shaped = try XCTUnwrap(font.shape("ffi"))
+        let shapedGlyph = try XCTUnwrap(shaped.glyphs.first)
+        XCTAssertNotNil(font.glyphData(at: shapedGlyph.index))
 
         let textureIDs = Mutex<[ObjectIdentifier]>([])
         let failures = Mutex<[String]>([])

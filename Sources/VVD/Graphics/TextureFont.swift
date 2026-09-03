@@ -44,7 +44,7 @@ public class TextureFont: Font, @unchecked Sendable {
         }
     }
 
-    private var glyphMap: [UnicodeScalar: GlyphData] = [:]
+    private var glyphMap: [UInt32: GlyphData] = [:]
     private var textures: [GlyphAtlasKind: [GlyphTextureAtlas]] = [:]
     private var numGlyphsLoaded: Int = 0
     private var _boldStrength: CGFloat = .zero
@@ -141,42 +141,56 @@ public class TextureFont: Font, @unchecked Sendable {
     }
 
     public func glyphData(for c: UnicodeScalar) -> GlyphData? {
-        if c.value == 0 { return nil }
-
         return self.withLockedFace { lockedFace in
-            if let cachedData = self.glyphMap[c] {
-                return cachedData
+            guard let index = self.glyphIndex(for: c, using: lockedFace) else {
+                return nil
             }
-
-            guard let bitmap = self.loadGlyphBitmap(
-                for: c,
-                embolden: self._boldStrength,
-                outline: self._outlineThickness,
-                using: lockedFace
-            ) else { return nil }
-
-            var frame: CGRect = .zero
-            let info = bitmap.bitmapInfo
-            let metrics = bitmap.glyphMetrics
-            let texture = self.cacheGlyphTexture(
-                width: info.width,
-                height: info.rows,
-                data: bitmap.data,
-                metrics: bitmap.sizeMetrics,
-                pixelMode: info.pixelMode,
-                frame: &frame
-            )
-            let glyph = GlyphData(
-                texture: texture,
-                offset: CGPoint(x: info.left, y: info.top),
-                advance: metrics.advance,
-                frame: frame,
-                ascender: metrics.ascender,
-                descender: metrics.descender
-            )
-            self.glyphMap[c] = glyph
-            return glyph
+            return self.glyphData(at: index, using: lockedFace)
         }
+    }
+
+    package func glyphData(at index: UInt32) -> GlyphData? {
+        self.withLockedFace { lockedFace in
+            self.glyphData(at: index, using: lockedFace)
+        }
+    }
+
+    private func glyphData(
+        at index: UInt32,
+        using lockedFace: LockedFace
+    ) -> GlyphData? {
+        if let cachedData = self.glyphMap[index] {
+            return cachedData
+        }
+
+        guard let bitmap = self.loadGlyphBitmap(
+            at: index,
+            embolden: self._boldStrength,
+            outline: self._outlineThickness,
+            using: lockedFace
+        ) else { return nil }
+
+        var frame: CGRect = .zero
+        let info = bitmap.bitmapInfo
+        let metrics = bitmap.glyphMetrics
+        let texture = self.cacheGlyphTexture(
+            width: info.width,
+            height: info.rows,
+            data: bitmap.data,
+            metrics: bitmap.sizeMetrics,
+            pixelMode: info.pixelMode,
+            frame: &frame
+        )
+        let glyph = GlyphData(
+            texture: texture,
+            offset: CGPoint(x: info.left, y: info.top),
+            advance: metrics.advance,
+            frame: frame,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+        self.glyphMap[index] = glyph
+        return glyph
     }
 
     private func cacheGlyphTexture(width: UInt32,

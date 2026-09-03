@@ -146,6 +146,7 @@ public class Font: @unchecked Sendable {
 
     private struct State: @unchecked Sendable {
         let face: FT_Face
+        let shapingFont: OpaquePointer
         var size26d6: FT_F26Dot6
         var dpi: DPI
 
@@ -250,6 +251,61 @@ public class Font: @unchecked Sendable {
         public let maximumValue: CGFloat
     }
 
+    package enum ShapingDirection: Hashable, Sendable {
+        case leftToRight
+        case rightToLeft
+        case topToBottom
+        case bottomToTop
+    }
+
+    package struct ShapingFeature: Hashable, Sendable {
+        package let tag: UInt32
+        package let value: UInt32
+        /// Unicode-scalar offsets in the shaped source. `nil` applies globally.
+        package let range: Range<Int>?
+
+        package init(
+            tag: UInt32,
+            value: UInt32 = 1,
+            range: Range<Int>? = nil
+        ) {
+            self.tag = tag
+            self.value = value
+            self.range = range
+        }
+
+        package init?(
+            tag: String,
+            value: UInt32 = 1,
+            range: Range<Int>? = nil
+        ) {
+            let bytes = Array(tag.utf8)
+            guard bytes.count == 4, bytes.allSatisfy({ $0 < 0x80 }) else {
+                return nil
+            }
+            self.init(
+                tag: bytes.reduce(UInt32.zero) {
+                    ($0 << 8) | UInt32($1)
+                },
+                value: value,
+                range: range
+            )
+        }
+    }
+
+    package struct ShapedGlyph: Hashable, Sendable {
+        package let index: UInt32
+        /// Unicode-scalar range represented by this glyph's source cluster.
+        package let sourceRange: Range<Int>
+        package let advance: CGSize
+        package let offset: CGPoint
+    }
+
+    package struct ShapedText: Hashable, Sendable {
+        package let glyphs: [ShapedGlyph]
+        package let direction: ShapingDirection
+    }
+
     public init?(path: String, faceIndex: Int = 0) {
         guard let faceIndex = FT_Long(exactly: faceIndex),
               faceIndex >= 0 else {
@@ -284,6 +340,12 @@ public class Font: @unchecked Sendable {
         if FT_Set_Char_Size(face, 0, size26d6, dpi.x, dpi.y) != 0 {
             Log.warn("Failed to initialize font size. You should call Font.setPointSize() manually.")
         }
+        guard let shapingFont = hb_ft_font_create(face, nil) else {
+            _ = library.withFaceLifecycleLock {
+                FT_Done_Face(face)
+            }
+            return nil
+        }
         self.library = library
         self.fontData = nil
         self.familyName = .init(cString: face.pointee.family_name)
@@ -291,7 +353,12 @@ public class Font: @unchecked Sendable {
         self.faceIndex = Int(face.pointee.face_index)
         self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
-        self.state = Mutex(State(face: face, size26d6: size26d6, dpi: dpi))
+        self.state = Mutex(State(
+            face: face,
+            shapingFont: shapingFont,
+            size26d6: size26d6,
+            dpi: dpi
+        ))
         self.filePath = path
     }
 
@@ -334,19 +401,32 @@ public class Font: @unchecked Sendable {
         if FT_Set_Char_Size(face, 0, size26d6, dpi.x, dpi.y) != 0 {
             Log.warn("Failed to initialize font size. You should call Font.setPointSize() manually.")
         }
+        guard let shapingFont = hb_ft_font_create(face, nil) else {
+            _ = library.withFaceLifecycleLock {
+                FT_Done_Face(face)
+            }
+            return nil
+        }
         self.library = library
         self.familyName = .init(cString: face.pointee.family_name)
         self.styleName = .init(cString: face.pointee.style_name)
         self.faceIndex = Int(face.pointee.face_index)
         self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
-        self.state = Mutex(State(face: face, size26d6: size26d6, dpi: dpi))
+        self.state = Mutex(State(
+            face: face,
+            shapingFont: shapingFont,
+            size26d6: size26d6,
+            dpi: dpi
+        ))
         self.filePath = ""
     }
 
     deinit {
         self.state.withLock {
             let face = $0.face
+            // The HarfBuzz font borrows `face`, so it must be destroyed first.
+            hb_font_destroy($0.shapingFont)
             _ = self.library.withFaceLifecycleLock {
                 FT_Done_Face(face)
             }
@@ -397,6 +477,7 @@ public class Font: @unchecked Sendable {
                 }
                 $0.size26d6 = charSize
                 $0.dpi = (resX, resY)
+                hb_ft_font_changed($0.shapingFont)
                 assert(self.numGlyphs == Int(face.pointee.num_glyphs))
                 self.clearCacheLocked()
             }
@@ -496,6 +577,7 @@ public class Font: @unchecked Sendable {
                 ) == 0 else {
                     return false
                 }
+                hb_ft_font_changed(state.shapingFont)
                 self.clearCacheLocked()
                 return true
             }
@@ -552,8 +634,171 @@ public class Font: @unchecked Sendable {
             ) == 0 else {
                 return false
             }
+            hb_ft_font_changed(state.shapingFont)
             self.clearCacheLocked()
             return true
+        }
+    }
+
+    package func shape(
+        _ text: String,
+        direction: ShapingDirection? = nil,
+        language: String? = nil,
+        features requestedFeatures: [ShapingFeature] = []
+    ) -> ShapedText? {
+        let scalars = text.unicodeScalars.map(\.value)
+        guard let textLength = Int32(exactly: scalars.count) else {
+            return nil
+        }
+        if scalars.isEmpty {
+            return ShapedText(
+                glyphs: [],
+                direction: direction ?? .leftToRight
+            )
+        }
+
+        return self.state.withLock { state -> ShapedText? in
+            guard let buffer = hb_buffer_create() else { return nil }
+            defer { hb_buffer_destroy(buffer) }
+
+            scalars.withUnsafeBufferPointer { bufferPointer in
+                hb_buffer_add_utf32(
+                    buffer,
+                    bufferPointer.baseAddress,
+                    textLength,
+                    0,
+                    textLength
+                )
+            }
+            hb_buffer_set_cluster_level(
+                buffer,
+                HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS
+            )
+            if let direction {
+                hb_buffer_set_direction(buffer, direction.harfbuzzValue)
+            }
+            if let language, !language.isEmpty {
+                language.withCString { pointer in
+                    hb_buffer_set_language(
+                        buffer,
+                        hb_language_from_string(pointer, -1)
+                    )
+                }
+            }
+            hb_buffer_guess_segment_properties(buffer)
+
+            var features: [hb_feature_t] = []
+            features.reserveCapacity(
+                requestedFeatures.count + (state.isKerningEnabled ? 0 : 1)
+            )
+            for requested in requestedFeatures {
+                let start: UInt32
+                let end: UInt32
+                if let range = requested.range {
+                    guard range.lowerBound >= 0,
+                          range.upperBound <= scalars.count,
+                          let lower = UInt32(exactly: range.lowerBound),
+                          let upper = UInt32(exactly: range.upperBound) else {
+                        return nil
+                    }
+                    start = lower
+                    end = upper
+                } else {
+                    start = 0
+                    end = UInt32.max
+                }
+                features.append(hb_feature_t(
+                    tag: requested.tag,
+                    value: requested.value,
+                    start: start,
+                    end: end
+                ))
+            }
+            if !state.isKerningEnabled {
+                let kerningTag: UInt32 = 0x6b65_726e // kern
+                features.removeAll { $0.tag == kerningTag }
+                features.append(hb_feature_t(
+                    tag: kerningTag,
+                    value: 0,
+                    start: 0,
+                    end: UInt32.max
+                ))
+            }
+
+            guard let featureCount = UInt32(exactly: features.count) else {
+                return nil
+            }
+
+            features.withUnsafeBufferPointer { featurePointer in
+                hb_shape(
+                    state.shapingFont,
+                    buffer,
+                    featurePointer.baseAddress,
+                    featureCount
+                )
+            }
+
+            var infoCount: UInt32 = 0
+            var positionCount: UInt32 = 0
+            guard let infos = hb_buffer_get_glyph_infos(buffer, &infoCount),
+                  let positions = hb_buffer_get_glyph_positions(
+                    buffer,
+                    &positionCount
+                  ),
+                  infoCount == positionCount else {
+                return nil
+            }
+
+            guard let count = Int(exactly: infoCount) else { return nil }
+            var glyphClusters: [Int] = []
+            glyphClusters.reserveCapacity(count)
+            for index in 0..<count {
+                guard let cluster = Int(exactly: infos[index].cluster) else {
+                    return nil
+                }
+                glyphClusters.append(cluster)
+            }
+            let clusterStarts = Set(glyphClusters).sorted()
+            guard clusterStarts.allSatisfy({ $0 >= 0 && $0 < scalars.count }) else {
+                return nil
+            }
+            var clusterEnds: [Int: Int] = [:]
+            clusterEnds.reserveCapacity(clusterStarts.count)
+            for (index, start) in clusterStarts.enumerated() {
+                clusterEnds[start] = index + 1 < clusterStarts.count
+                    ? clusterStarts[index + 1]
+                    : scalars.count
+            }
+
+            var glyphs: [ShapedGlyph] = []
+            glyphs.reserveCapacity(count)
+            for index in 0..<count {
+                let info = infos[index]
+                let position = positions[index]
+                let clusterStart = glyphClusters[index]
+                guard let clusterEnd = clusterEnds[clusterStart] else {
+                    return nil
+                }
+                glyphs.append(ShapedGlyph(
+                    index: info.codepoint,
+                    sourceRange: clusterStart..<clusterEnd,
+                    advance: CGSize(
+                        width: ft26d6ToFloat(FT_F26Dot6(position.x_advance)),
+                        height: ft26d6ToFloat(FT_F26Dot6(position.y_advance))
+                    ),
+                    offset: CGPoint(
+                        x: ft26d6ToFloat(FT_F26Dot6(position.x_offset)),
+                        y: ft26d6ToFloat(FT_F26Dot6(position.y_offset))
+                    )
+                ))
+            }
+
+            return ShapedText(
+                glyphs: glyphs,
+                direction: ShapingDirection(
+                    harfbuzzValue: hb_buffer_get_direction(buffer)
+                ) ?? direction ?? .leftToRight
+            )
         }
     }
 
@@ -668,6 +913,16 @@ public class Font: @unchecked Sendable {
         }
     }
 
+    func glyphIndex(for c: UnicodeScalar, using lockedFace: LockedFace) -> UInt32? {
+        guard c.value != 0 else { return nil }
+        let index = if lockedFace.pointer.pointee.charmap != nil {
+            FT_Get_Char_Index(lockedFace.pointer, FT_ULong(c.value))
+        } else {
+            FT_UInt(c.value)
+        }
+        return UInt32(index)
+    }
+
     private func _glyphMetrics(from face: FT_Face,
                                index: UInt32,
                                embolden: CGFloat = 0) -> GlyphMetrics {
@@ -717,6 +972,33 @@ public class Font: @unchecked Sendable {
             return _glyphMetrics(from: face,
                                  index: UInt32(index),
                                  embolden: embolden)
+        }
+    }
+
+    package func glyphMetrics(
+        at index: UInt32,
+        embolden: CGFloat = 0
+    ) -> GlyphMetrics? {
+        self.state.withLock { state in
+            var loadFlags = state.isBitmapPreferred
+                ? FT_Int32(FT_LOAD_RENDER)
+                : FT_Int32(FT_LOAD_DEFAULT)
+            if state.isColorEnabled && FT_HAS_COLOR(state.face) {
+                loadFlags |= FT_Int32(FT_LOAD_COLOR)
+            }
+            guard FT_Load_Glyph(
+                state.face,
+                FT_UInt(index),
+                loadFlags
+            ) == 0 else {
+                Log.err("Failed to load glyph index=\(index)")
+                return nil
+            }
+            return _glyphMetrics(
+                from: state.face,
+                index: index,
+                embolden: embolden
+            )
         }
     }
 
@@ -786,19 +1068,31 @@ public class Font: @unchecked Sendable {
         outline: CGFloat,
         using lockedFace: LockedFace
     ) -> GlyphBitmap? {
-        if c.value == 0 { return nil }
-
-        let face = lockedFace.pointer
-        let index = if face.pointee.charmap != nil {
-            FT_Get_Char_Index(face, FT_ULong(c.value))
-        } else {
-            FT_UInt(c.value)
+        guard let index = glyphIndex(for: c, using: lockedFace) else {
+            return nil
         }
+        return loadGlyphBitmap(
+            at: index,
+            description: "char=\(c)(0x\(String(format: "%x", c.value)))",
+            embolden: embolden,
+            outline: outline,
+            using: lockedFace
+        )
+    }
+
+    func loadGlyphBitmap(
+        at index: UInt32,
+        description: String? = nil,
+        embolden: CGFloat,
+        outline: CGFloat,
+        using lockedFace: LockedFace
+    ) -> GlyphBitmap? {
+        let face = lockedFace.pointer
         // loading font.
         var loadFlags = lockedFace.isBitmapPreferred ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
         if lockedFace.isColorEnabled && FT_HAS_COLOR(face) { loadFlags |= FT_Int32(FT_LOAD_COLOR) }
-        if FT_Load_Glyph(face, index, loadFlags) != 0 {
-            Log.err("Failed to load glyph for char=\(c)(0x\(String(format: "%x", c.value)))")
+        if FT_Load_Glyph(face, FT_UInt(index), loadFlags) != 0 {
+            Log.err("Failed to load glyph \(description ?? "index=\(index)")")
             return nil
         }
 
@@ -991,7 +1285,7 @@ public class Font: @unchecked Sendable {
             }
         }
         guard bitmapLoaded else {
-            Log.warn("Failed to load bitmap for char=\(c)(0x\(String(format: "%x", c.value)))")
+            Log.warn("Failed to load bitmap for \(description ?? "index=\(index)")")
             return nil
         }
 
@@ -1024,6 +1318,30 @@ public class Font: @unchecked Sendable {
         guard let bitmap = self.withLockedFace({ lockedFace in
             self.loadGlyphBitmap(
                 for: c,
+                embolden: embolden,
+                outline: outline,
+                using: lockedFace
+            )
+        }) else { return false }
+
+        body(
+            bitmap.data,
+            bitmap.glyphMetrics,
+            bitmap.bitmapInfo,
+            bitmap.sizeMetrics
+        )
+        return true
+    }
+
+    package func withGlyphBitmap(
+        at index: UInt32,
+        embolden: CGFloat,
+        outline: CGFloat,
+        _ body: ([UInt8], GlyphMetrics, BitmapInfo, SizeMetrics) -> Void
+    ) -> Bool {
+        guard let bitmap = self.withLockedFace({ lockedFace in
+            self.loadGlyphBitmap(
+                at: index,
                 embolden: embolden,
                 outline: outline,
                 using: lockedFace
@@ -1084,104 +1402,165 @@ public class Font: @unchecked Sendable {
         var commands: [OutlineCommand] = []
         let metrics: GlyphMetrics? = self.state.withLock {
             let face = $0.face
-
             let index = face.pointee.charmap != nil
                 ? FT_Get_Char_Index(face, FT_ULong(c.value)) : FT_UInt(c.value)
-
-            let loadFlags = FT_Int32(FT_LOAD_DEFAULT) |
-                            FT_Int32(FT_LOAD_NO_BITMAP)
-            guard FT_Load_Glyph(face, index, loadFlags) == 0 else {
-                return nil
-            }
-            guard face.pointee.glyph.pointee.format == FT_GLYPH_FORMAT_OUTLINE else {
-                return nil
-            }
-
-            let strength = ft26d6(embolden)
-            if strength != 0 {
-                guard FT_Outline_Embolden(
-                    &face.pointee.glyph.pointee.outline,
-                    strength) == 0 else {
-                    return nil
-                }
-            }
-
-            var sourceOutline = face.pointee.glyph.pointee.outline
-            var decomposedOutline = sourceOutline
-            var ownsDecomposedOutline = false
-            if outline > .ulpOfOne {
-                guard let strokedOutline = _makeStrokedOutline(
-                    from: &sourceOutline,
-                    radius: outline) else {
-                    return nil
-                }
-                decomposedOutline = strokedOutline
-                ownsDecomposedOutline = true
-            }
-            defer {
-                if ownsDecomposedOutline {
-                    FT_Outline_Done(library.library, &decomposedOutline)
-                }
-            }
-
-            var fn = FT_Outline_Funcs()
-            fn.move_to = { (to: UnsafePointer<FT_Vector>?,
-                            ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
-                let v = to!.pointee
-                commands.pointee.append(.move(to: CGPoint(ft26d6: v)))
-                return 0
-            }
-            fn.line_to = { (to: UnsafePointer<FT_Vector>?,
-                            ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
-                let v = to!.pointee
-                commands.pointee.append(.line(to: CGPoint(ft26d6: v)))
-                return 0
-            }
-            fn.conic_to = { (ctl: UnsafePointer<FT_Vector>?,
-                             to: UnsafePointer<FT_Vector>?,
-                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
-                let v = to!.pointee
-                let c = ctl!.pointee
-                commands.pointee.append(
-                    .quadCurve(to: CGPoint(ft26d6: v),
-                               control: CGPoint(ft26d6: c)))
-                return 0
-            }
-            fn.cubic_to = { (ctl1: UnsafePointer<FT_Vector>?,
-                             ctl2: UnsafePointer<FT_Vector>?,
-                             to: UnsafePointer<FT_Vector>?,
-                             ctxt: UnsafeMutableRawPointer?)->Int32 in
-                let commands = ctxt!.assumingMemoryBound(to: [OutlineCommand].self)
-                let v = to!.pointee
-                let c1 = ctl1!.pointee
-                let c2 = ctl2!.pointee
-                commands.pointee.append(
-                    .curve(to: CGPoint(ft26d6: v),
-                           control1: CGPoint(ft26d6: c1),
-                           control2: CGPoint(ft26d6: c2)))
-                return 0
-            }
-            fn.shift = 0
-            fn.delta = 0
-
-            let error = withUnsafeMutablePointer(to: &commands) {
-                FT_Outline_Decompose(&decomposedOutline,
-                                     &fn,
-                                     UnsafeMutableRawPointer($0))
-            }
-            if error == 0 {
-                return _glyphMetrics(from: face,
-                                     index: UInt32(index),
-                                     embolden: embolden)
-            }
-            return nil
+            return _decomposeGlyphOutline(
+                at: UInt32(index),
+                face: face,
+                embolden: embolden,
+                outline: outline,
+                commands: &commands
+            )
         }
         guard let metrics else { return nil }
 
         commands.forEach(body)
         return metrics
+    }
+
+    package func decomposeGlyphOutline(
+        at index: UInt32,
+        embolden: CGFloat = 0,
+        outline: CGFloat = 0,
+        _ body: (OutlineCommand) -> Void
+    ) -> GlyphMetrics? {
+        var commands: [OutlineCommand] = []
+        let metrics = self.state.withLock { state in
+            _decomposeGlyphOutline(
+                at: index,
+                face: state.face,
+                embolden: embolden,
+                outline: outline,
+                commands: &commands
+            )
+        }
+        guard let metrics else { return nil }
+        commands.forEach(body)
+        return metrics
+    }
+
+    private func _decomposeGlyphOutline(
+        at index: UInt32,
+        face: FT_Face,
+        embolden: CGFloat,
+        outline: CGFloat,
+        commands: inout [OutlineCommand]
+    ) -> GlyphMetrics? {
+        let loadFlags = FT_Int32(FT_LOAD_DEFAULT) |
+                        FT_Int32(FT_LOAD_NO_BITMAP)
+        guard FT_Load_Glyph(face, FT_UInt(index), loadFlags) == 0 else {
+            return nil
+        }
+        guard face.pointee.glyph.pointee.format == FT_GLYPH_FORMAT_OUTLINE else {
+            return nil
+        }
+
+        let strength = ft26d6(embolden)
+        if strength != 0 {
+            guard FT_Outline_Embolden(
+                &face.pointee.glyph.pointee.outline,
+                strength) == 0 else {
+                return nil
+            }
+        }
+
+        var sourceOutline = face.pointee.glyph.pointee.outline
+        var decomposedOutline = sourceOutline
+        var ownsDecomposedOutline = false
+        if outline > .ulpOfOne {
+            guard let strokedOutline = _makeStrokedOutline(
+                from: &sourceOutline,
+                radius: outline) else {
+                return nil
+            }
+            decomposedOutline = strokedOutline
+            ownsDecomposedOutline = true
+        }
+        defer {
+            if ownsDecomposedOutline {
+                FT_Outline_Done(library.library, &decomposedOutline)
+            }
+        }
+
+        var functions = FT_Outline_Funcs()
+        functions.move_to = { (to: UnsafePointer<FT_Vector>?,
+                               context: UnsafeMutableRawPointer?) -> Int32 in
+            let commands = context!.assumingMemoryBound(
+                to: [OutlineCommand].self
+            )
+            commands.pointee.append(.move(to: CGPoint(ft26d6: to!.pointee)))
+            return 0
+        }
+        functions.line_to = { (to: UnsafePointer<FT_Vector>?,
+                               context: UnsafeMutableRawPointer?) -> Int32 in
+            let commands = context!.assumingMemoryBound(
+                to: [OutlineCommand].self
+            )
+            commands.pointee.append(.line(to: CGPoint(ft26d6: to!.pointee)))
+            return 0
+        }
+        functions.conic_to = { (control: UnsafePointer<FT_Vector>?,
+                                to: UnsafePointer<FT_Vector>?,
+                                context: UnsafeMutableRawPointer?) -> Int32 in
+            let commands = context!.assumingMemoryBound(
+                to: [OutlineCommand].self
+            )
+            commands.pointee.append(.quadCurve(
+                to: CGPoint(ft26d6: to!.pointee),
+                control: CGPoint(ft26d6: control!.pointee)
+            ))
+            return 0
+        }
+        functions.cubic_to = { (control1: UnsafePointer<FT_Vector>?,
+                                control2: UnsafePointer<FT_Vector>?,
+                                to: UnsafePointer<FT_Vector>?,
+                                context: UnsafeMutableRawPointer?) -> Int32 in
+            let commands = context!.assumingMemoryBound(
+                to: [OutlineCommand].self
+            )
+            commands.pointee.append(.curve(
+                to: CGPoint(ft26d6: to!.pointee),
+                control1: CGPoint(ft26d6: control1!.pointee),
+                control2: CGPoint(ft26d6: control2!.pointee)
+            ))
+            return 0
+        }
+        functions.shift = 0
+        functions.delta = 0
+
+        let error = withUnsafeMutablePointer(to: &commands) {
+            FT_Outline_Decompose(
+                &decomposedOutline,
+                &functions,
+                UnsafeMutableRawPointer($0)
+            )
+        }
+        guard error == 0 else { return nil }
+        return _glyphMetrics(
+            from: face,
+            index: index,
+            embolden: embolden
+        )
+    }
+}
+
+private extension Font.ShapingDirection {
+    var harfbuzzValue: hb_direction_t {
+        switch self {
+        case .leftToRight: HB_DIRECTION_LTR
+        case .rightToLeft: HB_DIRECTION_RTL
+        case .topToBottom: HB_DIRECTION_TTB
+        case .bottomToTop: HB_DIRECTION_BTT
+        }
+    }
+
+    init?(harfbuzzValue: hb_direction_t) {
+        switch harfbuzzValue {
+        case HB_DIRECTION_LTR: self = .leftToRight
+        case HB_DIRECTION_RTL: self = .rightToLeft
+        case HB_DIRECTION_TTB: self = .topToBottom
+        case HB_DIRECTION_BTT: self = .bottomToTop
+        default: return nil
+        }
     }
 }
