@@ -612,6 +612,11 @@ extension GraphicsContext {
                 var textureFrame: CGRect
             }
 
+            struct VectorBatch {
+                var path: Path
+                var foregroundColor: Color?
+            }
+
             struct Background {
                 var frame: CGRect
                 var color: Color
@@ -655,6 +660,7 @@ extension GraphicsContext {
             fileprivate var source: ResolvedText
             fileprivate var lineGlyphs: [LineGlyphs]
             fileprivate var batches: [Batch]
+            var vectorBatches: [VectorBatch]
             fileprivate var attachments: [Attachment]
             var backgrounds: [Background]
             var decorations: [Decoration]
@@ -663,6 +669,7 @@ extension GraphicsContext {
                 source: ResolvedText,
                 lineGlyphs: [LineGlyphs],
                 batches: [Batch],
+                vectorBatches: [VectorBatch],
                 attachments: [Attachment],
                 backgrounds: [Background],
                 decorations: [Decoration]
@@ -670,6 +677,7 @@ extension GraphicsContext {
                 self.source = source
                 self.lineGlyphs = lineGlyphs
                 self.batches = batches
+                self.vectorBatches = vectorBatches
                 self.attachments = attachments
                 self.backgrounds = backgrounds
                 self.decorations = decorations
@@ -959,6 +967,7 @@ extension GraphicsContext {
             }
 
             var quads: [Quad] = []
+            var vectorBatches: [Drawing.VectorBatch] = []
             var attachments: [Drawing.Attachment] = []
             var backgrounds: [Drawing.Background] = []
             var decorations: [Drawing.Decoration] = []
@@ -1022,6 +1031,33 @@ extension GraphicsContext {
                 ))
             }
 
+            func appendVector(
+                path: Path,
+                baseline: CGPoint,
+                foregroundColor: Color?
+            ) {
+                guard !path.isEmpty else { return }
+                let transform = CGAffineTransform(
+                    translationX: baseline.x,
+                    y: baseline.y
+                )
+                if let index = vectorBatches.firstIndex(where: {
+                    $0.foregroundColor == foregroundColor
+                }) {
+                    vectorBatches[index].path.addPath(
+                        path,
+                        transform: transform
+                    )
+                } else {
+                    var transformedPath = Path()
+                    transformedPath.addPath(path, transform: transform)
+                    vectorBatches.append(Drawing.VectorBatch(
+                        path: transformedPath,
+                        foregroundColor: foregroundColor
+                    ))
+                }
+            }
+
             Self.forEachGlyph(in: lineGlyphs) { glyph, baseline in
                 switch glyph.content {
                 case .unresolved:
@@ -1031,19 +1067,27 @@ extension GraphicsContext {
                     } else {
                         content = glyph.face.glyph(for: glyph.scalar)
                     }
-                    guard case let .texture(data) = content else {
-                        return
+                    switch content {
+                    case let .texture(data):
+                        appendTexture(
+                            texture: data.texture,
+                            frame: data.frame,
+                            offset: data.offset,
+                            baseline: CGPoint(
+                                x: baseline.x + data.offset.x,
+                                y: baseline.y
+                            ),
+                            foregroundColor: glyph.foregroundColor
+                        )
+                    case let .vector(data):
+                        appendVector(
+                            path: data.path,
+                            baseline: baseline,
+                            foregroundColor: glyph.foregroundColor
+                        )
+                    case nil:
+                        break
                     }
-                    appendTexture(
-                        texture: data.texture,
-                        frame: data.frame,
-                        offset: data.offset,
-                        baseline: CGPoint(
-                            x: baseline.x + data.offset.x,
-                            y: baseline.y
-                        ),
-                        foregroundColor: glyph.foregroundColor
-                    )
 
                 case let .texture(data):
                     guard glyph.scalar != UnicodeScalar(0) else { return }
@@ -1051,6 +1095,13 @@ extension GraphicsContext {
                         texture: data.texture,
                         frame: data.frame,
                         offset: data.offset,
+                        baseline: baseline,
+                        foregroundColor: glyph.foregroundColor
+                    )
+
+                case let .vector(data):
+                    appendVector(
+                        path: data.path,
                         baseline: baseline,
                         foregroundColor: glyph.foregroundColor
                     )
@@ -1071,7 +1122,7 @@ extension GraphicsContext {
                         textureFrame: data.frame
                     ))
 
-                case .vector, .missing:
+                case .missing:
                     break
                 }
             }
@@ -1214,6 +1265,7 @@ extension GraphicsContext {
                 source: self,
                 lineGlyphs: lineGlyphs,
                 batches: batches,
+                vectorBatches: vectorBatches,
                 attachments: attachments,
                 backgrounds: backgrounds,
                 decorations: decorations
@@ -1973,6 +2025,36 @@ extension GraphicsContext {
                 Path(background.frame.applying(transform)),
                 with: .color(background.color)
             )
+        }
+
+        for batch in drawing.vectorBatches {
+            let path = batch.path.applying(transform)
+            let isAntialiased = self.environment.disableMSAA == false
+            guard let renderPass = self.beginRenderPass(
+                enableStencil: true,
+                enableMSAA: isAntialiased
+            ) else {
+                continue
+            }
+            if let scissorRect {
+                renderPass.encoder.setScissorRect(scissorRect)
+            }
+            if self.encodeStencilPathFillCommand(
+                renderPass: renderPass,
+                path: path
+            ) {
+                self.encodeShadingBoxCommand(
+                    renderPass: renderPass,
+                    shading: batch.foregroundColor.map(Shading.color) ?? shading,
+                    stencil: .testNonZero,
+                    blendState: .opaque,
+                    bounds: rect
+                )
+                renderPass.end()
+                self.drawSource()
+            } else {
+                renderPass.end()
+            }
         }
 
         var foregroundColors: [Color?] = []
