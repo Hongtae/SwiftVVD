@@ -267,6 +267,10 @@ private struct TextFieldControl: View {
         }
     }
 
+    private var resolvedCompositionCaretStyle: TextFieldCompositionCaretStyle {
+        configuration.isSecure ? .insertionPoint : compositionCaretStyle
+    }
+
     @ViewBuilder
     private var styledContent: some View {
         if drawsBorder {
@@ -318,7 +322,14 @@ private struct TextFieldControl: View {
         let text = configuration.state.formatActions == nil
             ? configuration._text.wrappedValue
             : configuration.state.displayText
-        let segments = inputState.displaySegments(in: text)
+        let segments = inputState.displaySegments(
+            in: text,
+            isSecure: configuration.isSecure
+        )
+        let composition = TextFieldInputState.displayText(
+            inputState.composition,
+            isSecure: configuration.isSecure
+        )
         let defaultCaretWidth: CGFloat = 1
         TextFieldViewportLayout(
             contentOffset: viewportState.contentOffset
@@ -341,11 +352,11 @@ private struct TextFieldControl: View {
                         Text(segments.selected)
                             .foregroundStyle(Color.white)
                             .background(Color.blue)
-                    } else if inputState.composition.isEmpty == false {
+                    } else if composition.isEmpty == false {
                         TextFieldCaret(
-                            compositionText: inputState.composition,
+                            compositionText: composition,
                             defaultWidth: defaultCaretWidth,
-                            compositionStyle: compositionCaretStyle
+                            compositionStyle: resolvedCompositionCaretStyle
                         )
                     }
                     Text(segments.trailing)
@@ -381,6 +392,7 @@ private struct TextFieldControl: View {
     private var inputModifier: TextFieldInputModifier {
         TextFieldInputModifier(
             text: configuration._text,
+            isSecure: configuration.isSecure,
             selection: configuration.selection,
             selectionValue: configuration.selection?.wrappedValue,
             fieldState: configuration.$state,

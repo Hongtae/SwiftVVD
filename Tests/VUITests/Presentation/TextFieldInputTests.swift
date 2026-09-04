@@ -44,6 +44,77 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(axisConfigured.axis, .vertical)
     }
 
+    // ASSERTIONS secureFieldStructureObserved
+    // ASSERTIONS secureFieldInitializerRoutingObserved
+    // ASSERTIONS secureFieldTextFieldBodyObserved
+    func testSecureFieldPreservesStorageAndBuildsSecureTextFieldBody() {
+        let text = Binding.constant("secret")
+        let basic = SecureField("Basic", text: text)
+        let stringTitle = "String"
+        let stringBasic = SecureField(stringTitle, text: text)
+        let prompted = SecureField(
+            "Prompted",
+            text: text,
+            prompt: Text("Prompt")
+        )
+        let stringPrompted = SecureField(
+            stringTitle,
+            text: text,
+            prompt: Text("Prompt")
+        )
+        let resource = SecureField(
+            LocalizedStringResource("Resource"),
+            text: text
+        )
+        let labeled = SecureField(text: text) {
+            Text("Label")
+        }
+
+        XCTAssertEqual(
+            Mirror(reflecting: basic).children.compactMap(\.label),
+            ["_text", "prompt", "deprecatedActions", "label"]
+        )
+        XCTAssertNotNil(basic.deprecatedActions)
+        XCTAssertNotNil(stringBasic.deprecatedActions)
+        XCTAssertNil(prompted.deprecatedActions)
+        XCTAssertNil(stringPrompted.deprecatedActions)
+        XCTAssertNotNil(prompted.prompt)
+        XCTAssertNil(resource.deprecatedActions)
+        XCTAssertNil(labeled.deprecatedActions)
+
+        guard let body = prompted.body as? TextField<Text> else {
+            XCTFail("SecureField body must be a TextField")
+            return
+        }
+        XCTAssertTrue(body.isSecure)
+        XCTAssertEqual(body.axis, .horizontal)
+        XCTAssertNil(body.selection)
+        XCTAssertEqual(body._text.wrappedValue, "secret")
+        XCTAssertNotNil(body.prompt)
+    }
+
+    // ASSERTIONS secureFieldUTF16ConcealmentObserved
+    func testSecureDisplayMasksUTF16UnitsAtSourceCharacterBoundaries() {
+        let text = "A😀e\u{301}"
+        XCTAssertEqual(text.count, 3)
+        XCTAssertEqual(text.utf16.count, 5)
+        XCTAssertEqual(
+            TextFieldInputState.displayText(text, isSecure: true),
+            "•••••"
+        )
+
+        var state = TextFieldInputState()
+        XCTAssertTrue(state.setSelection(
+            1..<2,
+            affinity: .upstream,
+            committedText: text
+        ))
+        let segments = state.displaySegments(in: text, isSecure: true)
+        XCTAssertEqual(segments.leading, "•")
+        XCTAssertEqual(segments.selected, "••")
+        XCTAssertEqual(segments.trailing, "••")
+    }
+
     // ASSERTIONS textFieldRoundedBorderStyleObserved
     // ASSERTIONS textFieldRoundedBorderStyleMetricsObserved
     func testRoundedBorderStyleUsesDedicatedBorderedRenderer() {
@@ -1363,6 +1434,62 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertTrue(responder.canPerformTextEditingCommand(.selectAll))
     }
 
+    // ASSERTIONS secureFieldCommandPolicyObserved
+    func testSecureTextFieldResponderProtectsClipboardExports() throws {
+        let clipboard = TextFieldTestClipboard()
+        clipboard.representations = [
+            ClipboardContentType.utf8PlainText: Data("Omega".utf8)
+        ]
+        let context = TextFieldClipboardAppContext(clipboard: clipboard)
+        let previousAppContext = appContext
+        appContext = context
+        defer { appContext = previousAppContext }
+
+        let model = TextFieldSelectionModel(text: "Alpha beta")
+        var fieldState = TextFieldState(displayText: model.text)
+        var inputState = TextFieldInputState()
+        inputState.setFocused(true, committedText: model.text)
+        XCTAssertTrue(inputState.setSelection(
+            0..<5,
+            affinity: .upstream,
+            committedText: model.text
+        ))
+
+        let responder = TextFieldResponder()
+        responder.isSecure = true
+        responder.text = model.textBinding
+        responder.fieldState = Binding(
+            get: { fieldState },
+            set: { fieldState = $0 }
+        )
+        responder.inputState = Binding(
+            get: { inputState },
+            set: { inputState = $0 }
+        )
+
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.copy))
+        XCTAssertFalse(responder.canPerformTextEditingCommand(.cut))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.paste))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.delete))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.selectAll))
+        XCTAssertTrue(responder.canPerformTextEditingCommand(.makeUpperCase))
+
+        responder.performTextEditingCommand(.copy)
+        responder.performTextEditingCommand(.cut)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "Alpha beta")
+        XCTAssertEqual(
+            clipboard.representations[ClipboardContentType.utf8PlainText],
+            Data("Omega".utf8)
+        )
+
+        responder.performTextEditingCommand(.paste)
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "Omega beta")
+        XCTAssertEqual(fieldState.displayText, model.text)
+        XCTAssertEqual(inputState.selectionOffsets, 5..<5)
+    }
+
     func testCaretMetricsUseFontLineHeightAndCompositionWidth() {
         XCTAssertEqual(
             TextFieldCaretMetrics(
@@ -1712,6 +1839,92 @@ final class TextFieldInputTests: XCTestCase {
     }
 
     @MainActor
+    // ASSERTIONS secureFieldSubmissionFocusObserved
+    func testMountedSecureFieldRoutesSubmissionAndRetainsFocus() throws {
+        let model = TextFieldInputModel()
+        model.text = "secret"
+        var submissions: [String] = []
+        let mounted = try mountTextField(
+            SecureField("Password", text: model.binding)
+                .onSubmit(of: .text) {
+                    submissions.append(model.text)
+                }
+        )
+        XCTAssertTrue(mounted.responder.isSecure)
+
+        var input = try XCTUnwrap(mounted.responder.inputState).wrappedValue
+        input.collapseSelection(
+            to: model.text.count,
+            affinity: .upstream,
+            committedText: model.text
+        )
+        mounted.responder.inputState?.wrappedValue = input
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: mounted.controller.testWindow,
+                text: "!"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(model.text, "secret!")
+
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: mounted.controller.testWindow,
+                text: "\r"
+            )
+        ))
+        Update.dispatchActions()
+        XCTAssertEqual(submissions, ["secret!"])
+        XCTAssertTrue(
+            mounted.controller.focusedResponder === mounted.responder
+        )
+    }
+
+    @MainActor
+    // ASSERTIONS secureFieldIMECompositionPolicyObserved
+    func testMountedSecureFieldDiscardsCompositionAndAcceptsCommittedText()
+        async throws {
+        let model = TextFieldInputModel()
+        let mounted = try mountTextField(
+            SecureField("Password", text: model.binding)
+        )
+
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textComposition,
+                window: mounted.controller.testWindow,
+                text: "marked"
+            )
+        ))
+        Update.dispatchActions()
+        await Task.yield()
+
+        XCTAssertEqual(model.text, "")
+        XCTAssertEqual(mounted.responder.inputState?.wrappedValue.composition, "")
+        XCTAssertEqual(mounted.controller.testWindow.compositionResets, [
+            TextCompositionReset(emitEvents: false, deviceID: 0)
+        ])
+
+        XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            event: keyboardEvent(
+                .textInput,
+                window: mounted.controller.testWindow,
+                text: "\u{3134}"
+            )
+        ))
+        Update.dispatchActions()
+
+        XCTAssertEqual(
+            model.text.unicodeScalars.map(\.value),
+            [UnicodeScalar("\u{3134}").value]
+        )
+        XCTAssertEqual(mounted.controller.testWindow.compositionResets.count, 1)
+    }
+
+    @MainActor
     // ASSERTIONS textFieldPointerSelectionRuntimeObserved
     func testMountedTextFieldResolvesCharacterSelectionGeometry() throws {
         let previousAppContext = appContext
@@ -1750,6 +1963,49 @@ final class TextFieldInputTests: XCTestCase {
             try XCTUnwrap(layout.characterOffsets.last),
             0,
             "\(layout.characterOffsets)"
+        )
+        for (leading, trailing) in zip(
+            layout.characterOffsets,
+            layout.characterOffsets.dropFirst()
+        ) {
+            XCTAssertGreaterThanOrEqual(trailing, leading)
+        }
+    }
+
+    @MainActor
+    // ASSERTIONS secureFieldUTF16ConcealmentObserved
+    func testMountedSecureFieldMapsMaskedLayoutToSourceCharacters() throws {
+        let previousAppContext = appContext
+        appContext = TextFieldClipboardAppContext(clipboard: nil)
+        defer { appContext = previousAppContext }
+
+        let model = TextFieldInputModel()
+        model.text = "A😀e\u{301}"
+        let mounted = try mountTextField(
+            SecureField("Password", text: model.binding)
+        )
+        var redraw = false
+        for tick in 1..<4 {
+            mounted.controller.updateView(
+                tick: UInt64(tick),
+                delta: 0,
+                date: mounted.controller.date,
+                contentSize: CGSize(width: 420, height: 120),
+                redraw: &redraw
+            ) { _, _ in }
+            Update.dispatchActions()
+        }
+        let layout = try XCTUnwrap(mounted.responder.selectionLayout)
+
+        XCTAssertTrue(mounted.responder.isSecure)
+        XCTAssertEqual(model.text.count, 3)
+        XCTAssertEqual(model.text.utf16.count, 5)
+        XCTAssertEqual(layout.characterCount, model.text.count)
+        XCTAssertEqual(layout.characterOffsets.count, model.text.count + 1)
+        XCTAssertEqual(layout.characterOffsets.first, 0)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(layout.characterOffsets.last),
+            0
         )
         for (leading, trailing) in zip(
             layout.characterOffsets,
@@ -2868,6 +3124,11 @@ private struct TextInputChange: Equatable {
     var deviceID: Int
 }
 
+private struct TextCompositionReset: Equatable {
+    var emitEvents: Bool
+    var deviceID: Int
+}
+
 private enum TextInputCursorChange: Equatable {
     case text(Int)
     case platformDefault(Int)
@@ -2891,6 +3152,7 @@ private final class TextFieldInputTestWindow: VVD.Window {
     var platformHandle: OpaquePointer? { nil }
     var eventObservers = WindowEventObserverContainer()
     var textInputChanges: [TextInputChange] = []
+    var compositionResets: [TextCompositionReset] = []
     var cursorChanges: [TextInputCursorChange] = []
     private var cursors: [Int: Cursor] = [:]
 
@@ -2924,6 +3186,17 @@ private final class TextFieldInputTestWindow: VVD.Window {
         textInputChanges.last.map { change in
             change.deviceID == deviceID && change.enabled
         } ?? false
+    }
+
+    func resetTextComposition(
+        _ emitEvents: Bool,
+        forDeviceID deviceID: Int
+    ) -> String? {
+        compositionResets.append(TextCompositionReset(
+            emitEvents: emitEvents,
+            deviceID: deviceID
+        ))
+        return nil
     }
 
     func setCursor(_ cursor: Cursor?, forDeviceID deviceID: Int) {

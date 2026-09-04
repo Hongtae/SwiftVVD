@@ -53,6 +53,25 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         )
     }
 
+    func testBackendFontShapesSecureMaskGlyph() throws {
+        let url = try XCTUnwrap(defaultFontURL)
+        let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))
+        font.setPointSize(
+            17,
+            dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
+        )
+
+        let mask = UnicodeScalar("•")
+        XCTAssertTrue(font.hasGlyph(for: mask))
+        XCTAssertNotNil(font.glyphMetrics(for: mask))
+        let shaped = try XCTUnwrap(font.shape("•••••"))
+        XCTAssertEqual(shaped.glyphs.count, 5)
+        XCTAssertGreaterThan(
+            shaped.glyphs.reduce(CGFloat.zero) { $0 + $1.advance.width },
+            0
+        )
+    }
+
     func testBackendFontGuessesRightToLeftShapingDirection() throws {
         let url = try XCTUnwrap(defaultFontURL)
         let font = try XCTUnwrap(VVD.Font(data: Data(contentsOf: url)))

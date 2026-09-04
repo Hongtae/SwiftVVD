@@ -977,6 +977,8 @@ enum TextFieldInputResult: Equatable {
 }
 
 struct TextFieldInputState: Equatable {
+    static let secureMask = "\u{2022}"
+
     var composition = ""
     var compositionReplacementRange: Range<Int>?
     var caretOffset = 0
@@ -1280,7 +1282,8 @@ struct TextFieldInputState: Equatable {
     }
 
     func displaySegments(
-        in committedText: String
+        in committedText: String,
+        isSecure: Bool = false
     ) -> (leading: String, selected: String, trailing: String) {
         let offsets = compositionReplacementRange ?? selectionOffsets
         let lower = committedText.index(
@@ -1291,13 +1294,23 @@ struct TextFieldInputState: Equatable {
             committedText.startIndex,
             offsetBy: min(max(offsets.upperBound, 0), committedText.count)
         )
-        return (
+        let segments = (
             String(committedText[..<lower]),
             compositionReplacementRange == nil
                 ? String(committedText[lower..<upper])
                 : "",
             String(committedText[upper...])
         )
+        return (
+            Self.displayText(segments.0, isSecure: isSecure),
+            Self.displayText(segments.1, isSecure: isSecure),
+            Self.displayText(segments.2, isSecure: isSecure)
+        )
+    }
+
+    static func displayText(_ text: String, isSecure: Bool) -> String {
+        guard isSecure else { return text }
+        return String(repeating: secureMask, count: text.utf16.count)
     }
 
     func transformationRange(in committedText: String) -> Range<Int>? {
@@ -1539,6 +1552,7 @@ struct TextFieldSelectionLayout: Equatable {
 
     static func resolve(
         text: String,
+        isSecure: Bool = false,
         environment: EnvironmentValues,
         sceneResources: SceneResources,
         leadingInset: CGFloat,
@@ -1556,7 +1570,11 @@ struct TextFieldSelectionLayout: Equatable {
             environment: environment,
             sceneResources: sceneResources
         )
-        guard let resolved = Text(verbatim: text)._resolve(
+        let displayText = TextFieldInputState.displayText(
+            text,
+            isSecure: isSecure
+        )
+        guard let resolved = Text(verbatim: displayText)._resolve(
             context: context,
             referenceDate: Date()
         ) else {
@@ -1570,9 +1588,9 @@ struct TextFieldSelectionLayout: Equatable {
 
         var atomIndex = atoms.startIndex
         var offsets: [CGFloat] = [0]
-        offsets.reserveCapacity(text.count + 1)
+        offsets.reserveCapacity(displayText.count + 1)
         var scalarIndex = 0
-        for character in text {
+        for character in displayText {
             let nextScalarIndex =
                 scalarIndex + character.unicodeScalars.count
             let characterRange = scalarIndex..<nextScalarIndex
@@ -1594,8 +1612,18 @@ struct TextFieldSelectionLayout: Equatable {
             offsets.append(trailing)
             scalarIndex = nextScalarIndex
         }
+        let sourceOffsets: [CGFloat]
+        if isSecure {
+            var maskOffset = 0
+            sourceOffsets = [0] + text.map { character in
+                maskOffset += String(character).utf16.count
+                return offsets[maskOffset]
+            }
+        } else {
+            sourceOffsets = offsets
+        }
         return TextFieldSelectionLayout(
-            characterOffsets: offsets,
+            characterOffsets: sourceOffsets,
             leadingInset: leadingInset,
             viewportOffset: viewportOffset
         )
@@ -1784,15 +1812,21 @@ struct TextFieldCaret: View {
 }
 
 protocol TextInputResponder: AnyObject {
+    var acceptsTextComposition: Bool { get }
     func handleTextInputEvent(_ event: VVD.KeyboardEvent) -> Bool
     func textInputFocusDidChange(_ focused: Bool)
     func containsTextInputPoint(_ point: CGPoint) -> Bool
+}
+
+extension TextInputResponder {
+    var acceptsTextComposition: Bool { true }
 }
 
 struct TextFieldInputModifier: ViewModifier, MultiViewModifier {
     typealias Body = Never
 
     var text: Binding<String>
+    var isSecure = false
     var selection: Binding<TextSelection?>?
     var selectionValue: TextSelection?
     var fieldState: Binding<TextFieldState>
@@ -1896,6 +1930,7 @@ private struct TextFieldResponderFilter: StatefulRule, RemovableAttribute {
         let modifier = modifier.value
         let environment = environment.value
         responder.text = modifier.text
+        responder.isSecure = modifier.isSecure
         responder.selection = modifier.selection
         responder.fieldState = modifier.fieldState
         responder.inputState = modifier.inputState
@@ -1988,6 +2023,8 @@ final class TextFieldResponder: MultiViewResponder,
             }
         }
     }
+    var isSecure = false
+    var acceptsTextComposition: Bool { !isSecure }
     var selection: Binding<TextSelection?>? {
         didSet {
             let location = selection.map {
@@ -2045,6 +2082,7 @@ final class TextFieldResponder: MultiViewResponder,
             text, viewportOffset in
             TextFieldSelectionLayout.resolve(
                 text: text,
+                isSecure: self.isSecure,
                 environment: environment,
                 sceneResources: sceneResources,
                 leadingInset: leadingInset,
@@ -2479,6 +2517,7 @@ final class TextFieldResponder: MultiViewResponder,
 
         switch event.type {
         case .textComposition:
+            guard acceptsTextComposition else { return true }
             Update.enqueueAction {
                 var editing = inputState.wrappedValue
                 let committedText = self.currentTextValue()
@@ -2610,7 +2649,8 @@ final class TextFieldResponder: MultiViewResponder,
         }
         switch command {
         case .copy, .cut:
-            return clipboard != nil && inputState.wrappedValue.hasSelection
+            return !isSecure && clipboard != nil
+                && inputState.wrappedValue.hasSelection
         case .paste:
             return clipboard?.containsData(
                 forType: ClipboardContentType.utf8PlainText

@@ -2035,9 +2035,17 @@ class WindowController: WindowDelegate,
             }
             self.contextMenuRecognizer.handleKeyboardEvent(event)
             if let responder = self.focusedResponder
-                    as? any TextInputResponder,
-               responder.handleTextInputEvent(event) {
-                return true
+                    as? any TextInputResponder {
+                if event.type == .textComposition,
+                   !responder.acceptsTextComposition {
+                    self.discardPlatformTextComposition(
+                        forDeviceID: event.deviceID
+                    )
+                    return true
+                }
+                if responder.handleTextInputEvent(event) {
+                    return true
+                }
             }
             var keyConsumed = false
             if let keyEvent = self.keyEvent(from: event) {
@@ -3090,6 +3098,16 @@ class WindowController: WindowDelegate,
                 return
             }
             self.window?.enableTextInput(enabled, forDeviceID: 0)
+        }
+    }
+
+    private func discardPlatformTextComposition(forDeviceID deviceID: Int) {
+        let owner = textInputFocusOwner
+        Task { @MainActor [weak owner] in
+            _ = owner?.window?.resetTextComposition(
+                false,
+                forDeviceID: deviceID
+            )
         }
     }
 
