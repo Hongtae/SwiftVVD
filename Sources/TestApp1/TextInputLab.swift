@@ -8,6 +8,8 @@ struct TextInputLabSheet: View {
     @State private var primarySelection: TextSelection?
     @State private var secondaryText = "Second field"
     @State private var secureText = "A😀e\u{301}한"
+    @State private var editorText = "First line\nSecond line"
+    @State private var editorSelection: TextSelection?
     @State private var enclosesCompositionText = true
     @State private var usesIBeamCursor = true
     @State private var clipboardStatus = "Clipboard has not been tested yet."
@@ -80,6 +82,24 @@ struct TextInputLabSheet: View {
             .font(.system(.caption))
             .foregroundColor(.secondary)
 
+            Divider()
+
+            Text("Multiline editor")
+                .font(.system(.caption))
+
+            TextEditor(
+                text: $editorText,
+                selection: $editorSelection
+            )
+            .frame(width: 420, height: 120)
+
+            Text(
+                "Editor value: \(editorText.count) characters, "
+                    + "\(editorText.filter { $0 == "\n" }.count) newlines"
+            )
+            .font(.system(.caption))
+            .foregroundColor(.secondary)
+
             Spacer()
 
             HStack {
@@ -90,7 +110,7 @@ struct TextInputLabSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 540)
+        .frame(width: 520, height: 720)
         .environment(\.isTextFieldCursorEnabled, usesIBeamCursor)
         .textFieldCompositionCaretStyle(
             enclosesCompositionText ? .enclosing : .insertionPoint
