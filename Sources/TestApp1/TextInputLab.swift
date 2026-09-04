@@ -7,6 +7,7 @@ struct TextInputLabSheet: View {
     @State private var primaryText = ""
     @State private var primarySelection: TextSelection?
     @State private var secondaryText = "Second field"
+    @State private var secureText = "A😀e\u{301}한"
     @State private var enclosesCompositionText = true
     @State private var usesIBeamCursor = true
     @State private var clipboardStatus = "Clipboard has not been tested yet."
@@ -63,6 +64,22 @@ struct TextInputLabSheet: View {
             Text("Second value: \(secondaryText)")
                 .font(.system(.caption))
 
+            Divider()
+
+            SecureField(
+                "Protected input",
+                text: $secureText,
+                prompt: Text("Copy and Cut should stay disabled")
+            )
+            .frame(width: 420)
+
+            Text(
+                "Protected value: \(secureText.count) characters, "
+                    + "\(secureText.utf16.count) UTF-16 units"
+            )
+            .font(.system(.caption))
+            .foregroundColor(.secondary)
+
             Spacer()
 
             HStack {
@@ -73,7 +90,7 @@ struct TextInputLabSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 450)
+        .frame(width: 520, height: 540)
         .environment(\.isTextFieldCursorEnabled, usesIBeamCursor)
         .textFieldCompositionCaretStyle(
             enclosesCompositionText ? .enclosing : .insertionPoint
