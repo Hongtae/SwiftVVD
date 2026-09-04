@@ -200,6 +200,22 @@ struct TextFieldStyleModifier<S: TextFieldStyle>: StyleModifier {
     }
 }
 
+struct TextEditorStyleModifier<S: TextEditorStyle>: StyleModifier {
+    typealias Body = Never
+    typealias StyleConfiguration = TextEditorStyleConfiguration
+    typealias StyleBody = S.Body
+
+    var style: S
+
+    init(style: S) { self.style = style }
+
+    func styleBody(
+        configuration: TextEditorStyleConfiguration
+    ) -> S.Body {
+        style.makeBody(configuration: configuration)
+    }
+}
+
 struct DividerStyleModifier<S: DividerStyle>: StyleModifier {
     typealias Body = Never
     typealias StyleConfiguration = DividerStyleConfiguration
