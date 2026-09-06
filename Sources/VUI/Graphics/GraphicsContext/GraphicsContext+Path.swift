@@ -17,7 +17,220 @@ private func _premultipliedVertexColor(_ color: BackendColor) -> Float4 {
             alpha)
 }
 
+@inline(__always)
+private func _pathElement(
+    _ element: Path.Element,
+    applying transform: CGAffineTransform
+) -> Path.Element {
+    switch element {
+    case .move(let point):
+        .move(to: point.applying(transform))
+    case .line(let point):
+        .line(to: point.applying(transform))
+    case .quadCurve(let point, let control):
+        .quadCurve(
+            to: point.applying(transform),
+            control: control.applying(transform)
+        )
+    case .curve(let point, let control1, let control2):
+        .curve(
+            to: point.applying(transform),
+            control1: control1.applying(transform),
+            control2: control2.applying(transform)
+        )
+    case .closeSubpath:
+        .closeSubpath
+    }
+}
+
+private struct StencilPathFillGeometryBuilder {
+    let transform: CGAffineTransform
+
+    var vertices: [Float2] = []
+    var triangleIndices: [GraphicsContext.StencilPathFillGeometry.TriangleIndices] = []
+
+    private var initialPoint: CGPoint?
+    private var currentPoint: CGPoint?
+    private var contourStart = 0
+    private var centerX: Scalar = 0
+    private var centerY: Scalar = 0
+
+    init(transform: CGAffineTransform) {
+        self.transform = transform
+    }
+
+    mutating func build(path: Path, pathTransform: CGAffineTransform?) {
+        if let pathTransform, !pathTransform.isIdentity {
+            path.forEach {
+                append(_pathElement($0, applying: pathTransform))
+            }
+        } else {
+            path.forEach { append($0) }
+        }
+        finish()
+    }
+
+    mutating func append(_ element: Path.Element) {
+        switch element {
+        case .move(let to):
+            finishContour()
+            initialPoint = to
+            currentPoint = to
+
+        case .line(let p1):
+            if let p0 = currentPoint {
+                if contourStart == vertices.count {
+                    appendVertex(p0)
+                }
+                appendVertex(p1)
+            }
+            currentPoint = p1
+
+        case .quadCurve(let p2, let p1):
+            if let p0 = currentPoint {
+                let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
+                let length = curve.approximateLength()
+                if length > .ulpOfOne {
+                    if contourStart == vertices.count {
+                        appendVertex(p0)
+                    }
+                    let step = 1.0 / length
+                    var t = step
+                    while t < 1.0 {
+                        appendVertex(curve.interpolate(t))
+                        t += step
+                    }
+                    appendVertex(p2)
+                }
+            }
+            currentPoint = p2
+
+        case .curve(let p3, let p1, let p2):
+            if let p0 = currentPoint {
+                let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
+                let length = curve.approximateLength()
+                if length > .ulpOfOne {
+                    if contourStart == vertices.count {
+                        appendVertex(p0)
+                    }
+                    let step = 1.0 / length
+                    var t = step
+                    while t < 1.0 {
+                        appendVertex(curve.interpolate(t))
+                        t += step
+                    }
+                    appendVertex(p3)
+                }
+            }
+            currentPoint = p3
+
+        case .closeSubpath:
+            finishContour()
+            currentPoint = initialPoint
+        }
+    }
+
+    mutating func finish() {
+        finishContour()
+    }
+
+    private mutating func appendVertex(_ point: CGPoint) {
+        let point = point.applying(transform)
+        vertices.append((Float32(point.x), Float32(point.y)))
+        centerX += point.x
+        centerY += point.y
+    }
+
+    private mutating func finishContour() {
+        let count = vertices.count - contourStart
+        guard count >= 2 else {
+            if count > 0 {
+                vertices.removeLast(count)
+            }
+            contourStart = vertices.count
+            centerX = 0
+            centerY = 0
+            return
+        }
+
+        let baseIndex = UInt32(contourStart)
+        let pivotIndex = UInt32(vertices.count)
+        let inverseCount = Scalar(1) / Scalar(count)
+        vertices.append((
+            Float32(centerX * inverseCount),
+            Float32(centerY * inverseCount)
+        ))
+
+        var index = baseIndex + 1
+        while index < pivotIndex {
+            triangleIndices.append((index - 1, index, pivotIndex))
+            index += 1
+        }
+        triangleIndices.append((pivotIndex - 1, baseIndex, pivotIndex))
+
+        contourStart = vertices.count
+        centerX = 0
+        centerY = 0
+    }
+}
+
 extension GraphicsContext {
+    struct StencilPathFillGeometry {
+        typealias TriangleIndices = (UInt32, UInt32, UInt32)
+
+        let vertices: [Float2]
+        let triangleIndices: [TriangleIndices]
+
+        var indexCount: Int { triangleIndices.count * 3 }
+
+        init(
+            path: Path,
+            transform: CGAffineTransform,
+            pathTransform: CGAffineTransform? = nil
+        ) {
+            var builder = StencilPathFillGeometryBuilder(transform: transform)
+            builder.build(path: path, pathTransform: pathTransform)
+            self.init(vertices: builder.vertices, triangleIndices: builder.triangleIndices)
+        }
+
+        fileprivate init(vertices: [Float2], triangleIndices: [TriangleIndices]) {
+            // The triangle array is uploaded directly as tightly packed indices.
+            precondition(
+                MemoryLayout<TriangleIndices>.stride == MemoryLayout<UInt32>.stride * 3
+            )
+            self.vertices = vertices
+            self.triangleIndices = triangleIndices
+        }
+    }
+
+    final class StencilPathGeometryScratch {
+        fileprivate var vertices: [Float2] = []
+        private var triangleIndices: [StencilPathFillGeometry.TriangleIndices] = []
+
+        func makeGeometry(
+            path: Path,
+            transform: CGAffineTransform,
+            pathTransform: CGAffineTransform? = nil
+        ) -> StencilPathFillGeometry {
+            var builder = StencilPathFillGeometryBuilder(transform: transform)
+            // Move storage into the builder before clearing it. A retained geometry
+            // snapshot stays independent through ordinary Array copy-on-write.
+            swap(&vertices, &builder.vertices)
+            swap(&triangleIndices, &builder.triangleIndices)
+            builder.vertices.removeAll(keepingCapacity: true)
+            builder.triangleIndices.removeAll(keepingCapacity: true)
+            builder.build(path: path, pathTransform: pathTransform)
+
+            let geometry = StencilPathFillGeometry(
+                vertices: builder.vertices,
+                triangleIndices: builder.triangleIndices
+            )
+            swap(&vertices, &builder.vertices)
+            swap(&triangleIndices, &builder.triangleIndices)
+            return geometry
+        }
+    }
+
     public struct Shading {
         enum Property {
             case color(color: Color)
@@ -199,6 +412,10 @@ extension GraphicsContext {
         }
 
         var vertexData: [Float2] = []
+        // Borrow only CPU capacity; all exits return it after any upload has copied the bytes.
+        swap(&pathGeometryScratch.vertices, &vertexData)
+        vertexData.removeAll(keepingCapacity: true)
+        defer { swap(&pathGeometryScratch.vertices, &vertexData) }
 
         let transform = self.transform.concatenating(self.viewTransform)
         let drawLineSegment = { (start: CGPoint, end: CGPoint, dir0: CGPoint, dir1: CGPoint) in
@@ -212,16 +429,17 @@ extension GraphicsContext {
                                        d: lineWidth * dir1.x,
                                        tx: end.x, ty: end.y)
 
-            let box = [Vector2(0, -0.5).applying(t0),
-                       Vector2(0, -0.5).applying(t1),
-                       Vector2(0,  0.5).applying(t0),
-                       Vector2(0,  0.5).applying(t1)].map {
-                $0.applying(transform)
-            }
+            let p0 = Vector2(0, -0.5).applying(t0).applying(transform).float2
+            let p1 = Vector2(0, -0.5).applying(t1).applying(transform).float2
+            let p2 = Vector2(0,  0.5).applying(t0).applying(transform).float2
+            let p3 = Vector2(0,  0.5).applying(t1).applying(transform).float2
 
-            vertexData.append(contentsOf: [
-                box[2].float2, box[0].float2, box[3].float2,
-                box[3].float2, box[0].float2, box[1].float2])
+            vertexData.append(p2)
+            vertexData.append(p0)
+            vertexData.append(p3)
+            vertexData.append(p3)
+            vertexData.append(p0)
+            vertexData.append(p1)
         }
 
         let addStrokeCap = { (p: CGPoint, d: CGPoint) in
@@ -242,16 +460,16 @@ extension GraphicsContext {
                             CGAffineTransform(rotationAngle: progress)
                                 .concatenating(trans))
 
-                    vertexData.append(contentsOf: [center.float2,
-                                                   pt0.float2,
-                                                   pt1.float2])
+                    vertexData.append(center.float2)
+                    vertexData.append(pt0.float2)
+                    vertexData.append(pt1.float2)
                     pt0 = pt1
                     progress += step
                 }
                 let pt1 = Vector2(0, halfWidth).applying(trans)
-                vertexData.append(contentsOf: [center.float2,
-                                               pt0.float2,
-                                               pt1.float2])
+                vertexData.append(center.float2)
+                vertexData.append(pt0.float2)
+                vertexData.append(pt1.float2)
             case .square:
                 let trans = CGAffineTransform(a: lineWidth * d.x,
                                               b: lineWidth * d.y,
@@ -260,14 +478,16 @@ extension GraphicsContext {
                                               tx: p.x, ty: p.y)
                     .concatenating(transform)
 
-                let pt = [Vector2(0.0,  0.5),
-                          Vector2(0.0, -0.5),
-                          Vector2(0.5,  0.5),
-                          Vector2(0.5, -0.5)].map {
-                    $0.applying(trans).float2
-                }
-                vertexData.append(contentsOf: [pt[0], pt[1], pt[2],
-                                             pt[2], pt[1], pt[3]])
+                let p0 = Vector2(0.0,  0.5).applying(trans).float2
+                let p1 = Vector2(0.0, -0.5).applying(trans).float2
+                let p2 = Vector2(0.5,  0.5).applying(trans).float2
+                let p3 = Vector2(0.5, -0.5).applying(trans).float2
+                vertexData.append(p0)
+                vertexData.append(p1)
+                vertexData.append(p2)
+                vertexData.append(p2)
+                vertexData.append(p1)
+                vertexData.append(p3)
             default:
                 return
             }
@@ -362,55 +582,63 @@ extension GraphicsContext {
                                            d: lineWidth * dir1.x,
                                            tx: p.x, ty: p.y)
                 if r1 > r2 {
-                    let pt = [Vector2(p),
-                              Vector2(0,  0.5).applying(t0),
-                              Vector2(0,  0.5).applying(t1)].map {
-                        $0.applying(transform).float2
-                    }
-                    vertexData.append(contentsOf: [pt[0], pt[2], pt[1]])
+                    let p0 = Vector2(p).applying(transform).float2
+                    let p1 = Vector2(0,  0.5).applying(t0).applying(transform).float2
+                    let p2 = Vector2(0,  0.5).applying(t1).applying(transform).float2
+                    vertexData.append(p0)
+                    vertexData.append(p2)
+                    vertexData.append(p1)
 
                 } else {
-                    let pt = [Vector2(p),
-                              Vector2(0, -0.5).applying(t0),
-                              Vector2(0, -0.5).applying(t1)].map {
-                        $0.applying(transform).float2
-                    }
-                    vertexData.append(contentsOf: [pt[0], pt[1], pt[2]])
+                    let p0 = Vector2(p).applying(transform).float2
+                    let p1 = Vector2(0, -0.5).applying(t0).applying(transform).float2
+                    let p2 = Vector2(0, -0.5).applying(t1).applying(transform).float2
+                    vertexData.append(p0)
+                    vertexData.append(p1)
+                    vertexData.append(p2)
                 }
             case .round:
                 let step = 1.0 / lineWidth
                 var progress: CGFloat = step
+                // Adjacent triangles share their transformed center and endpoint.
                 let p0 = Vector2(p)
+                let center = p0.applying(transform)
                 if r1 > r2 {
-                    var p1 = Vector2(0, halfWidth).rotated(by: r1)
+                    var p1 = (Vector2(0, halfWidth).rotated(by: r1) + p0)
+                        .applying(transform)
                     while progress < 1.0 {
                         let r = lerp(r1, r2, progress)
-                        let p2 = Vector2(0, halfWidth).rotated(by: r)
-                        vertexData.append(contentsOf: [p0, p2 + p0, p1 + p0].map {
-                            $0.applying(transform).float2
-                        })
+                        let p2 = (Vector2(0, halfWidth).rotated(by: r) + p0)
+                            .applying(transform)
+                        vertexData.append(center.float2)
+                        vertexData.append(p2.float2)
+                        vertexData.append(p1.float2)
                         progress += step
                         p1 = p2
                     }
-                    let p2 = Vector2(0, halfWidth).rotated(by: r2)
-                    vertexData.append(contentsOf: [p0, p2 + p0, p1 + p0].map {
-                        $0.applying(transform).float2
-                    })
+                    let p2 = (Vector2(0, halfWidth).rotated(by: r2) + p0)
+                        .applying(transform)
+                    vertexData.append(center.float2)
+                    vertexData.append(p2.float2)
+                    vertexData.append(p1.float2)
                 } else {
-                    var p1 = Vector2(0, -halfWidth).rotated(by: r1)
+                    var p1 = (Vector2(0, -halfWidth).rotated(by: r1) + p0)
+                        .applying(transform)
                     while progress < 1.0 {
                         let r = lerp(r1, r2, progress)
-                        let p2 = Vector2(0, -halfWidth).rotated(by: r)
-                        vertexData.append(contentsOf: [p0, p1 + p0, p2 + p0].map {
-                            $0.applying(transform).float2
-                        })
+                        let p2 = (Vector2(0, -halfWidth).rotated(by: r) + p0)
+                            .applying(transform)
+                        vertexData.append(center.float2)
+                        vertexData.append(p1.float2)
+                        vertexData.append(p2.float2)
                         progress += step
                         p1 = p2
                     }
-                    let p2 = Vector2(0, -halfWidth).rotated(by: r2)
-                    vertexData.append(contentsOf: [p0, p1 + p0, p2 + p0].map {
-                        $0.applying(transform).float2
-                    })
+                    let p2 = (Vector2(0, -halfWidth).rotated(by: r2) + p0)
+                        .applying(transform)
+                    vertexData.append(center.float2)
+                    vertexData.append(p1.float2)
+                    vertexData.append(p2.float2)
                 }
             case .miter:
                 let t0 = CGAffineTransform(a: dir0.x, b: dir0.y,
@@ -425,31 +653,43 @@ extension GraphicsContext {
                 let dir0 = Vector2(dir0)
                 let dir1 = Vector2(dir1)
                 if r1 > r2 {
-                    let pt = [Vector2(0, 0.5).applying(t0),
-                              Vector2(0, 0.5).applying(t1)]
+                    let pt0 = Vector2(0, 0.5).applying(t0)
+                    let pt1 = Vector2(0, 0.5).applying(t1)
 
                     let p0 = Vector2(p)
                     let s = Vector2.cross(dir0, dir1)
-                    let t = Vector2.cross(pt[1] - pt[0], dir1) / s
-                    let p1 = pt[0] + dir0 * t
+                    let t = Vector2.cross(pt1 - pt0, dir1) / s
+                    let p1 = pt0 + dir0 * t
 
-                    let triangles = [p0, p1, pt[0], p0, pt[1], p1].map {
-                        $0.applying(transform).float2
-                    }
-                    vertexData.append(contentsOf: triangles)
+                    let v0 = p0.applying(transform).float2
+                    let v1 = p1.applying(transform).float2
+                    let v2 = pt0.applying(transform).float2
+                    let v3 = pt1.applying(transform).float2
+                    vertexData.append(v0)
+                    vertexData.append(v1)
+                    vertexData.append(v2)
+                    vertexData.append(v0)
+                    vertexData.append(v3)
+                    vertexData.append(v1)
                 } else {
-                    let pt = [Vector2(0, -0.5).applying(t0),
-                              Vector2(0, -0.5).applying(t1)]
+                    let pt0 = Vector2(0, -0.5).applying(t0)
+                    let pt1 = Vector2(0, -0.5).applying(t1)
 
                     let p0 = Vector2(p)
                     let s = Vector2.cross(dir0, dir1)
-                    let t = Vector2.cross(pt[1] - pt[0], dir1) / s
-                    let p1 = pt[0] + dir0 * t
+                    let t = Vector2.cross(pt1 - pt0, dir1) / s
+                    let p1 = pt0 + dir0 * t
 
-                    let triangles = [p0, pt[0], p1, p0, p1, pt[1]].map {
-                        $0.applying(transform).float2
-                    }
-                    vertexData.append(contentsOf: triangles)
+                    let v0 = p0.applying(transform).float2
+                    let v1 = p1.applying(transform).float2
+                    let v2 = pt0.applying(transform).float2
+                    let v3 = pt1.applying(transform).float2
+                    vertexData.append(v0)
+                    vertexData.append(v2)
+                    vertexData.append(v1)
+                    vertexData.append(v0)
+                    vertexData.append(v1)
+                    vertexData.append(v3)
                 }
             @unknown default:
                 fatalError("Unknown value")
@@ -626,9 +866,11 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
 
         encoder.setCullMode(.back)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setStencilReferenceValue(0)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(vertexStart: 0,
                      vertexCount: vertexData.count,
                      instanceCount: 1,
@@ -636,124 +878,27 @@ extension GraphicsContext {
         return true
     }
 
-    func encodeStencilPathFillCommand(renderPass: RenderPass,
-                                      path: Path) -> Bool {
+    func encodeStencilPathFillCommand(
+        renderPass: RenderPass,
+        path: Path,
+        pathTransform: CGAffineTransform? = nil
+    ) -> Bool {
         if path.isEmpty { return false }
 
-        struct PolygonElement {
-            var vertices: [CGPoint] = []
-        }
-        var polygons: [PolygonElement] = []
-        do {
-            var initialPoint: CGPoint? = nil
-            var currentPoint: CGPoint? = nil
-            var polygon = PolygonElement()
-            path.forEach { element in
-                // make polygon array from path
-                switch element {
-                case .move(let to):
-                    polygons.append(polygon)
-                    polygon = PolygonElement()
-                    initialPoint = to
-                    currentPoint = to
-                case .line(let p1):
-                    if let p0 = currentPoint {
-                        if polygon.vertices.isEmpty {
-                            polygon.vertices.append(p0)
-                        }
-                        polygon.vertices.append(p1)
-                    }
-                    currentPoint = p1
-                case .quadCurve(let p2, let p1):
-                    if let p0 = currentPoint {
-                        let curve = QuadraticBezier(p0: p0, p1: p1, p2: p2)
-                        let length = curve.approximateLength()
-                        if length > .ulpOfOne {
-                            if polygon.vertices.isEmpty {
-                                polygon.vertices.append(p0)
-                            }
-                            let step = 1.0 / length
-                            var t = step
-                            while t < 1.0 {
-                                let pt = curve.interpolate(t)
-                                polygon.vertices.append(pt)
-                                t += step
-                            }
-                            polygon.vertices.append(p2)
-                        }
-                    }
-                    currentPoint = p2
-                case .curve(let p3, let p1, let p2):
-                    if let p0 = currentPoint {
-                        let curve = CubicBezier(p0: p0, p1: p1, p2: p2, p3: p3)
-                        let length = curve.approximateLength()
-                        if length > .ulpOfOne {
-                            if polygon.vertices.isEmpty {
-                                polygon.vertices.append(p0)
-                            }
-                            let step = 1.0 / length
-                            var t = step
-                            while t < 1.0 {
-                                let pt = curve.interpolate(t)
-                                polygon.vertices.append(pt)
-                                t += step
-                            }
-                            polygon.vertices.append(p3)
-                        }
-                    }
-                    currentPoint = p3
-                case .closeSubpath:
-                    polygons.append(polygon)
-                    polygon = PolygonElement()
-                    currentPoint = initialPoint
-                }
-            }
-            polygons.append(polygon)
-        }
-
         let transform = self.transform.concatenating(self.viewTransform)
-        var numVertices = 0
-        polygons.forEach {
-            numVertices += $0.vertices.count + 2
-        }
-        var vertexData: [Float2] = []
-        vertexData.reserveCapacity(numVertices)
+        let geometry = pathGeometryScratch.makeGeometry(
+            path: path,
+            transform: transform,
+            pathTransform: pathTransform
+        )
+        if geometry.vertices.count < 3 { return false }
+        if geometry.triangleIndices.isEmpty { return false }
 
-        var indexData: [UInt32] = []
-        indexData.reserveCapacity(numVertices * 3)
-
-        polygons.forEach { element in
-            // make vertex, index data.
-            if element.vertices.count < 2 { return }
-
-            let baseIndex = UInt32(vertexData.count)
-            var center: Vector2 = .zero
-            element.vertices.forEach { pt in
-                let v = Vector2(pt.applying(transform))
-                vertexData.append(v.float2)
-                center += v
-            }
-            center = center / Scalar(element.vertices.count)
-            let pivotIndex = UInt32(vertexData.count)
-            vertexData.append(center.float2)
-
-            for i in (baseIndex + 1)..<pivotIndex {
-                indexData.append(i - 1)
-                indexData.append(i)
-                indexData.append(pivotIndex)
-            }
-            indexData.append(pivotIndex - 1)
-            indexData.append(baseIndex)
-            indexData.append(pivotIndex)
-        }
-        if vertexData.count < 3 { return false }
-        if indexData.count < 3 { return false }
-
-        guard let vertexBuffer = self.makeBuffer(vertexData) else {
+        guard let vertexBuffer = self.makeBuffer(geometry.vertices) else {
             Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
         }
-        guard let indexBuffer = self.makeBuffer(indexData) else {
+        guard let indexBuffer = self.makeBuffer(geometry.triangleIndices) else {
             Log.err("GraphicsContext error: _makeBuffer failed.")
             return false
         }
@@ -780,13 +925,15 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
 
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setStencilReferenceValue(0)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-        encoder.drawIndexed(indexCount: indexData.count,
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
+        encoder.drawIndexed(indexCount: geometry.indexCount,
                             indexType: .uint32,
-                            indexBuffer: indexBuffer,
-                            indexBufferOffset: 0,
+                            indexBuffer: indexBuffer.buffer,
+                            indexBufferOffset: indexBuffer.offset,
                             instanceCount: 1,
                             baseVertex: 0,
                             baseInstance: 0)
@@ -818,10 +965,11 @@ extension GraphicsContext {
             switch property {
             case let .color(c):
                 shader = .vertexColor
+                let color = _premultipliedVertexColor(c.backendColor(in: self.environment))
                 let makeVertex = { (x: Scalar, y: Scalar) in
                     _Vertex(position: Vector2(x, y).float2,
                             texcoord: Vector2.zero.float2,
-                            color: _premultipliedVertexColor(c.backendColor(in: self.environment)))
+                            color: color)
                 }
                 vertices = [
                     makeVertex(-1, -1), makeVertex(-1, 1), makeVertex(1, -1),
@@ -854,34 +1002,57 @@ extension GraphicsContext {
                 let viewportToGradientTransform = self.viewTransform.inverted()
                     .concatenating(gradientTransform.inverted())
 
-                let viewportExtents = [CGPoint(x: -1, y: -1),   // left-bottom
-                                       CGPoint(x: -1, y: 1),    // left-top
-                                       CGPoint(x: 1, y: 1),     // right-top
-                                       CGPoint(x: 1, y: -1)]    // right-bottom
-                    .map { $0.applying(viewportToGradientTransform) }
-                let maxX = viewportExtents.max { $0.x < $1.x }!.x
-                let minX = viewportExtents.min { $0.x < $1.x }!.x
-                let maxY = viewportExtents.max { $0.y < $1.y }!.y
-                let minY = viewportExtents.min { $0.y < $1.y }!.y
+                let p0 = CGPoint(x: -1, y: -1).applying(viewportToGradientTransform)
+                let p1 = CGPoint(x: -1, y: 1).applying(viewportToGradientTransform)
+                let p2 = CGPoint(x: 1, y: 1).applying(viewportToGradientTransform)
+                let p3 = CGPoint(x: 1, y: -1).applying(viewportToGradientTransform)
+                // Preserve the first corner on ties and the original comparison order.
+                var xMax = p0.x
+                if xMax < p1.x { xMax = p1.x }
+                if xMax < p2.x { xMax = p2.x }
+                if xMax < p3.x { xMax = p3.x }
+                var xMin = p0.x
+                if p1.x < xMin { xMin = p1.x }
+                if p2.x < xMin { xMin = p2.x }
+                if p3.x < xMin { xMin = p3.x }
+                var yMax = p0.y
+                if yMax < p1.y { yMax = p1.y }
+                if yMax < p2.y { yMax = p2.y }
+                if yMax < p3.y { yMax = p3.y }
+                var yMin = p0.y
+                if p1.y < yMin { yMin = p1.y }
+                if p2.y < yMin { yMin = p2.y }
+                if p3.y < yMin { yMin = p3.y }
+                // Keep the box emitter's captured bounds immutable.
+                let maxX = xMax
+                let minX = xMin
+                let maxY = yMax
+                let minY = yMin
 
                 let gradientToViewportTransform = gradientTransform
                     .concatenating(self.viewTransform)
 
                 let addGradientBox = { (x1: CGFloat, x2: CGFloat, c1: BackendColor, c2: BackendColor) in
-                    let verts = [_Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
-                                         texcoord: Vector2.zero.float2,
-                                         color: _premultipliedVertexColor(c1)),
-                                 _Vertex(position: Vector2(x1, minY).applying(gradientToViewportTransform).float2,
-                                         texcoord: Vector2.zero.float2,
-                                         color: _premultipliedVertexColor(c1)),
-                                 _Vertex(position: Vector2(x2, maxY).applying(gradientToViewportTransform).float2,
-                                         texcoord: Vector2.zero.float2,
-                                         color: _premultipliedVertexColor(c2)),
-                                 _Vertex(position: Vector2(x2, minY).applying(gradientToViewportTransform).float2,
-                                         texcoord: Vector2.zero.float2,
-                                         color: _premultipliedVertexColor(c2))]
-                    vertices.append(contentsOf: [verts[0], verts[1], verts[2]])
-                    vertices.append(contentsOf: [verts[2], verts[1], verts[3]])
+                    // Reserve the first six-vertex box; later boxes use normal Array growth.
+                    if vertices.isEmpty {
+                        vertices.reserveCapacity(6)
+                    }
+                    let color1 = _premultipliedVertexColor(c1)
+                    let color2 = _premultipliedVertexColor(c2)
+                    let v0 = _Vertex(position: Vector2(x1, maxY).applying(gradientToViewportTransform).float2,
+                                     texcoord: Vector2.zero.float2, color: color1)
+                    let v1 = _Vertex(position: Vector2(x1, minY).applying(gradientToViewportTransform).float2,
+                                     texcoord: Vector2.zero.float2, color: color1)
+                    let v2 = _Vertex(position: Vector2(x2, maxY).applying(gradientToViewportTransform).float2,
+                                     texcoord: Vector2.zero.float2, color: color2)
+                    let v3 = _Vertex(position: Vector2(x2, minY).applying(gradientToViewportTransform).float2,
+                                     texcoord: Vector2.zero.float2, color: color2)
+                    vertices.append(v0)
+                    vertices.append(v1)
+                    vertices.append(v2)
+                    vertices.append(v2)
+                    vertices.append(v1)
+                    vertices.append(v3)
                 }
                 if options.contains(.mirror) {
                     var pos = floor(minX)
@@ -1016,25 +1187,48 @@ extension GraphicsContext {
                     let p2 = Vector2(x2, 0)
                     let p3 = p2.rotated(by: step)
 
-                    let verts: [Vector2]
-                    let colors: [Color]
-                    if (p1 - p0).magnitudeSquared < .ulpOfOne {
-                        verts = [p0, p2, p3]
-                        colors = [c1, c2, c2]
-                    } else {
-                        verts = [p1, p0, p3, p3, p0, p2]
-                        colors = [c1, c1, c2, c2, c1, c2]
+                    // Resolve the final clipped endpoints once for the whole arc.
+                    let color1 = _premultipliedVertexColor(c1.backendColor(in: self.environment))
+                    let color2 = _premultipliedVertexColor(c2.backendColor(in: self.environment))
+                    let isTriangle = (p1 - p0).magnitudeSquared < .ulpOfOne
+                    // Reserve the first arc; later appends keep geometric growth across arcs.
+                    if vertices.isEmpty {
+                        let numVertices = Int((CGFloat.pi * 2) / step) + 1
+                        vertices.reserveCapacity(numVertices * (isTriangle ? 3 : 6))
                     }
-                    let numVertices = Int((CGFloat.pi * 2) / step) + 1
-                    vertices.reserveCapacity(vertices.count + numVertices * verts.count)
                     var progress: CGFloat = .zero
-                    while progress < .pi * 2  {
-                        for (i, p) in verts.enumerated() {
-                            vertices.append(_Vertex(position: p.rotated(by: progress).applying(transform).float2,
-                                                    texcoord: texCoord,
-                                                    color: _premultipliedVertexColor(
-                                                        colors[i].backendColor(in: self.environment)
-                                                    )))
+                    while progress < .pi * 2 {
+                        // Share this angle's coefficients without changing rotation arithmetic.
+                        let angle = Scalar(progress)
+                        let cosR = cos(angle)
+                        let sinR = sin(angle)
+                        let rotated = { (point: Vector2) in
+                            Vector2(point.x * cosR - point.y * sinR,
+                                    point.x * sinR + point.y * cosR)
+                        }
+                        if isTriangle {
+                            vertices.append(_Vertex(position: rotated(p0).applying(transform).float2,
+                                                    texcoord: texCoord, color: color1))
+                            vertices.append(_Vertex(position: rotated(p2).applying(transform).float2,
+                                                    texcoord: texCoord, color: color2))
+                            vertices.append(_Vertex(position: rotated(p3).applying(transform).float2,
+                                                    texcoord: texCoord, color: color2))
+                        } else {
+                            // Reuse v0 and v3 between the two triangles at this angle.
+                            let v1 = _Vertex(position: rotated(p1).applying(transform).float2,
+                                             texcoord: texCoord, color: color1)
+                            let v0 = _Vertex(position: rotated(p0).applying(transform).float2,
+                                             texcoord: texCoord, color: color1)
+                            let v3 = _Vertex(position: rotated(p3).applying(transform).float2,
+                                             texcoord: texCoord, color: color2)
+                            let v2 = _Vertex(position: rotated(p2).applying(transform).float2,
+                                             texcoord: texCoord, color: color2)
+                            vertices.append(v1)
+                            vertices.append(v0)
+                            vertices.append(v3)
+                            vertices.append(v3)
+                            vertices.append(v0)
+                            vertices.append(v2)
                         }
                         progress += step
                     }
@@ -1148,29 +1342,52 @@ extension GraphicsContext {
                 let center = Vector2(0, 0).applying(transform)
                 let numTriangles = Int((CGFloat.pi * 2) / step) + 1
                 vertices.reserveCapacity(numTriangles * 3)
+
+                // Sample locations increase, so passed stops cannot be upper endpoints again.
+                let firstStop = gradient.stops[0]
+                var currentStop = firstStop
+                var nextStopIndex = 1
+                let interpolatedColor = { (location: CGFloat) -> Color in
+                    if location > firstStop.location {
+                        while nextStopIndex < gradient.stops.count {
+                            let nextStop = gradient.stops[nextStopIndex]
+                            if nextStop.location > location {
+                                return .lerp(currentStop.color, nextStop.color,
+                                             (location - currentStop.location) /
+                                             (nextStop.location - currentStop.location))
+                            }
+                            currentStop = nextStop
+                            nextStopIndex += 1
+                        }
+                        return currentStop.color
+                    }
+                    return firstStop.color
+                }
+                var p0 = Vector2(1, 0).rotated(by: progress).applying(transform)
+                var color1 = _premultipliedVertexColor(interpolatedColor(
+                    progress / (.pi * 2)
+                ).backendColor(in: self.environment))
                 while progress < .pi * 2 {
-                    let p0 = Vector2(1, 0).rotated(by: progress).applying(transform)
-                    let p1 = Vector2(1, 0).rotated(by: progress + step).applying(transform)
-                    let color1 = gradient._linearInterpolatedColor(at: progress / (.pi * 2))
-                    let color2 = gradient._linearInterpolatedColor(at: (progress + step) / (.pi * 2))
+                    let nextProgress = progress + step
+                    let p1 = Vector2(1, 0).rotated(by: nextProgress).applying(transform)
+                    let color2 = _premultipliedVertexColor(interpolatedColor(
+                        nextProgress / (.pi * 2)
+                    ).backendColor(in: self.environment))
 
                     vertices.append(_Vertex(position: center.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(
-                                                color1.backendColor(in: self.environment)
-                                            )))
+                                            color: color1))
                     vertices.append(_Vertex(position: p0.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(
-                                                color1.backendColor(in: self.environment)
-                                            )))
+                                            color: color1))
                     vertices.append(_Vertex(position: p1.float2,
                                             texcoord: texCoord,
-                                            color: _premultipliedVertexColor(
-                                                color2.backendColor(in: self.environment)
-                                            )))
+                                            color: color2))
 
-                    progress += step
+                    // The next triangle starts at this same accumulated angle.
+                    p0 = p1
+                    color1 = color2
+                    progress = nextProgress
                 }
             case let .shader(shader, shaderBounds):
                 _ = encodeCustomShaderShadingCommand(

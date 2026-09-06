@@ -6,52 +6,8 @@
 //
 
 import Foundation
+import Synchronization
 import VVD
-
-#if false
-private func decodeShader(device: GraphicsDevice, encodedText: String) -> VVD.ShaderFunction? {
-    if let data = Data(base64Encoded: encodedText, options: .ignoreUnknownCharacters) {
-        let inputStream = InputStream(data: data)
-        let outputStream = OutputStream.toMemory()
-
-        if decompress(input: inputStream, output: outputStream) == .success {
-            let decodedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
-            if let shader = VVD.Shader(data: decodedData), shader.validate() {
-                Log.debug("GraphicsPipeline Shader loaded: \(shader)")
-                if let module = device.makeShaderModule(from: shader) {
-                    return module.makeFunction(name: module.functionNames.first ?? "")
-                }
-            }
-        }
-    }
-    return nil
-}
-
-private func encodeSPIRVData(from url: URL?) -> String? {
-    if let url {
-        do {
-            let data = try Data(contentsOf: url, options: [])
-            let length = data.count
-            Log.debug("URL:\(url) loaded \(length) bytes.")
-            let inputStream = InputStream(data: data)
-            let outputStream = OutputStream.toMemory()
-
-            let compressionResult = compress(input: inputStream, inputBytes: length, output: outputStream, method: .best)
-            if compressionResult == .success {
-                let compressedData = outputStream.property(forKey: .dataWrittenToMemoryStreamKey) as! Data
-                return compressedData.base64EncodedString()
-            } else {
-                Log.error("\(#function) compression failed: \(compressionResult)")
-            }
-        } catch {
-            Log.error("\(#function) error on loading data: \(error)")
-        }
-    } else {
-        Log.error("\(#function) error: Invalid URL")
-    }
-    return nil
-}
-#endif
 
 // MARK: - Pipeline Types
 enum _Shader {
@@ -98,7 +54,7 @@ enum _Shader {
     case blendPlusLighter
 }
 
-enum _Stencil {
+enum _Stencil: Int, CaseIterable {
     case makeFill
     case makeStroke
     case testNonZero    // filled using the non-zero rule
@@ -146,7 +102,8 @@ class GraphicsPipelineStates {
         let sampleCount: Int
     }
     private var renderStates: [RenderStateDescriptor: RenderPipelineState] = [:]
-    private var depthStencilStates: [_Stencil: DepthStencilState] = [:]
+    private var depthStencilStates: [DepthStencilState?] =
+        Array(repeating: nil, count: _Stencil.allCases.count)
 
     func renderState(shader: _Shader,
                      colorFormat: PixelFormat,
@@ -165,71 +122,70 @@ class GraphicsPipelineStates {
         assert(rs.sampleCount.isPowerOfTwo,
                "sampleCount must be a power of two and greater than zero.")
 
-        Self.lock.lock()
-        defer { Self.lock.unlock() }
+        return Self.lock.withLock { _ in
+            if let state = renderStates[rs] { return state }
 
-        if let state = renderStates[rs] { return state }
+            guard let shader = shaderFunctions[rs.shader] else { return nil }
 
-        guard let shader = shaderFunctions[rs.shader] else { return nil }
+            var pipelineDescriptor = RenderPipelineDescriptor()
+            pipelineDescriptor.vertexFunction = shader.vertexFunction
+            pipelineDescriptor.fragmentFunction = shader.fragmentFunction
+            pipelineDescriptor.colorAttachments = [
+                .init(index: 0, pixelFormat: rs.colorFormat, blendState: rs.blendState)
+            ]
+            pipelineDescriptor.depthStencilAttachmentPixelFormat = rs.depthFormat
+            if rs.shader == .stencil {
+                pipelineDescriptor.vertexDescriptor.attributes = [
+                    .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
+                ]
+                pipelineDescriptor.vertexDescriptor.layouts = [
+                    .init(stepRate: .vertex, stride: MemoryLayout<Float2>.stride)
+                ]
+            } else if rs.shader == .projectiveImage {
+                pipelineDescriptor.vertexDescriptor.attributes = [
+                    .init(format: .float4, offset: 0, bufferIndex: 0, location: 0),
+                    .init(
+                        format: .float2,
+                        offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.texcoord)!,
+                        bufferIndex: 0,
+                        location: 1
+                    ),
+                    .init(
+                        format: .float4,
+                        offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.color)!,
+                        bufferIndex: 0,
+                        location: 2
+                    ),
+                ]
+                pipelineDescriptor.vertexDescriptor.layouts = [
+                    .init(
+                        stepRate: .vertex,
+                        stride: MemoryLayout<_ProjectiveVertex>.stride
+                    )
+                ]
+            } else {
+                pipelineDescriptor.vertexDescriptor.attributes = [
+                    .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
+                    .init(format: .float2, offset: MemoryLayout<_Vertex>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
+                    .init(format: .float4, offset: MemoryLayout<_Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
+                ]
+                pipelineDescriptor.vertexDescriptor.layouts = [
+                    .init(stepRate: .vertex, stride: MemoryLayout<_Vertex>.stride)
+                ]
+            }
+            pipelineDescriptor.primitiveTopology = .triangle
+            pipelineDescriptor.triangleFillMode = .fill
+            pipelineDescriptor.rasterSampleCount = rs.sampleCount
 
-        var pipelineDescriptor = RenderPipelineDescriptor()
-        pipelineDescriptor.vertexFunction = shader.vertexFunction
-        pipelineDescriptor.fragmentFunction = shader.fragmentFunction
-        pipelineDescriptor.colorAttachments = [
-            .init(index: 0, pixelFormat: rs.colorFormat, blendState: rs.blendState)
-        ]
-        pipelineDescriptor.depthStencilAttachmentPixelFormat = rs.depthFormat
-        if rs.shader == .stencil {
-            pipelineDescriptor.vertexDescriptor.attributes = [
-                .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
-            ]
-            pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(stepRate: .vertex, stride: MemoryLayout<Float2>.stride)
-            ]
-        } else if rs.shader == .projectiveImage {
-            pipelineDescriptor.vertexDescriptor.attributes = [
-                .init(format: .float4, offset: 0, bufferIndex: 0, location: 0),
-                .init(
-                    format: .float2,
-                    offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.texcoord)!,
-                    bufferIndex: 0,
-                    location: 1
-                ),
-                .init(
-                    format: .float4,
-                    offset: MemoryLayout<_ProjectiveVertex>.offset(of: \.color)!,
-                    bufferIndex: 0,
-                    location: 2
-                ),
-            ]
-            pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(
-                    stepRate: .vertex,
-                    stride: MemoryLayout<_ProjectiveVertex>.stride
-                )
-            ]
-        } else {
-            pipelineDescriptor.vertexDescriptor.attributes = [
-                .init(format: .float2, offset: 0, bufferIndex: 0, location: 0 ),
-                .init(format: .float2, offset: MemoryLayout<_Vertex>.offset(of: \.texcoord)!, bufferIndex: 0, location: 1 ),
-                .init(format: .float4, offset: MemoryLayout<_Vertex>.offset(of: \.color)!, bufferIndex: 0, location: 2 ),
-            ]
-            pipelineDescriptor.vertexDescriptor.layouts = [
-                .init(stepRate: .vertex, stride: MemoryLayout<_Vertex>.stride)
-            ]
+            var reflection = PipelineReflection()
+            if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
+                                                          reflection: &reflection) {
+                Log.debug("RenderPipelineState (_Shader.\(rs.shader)) Reflection: \(reflection)")
+                renderStates[rs] = state
+                return renderStates[rs]
+            }
+            return nil
         }
-        pipelineDescriptor.primitiveTopology = .triangle
-        pipelineDescriptor.triangleFillMode = .fill
-        pipelineDescriptor.rasterSampleCount = rs.sampleCount
-
-        var reflection = PipelineReflection()
-        if let state = device.makeRenderPipelineState(descriptor: pipelineDescriptor,
-                                                      reflection: &reflection) {
-            Log.debug("RenderPipelineState (_Shader.\(rs.shader)) Reflection: \(reflection)")
-            renderStates[rs] = state
-            return renderStates[rs]
-        }
-        return nil
     }
 
     func makeCustomRenderState(
@@ -285,67 +241,73 @@ class GraphicsPipelineStates {
     }
 
     func depthStencilState(_ ds: _Stencil) -> DepthStencilState? {
-        Self.lock.lock()
-        defer { Self.lock.unlock() }
+        return Self.lock.withLock { _ in
+            let index = ds.rawValue
+            if let state = depthStencilStates[index] { return state }
 
-        if let state = depthStencilStates[ds] { return state }
+            var descriptor = DepthStencilDescriptor()
+            descriptor.depthCompareFunction = .always
+            descriptor.isDepthWriteEnabled = false
 
-        var descriptor = DepthStencilDescriptor()
-        descriptor.depthCompareFunction = .always
-        descriptor.isDepthWriteEnabled = false
+            switch ds {
+            case .makeFill:
+                descriptor.frontFaceStencil.depthStencilPassOperation = .incrementWrap
+                descriptor.backFaceStencil.depthStencilPassOperation = .decrementWrap
+            case .makeStroke:
+                descriptor.frontFaceStencil.depthStencilPassOperation = .incrementClamp
+                descriptor.backFaceStencil.depthStencilPassOperation = .incrementClamp
+            case .testNonZero:
+                // filled using the non-zero rule. (reference stencil value: 0)
+                descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
+                descriptor.backFaceStencil.stencilCompareFunction = .notEqual
+            case .testEven:
+                // even-odd winding rule. (reference stencil value: 0)
+                descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
+                descriptor.backFaceStencil.stencilCompareFunction = .notEqual
+                descriptor.frontFaceStencil.readMask = 1
+                descriptor.backFaceStencil.readMask = 1
+            case .testZero:
+                // inverse of non-zero rule
+                descriptor.frontFaceStencil.stencilCompareFunction = .equal
+                descriptor.backFaceStencil.stencilCompareFunction = .equal
+            case .testOdd:
+                // inverse of even-odd rule
+                descriptor.frontFaceStencil.stencilCompareFunction = .equal
+                descriptor.backFaceStencil.stencilCompareFunction = .equal
+                descriptor.frontFaceStencil.readMask = 1
+                descriptor.backFaceStencil.readMask = 1
+            case .ignore:
+                break
+            }
 
-        switch ds {
-        case .makeFill:
-            descriptor.frontFaceStencil.depthStencilPassOperation = .incrementWrap
-            descriptor.backFaceStencil.depthStencilPassOperation = .decrementWrap
-        case .makeStroke:
-            descriptor.frontFaceStencil.depthStencilPassOperation = .incrementClamp
-            descriptor.backFaceStencil.depthStencilPassOperation = .incrementClamp
-        case .testNonZero:
-            // filled using the non-zero rule. (reference stencil value: 0)
-            descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
-            descriptor.backFaceStencil.stencilCompareFunction = .notEqual
-        case .testEven:
-            // even-odd winding rule. (reference stencil value: 0)
-            descriptor.frontFaceStencil.stencilCompareFunction = .notEqual
-            descriptor.backFaceStencil.stencilCompareFunction = .notEqual
-            descriptor.frontFaceStencil.readMask = 1
-            descriptor.backFaceStencil.readMask = 1
-        case .testZero:
-            // inverse of non-zero rule
-            descriptor.frontFaceStencil.stencilCompareFunction = .equal
-            descriptor.backFaceStencil.stencilCompareFunction = .equal
-        case .testOdd:
-            // inverse of even-odd rule
-            descriptor.frontFaceStencil.stencilCompareFunction = .equal
-            descriptor.backFaceStencil.stencilCompareFunction = .equal
-            descriptor.frontFaceStencil.readMask = 1
-            descriptor.backFaceStencil.readMask = 1
-        case .ignore:
-            break
+            if let depthStencilState = device.makeDepthStencilState(descriptor: descriptor) {
+                depthStencilStates[index] = depthStencilState
+                return depthStencilState
+            }
+            return nil
         }
-
-        if let depthStencilState = device.makeDepthStencilState(descriptor: descriptor) {
-            depthStencilStates[ds] = depthStencilState
-            return depthStencilStates[ds]
-        }
-        return nil
     }
 
     func makeBindingSet1() -> ShaderBindingSet? {
-        device.makeShaderBindingSet(layout: bindingLayout1)
+        let bindings = device.makeShaderBindingSet(layout: bindingLayout1)
+        // Draw commands replace textures but keep the fixed shaders' sampler.
+        bindings?.setSamplerState(defaultSampler, binding: 0)
+        return bindings
     }
 
     func makeBindingSet2() -> ShaderBindingSet? {
-        device.makeShaderBindingSet(layout: bindingLayout2)
+        let bindings = device.makeShaderBindingSet(layout: bindingLayout2)
+        bindings?.setSamplerState(defaultSampler, binding: 0)
+        bindings?.setSamplerState(defaultSampler, binding: 1)
+        return bindings
     }
 
-    private init(device: GraphicsDevice,
-                 shaderFunctions: [_Shader: ShaderFunctions],
-                 bindingLayout1: ShaderBindingSetLayout,
-                 bindingLayout2: ShaderBindingSetLayout,
-                 defaultSampler: SamplerState,
-                 defaultMaskTexture: Texture) {
+    init(device: GraphicsDevice,
+         shaderFunctions: [_Shader: ShaderFunctions],
+         bindingLayout1: ShaderBindingSetLayout,
+         bindingLayout2: ShaderBindingSetLayout,
+         defaultSampler: SamplerState,
+         defaultMaskTexture: Texture) {
         self.device = device
         self.shaderFunctions = shaderFunctions
         self.bindingLayout1 = bindingLayout1
@@ -353,201 +315,199 @@ class GraphicsPipelineStates {
         self.defaultSampler = defaultSampler
         self.defaultMaskTexture = defaultMaskTexture
         self.renderStates = [:]
-        self.depthStencilStates = [:]
     }
 
-    private static let lock = NSLock()
+    private static let lock = Mutex(())
     nonisolated(unsafe) private static weak var sharedInstance: GraphicsPipelineStates? = nil
 
     static func sharedInstance(commandQueue: CommandQueue) -> GraphicsPipelineStates? {
         if let instance = sharedInstance {
             return instance
         }
-        lock.lock()
-        defer { lock.unlock() }
+        return lock.withLock { _ in
+            var instance = sharedInstance
+            if instance != nil { return instance }
 
-        var instance = sharedInstance
-        if instance != nil { return instance }
+            let device = commandQueue.device
+            do {
+                struct LoadError: Error {
+                    let message: String
+                }
 
-        let device = commandQueue.device
-        do {
-            struct LoadError: Error {
-                let message: String
-            }
-
-            let loadShader = { (name: String) throws -> VVD.ShaderFunction in
-                if let url = Bundle.module.url(forResource: name,
-                                               withExtension: "spv",
-                                               subdirectory: "SPIRV") {
-                    do {
-                        let d = try Data(contentsOf: url, options: [])
-                        if let shader = VVD.Shader(data: d, name: name), shader.validate() {
-                            Log.debug("GraphicsPipeline Shader loaded: \(shader)")
-                            if let module = device.makeShaderModule(from: shader) {
-                                if let fn = module.makeFunction(name: module.functionNames.first ?? "") {
-                                    return fn
+                let loadShader = { (name: String) throws -> VVD.ShaderFunction in
+                    if let url = Bundle.module.url(forResource: name,
+                                                   withExtension: "spv",
+                                                   subdirectory: "SPIRV") {
+                        do {
+                            let d = try Data(contentsOf: url, options: [])
+                            if let shader = VVD.Shader(data: d, name: name), shader.validate() {
+                                Log.debug("GraphicsPipeline Shader loaded: \(shader)")
+                                if let module = device.makeShaderModule(from: shader) {
+                                    if let fn = module.makeFunction(name: module.functionNames.first ?? "") {
+                                        return fn
+                                    }
                                 }
+                            } else {
+                                throw LoadError(message: "Failed to load shader: \(name)")
                             }
-                        } else {
-                            throw LoadError(message: "Failed to load shader: \(name)")
+                        } catch {
+                            Log.error("URL(\(url)) error: \(error)")
+                            throw error
                         }
-                    } catch {
-                        Log.error("URL(\(url)) error: \(error)")
-                        throw error
                     }
+                    throw LoadError(message: "Unable to load shader: \(name)")
                 }
-                throw LoadError(message: "Unable to load shader: \(name)")
-            }
 
-            let vertexFunction = try loadShader("default.vert")
-            let projectiveVertexFunction = try loadShader("projective.vert")
+                let vertexFunction = try loadShader("default.vert")
+                let projectiveVertexFunction = try loadShader("projective.vert")
 
-            var shaderFunctions: [_Shader: ShaderFunctions] = [:]
+                var shaderFunctions: [_Shader: ShaderFunctions] = [:]
 
-            //NOTE - Vulkan does not allow nil-fragment shader, unless rasterizer discard is enabled.
-            // The Vulkan spec states: The pipeline must be created with a complete set of state
-            // [VUID-VkGraphicsPipelineCreateInfo-None-06573]
-            // https://registry.khronos.org/vulkan/specs/1.3/html/chap10.html#pipelines-graphics-subsets-complete
-            shaderFunctions[.stencil] = ShaderFunctions(
-                vertexFunction: try loadShader("stencil.vert"),
-                fragmentFunction: try loadShader("stencil.frag"))
+                //NOTE - Vulkan does not allow nil-fragment shader, unless rasterizer discard is enabled.
+                // The Vulkan spec states: The pipeline must be created with a complete set of state
+                // [VUID-VkGraphicsPipelineCreateInfo-None-06573]
+                // https://registry.khronos.org/vulkan/specs/1.3/html/chap10.html#pipelines-graphics-subsets-complete
+                shaderFunctions[.stencil] = ShaderFunctions(
+                    vertexFunction: try loadShader("stencil.vert"),
+                    fragmentFunction: try loadShader("stencil.frag"))
 
-            let loadFragmentFunction = { (name: String) in
-                ShaderFunctions(vertexFunction: vertexFunction,
-                                fragmentFunction: try loadShader(name))
-            }
-
-            shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
-            shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
-            shaderFunctions[.projectiveImage] = ShaderFunctions(
-                vertexFunction: projectiveVertexFunction,
-                fragmentFunction: try loadShader("draw_image.frag")
-            )
-            shaderFunctions[.rcImage] = try loadFragmentFunction("draw_r8_opacity_image.frag")
-            shaderFunctions[.resolveMask] = try loadFragmentFunction("resolve_mask.frag")
-
-            // load filters
-            shaderFunctions[.filterProjectionTransform] = try loadFragmentFunction("filter_projectionTransform.frag")
-            shaderFunctions[.filterColorMatrix] = try loadFragmentFunction("filter_colorMatrix.frag")
-            shaderFunctions[.filterBlur] = try loadFragmentFunction("filter_blur.frag")
-            shaderFunctions[.filterSrgbToLinear] = try loadFragmentFunction("filter_srgbToLinear.frag")
-            shaderFunctions[.filterLinearToSrgb] = try loadFragmentFunction("filter_linearToSrgb.frag")
-
-            // load blend functions
-            shaderFunctions[.blendNormal] = try loadFragmentFunction("blend_normal.frag")
-            shaderFunctions[.blendMultiply] = try loadFragmentFunction("blend_multiply.frag")
-            shaderFunctions[.blendScreen] = try loadFragmentFunction("blend_screen.frag")
-            shaderFunctions[.blendOverlay] = try loadFragmentFunction("blend_overlay.frag")
-            shaderFunctions[.blendDarken] = try loadFragmentFunction("blend_darken.frag")
-            shaderFunctions[.blendLighten] = try loadFragmentFunction("blend_lighten.frag")
-            shaderFunctions[.blendColorDodge] = try loadFragmentFunction("blend_colorDodge.frag")
-            shaderFunctions[.blendColorBurn] = try loadFragmentFunction("blend_colorBurn.frag")
-            shaderFunctions[.blendSoftLight] = try loadFragmentFunction("blend_softLight.frag")
-            shaderFunctions[.blendHardLight] = try loadFragmentFunction("blend_hardLight.frag")
-            shaderFunctions[.blendDifference] = try loadFragmentFunction("blend_difference.frag")
-            shaderFunctions[.blendExclusion] = try loadFragmentFunction("blend_exclusion.frag")
-            shaderFunctions[.blendHue] = try loadFragmentFunction("blend_hue.frag")
-            shaderFunctions[.blendSaturation] = try loadFragmentFunction("blend_saturation.frag")
-            shaderFunctions[.blendColor] = try loadFragmentFunction("blend_color.frag")
-            shaderFunctions[.blendLuminosity] = try loadFragmentFunction("blend_luminosity.frag")
-            shaderFunctions[.blendClear] = try loadFragmentFunction("blend_clear.frag")
-            shaderFunctions[.blendCopy] = try loadFragmentFunction("blend_copy.frag")
-            shaderFunctions[.blendSourceIn] = try loadFragmentFunction("blend_sourceIn.frag")
-            shaderFunctions[.blendSourceOut] = try loadFragmentFunction("blend_sourceOut.frag")
-            shaderFunctions[.blendSourceAtop] = try loadFragmentFunction("blend_sourceAtop.frag")
-            shaderFunctions[.blendDestinationOver] = try loadFragmentFunction("blend_destinationOver.frag")
-            shaderFunctions[.blendDestinationIn] = try loadFragmentFunction("blend_destinationIn.frag")
-            shaderFunctions[.blendDestinationOut] = try loadFragmentFunction("blend_destinationOut.frag")
-            shaderFunctions[.blendDestinationAtop] = try loadFragmentFunction("blend_destinationAtop.frag")
-            shaderFunctions[.blendXor] = try loadFragmentFunction("blend_xor.frag")
-            shaderFunctions[.blendPlusDarker] = try loadFragmentFunction("blend_plusDarker.frag")
-            shaderFunctions[.blendPlusLighter] = try loadFragmentFunction("blend_plusLighter.frag")
-
-            let bindingLayout1 = ShaderBindingSetLayout(
-                bindings: [
-                    ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
-                ])
-
-            let bindingLayout2 = ShaderBindingSetLayout(
-                bindings: [
-                    ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
-                    ShaderBinding(binding: 1, type: .textureSampler, arrayLength: 1),
-                ])
-
-            let samplerDesc = SamplerDescriptor(minFilter: .linear,
-                                                magFilter: .linear)
-            guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
-            else {
-                throw LoadError(message: "makeSampler failed.")
-            }
-            
-            guard let defaultMaskTexture = device.makeTexture(
-                descriptor: TextureDescriptor(textureType: .type2D,
-                                              pixelFormat: .r8Unorm,
-                                              width: 2,
-                                              height: 2,
-                                              usage: [.copyDestination, .sampled]))
-            else {
-                throw LoadError(message: "makeTexture failed.")
-            }
-
-            let texWidth = defaultMaskTexture.width
-            let texHeight = defaultMaskTexture.height
-            let bufferLength = texWidth * texHeight
-            guard let stgBuffer = device.makeBuffer(length: bufferLength,
-                                                    storageMode: .shared,
-                                                    cpuCacheMode: .writeCombined)
-            else {
-                throw LoadError(message: "makeBuffer failed.")
-            }
-            if let ptr = stgBuffer.contents() {
-                let pixelData = [UInt8](repeating: 255, count: bufferLength)
-                pixelData.withUnsafeBytes {
-                    assert($0.count == bufferLength)
-                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
+                let loadFragmentFunction = { (name: String) in
+                    ShaderFunctions(vertexFunction: vertexFunction,
+                                    fragmentFunction: try loadShader(name))
                 }
-                stgBuffer.flush()
-            } else {
-                throw LoadError(message: "buffer.contents() failed.")
+
+                shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
+                shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
+                shaderFunctions[.projectiveImage] = ShaderFunctions(
+                    vertexFunction: projectiveVertexFunction,
+                    fragmentFunction: try loadShader("draw_image.frag")
+                )
+                shaderFunctions[.rcImage] = try loadFragmentFunction("draw_r8_opacity_image.frag")
+                shaderFunctions[.resolveMask] = try loadFragmentFunction("resolve_mask.frag")
+
+                // load filters
+                shaderFunctions[.filterProjectionTransform] = try loadFragmentFunction("filter_projectionTransform.frag")
+                shaderFunctions[.filterColorMatrix] = try loadFragmentFunction("filter_colorMatrix.frag")
+                shaderFunctions[.filterBlur] = try loadFragmentFunction("filter_blur.frag")
+                shaderFunctions[.filterSrgbToLinear] = try loadFragmentFunction("filter_srgbToLinear.frag")
+                shaderFunctions[.filterLinearToSrgb] = try loadFragmentFunction("filter_linearToSrgb.frag")
+
+                // load blend functions
+                shaderFunctions[.blendNormal] = try loadFragmentFunction("blend_normal.frag")
+                shaderFunctions[.blendMultiply] = try loadFragmentFunction("blend_multiply.frag")
+                shaderFunctions[.blendScreen] = try loadFragmentFunction("blend_screen.frag")
+                shaderFunctions[.blendOverlay] = try loadFragmentFunction("blend_overlay.frag")
+                shaderFunctions[.blendDarken] = try loadFragmentFunction("blend_darken.frag")
+                shaderFunctions[.blendLighten] = try loadFragmentFunction("blend_lighten.frag")
+                shaderFunctions[.blendColorDodge] = try loadFragmentFunction("blend_colorDodge.frag")
+                shaderFunctions[.blendColorBurn] = try loadFragmentFunction("blend_colorBurn.frag")
+                shaderFunctions[.blendSoftLight] = try loadFragmentFunction("blend_softLight.frag")
+                shaderFunctions[.blendHardLight] = try loadFragmentFunction("blend_hardLight.frag")
+                shaderFunctions[.blendDifference] = try loadFragmentFunction("blend_difference.frag")
+                shaderFunctions[.blendExclusion] = try loadFragmentFunction("blend_exclusion.frag")
+                shaderFunctions[.blendHue] = try loadFragmentFunction("blend_hue.frag")
+                shaderFunctions[.blendSaturation] = try loadFragmentFunction("blend_saturation.frag")
+                shaderFunctions[.blendColor] = try loadFragmentFunction("blend_color.frag")
+                shaderFunctions[.blendLuminosity] = try loadFragmentFunction("blend_luminosity.frag")
+                shaderFunctions[.blendClear] = try loadFragmentFunction("blend_clear.frag")
+                shaderFunctions[.blendCopy] = try loadFragmentFunction("blend_copy.frag")
+                shaderFunctions[.blendSourceIn] = try loadFragmentFunction("blend_sourceIn.frag")
+                shaderFunctions[.blendSourceOut] = try loadFragmentFunction("blend_sourceOut.frag")
+                shaderFunctions[.blendSourceAtop] = try loadFragmentFunction("blend_sourceAtop.frag")
+                shaderFunctions[.blendDestinationOver] = try loadFragmentFunction("blend_destinationOver.frag")
+                shaderFunctions[.blendDestinationIn] = try loadFragmentFunction("blend_destinationIn.frag")
+                shaderFunctions[.blendDestinationOut] = try loadFragmentFunction("blend_destinationOut.frag")
+                shaderFunctions[.blendDestinationAtop] = try loadFragmentFunction("blend_destinationAtop.frag")
+                shaderFunctions[.blendXor] = try loadFragmentFunction("blend_xor.frag")
+                shaderFunctions[.blendPlusDarker] = try loadFragmentFunction("blend_plusDarker.frag")
+                shaderFunctions[.blendPlusLighter] = try loadFragmentFunction("blend_plusLighter.frag")
+
+                let bindingLayout1 = ShaderBindingSetLayout(
+                    bindings: [
+                        ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
+                    ])
+
+                let bindingLayout2 = ShaderBindingSetLayout(
+                    bindings: [
+                        ShaderBinding(binding: 0, type: .textureSampler, arrayLength: 1),
+                        ShaderBinding(binding: 1, type: .textureSampler, arrayLength: 1),
+                    ])
+
+                let samplerDesc = SamplerDescriptor(minFilter: .linear,
+                                                    magFilter: .linear)
+                guard let defaultSampler = device.makeSamplerState(descriptor: samplerDesc)
+                else {
+                    throw LoadError(message: "makeSampler failed.")
+                }
+
+                guard let defaultMaskTexture = device.makeTexture(
+                    descriptor: TextureDescriptor(textureType: .type2D,
+                                                  pixelFormat: .r8Unorm,
+                                                  width: 2,
+                                                  height: 2,
+                                                  usage: [.copyDestination, .sampled]))
+                else {
+                    throw LoadError(message: "makeTexture failed.")
+                }
+
+                let texWidth = defaultMaskTexture.width
+                let texHeight = defaultMaskTexture.height
+                let bufferLength = texWidth * texHeight
+                guard let stgBuffer = device.makeBuffer(length: bufferLength,
+                                                        storageMode: .shared,
+                                                        cpuCacheMode: .writeCombined)
+                else {
+                    throw LoadError(message: "makeBuffer failed.")
+                }
+                if let ptr = stgBuffer.contents() {
+                    let pixelData = [UInt8](repeating: 255, count: bufferLength)
+                    pixelData.withUnsafeBytes {
+                        assert($0.count == bufferLength)
+                        ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
+                    }
+                    stgBuffer.flush()
+                } else {
+                    throw LoadError(message: "buffer.contents() failed.")
+                }
+
+                guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+                    throw LoadError(message: "makeCommandBuffer failed.")
+                }
+                guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
+                    throw LoadError(message: "makeCopyCommandEncoder failed.")
+                }
+                encoder.copy(from: stgBuffer,
+                             sourceOffset: BufferImageOrigin(
+                                offset: 0,
+                                imageWidth: texWidth,
+                                imageHeight: texHeight),
+                             to: defaultMaskTexture,
+                             destinationOffset: TextureOrigin(layer: 0, level: 0,
+                                                              x: 0, y: 0, z: 0),
+                             size: TextureSize(width: texWidth,
+                                               height: texHeight,
+                                               depth: 1))
+
+                encoder.endEncoding()
+                commandBuffer.commit()
+
+                instance = GraphicsPipelineStates(
+                    device: device,
+                    shaderFunctions: shaderFunctions,
+                    bindingLayout1: bindingLayout1,
+                    bindingLayout2: bindingLayout2,
+                    defaultSampler: defaultSampler,
+                    defaultMaskTexture: defaultMaskTexture)
+
+                // make weak-ref
+                Self.sharedInstance = instance
+                Log.info("\(Self.self).\(#function): instance created.")
+            } catch {
+                fatalError("\(Self.self).\(#function) Error: \(error)")
             }
 
-            guard let commandBuffer = commandQueue.makeCommandBuffer() else {
-                throw LoadError(message: "makeCommandBuffer failed.")
-            }
-            guard let encoder = commandBuffer.makeCopyCommandEncoder() else {
-                throw LoadError(message: "makeCopyCommandEncoder failed.")
-            }
-            encoder.copy(from: stgBuffer,
-                         sourceOffset: BufferImageOrigin(
-                            offset: 0,
-                            imageWidth: texWidth,
-                            imageHeight: texHeight),
-                         to: defaultMaskTexture,
-                         destinationOffset: TextureOrigin(layer: 0, level: 0,
-                                                          x: 0, y: 0, z: 0),
-                         size: TextureSize(width: texWidth,
-                                           height: texHeight,
-                                           depth: 1))
-
-            encoder.endEncoding()
-            commandBuffer.commit()
-
-            instance = GraphicsPipelineStates(
-                device: device,
-                shaderFunctions: shaderFunctions,
-                bindingLayout1: bindingLayout1,
-                bindingLayout2: bindingLayout2,
-                defaultSampler: defaultSampler,
-                defaultMaskTexture: defaultMaskTexture)
-
-            // make weak-ref
-            Self.sharedInstance = instance
-            Log.info("\(Self.self).\(#function): instance created.")
-        } catch {
-            fatalError("\(Self.self).\(#function) Error: \(error)")
+            return instance
         }
-
-        return instance
     }
 }
 
@@ -566,23 +526,34 @@ extension GraphicsContext {
 
     struct RenderPass {
         let encoder: RenderCommandEncoder
-        let descriptor: RenderPassDescriptor
+        let colorFormat: PixelFormat
+        let depthFormat: PixelFormat
         let sampleCount: Int
+
+        init(encoder: RenderCommandEncoder,
+             descriptor: RenderPassDescriptor,
+             sampleCount: Int) {
+            self.encoder = encoder
+            // Formats stay fixed for this pass. The backend encoder retains
+            // the attachments, so draw commands only need their formats.
+            self.colorFormat = descriptor.colorAttachments.first?
+                .renderTarget?.pixelFormat ?? .invalid
+            self.depthFormat = descriptor.depthStencilAttachment
+                .renderTarget?.pixelFormat ?? .invalid
+            self.sampleCount = sampleCount
+
+            // These values stay fixed for every draw in this pass.
+            // Cull mode remains draw-specific for stroke geometry.
+            encoder.setFrontFacing(.clockwise)
+            if depthFormat.isStencilFormat {
+                encoder.setStencilReferenceValue(0)
+            }
+        }
 
         func end() {
             if self.encoder.isCompleted == false {
                 self.encoder.endEncoding()
             }
-        }
-
-        var colorFormat: PixelFormat {
-            descriptor.colorAttachments.first?.renderTarget?.pixelFormat ??
-                .invalid
-        }
-
-        var depthFormat: PixelFormat {
-            descriptor.depthStencilAttachment.renderTarget?.pixelFormat ??
-                .invalid
         }
     }
 
@@ -728,54 +699,36 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
         if let texture {
             self.bindingSet1.setTexture(texture, binding: 0)
-            self.bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
             encoder.setResource(self.bindingSet1, index: 0)
         }
 
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setStencilReferenceValue(0)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(vertexStart: 0,
                      vertexCount: vertices.count,
                      instanceCount: 1,
                      baseInstance: 0)
     }
 
-    func makeBuffer<T>(_ data: [T]) -> GPUBuffer? {
+    func makeBuffer<T>(_ data: [T]) -> BufferSlice? {
         if data.isEmpty { return nil }
 
-        let device = self.commandBuffer.device
-        let length = MemoryLayout<T>.stride * data.count
-        if let buffer = device.makeBuffer(length: length,
-                                          storageMode: .shared,
-                                          cpuCacheMode: .writeCombined) {
-            if let ptr = buffer.contents() {
-                data.withUnsafeBytes {
-                    assert($0.count == length)
-                    ptr.copyMemory(from: $0.baseAddress!, byteCount: $0.count)
-                }
-                buffer.flush()
-                return buffer
-            }
+        return data.withUnsafeBytes { bytes in
+            uploadBufferArena.copy(
+                bytes,
+                alignment: MemoryLayout<T>.alignment
+            )
         }
-        return nil
     }
 
-    func makeBuffer(_ data: UnsafeRawBufferPointer) -> GPUBuffer? {
-        if data.count > 0 && data.baseAddress != nil {
-            let length = data.count
-            let device = self.commandBuffer.device
-            if let buffer = device.makeBuffer(length: length,
-                                              storageMode: .shared,
-                                              cpuCacheMode: .writeCombined) {
-                if let ptr = buffer.contents() {
-                    ptr.copyMemory(from: data.baseAddress!, byteCount: data.count)
-                    buffer.flush()
-                    return buffer
-                }
-            }
-        }
-        return nil
+    func makeBuffer(_ data: UnsafeRawBufferPointer) -> BufferSlice? {
+        uploadBufferArena.copy(
+            data,
+            alignment: UploadBufferArena.allocationAlignment
+        )
     }
 }

@@ -1047,9 +1047,11 @@ extension GraphicsContext {
                 )
             }
             encoder.setCullMode(.none)
-            encoder.setFrontFacing(.clockwise)
-            encoder.setStencilReferenceValue(0)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBuffer(
+                vertexBuffer.buffer,
+                offset: vertexBuffer.offset,
+                index: 0
+            )
             encoder.draw(
                 vertexStart: 0,
                 vertexCount: vertices.count,

@@ -383,16 +383,18 @@ extension GraphicsContext {
         let uvMinY = Float(textureFrame.minY * invH)
         let uvMaxY = Float(textureFrame.maxY * invH)
 
+        let color = color.float4
         let makeVertex = { x, y, u, v in
-            _Vertex(position: (x, y), texcoord: (u, v), color: color.float4)
+            _Vertex(position: (x, y), texcoord: (u, v), color: color)
         }
-        let vertices: [_Vertex] = [
-            makeVertex(-1, -1, uvMinX, uvMaxY), // left bottom
-            makeVertex(-1,  1, uvMinX, uvMinY), // left top
-            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
-            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
-            makeVertex(-1,  1, uvMinX, uvMinY), // left top
-            makeVertex( 1,  1, uvMaxX, uvMinY), // right top
+        // Reuse corners without changing the six-vertex triangle order.
+        let bottomLeft = makeVertex(-1, -1, uvMinX, uvMaxY)
+        let topLeft = makeVertex(-1,  1, uvMinX, uvMinY)
+        let bottomRight = makeVertex( 1, -1, uvMaxX, uvMaxY)
+        let topRight = makeVertex( 1,  1, uvMaxX, uvMinY)
+        let vertices = [
+            bottomLeft, topLeft, bottomRight,
+            bottomRight, topLeft, topRight
         ]
 
         guard let renderState = pipeline.renderState(
@@ -418,15 +420,17 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
 
         self.bindingSet1.setTexture(texture, binding: 0)
-        self.bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
         encoder.setResource(self.bindingSet1, index: 0)
 
         withUnsafeBytes(of: projectionTransform) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
         }
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(vertexStart: 0,
                      vertexCount: vertices.count,
                      instanceCount: 1,
@@ -448,18 +452,20 @@ extension GraphicsContext {
         let uvMinY = Float(textureFrame.minY * invH)
         let uvMaxY = Float(textureFrame.maxY * invH)
 
+        let color = color.float4
         let makeVertex = { (x: Scalar, y: Scalar, u: Float, v: Float) in
             _Vertex(position: Vector2(x, y).applying(self.viewTransform).float2,
-                    texcoord: (u, v), color: color.float4)
+                    texcoord: (u, v), color: color)
         }
         let frame = frame.standardized
-        let vertices: [_Vertex] = [
-            makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY), // left bottom
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
-            makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY), // right top
+        // Reuse corners without changing the six-vertex triangle order.
+        let bottomLeft = makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY)
+        let topLeft = makeVertex(frame.minX, frame.minY, uvMinX, uvMinY)
+        let bottomRight = makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY)
+        let topRight = makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY)
+        let vertices = [
+            bottomLeft, topLeft, bottomRight,
+            bottomRight, topLeft, topRight
         ]
 
         guard let renderState = pipeline.renderState(
@@ -485,15 +491,17 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
 
         self.bindingSet1.setTexture(texture, binding: 0)
-        self.bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
         encoder.setResource(self.bindingSet1, index: 0)
 
         withUnsafeBytes(of: colorMatrix) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
         }
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(vertexStart: 0,
                      vertexCount: vertices.count,
                      instanceCount: 1,
@@ -526,16 +534,18 @@ extension GraphicsContext {
         let uvMaxX = Float(textureFrame.maxX * invW)
         let uvMinY = Float(textureFrame.minY * invH)
         let uvMaxY = Float(textureFrame.maxY * invH)
+        let color = color.float4
         let makeVertex = { x, y, u, v in
-            _Vertex(position: (x, y), texcoord: (u, v), color: color.float4)
+            _Vertex(position: (x, y), texcoord: (u, v), color: color)
         }
-        let vertices: [_Vertex] = [
-            makeVertex(-1, -1, uvMinX, uvMaxY), // left bottom
-            makeVertex(-1,  1, uvMinX, uvMinY), // left top
-            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
-            makeVertex( 1, -1, uvMaxX, uvMaxY), // right bottom
-            makeVertex(-1,  1, uvMinX, uvMinY), // left top
-            makeVertex( 1,  1, uvMaxX, uvMinY), // right top
+        // Reuse corners without changing the six-vertex triangle order.
+        let bottomLeft = makeVertex(-1, -1, uvMinX, uvMaxY)
+        let topLeft = makeVertex(-1,  1, uvMinX, uvMinY)
+        let bottomRight = makeVertex( 1, -1, uvMaxX, uvMaxY)
+        let topRight = makeVertex( 1,  1, uvMaxX, uvMinY)
+        let vertices = [
+            bottomLeft, topLeft, bottomRight,
+            bottomRight, topLeft, topRight
         ]
 
         guard let renderState = pipeline.renderState(
@@ -561,15 +571,17 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
 
         self.bindingSet1.setTexture(texture, binding: 0)
-        self.bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
         encoder.setResource(self.bindingSet1, index: 0)
 
         withUnsafeBytes(of: blurParameters) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
         }
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(vertexStart: 0,
                      vertexCount: vertices.count,
                      instanceCount: 1,

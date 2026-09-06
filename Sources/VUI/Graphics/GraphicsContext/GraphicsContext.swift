@@ -10,6 +10,94 @@ import VVD
 
 public struct GraphicsContext {
 
+    struct BufferSlice {
+        let buffer: GPUBuffer
+        let offset: Int
+    }
+
+    final class UploadBufferArena {
+        // Contexts encoding into one command buffer share this arena. Slices are
+        // monotonic so deferred backend encoders never observe overwritten data.
+        private static let defaultCapacity = 256 * 1024
+        private static let capacityAlignment = 4096
+        static let allocationAlignment = 16
+
+        private final class Chunk {
+            // Shared-buffer mappings and lengths stay fixed while the buffer is retained.
+            let buffer: GPUBuffer
+            let length: Int
+            let contents: UnsafeMutableRawPointer
+            var endOffset: Int = 0
+
+            init(buffer: GPUBuffer, contents: UnsafeMutableRawPointer) {
+                self.buffer = buffer
+                self.length = buffer.length
+                self.contents = contents
+            }
+        }
+
+        private let device: GraphicsDevice
+        private var chunks: [Chunk] = []
+
+        init(device: GraphicsDevice) {
+            self.device = device
+            self.chunks.reserveCapacity(1)
+        }
+
+        func copy(
+            _ bytes: UnsafeRawBufferPointer,
+            alignment requestedAlignment: Int
+        ) -> BufferSlice? {
+            guard bytes.count > 0, let source = bytes.baseAddress else {
+                return nil
+            }
+
+            let alignment = max(
+                Self.allocationAlignment,
+                requestedAlignment
+            )
+            assert(alignment.isPowerOfTwo)
+
+            if let chunk = chunks.last {
+                let offset = chunk.endOffset.alignedUp(
+                    toMultipleOf: alignment
+                )
+                if bytes.count <= chunk.length,
+                   offset <= chunk.length - bytes.count {
+                    chunk.contents.advanced(by: offset).copyMemory(
+                        from: source,
+                        byteCount: bytes.count
+                    )
+                    chunk.endOffset = offset + bytes.count
+                    chunk.buffer.flush()
+                    return BufferSlice(buffer: chunk.buffer, offset: offset)
+                }
+            }
+
+            let minimumCapacity = max(
+                Self.defaultCapacity,
+                bytes.count
+            )
+            let capacity = minimumCapacity.alignedUp(
+                toMultipleOf: Self.capacityAlignment
+            )
+            guard let buffer = device.makeBuffer(
+                length: capacity,
+                storageMode: .shared,
+                cpuCacheMode: .writeCombined
+            ), let destination = buffer.contents() else {
+                return nil
+            }
+
+            destination.copyMemory(from: source, byteCount: bytes.count)
+            buffer.flush()
+            let chunk = Chunk(buffer: buffer, contents: destination)
+            chunk.endOffset = bytes.count
+            chunks.append(chunk)
+            return BufferSlice(buffer: buffer, offset: 0)
+        }
+    }
+
     public var opacity: Double
     public var blendMode: BlendMode
     public internal(set) var environment: EnvironmentValues
@@ -51,6 +139,10 @@ public struct GraphicsContext {
     let sceneResources: SceneResources
     let commandBuffer: CommandBuffer
     let pipeline: GraphicsPipelineStates
+    let uploadBufferArena: UploadBufferArena
+    // Serial command recording shares CPU capacity, not cached tessellation.
+    // Uploads copy the payload before another fill or stroke reuses the vertex array.
+    let pathGeometryScratch: StencilPathGeometryScratch
 
     let bindingSet1: ShaderBindingSet // for 1-texture
     let bindingSet2: ShaderBindingSet // for 2-textures
@@ -67,7 +159,9 @@ public struct GraphicsContext {
           contentOffset: CGPoint,
           contentScaleFactor: CGFloat,
           renderTargets: RenderTargets,
-          commandBuffer: CommandBuffer) {
+          commandBuffer: CommandBuffer,
+          uploadBufferArena: UploadBufferArena? = nil,
+          pathGeometryScratch: StencilPathGeometryScratch? = nil) {
 
         let viewport = viewport.standardized
         if viewport.isEmpty || viewport.isInfinite {
@@ -86,6 +180,10 @@ public struct GraphicsContext {
         self.clipBoundingRect = viewport
         self.environment = environment
         self.commandBuffer = commandBuffer
+        self.uploadBufferArena = uploadBufferArena ?? UploadBufferArena(
+            device: commandBuffer.device
+        )
+        self.pathGeometryScratch = pathGeometryScratch ?? StencilPathGeometryScratch()
         self.contentScaleFactor = contentScaleFactor
         self.renderTargets = renderTargets
         self.contentBoundsState = ContentBoundsState()
@@ -297,7 +395,9 @@ extension GraphicsContext {
           contentOffset: CGPoint,
           contentScaleFactor: CGFloat,
           resolution: CGSize,
-          commandBuffer: CommandBuffer) {
+          commandBuffer: CommandBuffer,
+          uploadBufferArena: UploadBufferArena? = nil,
+          pathGeometryScratch: StencilPathGeometryScratch? = nil) {
 
         let device = commandBuffer.device
 
@@ -320,7 +420,9 @@ extension GraphicsContext {
                   contentOffset: contentOffset,
                   contentScaleFactor: contentScaleFactor,
                   renderTargets: renderTargets,
-                  commandBuffer: commandBuffer)
+                  commandBuffer: commandBuffer,
+                  uploadBufferArena: uploadBufferArena,
+                  pathGeometryScratch: pathGeometryScratch)
     }
 
     func drawSource() {

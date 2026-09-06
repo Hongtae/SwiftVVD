@@ -95,7 +95,8 @@ extension GraphicsContext {
                                     textureFrame: CGRect,
                                     blendMode: BlendMode,
                                     color: BackendColor) -> Bool {
-        if source.dimensions != backdrop.dimensions {
+        let sourceDimensions = source.dimensions
+        if sourceDimensions != backdrop.dimensions {
             Log.error("GraphicsContext.encodeBlendTexturesCommand failed.")
             return false
         }
@@ -140,8 +141,8 @@ extension GraphicsContext {
                     color: color)
         }
 
-        let invW = 1.0 / CGFloat(source.width)
-        let invH = 1.0 / CGFloat(source.height)
+        let invW = 1.0 / CGFloat(sourceDimensions.0)
+        let invH = 1.0 / CGFloat(sourceDimensions.1)
         let u1 = textureFrame.minX * invW
         let u2 = textureFrame.maxX * invW
         let v1 = textureFrame.minY * invH
@@ -178,13 +179,14 @@ extension GraphicsContext {
         encoder.setDepthStencilState(depthState)
         self.bindingSet2.setTexture(source, binding: 0)
         self.bindingSet2.setTexture(backdrop, binding: 1)
-        self.bindingSet2.setSamplerState(pipeline.defaultSampler, binding: 0)
-        self.bindingSet2.setSamplerState(pipeline.defaultSampler, binding: 1)
         encoder.setResource(self.bindingSet2, index: 0)
 
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
 
         encoder.draw(vertexStart: 0,
                      vertexCount: vertices.count,

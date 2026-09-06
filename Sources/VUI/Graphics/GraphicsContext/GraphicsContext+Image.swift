@@ -589,10 +589,11 @@ extension GraphicsContext {
         let trans = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
+        let color = color.float4
         let makeVertex = { (x: Scalar, y: Scalar, u: Scalar, v: Scalar) in
             _Vertex(position: Vector2(x, y).applying(trans).float2,
                     texcoord: Vector2(u, v).applying(textureTransform).float2,
-                    color: color.float4)
+                    color: color)
         }
 
         let invW = 1.0 / CGFloat(texture.width)
@@ -603,13 +604,14 @@ extension GraphicsContext {
         let uvMinY = textureFrame.minY * invH
         let uvMaxY = textureFrame.maxY * invH
 
-        let vertices: [_Vertex] = [
-            makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY), // left bottom
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
-            makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY), // right bottom
-            makeVertex(frame.minX, frame.minY, uvMinX, uvMinY), // left top
-            makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY), // right top
+        // Transform each corner once, preserving the original triangle order.
+        let bottomLeft = makeVertex(frame.minX, frame.maxY, uvMinX, uvMaxY)
+        let topLeft = makeVertex(frame.minX, frame.minY, uvMinX, uvMinY)
+        let bottomRight = makeVertex(frame.maxX, frame.maxY, uvMaxX, uvMaxY)
+        let topRight = makeVertex(frame.maxX, frame.minY, uvMaxX, uvMinY)
+        let vertices = [
+            bottomLeft, topLeft, bottomRight,
+            bottomRight, topLeft, topRight
         ]
 
         self.encodeDrawCommand(renderPass: renderPass,

@@ -2028,7 +2028,6 @@ extension GraphicsContext {
         }
 
         for batch in drawing.vectorBatches {
-            let path = batch.path.applying(transform)
             let isAntialiased = self.environment.disableMSAA == false
             guard let renderPass = self.beginRenderPass(
                 enableStencil: true,
@@ -2041,7 +2040,8 @@ extension GraphicsContext {
             }
             if self.encodeStencilPathFillCommand(
                 renderPass: renderPass,
-                path: path
+                path: batch.path,
+                pathTransform: transform
             ) {
                 self.encodeShadingBoxCommand(
                     renderPass: renderPass,

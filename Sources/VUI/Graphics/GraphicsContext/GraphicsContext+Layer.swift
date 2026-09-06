@@ -17,7 +17,9 @@ extension GraphicsContext {
             contentOffset: self.contentOffset,
             contentScaleFactor: self.contentScaleFactor,
             resolution: self.resolution,
-            commandBuffer: self.commandBuffer) else {
+            commandBuffer: self.commandBuffer,
+            uploadBufferArena: self.uploadBufferArena,
+            pathGeometryScratch: self.pathGeometryScratch) else {
             return nil
         }
         // Layer contents stay in the caller's current user space. The caller's transform is
@@ -41,7 +43,9 @@ extension GraphicsContext {
             contentOffset: .zero,
             contentScaleFactor: self.contentScaleFactor,
             resolution: CGSize(width: width, height: height),
-            commandBuffer: self.commandBuffer)
+            commandBuffer: self.commandBuffer,
+            uploadBufferArena: self.uploadBufferArena,
+            pathGeometryScratch: self.pathGeometryScratch)
         context?.clear(with: .clear)
         return context
     }
@@ -309,11 +313,13 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(renderState)
         encoder.setDepthStencilState(depthState)
         bindingSet1.setTexture(texture, binding: 0)
-        bindingSet1.setSamplerState(pipeline.defaultSampler, binding: 0)
         encoder.setResource(bindingSet1, index: 0)
         encoder.setCullMode(.none)
-        encoder.setFrontFacing(.clockwise)
-        encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+        encoder.setVertexBuffer(
+            vertexBuffer.buffer,
+            offset: vertexBuffer.offset,
+            index: 0
+        )
         encoder.draw(
             vertexStart: 0,
             vertexCount: vertices.count,
