@@ -2,10 +2,10 @@
 //  File: Plane.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct Plane: Hashable {
+public struct Plane: Hashable, Sendable {
     public var a: Scalar
     public var b: Scalar
     public var c: Scalar

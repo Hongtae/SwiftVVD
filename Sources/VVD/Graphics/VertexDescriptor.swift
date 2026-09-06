@@ -2,10 +2,10 @@
 //  File: VertexDescriptor.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum VertexFormat {
+public enum VertexFormat: Sendable {
     case invalid
     
     case uchar
@@ -72,12 +72,12 @@ public enum VertexFormat {
     case uint1010102Normalized
 }
 
-public enum VertexStepRate {
+public enum VertexStepRate: Sendable {
     case vertex
     case instance
 }
 
-public struct VertexBufferLayoutDescriptor {
+public struct VertexBufferLayoutDescriptor: Sendable {
     public var stepRate: VertexStepRate
     public var stride: Int
 
@@ -88,7 +88,7 @@ public struct VertexBufferLayoutDescriptor {
     }
 }
 
-public struct VertexAttributeDescriptor {
+public struct VertexAttributeDescriptor: Sendable {
     public var format: VertexFormat
     public var offset: Int
     public var bufferIndex: Int
@@ -105,7 +105,7 @@ public struct VertexAttributeDescriptor {
     }
 }
 
-public struct VertexDescriptor {
+public struct VertexDescriptor: Sendable {
     public var attributes: [VertexAttributeDescriptor]
     public var layouts: [VertexBufferLayoutDescriptor]
 

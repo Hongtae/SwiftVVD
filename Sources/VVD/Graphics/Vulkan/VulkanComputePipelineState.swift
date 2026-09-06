@@ -2,14 +2,14 @@
 //  File: VulkanComputePipelineState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-final class VulkanComputePipelineState: ComputePipelineState {
+final class VulkanComputePipelineState: ComputePipelineState, @unchecked Sendable {
     let device: GraphicsDevice
     let pipeline: VkPipeline
     let layout: VkPipelineLayout

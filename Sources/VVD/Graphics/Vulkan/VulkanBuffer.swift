@@ -2,14 +2,14 @@
 //  File: VulkanBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-final class VulkanBuffer {
+final class VulkanBuffer: @unchecked Sendable {
     var buffer: VkBuffer
     var usage: VkBufferUsageFlags
     var sharingMode: VkSharingMode

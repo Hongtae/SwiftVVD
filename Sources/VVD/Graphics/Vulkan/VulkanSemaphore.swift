@@ -2,7 +2,7 @@
 //  File: VulkanSemaphore.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -10,7 +10,7 @@ import Foundation
 import Synchronization
 import Vulkan
 
-class VulkanSemaphore: GPUEvent {
+class VulkanSemaphore: GPUEvent, @unchecked Sendable {
     let device: GraphicsDevice
     let semaphore: VkSemaphore
 
@@ -29,7 +29,7 @@ class VulkanSemaphore: GPUEvent {
     var isBinarySemaphore: Bool { true }
 }
 
-final class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore {
+final class VulkanSemaphoreAutoIncrementalTimeline: VulkanSemaphore, @unchecked Sendable {
     let waitValue = Atomic<UInt64>(0)
     let signalValue = Atomic<UInt64>(0)
 

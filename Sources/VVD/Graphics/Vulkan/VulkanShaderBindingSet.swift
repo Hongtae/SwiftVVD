@@ -2,14 +2,15 @@
 //  File: VulkanShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
+import Synchronization
 import Vulkan
 
-final class VulkanShaderBindingSet: ShaderBindingSet {
+final class VulkanShaderBindingSet: ShaderBindingSet, @unchecked Sendable {
     let device: GraphicsDevice
     let descriptorSetLayout: VkDescriptorSetLayout
     let layoutFlags: VkDescriptorSetLayoutCreateFlags
@@ -17,7 +18,7 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
     private let poolID: VulkanDescriptorPoolID
     
     typealias DescriptorBinding = VulkanDescriptorSet.Binding    
-    var bindings: [DescriptorBinding]
+    let bindings: Mutex<[DescriptorBinding]>
 
     init(device: VulkanGraphicsDevice,
          layout: VkDescriptorSetLayout,
@@ -28,10 +29,11 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
         self.poolID = poolID
         self.layoutFlags = layoutCreateInfo.flags
 
-        self.bindings = (0..<Int(layoutCreateInfo.bindingCount)).map {
+        let bindings = (0..<Int(layoutCreateInfo.bindingCount)).map {
             let binding = layoutCreateInfo.pBindings[$0]
             return DescriptorBinding(layoutBinding: binding)
         }
+        self.bindings = Mutex(bindings)
     }
 
     deinit {
@@ -289,7 +291,7 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
     func makeDescriptorSet() -> VulkanDescriptorSet {
         let device = self.device as! VulkanGraphicsDevice
         let descriptorSet = device.makeDescriptorSet(layout: self.descriptorSetLayout, poolID: self.poolID)!
-        descriptorSet.bindings = self.bindings
+        descriptorSet.bindings = self.bindings.withLock { $0 }
 
         let tempHolder = TemporaryBufferHolder(label: "VulkanShaderBindingSet.makeDescriptorSet")
 
@@ -332,7 +334,8 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     private func findDescriptorBinding(_ binding: Int) -> DescriptorBinding? {
-        for b in self.bindings {
+        let bindings = self.bindings.withLock { $0 }
+        for b in bindings {
             if b.layoutBinding.binding == binding {
                 return b
             }
@@ -341,11 +344,12 @@ final class VulkanShaderBindingSet: ShaderBindingSet {
     }
 
     private func updateDescriptorBinding(_ desc: DescriptorBinding, binding: Int) {
-        for i in 0..<self.bindings.count {
-            let b = self.bindings[i]            
-            if b.layoutBinding.binding == binding {
-                self.bindings[i] = desc
-                break
+        self.bindings.withLock { bindings in
+            for i in 0..<bindings.count {
+                if bindings[i].layoutBinding.binding == binding {
+                    bindings[i] = desc
+                    break
+                }
             }
         }
     }

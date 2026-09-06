@@ -2,14 +2,14 @@
 //  File: VulkanImageView.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-final class VulkanImageView: Texture {
+final class VulkanImageView: Texture, @unchecked Sendable {
 
     let imageView: VkImageView
     var waitSemaphore: VkSemaphore?

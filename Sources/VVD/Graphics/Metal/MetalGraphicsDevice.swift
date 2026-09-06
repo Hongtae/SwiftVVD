@@ -256,11 +256,7 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                     nameConversions.append(nameConversion)
                 }
 
-                let module = MetalShaderModule(device: self, library: library, names: nameConversions)
                 let workgroupSize = shader.threadgroupSize
-                module.workgroupSize = MTLSize(width: workgroupSize.x,
-                                               height: workgroupSize.y,
-                                               depth: workgroupSize.z)
 
                 assert(bindings1.count == bindings2.count)
 
@@ -313,9 +309,12 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                     return a.set < b.set
                 }
                 bindingMap.inputAttributeIndexOffset = numBuffers
-                module.bindings = bindingMap
-                
-                return module
+                return MetalShaderModule(
+                    device: self, library: library, names: nameConversions,
+                    workgroupSize: MTLSize(width: workgroupSize.x,
+                                           height: workgroupSize.y,
+                                           depth: workgroupSize.z),
+                    bindings: bindingMap)
             }
         }
         return nil
@@ -595,25 +594,24 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             reflection.pointee.pushConstantLayouts = pushConstants
         }
         
-        let state = MetalRenderPipelineState(device: self, pipelineState: pipelineState)
-        state.primitiveType = switch descriptor.primitiveTopology {
+        let primitiveType: MTLPrimitiveType = switch descriptor.primitiveTopology {
         case .point:            .point
         case .line:             .line
         case .lineStrip:        .lineStrip
         case .triangle:         .triangle
         case .triangleStrip:    .triangleStrip
         }
-        state.triangleFillMode = switch descriptor.triangleFillMode {
+        let triangleFillMode: MTLTriangleFillMode = switch descriptor.triangleFillMode {
         case .fill:             .fill
         case .lines:            .lines
         }
-        if let vertexFunction = vertexFunction {
-            state.vertexBindings = vertexFunction.module.bindings
-        }
-        if let fragmentFunction = fragmentFunction {
-            state.fragmentBindings = fragmentFunction.module.bindings
-        }
-        return state
+        return MetalRenderPipelineState(
+            device: self,
+            pipelineState: pipelineState,
+            primitiveType: primitiveType,
+            triangleFillMode: triangleFillMode,
+            vertexBindings: vertexFunction?.module.bindings,
+            fragmentBindings: fragmentFunction?.module.bindings)
     }
 
     func makeComputePipelineState(descriptor: ComputePipelineDescriptor, reflection: UnsafeMutablePointer<PipelineReflection>?) -> ComputePipelineState? {

@@ -2,7 +2,7 @@
 //  File: VulkanGraphicsDevice.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -1059,7 +1059,6 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     }
 
     func makeDepthStencilState(descriptor desc: DepthStencilDescriptor) -> DepthStencilState? {
-
         let compareOp = { (fn: CompareFunction) -> VkCompareOp in
             switch fn {
             case .never:            VK_COMPARE_OP_NEVER
@@ -1095,32 +1094,12 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
                 reference: 0) // use dynamic state (VK_DYNAMIC_STATE_STENCIL_REFERENCE)
         }
 
-        let depthStencilState = VulkanDepthStencilState(device: self)
-        depthStencilState.depthTestEnable = VK_TRUE
-        depthStencilState.depthWriteEnable = desc.isDepthWriteEnabled ? VK_TRUE : VK_FALSE
-        depthStencilState.depthCompareOp = compareOp(desc.depthCompareFunction)
-        depthStencilState.depthBoundsTestEnable = VK_FALSE
-        depthStencilState.front = stencilOpState(desc.frontFaceStencil)
-        depthStencilState.back  = stencilOpState(desc.backFaceStencil)
-        depthStencilState.stencilTestEnable = VK_TRUE
-        depthStencilState.minDepthBounds = 0.0
-        depthStencilState.maxDepthBounds = 1.0
-
-        if depthStencilState.front.compareOp == VK_COMPARE_OP_ALWAYS &&
-           depthStencilState.front.failOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.front.passOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.front.depthFailOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.compareOp == VK_COMPARE_OP_ALWAYS &&
-           depthStencilState.back.failOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.passOp == VK_STENCIL_OP_KEEP &&
-           depthStencilState.back.depthFailOp == VK_STENCIL_OP_KEEP {
-            depthStencilState.stencilTestEnable = VK_FALSE
-        }
-        if depthStencilState.depthWriteEnable == VK_FALSE &&
-           depthStencilState.depthCompareOp == VK_COMPARE_OP_ALWAYS {
-            depthStencilState.depthTestEnable = VK_FALSE
-        }
-        return depthStencilState
+        return VulkanDepthStencilState(
+            device: self,
+            depthWriteEnable: desc.isDepthWriteEnabled ? VK_TRUE : VK_FALSE,
+            depthCompareOp: compareOp(desc.depthCompareFunction),
+            front: stencilOpState(desc.frontFaceStencil),
+            back: stencilOpState(desc.backFaceStencil))
     }
 
     func makeBuffer(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode) -> GPUBuffer? {

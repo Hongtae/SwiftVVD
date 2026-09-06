@@ -2,14 +2,14 @@
 //  File: VulkanShaderFunction.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-final class VulkanShaderFunction: ShaderFunction {
+final class VulkanShaderFunction: ShaderFunction, @unchecked Sendable {
     let module: VulkanShaderModule
     var device: GraphicsDevice { self.module.device }
     var stage: ShaderStage { self.module.stage }
@@ -17,14 +17,14 @@ final class VulkanShaderFunction: ShaderFunction {
     let functionConstants: [String: ShaderFunctionConstant]
     var stageInputAttributes: [ShaderAttribute] { self.module.inputAttributes }
 
-    var specializationInfo: VkSpecializationInfo
-    var specializationData: UnsafeMutableRawPointer?
+    let specializationInfo: VkSpecializationInfo
+    private let specializationData: UnsafeMutableRawPointer?
 
     init(module: VulkanShaderModule, name: String, constantValues: [ShaderFunctionConstantValue]) {
         self.module = module
         self.functionName = name
-        self.specializationData = nil
-        self.specializationInfo = VkSpecializationInfo()
+        var specializationData: UnsafeMutableRawPointer? = nil
+        var specializationInfo = VkSpecializationInfo()
         self.functionConstants = [:]
 
         if constantValues.isEmpty == false {
@@ -42,10 +42,10 @@ final class VulkanShaderFunction: ShaderFunction {
                 let mapEntry = specializationData!.bindMemory(to: VkSpecializationMapEntry.self, capacity: constantValues.count)
                 var data = specializationData!.advanced(by: mapEntrySizeInBytes)
 
-                self.specializationInfo.mapEntryCount = UInt32(constantValues.count)
-                self.specializationInfo.pMapEntries = UnsafePointer(mapEntry)
-                self.specializationInfo.pData = UnsafeRawPointer(data)
-                self.specializationInfo.dataSize = size
+                specializationInfo.mapEntryCount = UInt32(constantValues.count)
+                specializationInfo.pMapEntries = UnsafePointer(mapEntry)
+                specializationInfo.pData = UnsafeRawPointer(data)
+                specializationInfo.dataSize = size
 
                 var offset = 0
                 for (i, sp) in constantValues.enumerated() {
@@ -61,6 +61,8 @@ final class VulkanShaderFunction: ShaderFunction {
                 }
             }
         }
+        self.specializationData = specializationData
+        self.specializationInfo = specializationInfo
     }
 
     deinit {

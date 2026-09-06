@@ -2,28 +2,28 @@
 //  File: Sampler.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum SamplerMinMagFilter {
+public enum SamplerMinMagFilter: Sendable {
     case nearest
     case linear
 }
 
-public enum SamplerMipFilter {
+public enum SamplerMipFilter: Sendable {
     case notMipmapped
     case nearest
     case linear
 }
 
-public enum SamplerAddressMode {
+public enum SamplerAddressMode: Sendable {
     case clampToEdge
     case `repeat`
     case mirrorRepeat
     case clampToZero
 }
 
-public struct SamplerDescriptor {
+public struct SamplerDescriptor: Sendable {
     public var addressModeU: SamplerAddressMode
     public var addressModeV: SamplerAddressMode
     public var addressModeW: SamplerAddressMode
@@ -36,7 +36,7 @@ public struct SamplerDescriptor {
     public var lodMaxClamp: Float
 
     public var maxAnisotropy: Int
-    public var normalizedCoordinates: Bool
+    public var normalizedCoordinates: Bool  
 
     // comparison function used when sampling texels from a depth texture.
     // NOTE: Some drivers have bugs that cause them to perform comparisons even
@@ -69,6 +69,6 @@ public struct SamplerDescriptor {
     }
 }
 
-public protocol SamplerState: AnyObject {
+public protocol SamplerState: Sendable {
     var device: GraphicsDevice { get }
 }

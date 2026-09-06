@@ -2,10 +2,10 @@
 //  File: DepthStencil.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum CompareFunction {
+public enum CompareFunction: Sendable {
     case never
     case less
     case equal
@@ -16,7 +16,7 @@ public enum CompareFunction {
     case always
 }
 
-public enum StencilOperation {
+public enum StencilOperation: Sendable {
     case keep
     case zero
     case replace
@@ -27,7 +27,7 @@ public enum StencilOperation {
     case decrementWrap
 }
 
-public struct StencilDescriptor {
+public struct StencilDescriptor: Sendable {
     public var stencilCompareFunction: CompareFunction = .always
     public var stencilFailureOperation: StencilOperation = .keep
     public var depthFailOperation: StencilOperation = .keep
@@ -51,7 +51,7 @@ public struct StencilDescriptor {
     }
 }
 
-public struct DepthStencilDescriptor {
+public struct DepthStencilDescriptor: Sendable {
     public var depthCompareFunction: CompareFunction
     public var frontFaceStencil: StencilDescriptor
     public var backFaceStencil: StencilDescriptor
@@ -68,6 +68,6 @@ public struct DepthStencilDescriptor {
     }
 }
 
-public protocol DepthStencilState {
+public protocol DepthStencilState: Sendable {
     var device: GraphicsDevice { get }
 }

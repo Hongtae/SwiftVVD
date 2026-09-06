@@ -2,7 +2,7 @@
 //  File: MetalRenderPipelineState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -14,20 +14,25 @@ final class MetalRenderPipelineState: RenderPipelineState {
 
     let pipelineState: MTLRenderPipelineState
 
-    var primitiveType: MTLPrimitiveType
-    var triangleFillMode: MTLTriangleFillMode
+    let primitiveType: MTLPrimitiveType
+    let triangleFillMode: MTLTriangleFillMode
 
-    var vertexBindings: MetalStageResourceBindingMap
-    var fragmentBindings: MetalStageResourceBindingMap
+    let vertexBindings: MetalStageResourceBindingMap
+    let fragmentBindings: MetalStageResourceBindingMap
 
-    init(device: MetalGraphicsDevice, pipelineState: MTLRenderPipelineState) {
+    init(device: MetalGraphicsDevice,
+         pipelineState: MTLRenderPipelineState,
+         primitiveType: MTLPrimitiveType,
+         triangleFillMode: MTLTriangleFillMode,
+         vertexBindings: MetalStageResourceBindingMap?,
+         fragmentBindings: MetalStageResourceBindingMap?) {
         self.device = device
         self.pipelineState = pipelineState
 
-        self.primitiveType = .triangle
-        self.triangleFillMode = .fill
+        self.primitiveType = primitiveType
+        self.triangleFillMode = triangleFillMode
 
-        self.vertexBindings = MetalStageResourceBindingMap(
+        self.vertexBindings = vertexBindings ?? MetalStageResourceBindingMap(
             resourceBindings: [],
             inputAttributeIndexOffset: 0,
             pushConstantIndex: 0,
@@ -35,7 +40,7 @@ final class MetalRenderPipelineState: RenderPipelineState {
             pushConstantSize: 0,
             pushConstantBufferSize: 0)
 
-        self.fragmentBindings = MetalStageResourceBindingMap(
+        self.fragmentBindings = fragmentBindings ?? MetalStageResourceBindingMap(
             resourceBindings: [],
             inputAttributeIndexOffset: 0,
             pushConstantIndex: 0,

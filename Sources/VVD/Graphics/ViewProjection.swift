@@ -2,12 +2,12 @@
 //  File: ViewProjection.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public struct ViewTransform: Hashable {
+public struct ViewTransform: Hashable, Sendable {
     private let matrix: Matrix3
     private let t: Vector3
 
@@ -73,7 +73,7 @@ public struct ViewTransform: Hashable {
     }
 }
 
-public struct ProjectionTransform: Hashable {
+public struct ProjectionTransform: Hashable, Sendable {
     public let matrix: Matrix4
 
     public var isPerspective: Bool  { matrix.m44 != 1.0 }
@@ -170,7 +170,7 @@ public struct ProjectionTransform: Hashable {
     }
 }
 
-public struct ViewFrustum {
+public struct ViewFrustum: Sendable {
 
     public let view: ViewTransform
     public let projection: ProjectionTransform

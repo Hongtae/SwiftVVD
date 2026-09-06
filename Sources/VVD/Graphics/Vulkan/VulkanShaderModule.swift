@@ -2,14 +2,14 @@
 //  File: VulkanShaderModule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
 import Vulkan
 
-final class VulkanShaderModule: ShaderModule {
+final class VulkanShaderModule: ShaderModule, @unchecked Sendable {
     let device: GraphicsDevice
     let module: VkShaderModule
     let functionNames: [String]

@@ -2,10 +2,10 @@
 //  File: CopyCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct TextureSize {
+public struct TextureSize: Sendable {
     public var width: Int
     public var height: Int
     public var depth: Int
@@ -17,7 +17,7 @@ public struct TextureSize {
     }
 }
 
-public struct TextureOrigin {
+public struct TextureOrigin: Sendable {
     public var layer: Int
     public var level: Int
     // pixel offset
@@ -34,7 +34,7 @@ public struct TextureOrigin {
     }
 }
 
-public struct BufferImageOrigin {
+public struct BufferImageOrigin: Sendable {
     public var offset: Int      // buffer offset (bytes)
     public var imageWidth: Int  // buffer image's width (pixels)
     public var imageHeight: Int // buffer image's height (pixels)

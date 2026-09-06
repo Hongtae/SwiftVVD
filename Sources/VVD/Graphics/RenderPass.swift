@@ -5,24 +5,24 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum RenderPassAttachmentLoadAction {
+public enum RenderPassAttachmentLoadAction: Sendable {
     case dontCare
     case load
     case clear
 }
 
-public enum RenderPassAttachmentStoreAction {
+public enum RenderPassAttachmentStoreAction: Sendable {
     case dontCare
     case store
 }
 
-public enum MultisampleDepthStencilResolveFilter {
+public enum MultisampleDepthStencilResolveFilter: Sendable {
     case sample0
     case min
     case max
 }
 
-public protocol RenderPassAttachmentDescriptor {
+public protocol RenderPassAttachmentDescriptor: Sendable {
     var renderTarget: Texture? { get set }
     var loadAction: RenderPassAttachmentLoadAction { get set }
     var storeAction: RenderPassAttachmentStoreAction { get set }
@@ -79,7 +79,7 @@ public struct RenderPassDepthStencilAttachmentDescriptor: RenderPassAttachmentDe
     }
 }
 
-public struct RenderPassDescriptor {
+public struct RenderPassDescriptor: Sendable {
     public var colorAttachments: [RenderPassColorAttachmentDescriptor]
     public var depthStencilAttachment: RenderPassDepthStencilAttachmentDescriptor
 

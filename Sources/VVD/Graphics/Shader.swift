@@ -8,14 +8,14 @@
 import Foundation
 import SPIRV_Cross
 
-public struct ShaderAttribute {
+public struct ShaderAttribute: Sendable {
     public var name : String
     public var location : Int
     public var type : ShaderDataType
     public var enabled : Bool
 }
 
-public enum ShaderDescriptorType {
+public enum ShaderDescriptorType: Sendable {
     case uniformBuffer
     case storageBuffer
     case storageTexture
@@ -26,7 +26,7 @@ public enum ShaderDescriptorType {
     case sampler
 }
 
-public struct ShaderDescriptor {
+public struct ShaderDescriptor: Sendable {
     public var set : Int
     public var binding : Int
     public var count : Int // array size

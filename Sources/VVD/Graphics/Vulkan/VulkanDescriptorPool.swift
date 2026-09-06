@@ -2,11 +2,12 @@
 //  File: VulkanDescriptorPool.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
 import Foundation
+import Synchronization
 import Vulkan
 
 let descriptorTypes: [VkDescriptorType] = [
@@ -41,7 +42,7 @@ private func index(of type: VkDescriptorType) -> Int {
     return begin
 }
 
-struct VulkanDescriptorPoolID: Hashable, Equatable {
+struct VulkanDescriptorPoolID: Hashable, Equatable, Sendable {
     let mask: UInt32
     let typeSize: [UInt32]
 
@@ -112,7 +113,7 @@ struct VulkanDescriptorPoolID: Hashable, Equatable {
     }
 }
 
-final class VulkanDescriptorPool {
+final class VulkanDescriptorPool: @unchecked Sendable {
     let poolID: VulkanDescriptorPoolID
     let pool: VkDescriptorPool
     let poolCreateFlags: VkDescriptorPoolCreateFlags
@@ -121,7 +122,7 @@ final class VulkanDescriptorPool {
 
     var numAllocatedSets: UInt32
 
-    private let lock = NSLock()
+    private let lock = Mutex(())
 
     init(device: VulkanGraphicsDevice, pool: VkDescriptorPool, poolCreateInfo: VkDescriptorPoolCreateInfo, poolID: VulkanDescriptorPoolID) {
         self.device = device
@@ -149,9 +150,7 @@ final class VulkanDescriptorPool {
         var descriptorSet: VkDescriptorSet? = nil
         let result: VkResult = withUnsafePointer(to: Optional(layout)) {
             allocateInfo.pSetLayouts = $0
-            return self.lock.withLock {
-                vkAllocateDescriptorSets(device.device, &allocateInfo, &descriptorSet)
-            }
+            return vkAllocateDescriptorSets(device.device, &allocateInfo, &descriptorSet)
         }
         if result == VK_SUCCESS {
             numAllocatedSets += 1
@@ -171,7 +170,7 @@ final class VulkanDescriptorPool {
 
         self.numAllocatedSets -= UInt32(descriptorSets.count)
         if self.numAllocatedSets == 0 {
-            let result = self.lock.withLock {
+            let result = self.lock.withLock { _ in
                 vkResetDescriptorPool(device.device, pool, 0)
             }
             if result != VK_SUCCESS {
@@ -180,7 +179,7 @@ final class VulkanDescriptorPool {
         } else if self.poolCreateFlags & UInt32(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue) != 0 {
             let optionalSets = descriptorSets.map{ Optional($0) }
             let result = optionalSets.withUnsafeBufferPointer { buffer in
-                self.lock.withLock {
+                self.lock.withLock { _ in
                     vkFreeDescriptorSets(device.device, self.pool, UInt32(buffer.count), buffer.baseAddress)
                 }
             }

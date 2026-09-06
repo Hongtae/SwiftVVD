@@ -2,14 +2,14 @@
 //  File: MetalShaderModule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
 import Foundation
 import Metal
 
-struct MetalResourceBinding {
+struct MetalResourceBinding: Sendable {
     var set: Int
     var binding: Int
 
@@ -20,7 +20,7 @@ struct MetalResourceBinding {
     var type: ShaderResourceType
 }
 
-struct MetalStageResourceBindingMap {
+struct MetalStageResourceBindingMap: Sendable {
     var resourceBindings: [MetalResourceBinding] // spir-v to msl bind mapping
     var inputAttributeIndexOffset: Int
     var pushConstantIndex: Int
@@ -40,7 +40,7 @@ extension ShaderResourceStructMember {
 
 final class MetalShaderModule: ShaderModule {
 
-    var device: GraphicsDevice
+    let device: GraphicsDevice
     let library: MTLLibrary
 
     struct NameConversion {
@@ -50,12 +50,16 @@ final class MetalShaderModule: ShaderModule {
 
     let functionNames: [String] // spirv names
     let functionNameMap: [String: String]   // spirv to msl table
-    var workgroupSize: MTLSize
+    let workgroupSize: MTLSize
 
-    var bindings: MetalStageResourceBindingMap
+    let bindings: MetalStageResourceBindingMap
 
 
-    init(device: MetalGraphicsDevice, library: MTLLibrary, names: [NameConversion]) {
+    init(device: MetalGraphicsDevice,
+         library: MTLLibrary,
+         names: [NameConversion],
+         workgroupSize: MTLSize,
+         bindings: MetalStageResourceBindingMap) {
         self.device = device
         self.library = library
 
@@ -69,14 +73,8 @@ final class MetalShaderModule: ShaderModule {
 
         self.functionNames = fnames
         self.functionNameMap = fnameMap
-        self.workgroupSize = MTLSize(width: 1, height: 1, depth: 1)
-        self.bindings = MetalStageResourceBindingMap(
-            resourceBindings: [],
-            inputAttributeIndexOffset: 0,
-            pushConstantIndex: 0,
-            pushConstantOffset: 0,
-            pushConstantSize: 0,
-            pushConstantBufferSize: 0)
+        self.workgroupSize = workgroupSize
+        self.bindings = bindings
 
         // Check function availability
         fnames = library.functionNames

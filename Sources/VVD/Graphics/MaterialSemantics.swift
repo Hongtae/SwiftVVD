@@ -2,10 +2,10 @@
 //  File: MaterialSemantics.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum MaterialSemantic {
+public enum MaterialSemantic: Sendable {
     case userDefined
     case baseColor
     case baseColorTexture
@@ -20,7 +20,7 @@ public enum MaterialSemantic {
     case emissiveTexture
 }
 
-public enum ShaderUniformSemantic {
+public enum ShaderUniformSemantic: Sendable {
     case modelMatrix
     case viewMatrix
     case projectionMatrix
@@ -41,7 +41,7 @@ public enum ShaderUniformSemantic {
     case spotLightColor
 }
 
-public enum VertexAttributeSemantic {
+public enum VertexAttributeSemantic: Sendable {
     case userDefined
     case position
     case normal
@@ -53,7 +53,7 @@ public enum VertexAttributeSemantic {
     case blendWeights
 }
 
-public struct ShaderBindingLocation: Hashable {
+public struct ShaderBindingLocation: Hashable, Sendable {
     public let set: Int
     public let binding: Int
     public let offset: Int

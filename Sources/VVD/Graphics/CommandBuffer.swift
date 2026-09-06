@@ -2,7 +2,7 @@
 //  File: CommandBuffer.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 public typealias CommandBufferHandler = (CommandBuffer) -> Void
@@ -31,7 +31,7 @@ public protocol CommandBuffer {
     var device: GraphicsDevice { get }
 }
 
-public enum CommandBufferStatus {
+public enum CommandBufferStatus: Sendable {
     case ready
     case encoding
     case committed

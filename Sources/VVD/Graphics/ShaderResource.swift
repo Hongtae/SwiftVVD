@@ -2,10 +2,10 @@
 //  File: ShaderResource.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum ShaderDataType {
+public enum ShaderDataType: Sendable {
     case unknown
     case none
 
@@ -206,7 +206,7 @@ public extension ShaderDataType {
     }
 }
 
-public enum ShaderStage {
+public enum ShaderStage: Sendable {
     case unknown
     case vertex
     case tessellationControl
@@ -263,23 +263,23 @@ extension ShaderStageFlags: CustomStringConvertible {
     }
 }
 
-public struct ShaderResourceBuffer {
+public struct ShaderResourceBuffer: Sendable {
     public var dataType: ShaderDataType
     public var alignment: Int
     public var size: Int
 }
 
-public struct ShaderResourceTexture {
+public struct ShaderResourceTexture: Sendable {
     public var dataType: ShaderDataType
     public var textureType: TextureType
 }
 
-public struct ShaderResourceThreadgroup {
+public struct ShaderResourceThreadgroup: Sendable {
     public var alignment: Int
     public var size: Int
 }
 
-public struct ShaderResourceStructMember {
+public struct ShaderResourceStructMember: Sendable {
     public var dataType: ShaderDataType
     public var name: String
     public var offset: Int
@@ -290,20 +290,20 @@ public struct ShaderResourceStructMember {
     public var members: [ShaderResourceStructMember]
 }
 
-public enum ShaderResourceType: Comparable {
+public enum ShaderResourceType: Comparable, Sendable {
     case buffer
     case texture
     case sampler
     case textureSampler // texture and sampler (combined)
 }
 
-public enum ShaderResourceAccess {
+public enum ShaderResourceAccess: Sendable {
     case readOnly
     case writeOnly
     case readWrite
 }
 
-public struct ShaderResource {
+public struct ShaderResource: Sendable {
     public var set: Int
     public var binding: Int
     public var name: String
@@ -325,7 +325,7 @@ public struct ShaderResource {
     public var members: [ShaderResourceStructMember]
 }
 
-public struct ShaderPushConstantLayout {
+public struct ShaderPushConstantLayout: Sendable {
     public var name: String
     public var offset: Int
     public var size: Int

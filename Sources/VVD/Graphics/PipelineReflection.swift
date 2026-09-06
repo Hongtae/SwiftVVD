@@ -2,10 +2,10 @@
 //  File: PipelineReflection.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct PipelineReflection: CustomStringConvertible {
+public struct PipelineReflection: CustomStringConvertible, Sendable {
     public var inputAttributes: [ShaderAttribute] = []
     public var pushConstantLayouts: [ShaderPushConstantLayout] = []
     public var resources: [ShaderResource] = []

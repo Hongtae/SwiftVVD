@@ -2,7 +2,7 @@
 //  File: VulkanDepthStencilState.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -12,37 +12,49 @@ import Vulkan
 final class VulkanDepthStencilState: DepthStencilState {
     let device: GraphicsDevice
 
-    var depthTestEnable: VkBool32
-    var depthWriteEnable: VkBool32
-    var depthCompareOp: VkCompareOp
-    var depthBoundsTestEnable: VkBool32
-    var minDepthBounds: Float
-    var maxDepthBounds: Float
+    let depthTestEnable: VkBool32
+    let depthWriteEnable: VkBool32
+    let depthCompareOp: VkCompareOp
+    let depthBoundsTestEnable: VkBool32
+    let minDepthBounds: Float
+    let maxDepthBounds: Float
 
-    var front: VkStencilOpState
-    var back: VkStencilOpState
-    var stencilTestEnable: VkBool32
+    let front: VkStencilOpState
+    let back: VkStencilOpState
+    let stencilTestEnable: VkBool32
 
-    init(device: VulkanGraphicsDevice) {
+    init(device: VulkanGraphicsDevice,
+         depthWriteEnable: VkBool32,
+         depthCompareOp: VkCompareOp,
+         front: VkStencilOpState,
+         back: VkStencilOpState) {
         self.device = device
 
-        self.depthTestEnable = VK_FALSE
-        self.depthWriteEnable = VK_FALSE
-        self.depthCompareOp = VK_COMPARE_OP_ALWAYS
+        self.depthWriteEnable = depthWriteEnable
+        self.depthCompareOp = depthCompareOp
         self.depthBoundsTestEnable = VK_FALSE
+        self.front = front
+        self.back = back
         self.minDepthBounds = 0.0
         self.maxDepthBounds = 1.0
 
-        let stencilOp = VkStencilOpState(failOp: VK_STENCIL_OP_KEEP,
-                                         passOp: VK_STENCIL_OP_KEEP,
-                                         depthFailOp: VK_STENCIL_OP_KEEP,
-                                         compareOp: VK_COMPARE_OP_ALWAYS,
-                                         compareMask: 0xffffffff,
-                                         writeMask: 0xffffffff,
-                                         reference: 0)
-        self.front = stencilOp
-        self.back = stencilOp
-        self.stencilTestEnable = VK_FALSE
+        if front.compareOp == VK_COMPARE_OP_ALWAYS &&
+           front.failOp == VK_STENCIL_OP_KEEP &&
+           front.passOp == VK_STENCIL_OP_KEEP &&
+           front.depthFailOp == VK_STENCIL_OP_KEEP &&
+           back.compareOp == VK_COMPARE_OP_ALWAYS &&
+           back.failOp == VK_STENCIL_OP_KEEP &&
+           back.passOp == VK_STENCIL_OP_KEEP &&
+           back.depthFailOp == VK_STENCIL_OP_KEEP {
+            self.stencilTestEnable = VK_FALSE
+        } else {
+            self.stencilTestEnable = VK_TRUE
+        }
+        if depthWriteEnable == VK_FALSE && depthCompareOp == VK_COMPARE_OP_ALWAYS {
+            self.depthTestEnable = VK_FALSE
+        } else {
+            self.depthTestEnable = VK_TRUE
+        }
     }
 
     func bind(commandBuffer: VkCommandBuffer) {

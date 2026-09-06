@@ -2,10 +2,10 @@
 //  File: ComputePipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct ComputePipelineDescriptor {
+public struct ComputePipelineDescriptor: Sendable {
     public var computeFunction: ShaderFunction?
     public var deferCompile: Bool
     public var disableOptimization: Bool
@@ -19,6 +19,6 @@ public struct ComputePipelineDescriptor {
     }
 }
 
-public protocol ComputePipelineState {
+public protocol ComputePipelineState: Sendable {
     var device: GraphicsDevice { get }
 }

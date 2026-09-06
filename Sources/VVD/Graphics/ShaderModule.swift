@@ -2,7 +2,7 @@
 //  File: ShaderModule.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -24,11 +24,10 @@ public struct ShaderFunctionConstantValue {
     }
 }
 
-public protocol ShaderModule {
+public protocol ShaderModule: Sendable {
     func makeFunction(name: String) -> ShaderFunction?
     func makeFunction(name: String, constantValues: [ShaderFunctionConstantValue]) -> ShaderFunction?
 
     var functionNames: [String] { get }
     var device: GraphicsDevice { get }
 }
-

@@ -2,7 +2,7 @@
 //  File: VulkanDescriptorSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_VULKAN
@@ -14,7 +14,7 @@ final class VulkanDescriptorSet {
     let descriptorSet: VkDescriptorSet
     let descriptorPool: VulkanDescriptorPool
 
-    struct Binding {
+    struct Binding: @unchecked Sendable {
         let layoutBinding: VkDescriptorSetLayoutBinding
 
         var bufferViews: [VulkanBufferView] = []

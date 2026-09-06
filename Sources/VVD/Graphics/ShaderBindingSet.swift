@@ -2,10 +2,10 @@
 //  File: ShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct ShaderBinding {
+public struct ShaderBinding: Sendable {
     public var binding: Int
     public var type: ShaderDescriptorType
     public var arrayLength: Int
@@ -22,7 +22,7 @@ public struct ShaderBinding {
     }
 }
 
-public struct ShaderBindingSetLayout {
+public struct ShaderBindingSetLayout: Sendable {
     public typealias Binding = ShaderBinding
     public var bindings: [Binding]
 
@@ -31,7 +31,7 @@ public struct ShaderBindingSetLayout {
     }
 }
 
-public struct BufferBindingInfo {
+public struct BufferBindingInfo: Sendable {
     public var buffer: GPUBuffer
     public var offset: Int
     public var length: Int
@@ -45,7 +45,7 @@ public struct BufferBindingInfo {
     }
 }
 
-public protocol ShaderBindingSet {
+public protocol ShaderBindingSet: Sendable {
     // bind buffers
     func setBuffer(_: GPUBuffer, offset: Int, length: Int, binding: Int)
     func setBufferArray(_ : [BufferBindingInfo], binding: Int)

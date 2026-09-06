@@ -2,11 +2,12 @@
 //  File: MetalShaderBindingSet.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
 import Foundation
+import Synchronization
 import Metal
 
 final class MetalShaderBindingSet: ShaderBindingSet {
@@ -14,9 +15,12 @@ final class MetalShaderBindingSet: ShaderBindingSet {
     let device: GraphicsDevice
     let layout: [ShaderBinding]
 
-    var buffers: [Int: Array<(buffer: MetalBuffer, offset: Int)>] = [:]
-    var textures: [Int: Array<MetalTexture>] = [:]
-    var samplers: [Int: Array<MetalSamplerState>] = [:]
+    struct Resources {
+        var buffers: [Int: [(buffer: MetalBuffer, offset: Int)]] = [:]
+        var textures: [Int: [MetalTexture]] = [:]
+        var samplers: [Int: [MetalSamplerState]] = [:]
+    }
+    let resources = Mutex(Resources())
 
     init(device: MetalGraphicsDevice, layout: [ShaderBinding]) {
         self.device = device
@@ -37,7 +41,7 @@ final class MetalShaderBindingSet: ShaderBindingSet {
             let availableItems = min(buffers.count, descriptor.arrayLength - startingIndex)
             assert(buffers.count >= availableItems)
 
-            var bufferArray = type(of: self.buffers).Value()
+            var bufferArray: [(MetalBuffer, Int)] = []
             bufferArray.reserveCapacity(availableItems)
 
             for i in 0..<availableItems {
@@ -46,7 +50,9 @@ final class MetalShaderBindingSet: ShaderBindingSet {
 
                 bufferArray.append( (buffer: buffer, offset: buffers[i].offset) )
             }
-            self.buffers[binding] = bufferArray
+            self.resources.withLock {
+                $0.buffers[binding] = bufferArray
+            }
         }
     }
 
@@ -61,7 +67,7 @@ final class MetalShaderBindingSet: ShaderBindingSet {
             let availableItems = min(textures.count, descriptor.arrayLength - startingIndex)
             assert(textures.count >= availableItems)
 
-            var textureArray = type(of: self.textures).Value()
+            var textureArray: [MetalTexture] = []
             textureArray.reserveCapacity(availableItems)
 
             for i in 0..<availableItems {
@@ -70,7 +76,9 @@ final class MetalShaderBindingSet: ShaderBindingSet {
 
                 textureArray.append(texture)
             }
-            self.textures[binding] = textureArray
+            self.resources.withLock {
+                $0.textures[binding] = textureArray
+            }
         }
     }
 
@@ -85,7 +93,7 @@ final class MetalShaderBindingSet: ShaderBindingSet {
             let availableItems = min(samplers.count, descriptor.arrayLength - startingIndex)
             assert(samplers.count >= availableItems)
 
-            var samplerArray = type(of: self.samplers).Value()
+            var samplerArray: [MetalSamplerState] = []
             samplerArray.reserveCapacity(availableItems)
 
             for i in 0..<availableItems {
@@ -94,7 +102,9 @@ final class MetalShaderBindingSet: ShaderBindingSet {
 
                 samplerArray.append(sampler)
             }
-            self.samplers[binding] = samplerArray
+            self.resources.withLock {
+                $0.samplers[binding] = samplerArray
+            }
         }
     }
 }

@@ -2,10 +2,10 @@
 //  File: Texture.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public enum TextureType {
+public enum TextureType: Sendable {
     case unknown
     case type1D
     case type2D
@@ -28,7 +28,7 @@ public struct TextureUsage: OptionSet, Sendable {
     public static let pixelFormatView   = TextureUsage(rawValue: 1<<7)
 }
 
-public protocol Texture: AnyObject {
+public protocol Texture: AnyObject, Sendable {
     var width: Int { get }
     var height: Int { get }
     var depth: Int { get }
@@ -50,7 +50,7 @@ extension Texture {
     public var dimensions: (Int, Int, Int) { (self.width, self.height, self.depth) }
 }
 
-public struct TextureDescriptor {
+public struct TextureDescriptor: Sendable {
     public var textureType: TextureType
     public var pixelFormat: PixelFormat
 

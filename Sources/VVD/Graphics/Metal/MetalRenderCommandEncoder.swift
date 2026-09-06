@@ -2,7 +2,7 @@
 //  File: MetalRenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_METAL
@@ -84,9 +84,10 @@ final class MetalRenderCommandEncoder: RenderCommandEncoder {
         if let bindingSet = bindingSet as? MetalShaderBindingSet,
            let encoder = self.encoder {
             // copy resources
-            let buffers = bindingSet.buffers
-            let textures = bindingSet.textures
-            let samplers = bindingSet.samplers
+            let resources = bindingSet.resources.withLock { $0 }
+            let buffers = resources.buffers
+            let textures = resources.textures
+            let samplers = resources.samplers
 
             encoder.commands.append {
                 (encoder: MTLRenderCommandEncoder, state: inout EncodingState) in

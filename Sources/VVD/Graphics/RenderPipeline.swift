@@ -2,10 +2,10 @@
 //  File: RenderPipeline.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct RenderPipelineColorAttachmentDescriptor {
+public struct RenderPipelineColorAttachmentDescriptor: Sendable {
     public var index: Int
     public var pixelFormat: PixelFormat
     public var blendState: BlendState
@@ -19,7 +19,7 @@ public struct RenderPipelineColorAttachmentDescriptor {
     }
 }
 
-public enum PrimitiveType {
+public enum PrimitiveType: Sendable {
     case point
     case line
     case lineStrip
@@ -27,33 +27,33 @@ public enum PrimitiveType {
     case triangleStrip
 }
 
-public enum IndexType {
+public enum IndexType: Sendable {
     case uint16
     case uint32
 }
 
-public enum TriangleFillMode {
+public enum TriangleFillMode: Sendable {
     case fill
     case lines
 }
 
-public enum CullMode {
+public enum CullMode: Sendable {
     case none
     case front
     case back
 }
 
-public enum Winding {
+public enum Winding: Sendable {
     case clockwise
     case counterClockwise
 }
 
-public enum DepthClipMode {
+public enum DepthClipMode: Sendable {
     case clip
     case clamp
 }
 
-public struct RenderPipelineDescriptor {
+public struct RenderPipelineDescriptor: Sendable {
     public var vertexFunction: ShaderFunction?
     public var fragmentFunction: ShaderFunction?
     public var vertexDescriptor: VertexDescriptor
@@ -87,6 +87,6 @@ public struct RenderPipelineDescriptor {
     }
 }
 
-public protocol RenderPipelineState {
+public protocol RenderPipelineState: Sendable {
     var device: GraphicsDevice { get }
 }

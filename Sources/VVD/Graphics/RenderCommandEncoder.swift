@@ -2,18 +2,18 @@
 //  File: RenderCommandEncoder.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 
-public enum VisibilityResultMode {
+public enum VisibilityResultMode: Sendable {
     case disabled
     case boolean
     case counting
 }
 
-public struct Viewport {
+public struct Viewport: Sendable {
     public var x: Double
     public var y: Double
     public var width: Double
@@ -36,7 +36,7 @@ public struct Viewport {
     }
 }
 
-public struct ScissorRect {
+public struct ScissorRect: Sendable {
     public var x: Int
     public var y: Int
     public var width: Int

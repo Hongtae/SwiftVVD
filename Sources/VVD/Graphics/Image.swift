@@ -82,7 +82,7 @@ public extension ImagePixelFormat {
     }
 }
 
-public enum ImageFormat {
+public enum ImageFormat: Sendable {
     case unknown
     case png
     case jpeg
@@ -110,7 +110,7 @@ private extension ImageFormat {
     }
 }
 
-public enum ImageInterpolation {
+public enum ImageInterpolation: Sendable {
     case nearest
     case bilinear
     case bicubic
