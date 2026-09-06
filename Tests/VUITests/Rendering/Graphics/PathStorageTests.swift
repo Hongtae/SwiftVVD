@@ -259,6 +259,48 @@ final class PathStorageTests: XCTestCase {
         assertEmpty(Path().trimmedPath(from: 0.25, to: 0.75))
     }
 
+    func testTrimmedMixedSubpathsPreserveExactElements() {
+        let firstCubicControl = 20.0 + 10.0 / 3.0
+        let secondCubicControl = 20.0 + 20.0 / 3.0
+        var path = Path()
+        path.move(to: .zero)
+        path.addLine(to: CGPoint(x: 10, y: 0))
+        path.addQuadCurve(
+            to: CGPoint(x: 20, y: 0),
+            control: CGPoint(x: 15, y: 0)
+        )
+        path.addCurve(
+            to: CGPoint(x: 30, y: 0),
+            control1: CGPoint(x: firstCubicControl, y: 0),
+            control2: CGPoint(x: secondCubicControl, y: 0)
+        )
+        path.closeSubpath()
+        path.move(to: CGPoint(x: 100, y: 0))
+        path.addLine(to: CGPoint(x: 110, y: 0))
+
+        let trimmed = path.trimmedPath(from: 0.125, to: 0.875)
+
+        XCTAssertEqual(
+            pathBox(trimmed).data.elements,
+            [
+                .move(to: CGPoint(x: 5, y: 0)),
+                .line(to: CGPoint(x: 10, y: 0)),
+                .quadCurve(
+                    to: CGPoint(x: 20, y: 0),
+                    control: CGPoint(x: 15, y: 0)
+                ),
+                .curve(
+                    to: CGPoint(x: 30, y: 0),
+                    control1: CGPoint(x: firstCubicControl, y: 0),
+                    control2: CGPoint(x: secondCubicControl, y: 0)
+                ),
+                .closeSubpath,
+                .move(to: CGPoint(x: 100, y: 0)),
+                .line(to: CGPoint(x: 105, y: 0)),
+            ]
+        )
+    }
+
     func testPathBoxSharesUntilMutationThenCopies() {
         var original = Path(rect)
         original.addRect(secondRect)
@@ -276,6 +318,277 @@ final class PathStorageTests: XCTestCase {
         XCTAssertFalse(originalBoxAfter === copyBoxAfter)
         XCTAssertEqual(original.boundingRect, CGRect(x: 10, y: 20, width: 70, height: 60))
         XCTAssertEqual(copy.boundingRect, CGRect(x: 10, y: 20, width: 190, height: 180))
+    }
+
+    func testUniqueMutationReusesReservedElementBuffer() {
+        var path = Path()
+        path.move(to: CGPoint(x: 1, y: 2))
+        pathBox(path).data.elements.reserveCapacity(64)
+
+        let identityBefore = bufferIdentity(path)
+        path.addLine(to: CGPoint(x: 3, y: 4))
+        let identityAfter = bufferIdentity(path)
+
+        XCTAssertEqual(identityAfter.box, identityBefore.box)
+        XCTAssertEqual(identityAfter.elements, identityBefore.elements)
+    }
+
+    func testConsecutiveMovesRemainDistinctBufferElements() {
+        var path = Path()
+        path.move(to: CGPoint(x: -4, y: 8))
+        path.move(to: CGPoint(x: -3, y: 7))
+
+        XCTAssertEqual(
+            pathBox(path).data.elements,
+            [
+                .move(to: CGPoint(x: -4, y: 8)),
+                .move(to: CGPoint(x: -3, y: 7)),
+            ]
+        )
+        XCTAssertEqual(
+            path.boundingRect,
+            CGRect(x: -4, y: 7, width: 1, height: 1)
+        )
+        XCTAssertEqual(path.currentPoint, CGPoint(x: -3, y: 7))
+    }
+
+    func testAddPathUsesSingleReservedDestinationBuffer() {
+        var source = Path()
+        source.move(to: CGPoint(x: 10, y: 20))
+        source.addLine(to: CGPoint(x: 30, y: 40))
+        source.addQuadCurve(
+            to: CGPoint(x: 50, y: 60),
+            control: CGPoint(x: 35, y: 55)
+        )
+        source.addCurve(
+            to: CGPoint(x: 80, y: 90),
+            control1: CGPoint(x: 55, y: 65),
+            control2: CGPoint(x: 70, y: 85)
+        )
+        source.closeSubpath()
+
+        var destination = Path()
+        destination.move(to: CGPoint(x: -2, y: -3))
+        destination.addLine(to: CGPoint(x: -1, y: -1))
+        pathBox(destination).data.elements.reserveCapacity(64)
+        let identityBefore = bufferIdentity(destination)
+
+        destination.addPath(
+            source,
+            transform: CGAffineTransform(
+                a: 1.25,
+                b: 0.2,
+                c: -0.1,
+                d: 0.75,
+                tx: 7,
+                ty: -11
+            )
+        )
+        let identityAfter = bufferIdentity(destination)
+
+        XCTAssertEqual(identityAfter.box, identityBefore.box)
+        XCTAssertEqual(identityAfter.elements, identityBefore.elements)
+        XCTAssertEqual(pathBox(destination).data.elements.count, 7)
+    }
+
+    func testAxisAlignedAddPathBulkAppendMatchesElementReplay() {
+        var source = Path()
+        source.move(to: CGPoint(x: 10, y: 20))
+        source.addLine(to: CGPoint(x: 30, y: 40))
+        source.addQuadCurve(
+            to: CGPoint(x: 50, y: 60),
+            control: CGPoint(x: 35, y: 55)
+        )
+        source.addCurve(
+            to: CGPoint(x: 80, y: 90),
+            control1: CGPoint(x: 55, y: 65),
+            control2: CGPoint(x: 70, y: 85)
+        )
+        source.closeSubpath()
+
+        var actual = Path()
+        actual.move(to: CGPoint(x: -2, y: -3))
+        actual.addLine(to: CGPoint(x: -1, y: -1))
+        var expected = actual
+        let transform = CGAffineTransform(
+            a: 0,
+            b: -2,
+            c: 3,
+            d: 0,
+            tx: 7,
+            ty: -11
+        )
+
+        actual.addPath(source, transform: transform)
+        appendElements(of: source, transform: transform, to: &expected)
+
+        XCTAssertEqual(pathBox(actual).data, pathBox(expected).data)
+    }
+
+    func testAxisAlignedShapeAppendsMatchElementReplay() {
+        let rect = CGRect(x: 2, y: 4, width: 12, height: 20)
+        let transform = CGAffineTransform(
+            a: 0,
+            b: -2,
+            c: 3,
+            d: 0,
+            tx: 7,
+            ty: -11
+        )
+
+        func basePath() -> Path {
+            var path = Path()
+            path.move(to: CGPoint(x: -2, y: -3))
+            path.addLine(to: CGPoint(x: -1, y: -1))
+            return path
+        }
+
+        var actualRect = basePath()
+        actualRect.addRect(rect, transform: transform)
+        var expectedRect = basePath()
+        appendElements(
+            of: Path(rect),
+            transform: transform,
+            to: &expectedRect
+        )
+        XCTAssertEqual(
+            pathBox(actualRect).data,
+            pathBox(expectedRect).data
+        )
+
+        var actualEllipse = basePath()
+        actualEllipse.addEllipse(in: rect, transform: transform)
+        var expectedEllipse = basePath()
+        appendElements(
+            of: Path(ellipseIn: rect),
+            transform: transform,
+            to: &expectedEllipse
+        )
+        XCTAssertEqual(
+            pathBox(actualEllipse).data,
+            pathBox(expectedEllipse).data
+        )
+
+        let cornerSize = CGSize(width: 4, height: 7)
+        var actualRoundedRect = basePath()
+        actualRoundedRect.addRoundedRect(
+            in: rect,
+            cornerSize: cornerSize,
+            style: .circular,
+            transform: transform
+        )
+        var expectedRoundedRect = basePath()
+        appendElements(
+            of: Path(
+                roundedRect: rect,
+                cornerSize: cornerSize,
+                style: .circular
+            ),
+            transform: transform,
+            to: &expectedRoundedRect
+        )
+        assertPathDataApproximatelyEqual(
+            pathBox(actualRoundedRect).data,
+            pathBox(expectedRoundedRect).data
+        )
+    }
+
+    func testAddLinesStartsANewSubpathInOneBufferMutation() {
+        var empty = Path()
+        empty.addLines([])
+        assertEmpty(empty)
+
+        var onePoint = Path()
+        onePoint.addLines([CGPoint(x: 1, y: 2)])
+        XCTAssertEqual(
+            pathBox(onePoint).data.elements,
+            [.move(to: CGPoint(x: 1, y: 2))]
+        )
+
+        var path = Path()
+        path.move(to: CGPoint(x: -2, y: -3))
+        path.addLine(to: CGPoint(x: -1, y: -1))
+        pathBox(path).data.elements.reserveCapacity(64)
+        let identityBefore = bufferIdentity(path)
+
+        path.addLines([
+            CGPoint(x: 10, y: 20),
+            CGPoint(x: 30, y: 40),
+        ])
+
+        XCTAssertEqual(bufferIdentity(path).box, identityBefore.box)
+        XCTAssertEqual(bufferIdentity(path).elements, identityBefore.elements)
+        XCTAssertEqual(
+            pathBox(path).data.elements,
+            [
+                .move(to: CGPoint(x: -2, y: -3)),
+                .line(to: CGPoint(x: -1, y: -1)),
+                .move(to: CGPoint(x: 10, y: 20)),
+                .line(to: CGPoint(x: 30, y: 40)),
+            ]
+        )
+        XCTAssertEqual(path.currentPoint, CGPoint(x: 30, y: 40))
+        XCTAssertEqual(path.boundingRect, CGRect(x: -2, y: -3, width: 32, height: 43))
+    }
+
+    func testAddingPathToItselfPreservesSourceElements() {
+        var path = Path()
+        path.move(to: CGPoint(x: 1, y: 2))
+        path.addLine(to: CGPoint(x: 3, y: 4))
+        path.addQuadCurve(
+            to: CGPoint(x: 8, y: 9),
+            control: CGPoint(x: 5, y: 7)
+        )
+        path.addCurve(
+            to: CGPoint(x: 13, y: 17),
+            control1: CGPoint(x: 9, y: 11),
+            control2: CGPoint(x: 12, y: 15)
+        )
+        path.closeSubpath()
+
+        let originalElements = pathBox(path).data.elements
+        let transform = CGAffineTransform(
+            a: 1.25,
+            b: 0.2,
+            c: -0.1,
+            d: 0.75,
+            tx: 7,
+            ty: -11
+        )
+        path.addPath(path, transform: transform)
+
+        let elements = pathBox(path).data.elements
+        XCTAssertEqual(Array(elements.prefix(originalElements.count)), originalElements)
+        XCTAssertEqual(elements.count, originalElements.count * 2)
+
+        var expectedSuffix = Path()
+        expectedSuffix.addPath(
+            Path { source in
+                for element in originalElements {
+                    switch element {
+                    case .move(let point):
+                        source.move(to: point)
+                    case .line(let point):
+                        source.addLine(to: point)
+                    case .quadCurve(let point, let control):
+                        source.addQuadCurve(to: point, control: control)
+                    case .curve(let point, let control1, let control2):
+                        source.addCurve(
+                            to: point,
+                            control1: control1,
+                            control2: control2
+                        )
+                    case .closeSubpath:
+                        source.closeSubpath()
+                    }
+                }
+            },
+            transform: transform
+        )
+        XCTAssertEqual(
+            Array(elements.suffix(originalElements.count)),
+            pathBox(expectedSuffix).data.elements
+        )
     }
 
     func testBoundsAndElementReadsDoNotPromoteSpecializedStorage() {
@@ -365,5 +678,190 @@ final class PathStorageTests: XCTestCase {
             return Path.PathBox()
         }
         return box
+    }
+
+    private func bufferIdentity(
+        _ path: Path,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> (box: ObjectIdentifier, elements: UnsafeRawPointer?) {
+        let box = pathBox(path, file: file, line: line)
+        let elements = box.data.elements.withUnsafeBufferPointer { buffer in
+            buffer.baseAddress.map(UnsafeRawPointer.init)
+        }
+        return (ObjectIdentifier(box), elements)
+    }
+
+    private func appendElements(
+        of source: Path,
+        transform: CGAffineTransform,
+        to destination: inout Path
+    ) {
+        source.forEach { element in
+            switch element {
+            case .move(let point):
+                destination.move(to: point.applying(transform))
+            case .line(let point):
+                destination.addLine(to: point.applying(transform))
+            case .quadCurve(let point, let control):
+                destination.addQuadCurve(
+                    to: point.applying(transform),
+                    control: control.applying(transform)
+                )
+            case .curve(let point, let control1, let control2):
+                destination.addCurve(
+                    to: point.applying(transform),
+                    control1: control1.applying(transform),
+                    control2: control2.applying(transform)
+                )
+            case .closeSubpath:
+                destination.closeSubpath()
+            }
+        }
+    }
+
+    private func assertPathDataApproximatelyEqual(
+        _ actual: Path.PathData,
+        _ expected: Path.PathData,
+        accuracy: CGFloat = 0.000_000_000_001,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            actual.elements.count,
+            expected.elements.count,
+            file: file,
+            line: line
+        )
+        for (actual, expected) in zip(actual.elements, expected.elements) {
+            switch (actual, expected) {
+            case (.move(let actual), .move(let expected)),
+                 (.line(let actual), .line(let expected)):
+                assertPoint(
+                    actual,
+                    equals: expected,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+            case (
+                .quadCurve(let actualPoint, let actualControl),
+                .quadCurve(let expectedPoint, let expectedControl)
+            ):
+                assertPoint(
+                    actualPoint,
+                    equals: expectedPoint,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+                assertPoint(
+                    actualControl,
+                    equals: expectedControl,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+            case (
+                .curve(let actualPoint, let actualControl1, let actualControl2),
+                .curve(
+                    let expectedPoint,
+                    let expectedControl1,
+                    let expectedControl2
+                )
+            ):
+                assertPoint(
+                    actualPoint,
+                    equals: expectedPoint,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+                assertPoint(
+                    actualControl1,
+                    equals: expectedControl1,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+                assertPoint(
+                    actualControl2,
+                    equals: expectedControl2,
+                    accuracy: accuracy,
+                    file: file,
+                    line: line
+                )
+            case (.closeSubpath, .closeSubpath):
+                break
+            default:
+                XCTFail(
+                    "Path element cases differ: \(actual) != \(expected)",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+        assertRect(
+            actual.boundingBox,
+            equals: expected.boundingBox,
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
+        assertRect(
+            actual.boundingBoxOfPath,
+            equals: expected.boundingBoxOfPath,
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(actual.initialPoint, expected.initialPoint)
+        XCTAssertEqual(actual.currentPoint, expected.currentPoint)
+    }
+
+    private func assertPoint(
+        _ actual: CGPoint,
+        equals expected: CGPoint,
+        accuracy: CGFloat,
+        file: StaticString,
+        line: UInt
+    ) {
+        XCTAssertEqual(
+            actual.x,
+            expected.x,
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            actual.y,
+            expected.y,
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
+    }
+
+    private func assertRect(
+        _ actual: CGRect,
+        equals expected: CGRect,
+        accuracy: CGFloat,
+        file: StaticString,
+        line: UInt
+    ) {
+        assertPoint(
+            actual.origin,
+            equals: expected.origin,
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
+        assertPoint(
+            CGPoint(x: actual.width, y: actual.height),
+            equals: CGPoint(x: expected.width, y: expected.height),
+            accuracy: accuracy,
+            file: file,
+            line: line
+        )
     }
 }

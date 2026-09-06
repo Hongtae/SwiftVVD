@@ -21,32 +21,39 @@ public typealias CGRect = Foundation.CGRect
 #endif
 
 public extension Vector2 {
+    @inlinable
     init(_ pt: CGPoint) {
         self.init(x: Scalar(pt.x), y: Scalar(pt.y))
     }
 
+    @inlinable
     init(_ s: CGSize) {
         self.init(x: Scalar(s.width), y: Scalar(s.height))
     }
 }
 
 public extension CGPoint {
+    @inlinable
     init(_ v: Vector2) {
         self.init(x: CGFloat(v.x), y: CGFloat(v.y))
     }
 
+    @inlinable
     init(_ p: CGPoint) {
         self = p
     }
 
+    @inlinable
     static func dot(_ v1: Self, _ v2: Self) -> CGFloat {
         return v1.x * v2.x + v1.y * v2.y
     }
 
+    @inlinable
     static func cross(_ v1: Self, _ v2: Self) -> CGFloat {
         return v1.x * v2.y - v1.y * v2.x
     }
 
+    @inlinable
     func normalized()->Self {
         let lengthSq = self.magnitudeSquared
         if lengthSq.isZero == false {
@@ -55,27 +62,34 @@ public extension CGPoint {
         return self
     }
 
+    @inlinable
     mutating func normalize() {
         self = self.normalized()
     }
 
+    @inlinable
     var magnitudeSquared: CGFloat   { Self.dot(self, self) }
+    @inlinable
     var magnitude: CGFloat          { self.magnitudeSquared.squareRoot() }
 
+    @inlinable
     static func lerp(_ a: Self, _ b: Self, _ t: CGFloat) -> CGPoint {
         a * (1.0 - t) + b * t
     }
 
+    @inlinable
     func applying(_ m: Matrix2) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22)
         return Self(x: x, y: y)
     }
 
+    @inlinable
     mutating func apply(_ m: Matrix2) {
         self = self.applying(m)
     }
 
+    @inlinable
     func applying(_ m: Matrix3) -> Self {
         let x = self.x * CGFloat(m.m11) + self.y * CGFloat(m.m21) + CGFloat(m.m31)
         let y = self.x * CGFloat(m.m12) + self.y * CGFloat(m.m22) + CGFloat(m.m32)
@@ -85,153 +99,190 @@ public extension CGPoint {
         return Self(x: x * w, y: y * w)
     }
 
+    @inlinable
     mutating func apply(_ m: Matrix3) {
         self = self.applying(m)
     }
 
+    @inlinable
     static func + (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x + rhs.x, y: lhs.y + rhs.y)
     }
 
+    @inlinable
     static func += (lhs: inout Self, rhs: Self) {
         lhs = lhs + rhs
     }
 
+    @inlinable
     static prefix func - (lhs: Self) -> Self {
         return Self(x: -lhs.x, y: -lhs.y)
     }
 
+    @inlinable
     static func - (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
     }
 
+    @inlinable
     static func -= (lhs: inout Self, rhs: Self) {
         lhs = lhs - rhs
     }
 
+    @inlinable
     static func * (lhs: Self, rhs: CGFloat) -> Self {
         return Self(x: lhs.x * rhs, y: lhs.y * rhs)
     }
 
+    @inlinable
     static func * (lhs: CGFloat, rhs: Self) -> Self {
         return Self(x: lhs * rhs.x, y: lhs * rhs.y)
     }
 
+    @inlinable
     static func *= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs * rhs
     }
 
+    @inlinable
     static func * (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x * rhs.x, y: lhs.y * rhs.y)
     }
 
+    @inlinable
     static func *= (lhs: inout Self, rhs: Self) {
         lhs = lhs * rhs
     }
 
+    @inlinable
     static func / (lhs: Self, rhs: Self) -> Self {
         return Self(x: lhs.x / rhs.x, y: lhs.y / rhs.y)
     }
 
+    @inlinable
     static func / (lhs: CGFloat, rhs: Self) -> Self {
         return Self(x: lhs / rhs.x, y: lhs / rhs.y)
     }
 
+    @inlinable
     static func / (lhs: Self, rhs: CGFloat) -> Self {
         let inv = 1.0 / rhs
         return lhs * inv
     }
 
+    @inlinable
     static func /= (lhs: inout Self, rhs: Self) {
         lhs = lhs / rhs
     }
 
+    @inlinable
     static func /= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs / rhs
     }
 
+    @inlinable
     static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(x: min(lhs.x, rhs.x), y: min(lhs.y, rhs.y))
     }
 
+    @inlinable
     static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(x: max(lhs.x, rhs.x), y: max(lhs.y, rhs.y))
     }
     
+    @inlinable
     static func clamp(_ value: Self, min: Self, max: Self) -> Self {
         return minimum(maximum(min, value), max)
     }
 }
 
+@inlinable
 public func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
     a * (1.0 - t) + b * t
 }
 
 public extension CGSize {
+    @inlinable
     init(_ v: Vector2) {
         self.init(width: CGFloat(v.x), height: CGFloat(v.y))
     }
 
+    @inlinable
     init(_ p: CGPoint) {
         self.init(width: p.x, height: p.y)
     }
 
+    @inlinable
     init(_ s: CGSize) {
         self = s
     }
 
+    @inlinable
     static func * (lhs: Self, rhs: CGFloat) -> Self {
         return Self(width: lhs.width * rhs, height: lhs.height * rhs)
     }
 
+    @inlinable
     static func *= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs * rhs
     }
 
+    @inlinable
     static func * (lhs: Self, rhs: Self) -> Self {
         return Self(width: lhs.width * rhs.width, height: lhs.height * rhs.height)
     }
 
+    @inlinable
     static func * (lhs: CGFloat, rhs: Self) -> Self {
         return Self(width: lhs * rhs.width, height: lhs * rhs.height)
     }
 
+    @inlinable
     static func *= (lhs: inout Self, rhs: Self) {
         lhs = lhs * rhs
     }
 
+    @inlinable
     static func / (lhs: Self, rhs: Self) -> Self {
         return Self(width: lhs.width / rhs.width, height: lhs.height / rhs.height)
     }
 
+    @inlinable
     static func / (lhs: CGFloat, rhs: Self) -> Self {
         return Self(width: lhs / rhs.width, height: lhs / rhs.height)
     }
 
+    @inlinable
     static func / (lhs: Self, rhs: CGFloat) -> Self {
         return Self(width: lhs.width / rhs, height: lhs.height / rhs)
     }
 
+    @inlinable
     static func /= (lhs: inout Self, rhs: Self) {
         lhs = lhs / rhs
     }
 
+    @inlinable
     static func /= (lhs: inout Self, rhs: CGFloat) {
         lhs = lhs / rhs
     }
 
+    @inlinable
     static func minimum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(width: min(lhs.width, rhs.width), height: min(lhs.height, rhs.height))
     }
 
+    @inlinable
     static func maximum(_ lhs: Self, _ rhs: Self) -> Self {
         return Self(width: max(lhs.width, rhs.width), height: max(lhs.height, rhs.height))
     }
 
+    @inlinable
     static func clamp(_ value: Self, min: Self, max: Self) -> Self {
         return minimum(maximum(min, value), max)
     }
 
+    @inlinable
     var cgPoint: CGPoint { CGPoint(x: width, y: height) }
 }
 

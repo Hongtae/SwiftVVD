@@ -105,13 +105,75 @@ final class PathContainmentTests: XCTestCase {
         )
     }
 
+    func testCurveBuffersPreserveWindingResults() {
+        let quadratic = Path { path in
+            path.move(to: CGPoint(x: -12, y: -8))
+            path.addQuadCurve(
+                to: CGPoint(x: 12, y: -8),
+                control: CGPoint(x: -2, y: 22)
+            )
+            path.closeSubpath()
+        }
+        let cubic = Path { path in
+            path.move(to: CGPoint(x: -12, y: -8))
+            path.addCurve(
+                to: CGPoint(x: 12, y: -8),
+                control1: CGPoint(x: -9, y: 25),
+                control2: CGPoint(x: 8, y: 5)
+            )
+            path.closeSubpath()
+        }
+        let points = [
+            CGPoint(x: -13, y: 0), CGPoint(x: 13, y: 0),
+            CGPoint(x: 0, y: -9), CGPoint(x: 0, y: -7),
+            CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 6),
+            CGPoint(x: 0, y: 8), CGPoint(x: -8, y: 0),
+            CGPoint(x: 8, y: 0), CGPoint(x: -5, y: 5),
+            CGPoint(x: 5, y: 5), CGPoint(x: 0, y: 15),
+        ]
+
+        for eoFill in [false, true] {
+            XCTAssertEqual(
+                publicContainsMask(quadratic, points, eoFill: eoFill),
+                0x538
+            )
+            XCTAssertEqual(
+                publicContainsMask(cubic, points, eoFill: eoFill),
+                0x3f8
+            )
+            XCTAssertEqual(
+                batchContains(quadratic, points, eoFill: eoFill),
+                0x538
+            )
+            XCTAssertEqual(
+                batchContains(cubic, points, eoFill: eoFill),
+                0x3f8
+            )
+        }
+    }
+
+    private func publicContainsMask(
+        _ path: Path,
+        _ points: [CGPoint],
+        eoFill: Bool
+    ) -> UInt64 {
+        var result: UInt64 = 0
+        for (index, point) in points.enumerated() {
+            if path.contains(point, eoFill: eoFill) {
+                result |= UInt64(1) << UInt64(index)
+            }
+        }
+        return result
+    }
+
     private func batchContains(
         _ path: Path,
         _ points: [CGPoint],
+        eoFill: Bool = false,
         origin: CGPoint = .zero
     ) -> UInt64 {
         points.withUnsafeBufferPointer {
-            path.contains(points: $0, eoFill: false, origin: origin).rawValue
+            path.contains(points: $0, eoFill: eoFill, origin: origin).rawValue
         }
     }
 }

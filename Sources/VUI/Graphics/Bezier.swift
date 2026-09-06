@@ -2,11 +2,60 @@
 //  File: Bezier.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
 import VVD
+
+struct BezierIntersections {
+    private(set) var count = 0
+    private var first: CGFloat = 0
+    private var second: CGFloat = 0
+    private var third: CGFloat = 0
+
+    @inline(__always)
+    mutating func append(_ value: CGFloat) {
+        switch count {
+        case 0: first = value
+        case 1: second = value
+        case 2: third = value
+        default: preconditionFailure("Bezier intersections exceed cubic degree")
+        }
+        count += 1
+    }
+
+    @inline(__always)
+    mutating func sort() {
+        if count > 1, second < first {
+            let value = first
+            first = second
+            second = value
+        }
+        if count > 2 {
+            if third < second {
+                let value = second
+                second = third
+                third = value
+            }
+            if second < first {
+                let value = first
+                first = second
+                second = value
+            }
+        }
+    }
+
+    @inline(__always)
+    subscript(index: Int) -> CGFloat {
+        switch index {
+        case 0 where count > 0: first
+        case 1 where count > 1: second
+        case 2 where count > 2: third
+        default: preconditionFailure("Bezier intersection index out of range")
+        }
+    }
+}
 
 struct QuadraticBezier {
     let p0: CGPoint     // start point
@@ -47,18 +96,44 @@ struct QuadraticBezier {
     }
 
     func approximateLength(subdivide: Int = 0) -> CGFloat {
-        var sumOfPointSegments = 0.0
-        self.subdivide(subdivide).forEach {
-            sumOfPointSegments += $0.lengthOfPointSegments
+        guard subdivide > 0 else {
+            return lengthOfPointSegments * 0.5
         }
+
+        var sumOfPointSegments: CGFloat = 0
+        accumulatePointSegmentLength(
+            subdivide: subdivide,
+            into: &sumOfPointSegments
+        )
         return sumOfPointSegments * 0.5
+    }
+
+    private func accumulatePointSegmentLength(
+        subdivide: Int,
+        into length: inout CGFloat
+    ) {
+        if subdivide > 0 {
+            let halves = split(0.5)
+            halves.0.accumulatePointSegmentLength(
+                subdivide: subdivide - 1,
+                into: &length
+            )
+            halves.1.accumulatePointSegmentLength(
+                subdivide: subdivide - 1,
+                into: &length
+            )
+        } else {
+            length += lengthOfPointSegments
+        }
     }
 
     func interpolate(_ t: CGFloat) -> CGPoint {
         let t2 = t * t
         let u = 1.0 - t
         let u2 = u * u
-        return (p0 * u2) + (p1 * u * t * 2) + (p2 * t2)
+        let x = (p0.x * u2) + (p1.x * u * t * 2) + (p2.x * t2)
+        let y = (p0.y * u2) + (p1.y * u * t * 2) + (p2.y * t2)
+        return CGPoint(x: x, y: y)
     }
 
     func interpolate(_ t: CGPoint) -> CGPoint {
@@ -108,7 +183,31 @@ struct QuadraticBezier {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
+    @inline(__always)
+    private func isLineSegmentIntersection(
+        _ t: CGFloat,
+        begin: CGPoint,
+        end: CGPoint
+    ) -> Bool {
+        guard t >= 0 && t <= 1 else { return false }
+
+        // pt: intersection point with infinite line
+        let point = interpolate(t)
+
+        // line segment bound check.
+        let s: CGFloat
+        if end.x - begin.x != 0 { // not vertical line
+            s = (point.x - begin.x) / (end.x - begin.x)
+        } else {
+            s = (point.y - begin.y) / (end.y - begin.y)
+        }
+        return s >= 0 && s <= 1
+    }
+
+    func intersectLineSegment(
+        _ begin: CGPoint,
+        _ end: CGPoint
+    ) -> BezierIntersections {
         let Q = end.y * (p0.x - 2 * p1.x + p2.x) - begin.y * (p0.x - 2 * p1.x + p2.x)
         let S = begin.x * (p0.y - 2 * p1.y + p2.y) - end.x * (p0.y - 2 * p1.y + p2.y)
         let R = end.y * 2 * (p1.x - p0.x) - begin.y * 2 * (p1.x - p0.x)
@@ -123,22 +222,15 @@ struct QuadraticBezier {
         let t1 = (-B + B2_4AC) * InvA2
         let t2 = (-B - B2_4AC) * InvA2
 
-        return [t1, t2].filter { t in
-            if (t >= 0 && t <= 1) {
-                // pt: intersection point with infinite line
-                let pt = self.interpolate(t)
-
-                // line segment bound check.
-                let s: CGFloat
-                if end.x - begin.x != 0 { // not vertical line
-                    s = (pt.x - begin.x) / (end.x - begin.x)
-                } else {
-                    s = (pt.y - begin.y) / (end.y - begin.y)
-                }
-                return s >= 0 && s <= 1
-            }
-            return false
-        }.sorted()
+        var intersections = BezierIntersections()
+        if isLineSegmentIntersection(t1, begin: begin, end: end) {
+            intersections.append(t1)
+        }
+        if isLineSegmentIntersection(t2, begin: begin, end: end) {
+            intersections.append(t2)
+        }
+        intersections.sort()
+        return intersections
     }
 
     func applying(_ t: CGAffineTransform) -> QuadraticBezier {
@@ -199,11 +291,35 @@ struct CubicBezier {
     }
 
     func approximateLength(subdivide: Int = 0) -> CGFloat {
-        var sumOfPointSegments = 0.0
-        self.subdivide(subdivide).forEach {
-            sumOfPointSegments += $0.lengthOfPointSegments
+        guard subdivide > 0 else {
+            return lengthOfPointSegments * 0.5
         }
+
+        var sumOfPointSegments: CGFloat = 0
+        accumulatePointSegmentLength(
+            subdivide: subdivide,
+            into: &sumOfPointSegments
+        )
         return sumOfPointSegments * 0.5
+    }
+
+    private func accumulatePointSegmentLength(
+        subdivide: Int,
+        into length: inout CGFloat
+    ) {
+        if subdivide > 0 {
+            let halves = split(0.5)
+            halves.0.accumulatePointSegmentLength(
+                subdivide: subdivide - 1,
+                into: &length
+            )
+            halves.1.accumulatePointSegmentLength(
+                subdivide: subdivide - 1,
+                into: &length
+            )
+        } else {
+            length += lengthOfPointSegments
+        }
     }
 
     func interpolate(_ t: CGFloat) -> CGPoint {
@@ -212,7 +328,11 @@ struct CubicBezier {
         let u = 1.0 - t
         let u2 = u * u
         let u3 = u2 * u
-        return (p0 * u3) + (p1 * t * u2 * 3) + (p2 * t2 * u * 3) + (p3 * t3)
+        let x = (p0.x * u3) + (p1.x * t * u2 * 3)
+            + (p2.x * t2 * u * 3) + (p3.x * t3)
+        let y = (p0.y * u3) + (p1.y * t * u2 * 3)
+            + (p2.y * t2 * u * 3) + (p3.y * t3)
+        return CGPoint(x: x, y: y)
     }
 
     func interpolate(_ t: CGPoint) -> CGPoint {
@@ -239,6 +359,31 @@ struct CubicBezier {
         return (p0 * u2 * -3) + (p1 * u2 * 3) - (p1 * u * t * 6) - (p2 * t2 * 3) + (p2 * u * t * 6) + (p3 * t2 * 3)
     }
 
+    @inline(__always)
+    private static func derivativeRoots(
+        a: CGFloat,
+        b: CGFloat,
+        c: CGFloat,
+        determinant: CGFloat
+    ) -> (count: Int, first: CGFloat, second: CGFloat) {
+        if determinant < 0 { return (0, 0, 0) }
+        if a.magnitude < .ulpOfOne {
+            if b.magnitude < .ulpOfOne { return (0, 0, 0) }
+            return (1, -c / b, 0)
+        }
+        if determinant.magnitude < .ulpOfOne {
+            return (1, -b / (a * 2), 0)
+        }
+
+        let squareRoot = sqrt(determinant)
+        let denominator = a * 2
+        return (
+            2,
+            (-b + squareRoot) / denominator,
+            (-b - squareRoot) / denominator
+        )
+    }
+
     var boundingBox: CGRect {
         //X = At^3 + Bt^2 + Ct + D
         //where A,B,C,D: (D = p0)
@@ -252,21 +397,6 @@ struct CubicBezier {
         let c_der = c
         
         let determinant = b_der * b_der - a_der * c_der * 4
-
-        let extremes = {
-            (a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat) -> [CGFloat] in
-            if d < 0 { return [] }
-            if a.magnitude < .ulpOfOne {
-                if b.magnitude < .ulpOfOne { return [] }
-                return [ -c / b ]
-            }
-            if d.magnitude < .ulpOfOne { return [ -b / ( a * 2) ] }
-            let s = sqrt(d)
-            return [
-                (-b + s) / ( a * 2),
-                (-b - s) / ( a * 2)
-            ]
-        }
 
         let curve = {
             (p0: CGFloat, p1: CGFloat, p2: CGFloat, p3: CGFloat, t: CGFloat) -> CGFloat in
@@ -283,14 +413,45 @@ struct CubicBezier {
         var maxX = max(p0.x, p3.x)
         var maxY = max(p0.y, p3.y)
 
-        extremes(a_der.x, b_der.x, c_der.x, determinant.x).forEach { t in
+        let xRoots = Self.derivativeRoots(
+            a: a_der.x,
+            b: b_der.x,
+            c: c_der.x,
+            determinant: determinant.x
+        )
+        if xRoots.count > 0 {
+            let t = xRoots.first
             if t > 0 && t < 1 {
                 let x = curve(p0.x, p1.x, p2.x, p3.x, t)
                 minX = min(x, minX)
                 maxX = max(x, maxX)
             }
         }
-        extremes(a_der.y, b_der.y, c_der.y, determinant.y).forEach { t in
+        if xRoots.count > 1 {
+            let t = xRoots.second
+            if t > 0 && t < 1 {
+                let x = curve(p0.x, p1.x, p2.x, p3.x, t)
+                minX = min(x, minX)
+                maxX = max(x, maxX)
+            }
+        }
+
+        let yRoots = Self.derivativeRoots(
+            a: a_der.y,
+            b: b_der.y,
+            c: c_der.y,
+            determinant: determinant.y
+        )
+        if yRoots.count > 0 {
+            let t = yRoots.first
+            if t > 0 && t < 1 {
+                let y = curve(p0.y, p1.y, p2.y, p3.y, t)
+                minY = min(y, minY)
+                maxY = max(y, maxY)
+            }
+        }
+        if yRoots.count > 1 {
+            let t = yRoots.second
             if t > 0 && t < 1 {
                 let y = curve(p0.y, p1.y, p2.y, p3.y, t)
                 minY = min(y, minY)
@@ -300,69 +461,84 @@ struct CubicBezier {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    func intersectLineSegment(_ begin: CGPoint, _ end: CGPoint) -> [CGFloat] {
-        let sign: (CGFloat)->CGFloat = { $0 < 0.0 ? -1 : 1 }
-        let cubicRoots = {
-            (a: CGFloat, b: CGFloat, c: CGFloat, d: CGFloat) -> [CGFloat] in
+    @inline(__always)
+    private static func sign(_ value: CGFloat) -> CGFloat {
+        value < 0 ? -1 : 1
+    }
 
-            let invA = 1.0 / a
-            let A = b * invA
-            let B = c * invA
-            let C = d * invA
+    private static func unitPolynomialRoots(
+        a: CGFloat,
+        b: CGFloat,
+        c: CGFloat,
+        d: CGFloat
+    ) -> BezierIntersections {
+        let invA = 1.0 / a
+        let A = b * invA
+        let B = c * invA
+        let C = d * invA
 
-            let Q = (3 * B - (A * A)) / 9
-            let R = (9 * A * B - 27 * C - 2 * (A * A * A)) / 54
-            let D = (Q * Q * Q) + (R * R) // polynomial discriminant
+        let Q = (3 * B - (A * A)) / 9
+        let R = (9 * A * B - 27 * C - 2 * (A * A * A)) / 54
+        let D = (Q * Q * Q) + (R * R) // polynomial discriminant
 
-            let A3 = A/3
+        let A3 = A/3
+        var roots = BezierIntersections()
 
-            var t: [CGFloat] = [-1, -1, -1]
-            if D >= 0 {
-                // complex or duplicate roots
-                let sqrt_D = sqrt(D)
-                let S = sign(R + sqrt_D) * pow((R + sqrt_D).magnitude, 1.0/3)
-                let T = sign(R - sqrt_D) * pow((R - sqrt_D).magnitude, 1.0/3)
+        if D >= 0 {
+            // complex or duplicate roots
+            let sqrt_D = sqrt(D)
+            let S = sign(R + sqrt_D) * pow((R + sqrt_D).magnitude, 1.0/3)
+            let T = sign(R - sqrt_D) * pow((R - sqrt_D).magnitude, 1.0/3)
 
-                t[0] = -A3 + (S + T)   // real root
-
-                let im = (sqrt(3) * (S - T)/2).magnitude // complex part of root pair
-                if im == .zero {
-                    t[1] = -A3 - (S + T)/2     // real part of complex root
-                    t[2] = -A3 - (S + T)/2     // real part of complex root
-                }
-            } else {
-                // distinct real roots
-                let th = acos(R / sqrt(-(Q * Q * Q)))
-                let sqrt_mQ = sqrt(-Q)
-                t[0] = 2 * sqrt_mQ * cos(th/3) - A3
-                t[1] = 2 * sqrt_mQ * cos((th + 2 * .pi)/3) - A3
-                t[2] = 2 * sqrt_mQ * cos((th + 4 * .pi)/3) - A3
+            let first = -A3 + (S + T) // real root
+            if first >= 0 && first <= 1 {
+                roots.append(first)
             }
-            return t.filter { $0 >= 0 && $0 <= 1 }
+
+            let im = (sqrt(3) * (S - T)/2).magnitude // complex part of root pair
+            if im == .zero {
+                let duplicate = -A3 - (S + T)/2 // real part of complex root
+                if duplicate >= 0 && duplicate <= 1 {
+                    roots.append(duplicate)
+                    roots.append(duplicate)
+                }
+            }
+        } else {
+            // distinct real roots
+            let th = acos(R / sqrt(-(Q * Q * Q)))
+            let sqrt_mQ = sqrt(-Q)
+            let first = 2 * sqrt_mQ * cos(th/3) - A3
+            let second = 2 * sqrt_mQ * cos((th + 2 * .pi)/3) - A3
+            let third = 2 * sqrt_mQ * cos((th + 4 * .pi)/3) - A3
+            if first >= 0 && first <= 1 { roots.append(first) }
+            if second >= 0 && second <= 1 { roots.append(second) }
+            if third >= 0 && third <= 1 { roots.append(third) }
         }
+        return roots
+    }
 
-        let bezierCoeffs = {
-            (p0: CGPoint, p1: CGPoint, p2: CGPoint, p3: CGPoint)
-            -> (CGPoint, CGPoint, CGPoint, CGPoint) in
-
-            let a = -p0 + 3 * p1 - 3 * p2 + p3
-            let b = 3 * p0 - 6 * p1 + 3 * p2
-            let c = -3 * p0 + 3 * p1
-            let d = p0
-            return (a, b, c, d)
-        }
-
+    func intersectLineSegment(
+        _ begin: CGPoint,
+        _ end: CGPoint
+    ) -> BezierIntersections {
         let A = end.y - begin.y     // A = y2 - y1
         let B = begin.x - end.x     // B = x1 - x2
         let C = begin.x * (begin.y - end.y) + begin.y * (end.x - begin.x)   // C = x1 * (y1 - y2) + y1 * (x2 - x1)
 
-        let (b0, b1, b2, b3) = bezierCoeffs(p0, p1, p2, p3)
+        let b0 = -p0 + 3 * p1 - 3 * p2 + p3
+        let b1 = 3 * p0 - 6 * p1 + 3 * p2
+        let b2 = -3 * p0 + 3 * p1
+        let b3 = p0
         let P0 = A * b0.x + B * b0.y        // t^3
         let P1 = A * b1.x + B * b1.y        // t^2
         let P2 = A * b2.x + B * b2.y        // t
         let P3 = A * b3.x + B * b3.y + C    // 1
 
-        return cubicRoots(P0, P1, P2, P3).filter { t in
+        let roots = Self.unitPolynomialRoots(a: P0, b: P1, c: P2, d: P3)
+        var intersections = BezierIntersections()
+        var index = 0
+        while index < roots.count {
+            let t = roots[index]
             let t2 = t * t
             let t3 = t2 * t
 
@@ -376,8 +552,13 @@ struct CubicBezier {
             } else {
                 s = (pt.y - begin.y) / (end.y - begin.y)
             }
-            return s >= 0 && s <= 1
-        }.sorted()
+            if s >= 0 && s <= 1 {
+                intersections.append(t)
+            }
+            index += 1
+        }
+        intersections.sort()
+        return intersections
     }
 
     func applying(_ t: CGAffineTransform) -> CubicBezier {
@@ -450,7 +631,25 @@ extension CubicBezier {
     }
 
     /// Subdivide then offset each piece for better accuracy.
-    func offsetCurves(by distance: CGFloat, subdivisions: Int = 2) -> [CubicBezier] {
-        subdivide(subdivisions).map { $0.offset(by: distance) }
+    func forEachOffsetCurve(
+        by distance: CGFloat,
+        subdivisions: Int = 2,
+        _ body: (CubicBezier) -> Void
+    ) {
+        if subdivisions > 0 {
+            let halves = split(0.5)
+            halves.0.forEachOffsetCurve(
+                by: distance,
+                subdivisions: subdivisions - 1,
+                body
+            )
+            halves.1.forEachOffsetCurve(
+                by: distance,
+                subdivisions: subdivisions - 1,
+                body
+            )
+        } else {
+            body(offset(by: distance))
+        }
     }
 }

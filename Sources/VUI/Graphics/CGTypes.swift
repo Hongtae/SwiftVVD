@@ -24,6 +24,7 @@ public typealias CGLineCap = CoreGraphics.CGLineCap
 public typealias CGLineJoin = CoreGraphics.CGLineJoin
 
 extension CGAffineTransform {
+    @inlinable
     public var matrix3: Matrix3 {
         Matrix3(a, b, 0.0, c, d, 0.0, tx, ty, 1.0)
     }
@@ -68,17 +69,23 @@ public struct CGVector: Hashable, Sendable {
 #endif
 
 extension Float: VectorArithmetic {
+    @inlinable
     public mutating func scale(by rhs: Double) { self *= Float(rhs) }
+    @inlinable
     public var magnitudeSquared: Double { Double(self * self) }
 }
 
 extension Double: VectorArithmetic {
+    @inlinable
     public mutating func scale(by rhs: Double) { self *= rhs }
+    @inlinable
     public var magnitudeSquared: Double { self * self }
 }
 
 extension CGFloat: VectorArithmetic {
+    @inlinable
     public mutating func scale(by rhs: Double) { self = self * rhs }
+    @inlinable
     public var magnitudeSquared: Double { self * self }
 }
 
@@ -119,6 +126,7 @@ extension CGRect: Animatable {
 }
 
 extension Vector2 {
+    @inlinable
     public func applying(_ t: CGAffineTransform) -> Vector2 {
         let x = self.x * Scalar(t.a) + self.y * Scalar(t.c) + Scalar(t.tx)
         let y = self.x * Scalar(t.b) + self.y * Scalar(t.d) + Scalar(t.ty)
