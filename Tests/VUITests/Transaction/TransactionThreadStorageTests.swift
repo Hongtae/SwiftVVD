@@ -6,7 +6,7 @@ import XCTest
 final class TransactionThreadStorageTests: XCTestCase {
     override func tearDown() {
         XCTAssertNil(Transaction.ThreadStorage.currentBox)
-        Transaction.ThreadStorage.resetCurrentIDForTesting()
+        Transaction.ThreadStorage._reset_id()
         super.tearDown()
     }
 
@@ -19,7 +19,7 @@ final class TransactionThreadStorageTests: XCTestCase {
     }
 
     func testTransactionIDFirstReadLazilyAllocatesStableThreadID() {
-        Transaction.ThreadStorage.resetCurrentIDForTesting()
+        Transaction.ThreadStorage._reset_id()
 
         let first = Transaction.id
         let second = Transaction.id
@@ -29,7 +29,7 @@ final class TransactionThreadStorageTests: XCTestCase {
     }
 
     func testTransactionCoreBarrierAdvancesThreadID() {
-        Transaction.ThreadStorage.resetCurrentIDForTesting()
+        Transaction.ThreadStorage._reset_id()
 
         let before = Transaction.id
         Transaction._core_barrier()
@@ -41,8 +41,74 @@ final class TransactionThreadStorageTests: XCTestCase {
         XCTAssertEqual(after, Transaction.id)
     }
 
+    func testResetIDPreservesCurrentTransactionAndGlobalAllocation() throws {
+        var transaction = Transaction()
+        transaction[ThreadStorageParentOnlyKey.self] = 11
+        var allocatedIDs: Set<Transaction.ID> = [Transaction.id]
+
+        try withTransaction(transaction) {
+            let box = try XCTUnwrap(Transaction.ThreadStorage.currentBox)
+
+            for _ in 0..<32 {
+                Transaction.ThreadStorage._reset_id()
+
+                XCTAssertTrue(Transaction.ThreadStorage.currentBox === box)
+                XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 11)
+
+                let id = Transaction.id
+                XCTAssertNotEqual(id.value, 0)
+                XCTAssertTrue(allocatedIDs.insert(id).inserted)
+                XCTAssertEqual(Transaction.id, id)
+            }
+        }
+    }
+
+    func testIDChangesPersistAfterNestedThrowingTransactionScopes() throws {
+        var parent = Transaction()
+        parent[ThreadStorageParentOnlyKey.self] = 11
+        var child = Transaction()
+        child[ThreadStorageThrowingKey.self] = 22
+
+        let initialID = Transaction.id
+        var finalID = initialID
+        try withTransaction(parent) {
+            let parentBox = try XCTUnwrap(Transaction.ThreadStorage.currentBox)
+            XCTAssertEqual(Transaction.id, initialID)
+
+            do {
+                try withTransaction(child) {
+                    XCTAssertEqual(Transaction.id, initialID)
+                    Transaction._core_barrier()
+                    let barrierID = Transaction.id
+                    XCTAssertNotEqual(barrierID.value, 0)
+                    XCTAssertNotEqual(barrierID, initialID)
+
+                    Transaction.ThreadStorage._reset_id()
+                    finalID = Transaction.id
+                    XCTAssertNotEqual(finalID.value, 0)
+                    XCTAssertNotEqual(finalID, initialID)
+                    XCTAssertNotEqual(finalID, barrierID)
+                    XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 11)
+                    XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 22)
+                    throw ThreadStorageProbeError.expected
+                }
+                XCTFail("throwing nested transaction returned normally")
+            } catch ThreadStorageProbeError.expected {
+                XCTAssertTrue(Transaction.ThreadStorage.currentBox === parentBox)
+                XCTAssertEqual(Transaction.current[ThreadStorageParentOnlyKey.self], 11)
+                XCTAssertEqual(Transaction.current[ThreadStorageThrowingKey.self], 0)
+                XCTAssertEqual(Transaction.id, finalID)
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        XCTAssertNil(Transaction.ThreadStorage.currentBox)
+        XCTAssertEqual(Transaction.id, finalID)
+    }
+
     func testTransactionIDIsThreadLocalAndGloballyAllocated() {
-        Transaction.ThreadStorage.resetCurrentIDForTesting()
+        Transaction.ThreadStorage._reset_id()
 
         let mainFirst = Transaction.id
         let mainSecond = Transaction.id
@@ -53,10 +119,10 @@ final class TransactionThreadStorageTests: XCTestCase {
         let workerFirstID = Atomic<UInt32>(0)
         let workerSecondID = Atomic<UInt32>(0)
         let worker = Thread {
-            Transaction.ThreadStorage.resetCurrentIDForTesting()
+            Transaction.ThreadStorage._reset_id()
             let first = Transaction.id
             let second = Transaction.id
-            Transaction.ThreadStorage.resetCurrentIDForTesting()
+            Transaction.ThreadStorage._reset_id()
             workerFirstID.store(first.value, ordering: .relaxed)
             workerSecondID.store(second.value, ordering: .relaxed)
             semaphore.signal()

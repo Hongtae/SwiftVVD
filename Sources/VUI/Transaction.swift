@@ -145,6 +145,7 @@ extension Transaction {
     }
 
     enum ThreadStorage {
+        // Current transactions are scoped; thread ids persist across scopes.
         private static let transaction = _AGThreadLocal<ThreadStorageBox?>(nil)
         private static let idKey = "VUI.Transaction.currentID"
 
@@ -170,21 +171,20 @@ extension Transaction {
                value != 0 {
                 return ID(value: value)
             }
+            return advanceID()
+        }
+
+        @discardableResult
+        static func advanceID() -> ID {
             let value = ThreadIDState.next()
             Thread.current.threadDictionary[idKey] = NSNumber(value: value)
             return ID(value: value)
         }
 
-        static func advanceID() {
-            let next = ThreadIDState.next()
-            Thread.current.threadDictionary[idKey] = NSNumber(value: next)
-        }
-
-#if DEBUG
-        static func resetCurrentIDForTesting() {
+        // Resets only this thread's id for test isolation, not the global counter.
+        static func _reset_id() {
             Thread.current.threadDictionary.removeObject(forKey: idKey)
         }
-#endif
 
         private enum ThreadIDState {
             private static let nextID = Atomic<UInt32>(1)
