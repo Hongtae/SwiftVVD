@@ -404,6 +404,4 @@ private final class TextFormattingCommandsTestAppContext: AppContext {
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
         resources[url] = data
     }
-
-    func checkWindowActivities() {}
 }

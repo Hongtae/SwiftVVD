@@ -196,6 +196,4 @@ private final class SidebarCommandsTestAppContext: AppContext {
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
         resources[url] = data
     }
-
-    func checkWindowActivities() {}
 }

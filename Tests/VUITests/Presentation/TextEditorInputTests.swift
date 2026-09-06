@@ -925,8 +925,6 @@ private final class TextEditorTestAppContext: AppContext {
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
         resources[url] = data
     }
-
-    func checkWindowActivities() {}
 }
 
 private final class TextEditorInputModel {
@@ -1019,8 +1017,6 @@ private final class TextEditorClipboardAppContext: AppContext {
     func resourceData(forURL url: URL) -> (any DataProtocol)? { nil }
 
     func setResource(data: (any DataProtocol)?, forURL url: URL) {}
-
-    func checkWindowActivities() {}
 }
 
 private final class TextEditorStateBindingCapture {

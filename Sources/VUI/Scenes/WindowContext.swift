@@ -141,7 +141,7 @@ class WindowContext: @unchecked Sendable {
                         }
 
                         self.swapChain = swapChain
-                        self.task = self.runUpdateTask()
+                        self.task = self.runUpdateTask(uuid: UUID())
                     } else {
                         Log.error("Failed to create swapChain.")
                     }
@@ -189,7 +189,8 @@ class WindowContext: @unchecked Sendable {
         )
     }
 
-    private func runUpdateTask() -> Task<Void, Never> {
+    @MainActor
+    private func runUpdateTask(uuid: UUID) -> Task<Void, Never> {
         struct PeriodicFrameTiming {
             struct Summary {
                 var minimum = 0.0
@@ -237,7 +238,7 @@ class WindowContext: @unchecked Sendable {
 
         let timingSummaryInterval = 1.0
 
-        return Task.detached(priority: .userInitiated) { @Sendable [weak self] in
+        let task = Task.detached(priority: .userInitiated) { @Sendable [weak self] in
             var onFinalize = self?.onFinalize
             defer {
                 onFinalize?()
@@ -659,6 +660,14 @@ class WindowContext: @unchecked Sendable {
                 }
             }
         }
+
+        Self.runningUpdateTasks[uuid] = task
+
+        Task { @MainActor in
+            await task.value
+            Self.runningUpdateTasks.removeValue(forKey: uuid)
+        }
+        return task
     }
 
     static func resolvedFrameInterval(
@@ -734,6 +743,26 @@ class WindowContext: @unchecked Sendable {
             break
         case .update:
             break
+        }
+    }
+
+    @MainActor
+    private static var runningUpdateTasks: [UUID: Task<Void, Never>] = [:]
+
+    @MainActor
+    static func cancelAndWaitForAllUpdateTasks() async {
+        while runningUpdateTasks.isEmpty == false {
+            let tasks = runningUpdateTasks
+            runningUpdateTasks.removeAll()
+
+            await withTaskGroup(of: Void.self) { group in
+                for task in tasks.values {
+                    group.addTask {
+                        task.cancel()
+                        await task.value
+                    }
+                }
+            }
         }
     }
 }

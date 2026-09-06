@@ -948,9 +948,6 @@ private final class TextResolutionTestAppContext: AppContext {
 
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
     }
-
-    func checkWindowActivities() {
-    }
 }
 
 private final class ResolvedTextScaleTestAppContext: AppContext {
@@ -969,8 +966,5 @@ private final class ResolvedTextScaleTestAppContext: AppContext {
 
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
         resources[url] = data
-    }
-
-    func checkWindowActivities() {
     }
 }

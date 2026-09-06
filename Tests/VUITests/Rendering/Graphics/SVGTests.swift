@@ -582,9 +582,6 @@ private final class SVGTestAppContext: AppContext {
     func setResource(data: (any DataProtocol)?, forURL url: URL) {
         resources[url] = data
     }
-
-    func checkWindowActivities() {
-    }
 }
 
 private extension SVG.Style {

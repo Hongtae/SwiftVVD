@@ -35,7 +35,9 @@ protocol AppContext: AnyObject {
     func resourceData(forURL: URL) -> (any DataProtocol)?
     func setResource(data: (any DataProtocol)?, forURL: URL)
 
-    func checkWindowActivities()
+    @MainActor func checkWindowStates()
+    @MainActor func canQuit() async -> Bool
+    @MainActor func requestQuit(force: Bool) async -> Bool
 
     var appWindowsController: AppWindowsController? { get }
 
@@ -43,6 +45,19 @@ protocol AppContext: AnyObject {
 }
 
 extension AppContext {
+    @MainActor
+    func checkWindowStates() {}
+
+    @MainActor
+    func canQuit() async -> Bool {
+        true
+    }
+
+    @MainActor
+    func requestQuit(force: Bool) async -> Bool {
+        false
+    }
+
     var clipboard: (any Clipboard)? {
         sharedApplication()?.clipboard
     }
@@ -80,12 +95,23 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
         }
     }
 
-    func checkWindowActivities() {
+    @MainActor
+    private var isTerminating = false
+
+    @MainActor
+    func checkWindowStates() {
         if self.activeWindows.isEmpty {
             if self.terminateAfterLastWindowClosed {
-                let app = sharedApplication()
-                app!.terminate(exitCode: 0)
-                Log.debug("window closed, request app exit!")
+                guard !isTerminating else { return }
+                isTerminating = true
+
+                Task { @MainActor in
+                    await WindowContext.cancelAndWaitForAllUpdateTasks()
+
+                    let app = sharedApplication()
+                    app!.terminate(exitCode: 0)
+                    Log.debug("window closed, request app exit!")
+                }
             }
         }
     }
@@ -132,7 +158,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 }
 
-enum ResourcePurgeReason {
+enum ResourcePurgeReason: Sendable {
     case lowMemory
     case appTermination
 }

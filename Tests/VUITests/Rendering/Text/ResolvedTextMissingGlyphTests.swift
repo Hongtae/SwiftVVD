@@ -2047,7 +2047,4 @@ private final class MissingGlyphTestAppContext: AppContext {
             loadedURLs.append(url)
         }
     }
-
-    func checkWindowActivities() {
-    }
 }

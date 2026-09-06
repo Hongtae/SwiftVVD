@@ -2922,8 +2922,6 @@ private final class TextFieldClipboardAppContext: AppContext {
     func resourceData(forURL url: URL) -> (any DataProtocol)? { nil }
 
     func setResource(data: (any DataProtocol)?, forURL url: URL) {}
-
-    func checkWindowActivities() {}
 }
 
 private final class TextFieldCommandFocusModel {

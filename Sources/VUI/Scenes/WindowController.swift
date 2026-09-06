@@ -1860,8 +1860,8 @@ class WindowController: WindowDelegate,
                     self?.endPresentationSession()
                 }
             }
-            DispatchQueue.main.async {
-                appContext?.checkWindowActivities()
+            Task { @MainActor in
+                appContext?.checkWindowStates()
             }
         case .hidden:
             viewGraph.data.graph.inbox.enqueue { [weak self] in
