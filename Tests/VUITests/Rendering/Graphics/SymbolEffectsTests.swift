@@ -2,6 +2,59 @@ import XCTest
 @testable import VUI
 
 final class SymbolEffectsTests: XCTestCase {
+    // ASSERTIONS imageViewChildTransactionalFlagObserved
+    func testImageConsumerSamplesTransitionWithoutPullingLayoutOrDisplayOutputs() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        var child: Attribute<ImageViewChild.Value>!
+        var environment: Attribute<EnvironmentValues>!
+        var values = EnvironmentValues()
+        values.appendSymbolEffect(
+            ResolvedSymbolEffect(
+                configuration: DrawOnSymbolEffect.drawOn.individually.configuration,
+                options: .default,
+                trigger: .transition(.willAppear)
+            ),
+            for: 501
+        )
+        var hidden = Transaction()
+        hidden.disablesAnimations = true
+
+        host.runTransaction(hidden, do: {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                var inputs = makeViewInputs(graph: graph, environment: values)
+                inputs.base.transaction = host.data._transaction
+                environment = inputs.base.cachedEnvironment.value.environment
+                let image = graph.makeInput(value: Image(systemName: "draw"))
+                _ = Image._makeView(view: _GraphValue(_attribute: image), inputs: inputs)
+            }
+        }, id: nil)
+
+        try host.data.withCurrent {
+            let identifier = try XCTUnwrap(host.data.rootSubgraph.nodes.first {
+                graph.attributeInfos[$0.rawValue]?.body?.bodyType == ImageViewChild.self
+            })
+            child = Attribute(identifier)
+            XCTAssertTrue(child.flags.contains(.transactional))
+        }
+        func cachedChild() throws -> ImageViewChild.Value {
+            try XCTUnwrap(
+                graph.slots[Int(child.identifier.rawValue)].node?.pointee
+                    .value?.anyValue as? ImageViewChild.Value
+            )
+        }
+        XCTAssertEqual(try cachedChild().symbolDrawProgresses, [0, 0])
+
+        let insertion = Transaction(animation: .linear(duration: 1))
+        host.runTransaction(insertion, do: {
+            values.symbolEffects[0].effect.trigger = .transition(.identity)
+            environment.setValue(values)
+        }, id: nil)
+
+        XCTAssertEqual(try cachedChild().symbolDrawProgresses, [0, 0])
+        XCTAssertTrue(try cachedChild().isSymbolEffectActive)
+    }
+
     func testPortableSymbolMetricsPreserveTheDesignViewport() throws {
         var environment = EnvironmentValues()
         environment.font = .system(size: 12)

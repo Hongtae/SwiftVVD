@@ -505,13 +505,14 @@ final class TextFieldInputTests: XCTestCase {
         func replaceAll(with text: String) {
             mounted.responder.performTextEditingCommand(.selectAll)
             Update.dispatchActions()
-            XCTAssertTrue(mounted.controller.handleKeyboardEvent(
+            let handled = mounted.controller.handleKeyboardEvent(
                 event: keyboardEvent(
                     .textInput,
                     window: mounted.controller.testWindow,
                     text: text
                 )
-            ))
+            )
+            XCTAssertTrue(handled)
             Update.dispatchActions()
             renderFrame()
         }
@@ -2493,7 +2494,6 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(range.upperBound, model.text.endIndex)
     }
 
-    @MainActor
     // ASSERTIONS textFieldCommandResponderOwnershipObserved
     // ASSERTIONS textFieldClipboardEditingRuntimeObserved
     // ASSERTIONS textFieldFocusSelectionRuntimeObserved
@@ -2581,7 +2581,6 @@ final class TextFieldInputTests: XCTestCase {
         XCTAssertEqual(model.second, "BRAVO")
     }
 
-    @MainActor
     // ASSERTIONS commandsFocusStoreTransferRuntimeObserved
     // ASSERTIONS commandsFocusStoreRootPublicationRuntimeObserved
     func testFocusStateStorePreservesInternalAndExternalTextFieldLayers() throws {
@@ -2991,7 +2990,6 @@ private struct TextFieldFocusStateHost: View {
     }
 }
 
-@MainActor
 private final class TextFieldFocusStateHostController: WindowController,
     @unchecked Sendable {
     init(model: TextFieldFocusStateModel) {
@@ -3005,7 +3003,6 @@ private final class TextFieldFocusStateHostController: WindowController,
     }
 }
 
-@MainActor
 private final class TextFieldCommandFocusHostController: WindowController,
     @unchecked Sendable {
     init(model: TextFieldCommandFocusModel) {

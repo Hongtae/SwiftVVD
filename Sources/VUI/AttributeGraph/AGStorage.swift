@@ -1746,8 +1746,12 @@ extension _AGGraph {
         guard flags != 0, subgraph.isValid else { return }
         withGraphUpdateCounterIfNeeded {
             repeat {
+                // Eager work can materialize transactional children. Consume it
+                // within this update, before the host advances the transaction.
+                drainPendingSideEffectEvaluations()
                 updatePendingSubgraphs(from: subgraph, flags: flags)
-            } while subgraph.hasPending(flags: flags)
+            } while subgraph.hasPending(flags: flags) ||
+                !pendingSideEffectEvaluations.isEmpty
         }
     }
 

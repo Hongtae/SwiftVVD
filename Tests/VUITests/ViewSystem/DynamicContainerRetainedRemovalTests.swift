@@ -2028,10 +2028,19 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var layoutAttr: Attribute<LayoutComputer>!
         var removalEvents: [String] = []
 
+        func sampleLayout() {
+            let layout = layoutAttr.value
+            let size = layout.sizeThatFits(.unspecified)
+            layout.place(at: .zero, proposal: ProposedViewSize(size))
+        }
+
         viewGraph.data.withCurrent {
             AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
                 let inputs = makeGraphInputs(graph: graph, transaction: Transaction())
                 let viewInputs = makeViewInputs(graph: graph, base: inputs)
+                // Lifecycle assertions require a visible, placed scroll content
+                // subtree, not just a cached zero-sized layout computer.
+                viewInputs.size.setValue(ViewSize(width: 100, height: 100))
                 source = graph.makeInput(value: makeRoot(["row"], recorder))
                 let outputs = Root._makeView(
                     view: _GraphValue(_attribute: source),
@@ -2043,10 +2052,12 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 }
                 layoutAttr = initialLayoutAttr
 
-                _ = layoutAttr.value
-                XCTAssertEqual(recorder.events, ["row appear"])
+                sampleLayout()
             }
         }
+        viewGraph.runTransaction(Transaction(), do: sampleLayout, id: nil)
+        viewGraph.flushTransactions()
+        XCTAssertEqual(recorder.events, ["row appear"])
 
         viewGraph.data.withCurrent {
             var removal = Transaction(animation: .linear(duration: 0.02))
@@ -2058,7 +2069,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             }
             source.setValue(makeRoot([], recorder), transaction: removal)
 
-            _ = layoutAttr.value
+            viewGraph.runTransaction(removal, do: sampleLayout, id: nil)
             XCTAssertEqual(removalEvents, [])
             XCTAssertEqual(recorder.events, ["row appear"])
         }
@@ -2070,7 +2081,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
         viewGraph.data.withCurrent {
             graph.inbox.drain()
-            _ = layoutAttr.value
+            viewGraph.runTransaction(nil, do: sampleLayout, id: nil)
             XCTAssertEqual(recorder.events, ["row appear", "row disappear"])
         }
     }

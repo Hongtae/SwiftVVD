@@ -2,6 +2,48 @@ import XCTest
 @testable import VUI
 
 final class GraphHostAsyncTransactionQueueTests: XCTestCase {
+    func testFlushMaterializesEagerTransactionalChildrenBeforeClearingTransaction() throws {
+        let host = GraphHost()
+        let graph = host.data.graph
+        var source: Attribute<Bool>!
+        var child: Attribute<Bool>?
+        var materializedWhileUpdating = false
+
+        host.data.withCurrent {
+            AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                source = graph.makeInput(value: false)
+                graph.makeSideEffectRule {
+                    guard source.value, child == nil else { return }
+                    materializedWhileUpdating = host.isUpdating
+                    AGSubgraph.withCurrent(host.data.rootSubgraph) {
+                        let attribute = graph.makeRule {
+                            host.data._transaction.value.isContinuous
+                        }
+                        attribute.flags = .transactional
+                        child = attribute
+                    }
+                }
+            }
+        }
+
+        var transaction = Transaction()
+        transaction.isContinuous = true
+        host.asyncTransaction(transaction) {
+            source.setValue(true)
+        }
+        host.flushTransactions()
+
+        let identifier = try XCTUnwrap(child).identifier
+        let cached = graph.slots[Int(identifier.rawValue)].node?.pointee
+            .value?.anyValue as? Bool
+        XCTAssertTrue(materializedWhileUpdating)
+        XCTAssertEqual(cached, true, "new children must be sampled before transaction reset")
+        XCTAssertFalse(host.isUpdating)
+        host.data.withCurrent {
+            XCTAssertFalse(host.data._transaction.value.isContinuous)
+        }
+    }
+
     func testDeferredAsyncTransactionQueuesUntilFlush() {
         let host = GraphHost()
         var events: [String] = []

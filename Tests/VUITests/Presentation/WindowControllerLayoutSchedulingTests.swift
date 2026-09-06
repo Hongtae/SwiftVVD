@@ -127,7 +127,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertTrue(controller.viewGraph.data.graph.actionOutbox.isEmpty)
     }
 
-    @MainActor
     func testScrollViewRootDisplayListMountsContentOnlyInsidePlatformGroup() throws {
         let controller = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -163,7 +162,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollViewReaderRealizesMountedLazyNonVisibleTarget() throws {
         let probe = LayoutSchedulingScrollViewReaderProbe()
         let controller = WindowController(
@@ -269,7 +267,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollViewReaderRealizesMountedTextLazyNonVisibleTarget() async throws {
         let probe = LayoutSchedulingScrollViewReaderProbe()
         let controller = WindowController(
@@ -392,7 +389,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS appKitEventActionUpdateBoundaryObserved buttonPressedDragBoundaryBindingObserved
-    @MainActor
     func testScrollViewReaderButtonActionResolvesOwningGraph() throws {
         let probe = LayoutSchedulingButtonScrollViewReaderProbe()
         let controller = WindowController(
@@ -472,7 +468,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS systemScrollViewDeferredTargetInvocationContextObserved
-    @MainActor
     func testModalScrollViewReaderButtonActionRealizesMountedTarget() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -676,7 +671,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testSiblingGridReadersPreserveIndependentColdSectionEstimate() throws {
         // ASSERTIONS: lazySiblingGridSectionPlacementLifecycleObserved
         let probe = LayoutSchedulingSiblingGridReaderProbe()
@@ -740,7 +734,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(offsets[1], 1_529, accuracy: 0.001)
     }
 
-    @MainActor
     func testSiblingGridReadersPreserveParameterizedSectionEstimates() async throws {
         // ASSERTIONS: lazyScrollViewReaderGridSectionParameterizedOffsetObserved
         // ASSERTIONS: lazyIndexPositionCachedVisibleStartObserved
@@ -783,7 +776,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     private func siblingGridReaderOffsets(
         configuration: LayoutSchedulingSiblingGridReaderConfiguration
     ) async throws -> [CGFloat] {
@@ -872,7 +864,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS systemScrollViewWheelOffsetSignObserved
-    @MainActor
     func testScrollViewHostConsumesDiscreteWheelAtMountedResponderBoundary() throws {
         let controller = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -938,7 +929,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     // ASSERTIONS scrollGeometryObserverPullPathObserved
     // ASSERTIONS scrollObserverStateCadenceObserved
     // ASSERTIONS scrollActionDispatcherTransactionalSchedulingObserved
-    @MainActor
     func testLazyScrollPublishesEachDiscreteWheelOffset() throws {
         let probe = LayoutSchedulingLazyScrollObserverProbe()
         let controller = WindowController(
@@ -1007,7 +997,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS lazyChildInputCacheOwnershipObserved
-    @MainActor
     func testLazyScrollTerminalSettleKeepsRetainedInputsValid() throws {
         let environment = ProcessInfo.processInfo.environment
         let itemCount = Int(
@@ -1087,7 +1076,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS systemScrollViewWheelOffsetSignObserved
-    @MainActor
     func testScrollViewHostConsumesPhasedWheelWithoutPanThreshold() throws {
         let phaseProbe = LayoutSchedulingScrollPhaseProbe()
         let controller = WindowController(
@@ -1280,7 +1268,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollViewHostCapturesPointerPanAfterAxisThreshold() throws {
         let controller = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -1427,7 +1414,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollPanCancelsActiveDescendantButtonWithoutTriggeringAction() throws {
         let probe = LayoutSchedulingScrollGestureArbitrationProbe()
         let controller = WindowController(
@@ -1522,7 +1508,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(probe.actions, 0)
     }
 
-    @MainActor
     func testActiveDescendantDragPreventsScrollPan() throws {
         let probe = LayoutSchedulingScrollGestureArbitrationProbe()
         let controller = WindowController(
@@ -1612,7 +1597,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         ))
     }
 
-    @MainActor
     func testActiveSimultaneousDescendantDragStillPreventsScrollPan() throws {
         let probe = LayoutSchedulingScrollGestureArbitrationProbe()
         let controller = WindowController(
@@ -1706,7 +1690,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         ))
     }
 
-    @MainActor
     func testTransformedScrollViewHostInverseMapsWheelHitTesting() throws {
         let baselineController = WindowController(
             content: LayoutSchedulingScrollViewAttachmentRoot(),
@@ -1778,7 +1761,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertTrue(binding.responder === responder)
     }
 
-    @MainActor
     func testNestedScrollViewWheelSelectsInnermostMountedHost() throws {
         let controller = WindowController(
             content: LayoutSchedulingNestedScrollViewAttachmentRoot(),
@@ -1857,7 +1839,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS projectionNonAffineScrollInputObserved
-    @MainActor
     func testNonAffineProjectionMapsScrollHostHitRegionByPlacement() throws {
         let size = CGSize(width: 260, height: 260)
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
@@ -1921,7 +1902,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS projectionNonAffineScrollInputObserved
-    @MainActor
     func testDescendantNonAffineProjectionInverseMapsDragLocation() throws {
         let size = CGSize(width: 260, height: 260)
         let baselineProbe = LayoutSchedulingProjectionInputProbe()
@@ -2024,7 +2004,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS projectionNonAffineNestedHostSelectionObserved
-    @MainActor
     func testNestedNonAffineProjectionKeepsWheelOnInnermostHost() throws {
         let size = CGSize(width: 300, height: 300)
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
@@ -2173,7 +2152,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertNil(manager.eventBindings[scrollID])
     }
 
-    @MainActor
     func testOrthogonalNestedScrollViewRoutesPhasedWheelAfterSignedThreshold() throws {
         let controller = WindowController(
             content: LayoutSchedulingOrthogonalNestedScrollViewAttachmentRoot(),
@@ -2371,7 +2349,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollViewRootDisplayListMountsInitiallyPlacedLazyContent() throws {
         let controller = WindowController(
             content: LayoutSchedulingLazyScrollViewAttachmentRoot(),
@@ -2430,7 +2407,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScrollViewRootDisplayListReplacesEagerContentWithPlacedLazyContent() throws {
         let probe = LayoutSchedulingLazyScrollReplacementProbe()
         let controller = WindowController(
@@ -2489,7 +2465,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testAnimationTimeAccumulatesDeltaIndependentlyOfEventTime() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -2534,7 +2509,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testAnimationTimeScaleDoesNotAffectEventTime() {
         let previousScale = WindowController.animationTimeScale
         WindowController.animationTimeScale = 0.25
@@ -2581,7 +2555,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testForcedIdleDrawReusesGraphOutputsWithoutAdvancingGraphTime() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -2634,7 +2607,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testIdleUpdateDoesNotRepeatRootLayoutPlacement() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -2682,7 +2654,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertGreaterThan(counter.placements, initialPlacements)
     }
 
-    @MainActor
     func testConsecutiveNoOpInboxWritesDoNotRepeatRootLayoutPlacement() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -2724,7 +2695,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(counter.placements, initialPlacements)
     }
 
-    @MainActor
     func testSettledLayoutSkipsMeasurementAndResizeReusesChildSizes() throws {
         let counter = LayoutMeasurementCounter()
         let probe = LayoutMeasurementProbe()
@@ -2847,7 +2817,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     // ASSERTIONS scrollGeometryObserverPullPathObserved
     // ASSERTIONS scrollShapeDisplayTransformCarrierUntrackedObserved
     // ASSERTIONS scrollShapeDisplayRetainedAcrossHostUpdatesObserved
-    @MainActor
     func testSystemScrollHostOffsetDoesNotRelayoutEagerContent() throws {
         let counter = LayoutMeasurementCounter()
         let geometryProbe = LayoutMeasurementScrollGeometryProbe()
@@ -2973,7 +2942,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(geometryProbe.offsets, offsets)
     }
 
-    @MainActor
     func testScheduledAnimationUpdateSamplesIntermediateBounds() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3034,7 +3002,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertNotEqual(sampledBounds, initialBounds)
     }
 
-    @MainActor
     func testScheduledFullStackAnimationSamplesBoundsAndOpacity() throws {
         try assertScheduledFullStackAnimationSamplesBoundsAndOpacity(
             animation: .linear(duration: 1.0),
@@ -3043,7 +3010,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScheduledSpringFullStackAnimationSamplesBoundsAndOpacity() throws {
         try assertScheduledFullStackAnimationSamplesBoundsAndOpacity(
             animation: .spring(duration: 20.0, bounce: 0.35),
@@ -3052,7 +3018,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testScheduledSpringCompletionWaitsForRegisteredAnimation() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3130,7 +3095,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(probe.completions, [1])
     }
 
-    @MainActor
     func testModalSpringCompletionWaitsForRegisteredAnimation() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3211,7 +3175,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testButtonSpringCompletionWaitsForRegisteredAnimation() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3282,7 +3245,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testRepeatedButtonSpringMoveDoesNotCompleteImmediately() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3352,7 +3314,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testNonAnimatedSiblingStateDoesNotInheritSpringTransaction() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3426,7 +3387,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testNonAnimatedResourceRequestIsSampledBeforeAnimatedSiblingMutation() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3478,11 +3438,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                 return duration == 5
             }
         )
-        XCTAssertLessThan(loadIndex, animatedRequestIndex)
+        XCTAssertLessThan(
+            loadIndex,
+            animatedRequestIndex,
+            "resource events: \(probe.resourceEvents)"
+        )
     }
 
     // ASSERTIONS customAnimationStatusLayoutContinuityObserved
-    @MainActor
     func testCustomAnimationCompletionStatusKeepsMovingWithReversedLayout() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3567,7 +3530,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS appKitEventActionUpdateBoundaryObserved animationListenerLifecycleObserved
-    @MainActor
     func testInputQueuedCustomAnimationRegistersBeforePendingListenerFallback() throws {
         Transaction.dispatchPendingListeners()
 
@@ -3624,7 +3586,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(probe.completions, [1])
     }
 
-    @MainActor
     func testSpringCompletionStatusSurfaceStaysRunningUntilAnimationCompletes() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -3726,7 +3687,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS animationLabStatusTransactionIsolationRuntimeObserved
-    @MainActor
     func testResolvedStatusCompletionSnapsOutsideRetainedRemovalTransaction() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -3861,7 +3821,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS animationLabAnimatedThenPlainStatusRetargetObserved
-    @MainActor
     func testPlainResolvedTextWritePreservesItsOwnActiveInterpolation() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -3981,7 +3940,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testNestedOffsetScaleSurfaceSamplesOffsetDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4063,7 +4021,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testDynamicChildOffsetScaleSurfaceSamplesOffsetDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4129,7 +4086,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(sampledBounds.minY, initialBounds.minY)
     }
 
-    @MainActor
     func testDynamicChildBackgroundShapeStartsGreenDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4199,7 +4155,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(sampledColor.provider.alpha, 0.35, accuracy: 0.01)
     }
 
-    @MainActor
     func testConditionalChildCombinedTransitionRetainsRemovalAndDelaysCompletion() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4214,7 +4169,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try assertConditionalChildCombinedRemoval(in: controller, probe: probe)
     }
 
-    @MainActor
     func testModalConditionalChildCombinedTransitionRetainsRemovalAndDelaysCompletion() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4251,7 +4205,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try assertConditionalChildCombinedRemoval(in: child, probe: probe)
     }
 
-    @MainActor
     private func assertConditionalChildCombinedRemoval(
         in controller: WindowController,
         probe: LayoutSchedulingAnimationProbe
@@ -4342,7 +4295,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(intermediateOpacity, 1)
     }
 
-    @MainActor
     func testSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4408,7 +4360,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(sampledBounds.minX, finalBounds.minX)
     }
 
-    @MainActor
     func testTextLikeSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4474,7 +4425,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(sampledBounds.minX, finalBounds.minX)
     }
 
-    @MainActor
     func testStaticButtonLabelSamplesIntermediatePositionWhenSiblingLabelWidthChanges() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4551,7 +4501,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertGreaterThan(sampledBounds.minX, finalBounds.minX)
     }
 
-    @MainActor
     func testStaticButtonLabelsRemainCenteredInsideBorders() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4588,7 +4537,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     // ASSERTIONS buttonLabelNestedLayoutInheritsContainerPositionObserved
     func testLabButtonGlyphPixelsRemainCenteredAcrossNestedAndDirectLayouts() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
@@ -4762,7 +4710,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testAnimationLabConditionalButtonSamplesIntermediateWidthDuringRemoval() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -4828,7 +4775,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS graphHostSeedMutationLifecycleObserved
-    @MainActor
     func testResolvedTextButtonBorderSamplesIntermediateWidthWhenLabelChanges() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -4914,7 +4860,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS graphHostSeedMutationLifecycleObserved
-    @MainActor
     func testResolvedTextContentChangeMovesRetainedHeadingAndButtonContinuously() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -5089,7 +5034,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
     // ASSERTIONS interpolatedDisplayListFinalTranslationObserved
     // ASSERTIONS shapeStyleUnchangedTextPresentationOffsetObserved
-    @MainActor
     func testResolvedAnimationLabVariantTextStaysCenteredDuringSpringMove() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -5194,7 +5138,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS animationLabSpringReversalCompositionObserved
-    @MainActor
     func testResolvedAnimationLabVariantTextStaysCenteredDuringRapidSpringReversal() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -5313,7 +5256,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS dynamicLayoutRetainedGeometryPreservationObserved
-    @MainActor
     func testAnimationLabRetainedChildKeepsLastPublishedGeometryDuringRemoval() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
@@ -5370,7 +5312,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testAnimationLabRemovalTitleSamplesIntermediateVerticalPosition() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
@@ -5440,7 +5381,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS animationLabRemovalTitleVerticalMonotonicObserved
-    @MainActor
     func testResolvedAnimationLabRemovalTitleSamplesIntermediateVerticalPosition() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -5554,7 +5494,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     // ASSERTIONS animationLabActiveSpringRemovalTitleContinuityObserved
     // ASSERTIONS animationLabActiveSpringInsertionTitleContinuityObserved
     // ASSERTIONS animationLabActiveSpringInsertionTrajectoryObserved
-    @MainActor
     func testResolvedAnimationLabActiveSpringRetainedTitleKeepsActionBoundaryContinuity() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -5726,7 +5665,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(settled.midY, initial.midY, accuracy: 0.5)
     }
 
-    @MainActor
     func testAnimationLabReplacementTextStaysAtInsertionPositionDuringRemoval() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -6206,7 +6144,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testContentTransitionLabRetainsAnimatedTextAndNumericTransitions() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue(),
@@ -6347,7 +6284,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS contentTransitionRapidTextPublicRetargetContinuityObserved
-    @MainActor
     func testContentTransitionRapidTextRetargetPreservesPresentationTrajectory() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -6519,7 +6455,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
     }
 
     // ASSERTIONS asymmetricTransitionRapidViewRetargetContinuityObserved
-    @MainActor
     func testRapidAsymmetricViewTransitionRetargetKeepsPresentationBoundaryContinuous() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -6743,7 +6678,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testSystemFontNumericTransitionSurvivesRapidRepeatedRetargets() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -6822,7 +6756,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
+    // ASSERTIONS imageViewChildTransactionalFlagObserved
+    // ASSERTIONS symbolEffectTransitionPhaseRuntimeObserved
     func testSystemSymbolDrawTransitionAnimatesFreshInsertion() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -6899,7 +6834,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let firstInsertionProgresses = try XCTUnwrap(
-            insertionProgresses.first
+            insertionProgresses.first,
+            "fresh symbol insertion has no draw progress: \(insertion)"
         )
         XCTAssertTrue(
             firstInsertionProgresses.allSatisfy {
@@ -6927,7 +6863,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
     // ASSERTIONS symbolEffectLayoutMotionObserved
     // ASSERTIONS symbolEffectLayoutDrawRestoreObserved
-    @MainActor
     func testSystemSymbolDrawHideKeepsRenderedPositionDuringButtonRelayout() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -7054,7 +6989,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testSystemSymbolReplacementKeepsStyleSpecificHostTimeline() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal),
               let renderQueue = deviceContext.renderQueue() else {
@@ -7172,7 +7106,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         // ASSERTIONS symbolEffectReplaceSpatialRuntimeObserved
     }
 
-    @MainActor
     func testRawPrimitiveReceivesEndpointModelPositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -7233,7 +7166,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
     }
 
-    @MainActor
     func testBackgroundShapeColorSamplesIntermediateColorDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -7302,7 +7234,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(sampledColor.provider.alpha, 0.35, accuracy: 0.01)
     }
 
-    @MainActor
     func testBackgroundShapeContributesToGeometryEffectSurfaceDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -7353,7 +7284,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertGreaterThan(sampledBounds.height, 35)
     }
 
-    @MainActor
     func testEnvironmentModifierPreservesAnimatedFrameForTextLikeSiblingPlacement() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -7426,7 +7356,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(sampledBounds.minX, finalBounds.minX)
     }
 
-    @MainActor
     func testReinsertedAnimationLabChildTextMovesWithBackgroundDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
@@ -7535,7 +7464,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertGreaterThan(lastFrame.background.midX, insertedBackground.midX)
     }
 
-    @MainActor
     func testRapidAnimationLabRetargetKeepsChildTextInsideBackground() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
@@ -7677,7 +7605,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try advance(to: 16.0)
     }
 
-    @MainActor
     func testRepeatedAnimationLabRemovalKeepsTitleInsideBoxAndSettlesCentered() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
@@ -7780,7 +7707,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         try update(time: 30.0, expectsSettledCenter: true)
     }
 
-    @MainActor
     func testModalTextLikeSiblingPlacementSurfaceSamplesIntermediatePositionDuringSpringMove() throws {
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationProbe()
@@ -7877,7 +7803,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(sampledBounds.minX, finalBounds.minX)
     }
 
-    @MainActor
     private func assertScheduledFullStackAnimationSamplesBoundsAndOpacity(
         animation: Animation,
         sampleTimes: [Double],
@@ -7978,7 +7903,6 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertLessThan(opacitySample.opacity, finalOpacity)
     }
 
-    @MainActor
     func testInputOnlyUpdateDoesNotRepeatRootLayoutPlacement() {
         let counter = LayoutSchedulingCounter()
         let controller = WindowController(
@@ -8018,14 +7942,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(counter.placements, initialPlacements)
     }
 
-    @MainActor
     private func displayBounds(in controller: WindowController) throws -> CGRect {
         try controller.viewGraph.data.withCurrent {
             try XCTUnwrap(controller.viewGraph.rootDisplayList?.value.interpolationBounds)
         }
     }
 
-    @MainActor
     private func displayList(in controller: WindowController) throws -> DisplayList {
         try controller.viewGraph.data.withCurrent {
             try XCTUnwrap(controller.viewGraph.rootDisplayList?.value)

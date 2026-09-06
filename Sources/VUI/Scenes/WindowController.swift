@@ -1545,11 +1545,21 @@ class WindowController: WindowDelegate,
             return (didLoadResources, didUpdateGraph)
         }
 
+        func consumeTransactionResources() {
+            let resourceLoad = loadRootResourcesIfNeeded()
+            if resourceLoad.didLoad {
+                loadedResources = true
+            }
+            if resourceLoad.updatedGraph {
+                resourcesUpdatedGraph = true
+            }
+        }
+
         let updateChangeSet = _AGChangeSet()
         _AGGraph.withChangeSet(updateChangeSet) {
             // Complete work queued by the previous host turn before advancing
             // the graph update seed for this turn.
-            viewGraph.flushTransactions()
+            viewGraph.flushTransactions(afterEach: consumeTransactionResources)
 
             // Drain platform input events before AG evaluation.
             events.forEach {
@@ -1585,20 +1595,15 @@ class WindowController: WindowDelegate,
             // Internally: data.withCurrent, inbox drain, dirty root update, time update.
             flushedCrossGraphSource = flushCrossGraphSourceIfNeeded()
             Update.dispatchActions()
-            viewGraph.updateOutputs(at: time, afterTransaction: {
-                // Backend resources are deferred until a graphics context exists.
-                // Consume them before the next graph transaction begins.
-                let resourceLoad = loadRootResourcesIfNeeded()
-                if resourceLoad.didLoad {
-                    loadedResources = true
-                }
-                if resourceLoad.updatedGraph {
-                    resourcesUpdatedGraph = true
-                }
-            })
+            // Deferred backend resources must be consumed at every transaction
+            // boundary, including the flushes before and after output evaluation.
+            viewGraph.updateOutputs(
+                at: time,
+                afterTransaction: consumeTransactionResources
+            )
 
             Update.dispatchActions()
-            viewGraph.flushTransactions()
+            viewGraph.flushTransactions(afterEach: consumeTransactionResources)
             viewGraph.data.withCurrent {
                 _ = viewGraph.rootDisplayList?.value
             }

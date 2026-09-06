@@ -2577,6 +2577,9 @@ extension Image: View {
                 time: inputs.base.time
             )
         )
+        // Consume image effects before the transaction advances to its next
+        // phase, even when layout and display outputs have not been read yet.
+        imageViewChildAttr.flags = .transactional
         let intrinsicImageAttr = graph.subscriptNode(
             parent: imageViewChildAttr,
             keyPath: \ImageViewChild.Value.image
