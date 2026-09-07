@@ -671,6 +671,7 @@ extension Color: ShapeStyle {
         // sRGB (gamma-encoded) ↔ linear light conversion
         private static func sRGBToLinear(_ c: Float) -> Float {
             let magnitude = abs(c)
+            if magnitude == 1 { return c }
             let result = magnitude <= 0.04045
                 ? magnitude / 12.92
                 : pow((magnitude + 0.055) / 1.055, 2.4)
@@ -678,6 +679,7 @@ extension Color: ShapeStyle {
         }
         private static func linearToSRGB(_ c: Float) -> Float {
             let magnitude = abs(c)
+            if magnitude == 1 { return c }
             let result = magnitude <= 0.0031308
                 ? magnitude * 12.92
                 : 1.055 * pow(magnitude, 1.0 / 2.4) - 0.055
@@ -789,6 +791,45 @@ extension Color: ShapeStyle {
         }
         public static func _apply(to type: inout _ShapeStyle_ShapeType) {
         }
+    }
+}
+
+extension Color.Resolved {
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(red)
+        try container.encode(green)
+        try container.encode(blue)
+        try container.encode(opacity)
+    }
+
+    public init(from decoder: any Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        let red = try container.decode(Float.self)
+        let green = try container.decode(Float.self)
+        let blue = try container.decode(Float.self)
+        let opacity = try container.decode(Float.self)
+        self.init(red: red, green: green, blue: blue, opacity: opacity)
+    }
+}
+
+extension Color {
+    struct RGBADefinition<RGB: Codable, Alpha: Codable>: Codable {
+        var red: RGB
+        var green: RGB
+        var blue: RGB
+        var opacity: Alpha
+    }
+}
+
+extension Color.Resolved: CodableByProxy {
+    var codingProxy: Color.RGBADefinition<Float, Float> {
+        .init(red: linearRed, green: linearGreen, blue: linearBlue, opacity: opacity)
+    }
+
+    static func unwrap(codingProxy: Color.RGBADefinition<Float, Float>) -> Self {
+        .init(colorSpace: .sRGBLinear, red: codingProxy.red,
+              green: codingProxy.green, blue: codingProxy.blue, opacity: codingProxy.opacity)
     }
 }
 
