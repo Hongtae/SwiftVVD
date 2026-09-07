@@ -2,7 +2,7 @@
 //  File: GraphicsContext+Filter.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -422,7 +422,16 @@ extension GraphicsContext {
         self.bindingSet1.setTexture(texture, binding: 0)
         encoder.setResource(self.bindingSet1, index: 0)
 
-        withUnsafeBytes(of: projectionTransform) {
+        let data = (Float32(projectionTransform.m11),
+                    Float32(projectionTransform.m12),
+                    Float32(projectionTransform.m13), Float32(0),
+                    Float32(projectionTransform.m21),
+                    Float32(projectionTransform.m22),
+                    Float32(projectionTransform.m23), Float32(0),
+                    Float32(projectionTransform.m31),
+                    Float32(projectionTransform.m32),
+                    Float32(projectionTransform.m33), Float32(0))
+        withUnsafeBytes(of: data) {
             encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
         }
         encoder.setCullMode(.none)

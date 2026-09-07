@@ -19,6 +19,8 @@ extension GraphicsContext {
     public mutating func clip(to path: Path,
                               style: FillStyle = FillStyle(),
                               options: ClipOptions = ClipOptions()) {
+        if path.isEmpty && options.contains(.inverse) { return }
+        
         let resolution = self.resolution
         let width = Int(resolution.width.rounded())
         let height = Int(resolution.height.rounded())
@@ -113,6 +115,8 @@ extension GraphicsContext {
                                      options: ClipOptions = ClipOptions(),
                                      content: (inout GraphicsContext) throws -> Void) rethrows {
         if var context = self.makeLayerContext() {
+            context.transform = self.transform
+            context.clipBoundingRect = self.clipBoundingRect
             try content(&context)
             if let maskTexture = self._resolveMaskTexture(
                 self.maskTexture,
