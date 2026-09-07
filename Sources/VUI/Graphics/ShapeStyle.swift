@@ -134,7 +134,18 @@ public struct _ShapeStyle_Shape {
             case .preparedText(.foregroundKeyColor):
                 return nil
             case let .pack(pack):
-                return pack.shapeStyle().flatMap(Self.shading(for:))
+                guard let style = pack.styles.first(where: {
+                    $0.key.name == .foreground && $0.key._level == 0
+                })?.style else { return nil }
+                switch style.fill {
+                case var .color(color):
+                    color.opacity *= style.opacity
+                    return .color(Color(color))
+                case let .paint(paint):
+                    return GraphicsContext.Shading(property: .resolvedPaint(
+                        paint: paint, bounds: bounds, opacity: style.opacity
+                    ))
+                }
             case let .style(style):
                 return Self.shading(for: style)
             case let .color(color):
@@ -157,6 +168,11 @@ public struct _ShapeStyle_Shape {
                 result = .style(AnyShapeStyle(mesh))
             case let .shader(shader, _):
                 result = .style(AnyShapeStyle(shader))
+            case let .resolvedPaint(paint, paintBounds, opacity):
+                var style = _ShapeStyle_Pack.Style(.paint(paint))
+                style.opacity = opacity
+                result = .pack(.init(styles: [(.init(.foreground, 0), style)]))
+                bounds = paintBounds ?? bounds
             default:
                 result = .none
             }
@@ -168,6 +184,24 @@ public struct _ShapeStyle_Shape {
             at: level,
             environment: environment
         )
+    }
+
+    mutating func storeStyle(_ style: _ShapeStyle_Pack.Style, name: _ShapeStyle_Name, level: Int) {
+        var pack: _ShapeStyle_Pack
+        if case let .pack(value) = result {
+            pack = value
+            result = .none
+        } else {
+            pack = .init()
+        }
+        let key = _ShapeStyle_Pack.Key(name, level)
+        let index = pack.styles.firstIndex { $0.key >= key } ?? pack.styles.endIndex
+        if index < pack.styles.endIndex && pack.styles[index].key == key {
+            pack.styles[index].style = style
+        } else {
+            pack.styles.insert((key, style), at: index)
+        }
+        result = .pack(pack)
     }
 
     func opacity(for color: Color, at level: Int) -> Float {
@@ -192,7 +226,12 @@ public struct _ShapeStyle_Shape {
     private static func shading(
         for style: AnyShapeStyle
     ) -> GraphicsContext.Shading? {
-        shading(for: style.storage.box.style)
+        let box = style.storage.box
+        if let box = box as? AnyColorBox { return .color(Color(box)) }
+        if let box = box as? ShapeStyleBox<Color.Resolved> { return .color(Color(box.base)) }
+        if let box = box as? ShapeStyleBox<MeshGradient> { return .meshGradient(box.base) }
+        if let box = box as? ShapeStyleBox<Shader> { return .shader(box.base, bounds: .null) }
+        return .style(style)
     }
 
     private static func shading(
@@ -657,20 +696,24 @@ public struct AnyShapeStyle: ShapeStyle {
         var box: AnyShapeStyleBox
         @usableFromInline
         static func == (lhs: AnyShapeStyle.Storage, rhs: AnyShapeStyle.Storage) -> Bool {
-            lhs.box === rhs.box
+            lhs.box === rhs.box || lhs.box.isEqual(to: rhs.box)
         }
     }
     var storage: Storage
     public init<S>(_ style: S) where S: ShapeStyle {
         if let style = style as? AnyShapeStyle {
             self.storage = style.storage
+        } else if let color = style as? Color {
+            self.storage = Storage(box: color.provider)
+        } else if let gradient = style as? AnyGradient {
+            self.storage = Storage(box: gradient.provider)
         } else {
-            self.storage = Storage(box: AnyShapeStyleBox(style: style))
+            self.storage = Storage(box: ShapeStyleBox(base: style))
         }
     }
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        storage.box._apply(to: &shape)
+        storage.box.apply(to: &shape)
     }
 
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
@@ -678,13 +721,22 @@ public struct AnyShapeStyle: ShapeStyle {
     }
 }
 
-class AnyShapeStyleBox {
-    let style: any ShapeStyle
-    init<S>(style: S) where S: ShapeStyle {
-        self.style = style
+class AnyShapeStyleBox: @unchecked Sendable {
+    func apply(to shape: inout _ShapeStyle_Shape) {}
+    func isEqual(to other: AnyShapeStyleBox) -> Bool { false }
+}
+
+final class ShapeStyleBox<S: ShapeStyle>: AnyShapeStyleBox, @unchecked Sendable {
+    let base: S
+
+    init(base: S) { self.base = base }
+
+    override func apply(to shape: inout _ShapeStyle_Shape) {
+        base._apply(to: &shape)
     }
 
-    func _apply(to shape: inout _ShapeStyle_Shape) {
-        self.style._apply(to: &shape)
+    override func isEqual(to other: AnyShapeStyleBox) -> Bool {
+        guard let other = other as? ShapeStyleBox<S> else { return false }
+        return compareValues(base, other.base, mode: .storedRepresentation)
     }
 }

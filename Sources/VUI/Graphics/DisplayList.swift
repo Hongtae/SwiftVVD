@@ -725,6 +725,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         enum ShapeStyleRecord: Equatable {
             case color(Color)
             case gradient(Gradient)
+            case paint(AnyResolvedPaint)
             case meshGradient(MeshGradient)
             case shader(Shader.ResolvedShader)
         }
@@ -3225,12 +3226,6 @@ struct DisplayList: Equatable, CustomStringConvertible {
         if let resolved = style as? Color.Resolved {
             return .color(Color(resolved))
         }
-        if let gradient = style as? Gradient {
-            return .gradient(gradient)
-        }
-        if let gradient = style as? AnyGradient {
-            return .gradient(gradient.provider.gradient)
-        }
         if let mesh = style as? MeshGradient {
             return .meshGradient(mesh)
         }
@@ -3238,11 +3233,12 @@ struct DisplayList: Equatable, CustomStringConvertible {
             return .shader(shader.resolvePaint(in: environment))
         }
         if let erased = style as? AnyShapeStyle {
-            return shapeStyleRecord(
-                for: erased.storage.box.style,
-                environment: environment,
-                role: role
-            )
+            let box = erased.storage.box
+            if let box = box as? AnyColorBox { return .color(Color(box)) }
+            if let box = box as? ShapeStyleBox<MeshGradient> { return .meshGradient(box.base) }
+            if let box = box as? ShapeStyleBox<Shader> {
+                return .shader(box.base.resolvePaint(in: environment))
+            }
         }
         return shapeStyleRecord(
             resolving: style,
@@ -3257,11 +3253,18 @@ struct DisplayList: Equatable, CustomStringConvertible {
         role: ShapeRole
     ) -> ItemRecord.ShapeStyleRecord? {
         var shape = _ShapeStyle_Shape(
-            operation: .fallbackColor(level: 0),
+            operation: .resolveStyle(name: .foreground, levels: 0..<1),
             environment: environment,
             role: role
         )
         style._apply(to: &shape)
+        if case let .pack(pack) = shape.result,
+           let style = pack.styles.first(where: {
+               $0.key.name == .foreground && $0.key._level == 0
+           })?.style,
+           case let .paint(paint) = style.fill {
+            return .paint(paint)
+        }
         guard let shading = shape.resolvedShading else { return nil }
         if case let .color(color)? = shadingRecord(for: shading) {
             return .color(color)

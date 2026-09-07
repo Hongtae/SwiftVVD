@@ -759,9 +759,9 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
                       case let .color(color)? = record.shapeStyle else {
                     continue
                 }
-                let provider = color.provider
-                if provider.blue - provider.red > 0.5,
-                   provider.green - provider.red > 0.2 {
+                let components = color.renderingComponents()
+                if components.blue - components.red > 0.5,
+                   components.green - components.red > 0.2 {
                     return true
                 }
             }

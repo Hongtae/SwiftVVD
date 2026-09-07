@@ -11,7 +11,7 @@ import VVD
 // The current non-linear renderer consumes encoded sRGB components.
 typealias BackendColor = VVD.Color<VVD.SRGB>
 
-private struct ColorComponents: Hashable, Sendable {
+struct ColorComponents: Hashable, Sendable {
     var colorSpace: Color.RGBColorSpace
     var red: Double
     var green: Double
@@ -29,25 +29,42 @@ private struct ColorComponents: Hashable, Sendable {
     }
 }
 
-private protocol ColorProvider: Hashable {
-    // Components provide the stable light/standard representation used by
-    // environment-free display-list inspection and interpolation.
-    var components: ColorComponents { get }
-    var description: String { get }
-
+protocol ColorProvider: Hashable, Serializable {
+    var tag: Color.ProviderTag { get }
     func resolve(in environment: EnvironmentValues) -> Color.Resolved
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR
+    func apply(color: Color, to shape: inout _ShapeStyle_Shape)
+    var colorDescription: String { get }
     func opacity(at level: Int, environment: EnvironmentValues) -> Float
-    func isEqual(to other: any ColorProvider) -> Bool
 }
 
-private extension ColorProvider {
-    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
-        components.resolve()
-    }
-
+extension ColorProvider {
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
         Color.ResolvedHDR(resolve(in: environment))
+    }
+
+    var colorDescription: String { String(describing: self) }
+
+    func apply(color: Color, to shape: inout _ShapeStyle_Shape) {
+        _apply(color: color, to: &shape)
+    }
+
+    func _apply(color: Color, to shape: inout _ShapeStyle_Shape) {
+        switch shape.operation {
+        case let .prepareText(level):
+            shape.result = .preparedText(.foregroundColor(
+                shape.applyingOpacity(at: level, to: color)
+            ))
+        case let .resolveStyle(name, levels):
+            guard !levels.isEmpty else { return }
+            var resolved = resolveHDR(in: shape.environment)
+            resolved.opacity *= opacity(at: levels.lowerBound, environment: shape.environment)
+            shape.storeStyle(.init(.color(resolved)), name: name, level: levels.lowerBound)
+        case let .fallbackColor(level):
+            shape.result = .color(shape.applyingOpacity(at: level, to: color))
+        case .copyStyle, .modifyBackground, .multiLevel, .primaryStyle:
+            break
+        }
     }
 
     func opacity(at level: Int, environment: EnvironmentValues) -> Float {
@@ -59,75 +76,74 @@ private extension ColorProvider {
         )
     }
 
-    func isEqual(to other: any ColorProvider) -> Bool {
-        guard let other = other as? Self else { return false }
-        return self == other
-    }
 }
 
-private struct RGBColorProvider: ColorProvider {
-    var components: ColorComponents
+extension Color {
+    struct OpacityColor: ColorProvider, CodableByProxy {
+        var base: Color
+        var opacity: Double
 
-    var description: String {
-        if components.colorSpace == .displayP3 {
-            return "DisplayP3(red: \(components.red), green: \(components.green), blue: \(components.blue), opacity: \(components.alpha))"
+        var tag: ProviderTag { .opacity }
+        var colorDescription: String {
+            "\(Int(opacity * 100 + 0.5))% \(base.description)"
         }
-        let resolved = components.resolve()
-        return String(
-            format: "#%02X%02X%02X%02X",
-            Self.descriptionComponent(resolved.red),
-            Self.descriptionComponent(resolved.green),
-            Self.descriptionComponent(resolved.blue),
-            Self.descriptionComponent(resolved.opacity)
-        )
+
+        func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+            var resolved = base.resolve(in: environment)
+            resolved.opacity *= Float(opacity)
+            return resolved
+        }
+
+        func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+            var resolved = base.resolveHDR(in: environment)
+            resolved.opacity *= Float(opacity)
+            return resolved
+        }
+
+        var codingProxy: OpacityDefinition<Double> {
+            .init(base: base, opacity: opacity)
+        }
+
+        static func unwrap(codingProxy: OpacityDefinition<Double>) -> Self {
+            .init(base: codingProxy.base, opacity: codingProxy.opacity)
+        }
     }
 
-    private static func descriptionComponent(_ value: Float) -> Int32 {
-        Int32(value * 255 + 0.5)
+    struct DisplayP3: ColorProvider, CodableByProxy {
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let opacity: Float
+
+        var tag: ProviderTag { .p3 }
+
+        func resolve(in environment: EnvironmentValues) -> Resolved {
+            .init(colorSpace: .displayP3, red: Float(red), green: Float(green),
+                  blue: Float(blue), opacity: opacity)
+        }
+
+        var codingProxy: RGBADefinition<CGFloat, Float> {
+            .init(red: red, green: green, blue: blue, opacity: opacity)
+        }
+
+        static func unwrap(codingProxy: RGBADefinition<CGFloat, Float>) -> Self {
+            .init(red: codingProxy.red, green: codingProxy.green,
+                  blue: codingProxy.blue, opacity: codingProxy.opacity)
+        }
+    }
+
+    struct OpacityDefinition<T: Codable>: Codable {
+        @ProxyCodable var base: Color
+        var opacity: T
     }
 }
 
-private struct OpacityColor: ColorProvider {
-    var base: Color
-    var opacity: Double
-
-    var components: ColorComponents {
-        var components = base.provider.components
-        components.alpha *= opacity
-        return components
-    }
-
-    var description: String {
-        "\(Int(opacity * 100 + 0.5))% \(base.description)"
-    }
-
-    func resolve(in environment: EnvironmentValues) -> Color.Resolved {
-        var resolved = base.resolve(in: environment)
-        resolved.opacity *= Float(opacity)
-        return resolved
-    }
-
-    func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
-        var resolved = base.resolveHDR(in: environment)
-        resolved.opacity *= Float(opacity)
-        return resolved
-    }
-}
-
-private struct ResolvedColorProvider: ColorProvider {
+struct ResolvedColorProvider: ColorProvider, CodableByProxy {
     var color: Color.ResolvedHDR
 
-    var components: ColorComponents {
-        ColorComponents(
-            colorSpace: .sRGBLinear,
-            red: Double(color.linearRed),
-            green: Double(color.linearGreen),
-            blue: Double(color.linearBlue),
-            alpha: Double(color.opacity)
-        )
-    }
+    var tag: Color.ProviderTag { .constant }
 
-    var description: String {
+    var colorDescription: String {
         if color.headroom == nil {
             if color.linearRed == 0,
                color.linearGreen == 0,
@@ -155,17 +171,22 @@ private struct ResolvedColorProvider: ColorProvider {
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
         color
     }
+
+    var codingProxy: Color.RGBADefinition<Float, Float> { color.base.codingProxy }
+
+    static func unwrap(codingProxy: Color.RGBADefinition<Float, Float>) -> Self {
+        .init(color: .init(Color.Resolved.unwrap(codingProxy: codingProxy)))
+    }
 }
 
-enum SystemColorType: ColorProvider, Codable, Sendable {
+enum SystemColorType: ColorProvider, CodableSerializable, Sendable {
     case red, orange, yellow, green, teal, mint, cyan, blue
     case indigo, purple, pink, brown, gray
     case primary, secondary, tertiary, quaternary, quinary
     case primaryFill, secondaryFill, tertiaryFill, quaternaryFill
 
-    fileprivate var components: ColorComponents {
-        components(scheme: .light, contrast: .standard)
-    }
+    var tag: Color.ProviderTag { .system }
+    var colorDescription: String { description }
 
     var description: String {
         switch self {
@@ -399,39 +420,70 @@ extension EnvironmentValues {
     }
 }
 
-final class AnyColorBox: Hashable, @unchecked Sendable {
-    static func == (lhs: AnyColorBox, rhs: AnyColorBox) -> Bool {
-        lhs.colorProvider.isEqual(to: rhs.colorProvider)
-    }
+class AnyColorBox: AnyShapeStyleBox, AnyCodableBox, @unchecked Sendable {
+    typealias Box = AnyColorBox
+    typealias Tag = Color.ProviderTag
 
-    func hash(into: inout Hasher) {
-        self.colorProvider.hash(into: &into)
-    }
+    var tag: Tag { fatalError("Abstract color box.") }
+    var colorDescription: String { fatalError("Abstract color box.") }
 
-    private let colorProvider: any ColorProvider
-
-    fileprivate init(_ colorProvider: any ColorProvider) {
-        self.colorProvider = colorProvider
-    }
-
-    fileprivate var components: ColorComponents { colorProvider.components }
-    var colorSpace: Color.RGBColorSpace { components.colorSpace }
-    var red: Double { components.red }
-    var green: Double { components.green }
-    var blue: Double { components.blue }
-    var alpha: Double { components.alpha }
-    var description: String { colorProvider.description }
-
+    func hash(into hasher: inout Hasher) { fatalError("Abstract color box.") }
     func resolve(in environment: EnvironmentValues) -> Color.Resolved {
-        colorProvider.resolve(in: environment)
+        fatalError("Abstract color box.")
     }
-
     func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
-        colorProvider.resolveHDR(in: environment)
+        fatalError("Abstract color box.")
+    }
+    func apply(color: Color, to shape: inout _ShapeStyle_Shape) {
+        fatalError("Abstract color box.")
+    }
+    func opacity(at level: Int, environment: EnvironmentValues) -> Float {
+        fatalError("Abstract color box.")
     }
 
-    func opacity(at level: Int, environment: EnvironmentValues) -> Float {
-        colorProvider.opacity(at: level, environment: environment)
+    override func apply(to shape: inout _ShapeStyle_Shape) {
+        let color = Color(self)
+        if case let .fallbackColor(level) = shape.operation {
+            shape.result = .color(shape.applyingOpacity(at: level, to: color))
+        } else {
+            apply(color: color, to: &shape)
+        }
+    }
+
+    func `as`<T: ColorProvider>(_ type: T.Type) -> T? {
+        (self as? ColorBox<T>)?.base
+    }
+}
+
+final class ColorBox<T: ColorProvider>: AnyColorBox, CodableBox, @unchecked Sendable {
+    let base: T
+
+    init(_ base: T) { self.base = base }
+
+    override var tag: Tag { base.tag }
+    override var colorDescription: String { base.colorDescription }
+    override func hash(into hasher: inout Hasher) { base.hash(into: &hasher) }
+    override func isEqual(to other: AnyShapeStyleBox) -> Bool {
+        guard let other = other as? ColorBox<T> else { return false }
+        return base == other.base
+    }
+    override func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        base.resolve(in: environment)
+    }
+    override func resolveHDR(in environment: EnvironmentValues) -> Color.ResolvedHDR {
+        base.resolveHDR(in: environment)
+    }
+    override func apply(color: Color, to shape: inout _ShapeStyle_Shape) {
+        base.apply(color: color, to: &shape)
+    }
+    override func opacity(at level: Int, environment: EnvironmentValues) -> Float {
+        base.opacity(at: level, environment: environment)
+    }
+    func serialize(to encoder: any Encoder) throws {
+        try base.serialize(to: encoder)
+    }
+    static func deserialize(from decoder: any Decoder) throws -> ColorBox<T> {
+        ColorBox(try T.deserialize(from: decoder))
     }
 }
 
@@ -442,8 +494,14 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
         case displayP3
     }
 
-    let provider: AnyColorBox
-    public var description: String { provider.description }
+    var provider: AnyColorBox
+    public var description: String { provider.colorDescription }
+
+    public static func == (lhs: Color, rhs: Color) -> Bool {
+        lhs.provider === rhs.provider || lhs.provider.isEqual(to: rhs.provider)
+    }
+
+    public func hash(into hasher: inout Hasher) { provider.hash(into: &hasher) }
 
     var backendColor: BackendColor {
         backendColor(in: EnvironmentValues())
@@ -460,25 +518,19 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
     }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) {
-        let colorProvider = RGBColorProvider(components: ColorComponents(
-            colorSpace: colorSpace,
-            red: red,
-            green: green,
-            blue: blue,
-            alpha: opacity
-        ))
-        self.provider = AnyColorBox(colorProvider)
+        switch colorSpace {
+        case .sRGB, .sRGBLinear:
+            let resolved = Resolved(colorSpace: colorSpace, red: Float(red),
+                                    green: Float(green), blue: Float(blue), opacity: Float(opacity))
+            provider = ColorBox(ResolvedColorProvider(color: .init(resolved)))
+        case .displayP3:
+            provider = ColorBox(DisplayP3(red: CGFloat(red), green: CGFloat(green),
+                                          blue: CGFloat(blue), opacity: Float(opacity)))
+        }
     }
 
     public init(_ colorSpace: RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) {
-        let colorProvider = RGBColorProvider(components: ColorComponents(
-            colorSpace: colorSpace,
-            red: white,
-            green: white,
-            blue: white,
-            alpha: opacity
-        ))
-        self.provider = AnyColorBox(colorProvider)
+        self.init(colorSpace, red: white, green: white, blue: white, opacity: opacity)
     }
 
     public init(hue: Double, saturation: Double, brightness: Double, opacity: Double = 1) {
@@ -501,7 +553,7 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
     }
 
     public func opacity(_ opacity: Double) -> Color {
-        Color(AnyColorBox(OpacityColor(base: self, opacity: opacity)))
+        Color(ColorBox(OpacityColor(base: self, opacity: opacity)))
     }
 
     init(_ provider: AnyColorBox) {
@@ -524,7 +576,7 @@ public struct Color: Hashable, Sendable, CustomStringConvertible {
 
 extension Color {
     fileprivate init(systemColor: SystemColorType) {
-        self.init(AnyColorBox(systemColor))
+        self.init(ColorBox(systemColor))
     }
 
     public static let red = Color(systemColor: .red)
@@ -629,11 +681,7 @@ extension Color: ShapeStyle {
     }
     
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        if case let .fallbackColor(level) = shape.operation {
-            shape.result = .color(shape.applyingOpacity(at: level, to: self))
-        } else {
-            shape.result = .color(self)
-        }
+        provider.apply(to: &shape)
     }
 
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
@@ -1002,7 +1050,56 @@ extension Color {
     }
 
     public init(_ resolved: Color.ResolvedHDR) {
-        self.init(AnyColorBox(ResolvedColorProvider(color: resolved)))
+        self.init(ColorBox(ResolvedColorProvider(color: resolved)))
+    }
+}
+
+extension Color: Serializable {
+    enum ProviderTag: Codable, CodableBoxTag {
+        case constant, p3, system, opacity
+
+        typealias Box = AnyColorBox
+
+        var type: any ColorProvider.Type {
+            switch self {
+            case .constant: ResolvedColorProvider.self
+            case .p3: DisplayP3.self
+            case .system: SystemColorType.self
+            case .opacity: OpacityColor.self
+            }
+        }
+
+        var box: any CodableBox<AnyColorBox>.Type {
+            func box<T: ColorProvider>(for type: T.Type) -> any CodableBox<AnyColorBox>.Type {
+                ColorBox<T>.self
+            }
+            return _openExistential(type, do: box(for:))
+        }
+    }
+
+    func serialize(to encoder: any Encoder) throws { try provider.encode(to: encoder) }
+
+    static func deserialize(from decoder: any Decoder) throws -> Color {
+        Color(try AnyColorBox.decode(from: decoder))
+    }
+}
+
+extension Color {
+    // Preserve the encoded color representation at the renderer boundary.
+    // The provider itself owns only its concrete value and resolution behavior.
+    func renderingComponents(in environment: EnvironmentValues = EnvironmentValues()) -> ColorComponents {
+        if let p3 = provider.as(DisplayP3.self) {
+            return .init(colorSpace: .displayP3, red: Double(p3.red), green: Double(p3.green),
+                         blue: Double(p3.blue), alpha: Double(p3.opacity))
+        }
+        if let wrapper = provider.as(OpacityColor.self) {
+            var components = wrapper.base.renderingComponents(in: environment)
+            components.alpha *= wrapper.opacity
+            return components
+        }
+        let color = resolve(in: environment)
+        return .init(colorSpace: .sRGB, red: Double(color.red), green: Double(color.green),
+                     blue: Double(color.blue), alpha: Double(color.opacity))
     }
 }
 

@@ -1200,12 +1200,14 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         guard sourceTint != nil || targetTint != nil else {
             return ImageShadingMix(shading: nil, record: nil)
         }
-        if let sourceTint, let targetTint,
-           sourceTint.provider.colorSpace != targetTint.provider.colorSpace {
+        let sourceComponents = sourceTint.map { $0.renderingComponents() }
+        let targetComponents = targetTint.map { $0.renderingComponents() }
+        if let sourceComponents, let targetComponents,
+           sourceComponents.colorSpace != targetComponents.colorSpace {
             return nil
         }
-        let colorSpace = sourceTint?.provider.colorSpace ??
-            targetTint?.provider.colorSpace ?? .sRGB
+        let colorSpace = sourceComponents?.colorSpace ??
+            targetComponents?.colorSpace ?? .sRGB
         let identityTint = Color(colorSpace, white: 1)
         guard let tint = interpolatedGradientColor(
             from: sourceTint ?? identityTint,
@@ -1313,15 +1315,17 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         progress: CGFloat
     ) -> Color? {
         if source == target { return source }
-        guard let sourceLinear = linearSRGBComponents(of: source),
-              let targetLinear = linearSRGBComponents(of: target),
-              source.provider.alpha.isFinite,
-              target.provider.alpha.isFinite else {
+        let sourceColor = source.renderingComponents()
+        let targetColor = target.renderingComponents()
+        guard let sourceLinear = linearSRGBComponents(of: sourceColor),
+              let targetLinear = linearSRGBComponents(of: targetColor),
+              sourceColor.alpha.isFinite,
+              targetColor.alpha.isFinite else {
             return nil
         }
 
-        let sourceAlpha = source.provider.alpha
-        let targetAlpha = target.provider.alpha
+        let sourceAlpha = sourceColor.alpha
+        let targetAlpha = targetColor.alpha
         let fraction = Double(progress)
         let mixedAlpha = sourceAlpha + (targetAlpha - sourceAlpha) * fraction
         let sourceLab = oklabComponents(fromLinearSRGB: sourceLinear)
@@ -1342,10 +1346,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         let linearSRGB = linearSRGBComponents(fromOklab: mixedLab)
         let output = encodedComponents(
             linearSRGB,
-            in: source.provider.colorSpace
+            in: sourceColor.colorSpace
         )
         return Color(
-            source.provider.colorSpace,
+            sourceColor.colorSpace,
             red: output.x,
             green: output.y,
             blue: output.z,
@@ -1687,24 +1691,12 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 return mesh
             }
             if let erased = style as? AnyShapeStyle {
-                return singleMeshGradientStyle(erased.storage.box.style)
+                return (erased.storage.box as? ShapeStyleBox<MeshGradient>)?.base
             }
             return nil
         default:
             return nil
         }
-    }
-
-    private static func singleMeshGradientStyle(
-        _ style: any ShapeStyle
-    ) -> MeshGradient? {
-        if let mesh = style as? MeshGradient {
-            return mesh
-        }
-        if let erased = style as? AnyShapeStyle {
-            return singleMeshGradientStyle(erased.storage.box.style)
-        }
-        return nil
     }
 
     private static func interpolatedMeshGradient(
@@ -2099,18 +2091,20 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         progress: CGFloat
     ) -> Color? {
         if source == target { return source }
-        guard let sourceLinear = linearSRGBComponents(of: source),
-              let targetLinear = linearSRGBComponents(of: target),
-              source.provider.alpha.isFinite,
-              target.provider.alpha.isFinite else {
+        let sourceColor = source.renderingComponents()
+        let targetColor = target.renderingComponents()
+        guard let sourceLinear = linearSRGBComponents(of: sourceColor),
+              let targetLinear = linearSRGBComponents(of: targetColor),
+              sourceColor.alpha.isFinite,
+              targetColor.alpha.isFinite else {
             return nil
         }
 
-        let workingSpace = target.provider.colorSpace
+        let workingSpace = targetColor.colorSpace
         let sourceComponents = encodedComponents(sourceLinear, in: workingSpace)
         let targetComponents = encodedComponents(targetLinear, in: workingSpace)
-        let sourceAlpha = source.provider.alpha
-        let targetAlpha = target.provider.alpha
+        let sourceAlpha = sourceColor.alpha
+        let targetAlpha = targetColor.alpha
         let fraction = Double(progress)
         let mixedAlpha = sourceAlpha + (targetAlpha - sourceAlpha) * fraction
         let mixedComponents: SIMD3<Double>
@@ -2133,10 +2127,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             blue: mixedComponents.z,
             opacity: mixedAlpha
         )
-        guard let mixedLinear = linearSRGBComponents(of: workingColor) else { return nil }
-        let output = encodedComponents(mixedLinear, in: source.provider.colorSpace)
+        guard let mixedLinear = linearSRGBComponents(of: workingColor.renderingComponents()) else { return nil }
+        let output = encodedComponents(mixedLinear, in: sourceColor.colorSpace)
         return Color(
-            source.provider.colorSpace,
+            sourceColor.colorSpace,
             red: output.x,
             green: output.y,
             blue: output.z,
@@ -2144,18 +2138,18 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         )
     }
 
-    private static func linearSRGBComponents(of color: Color) -> SIMD3<Double>? {
+    private static func linearSRGBComponents(of color: ColorComponents) -> SIMD3<Double>? {
         var components = SIMD3(
-            color.provider.red,
-            color.provider.green,
-            color.provider.blue
+            color.red,
+            color.green,
+            color.blue
         )
         guard components.x.isFinite,
               components.y.isFinite,
               components.z.isFinite else {
             return nil
         }
-        switch color.provider.colorSpace {
+        switch color.colorSpace {
         case .sRGB:
             components = mappedComponents(components, decodeRGBComponent)
         case .sRGBLinear:

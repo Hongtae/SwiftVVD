@@ -2,7 +2,7 @@
 //  File: Gradient.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -40,10 +40,10 @@ public struct Gradient {
     }
 
     public struct ColorSpace: Hashable, Sendable {
-        let id: UInt32
+        var base: ResolvedGradient.ColorSpace
 
-        public static let device = ColorSpace(id: 0)
-        public static let perceptual = ColorSpace(id: 2)
+        public static let device = ColorSpace(base: .device)
+        public static let perceptual = ColorSpace(base: .perceptual)
     }
 
     func normalized() -> Self {
@@ -66,6 +66,11 @@ public struct Gradient {
                 }
                 stops2.append(s)
             } else if s.location >= 1.0 {
+                if current.location <= 0.0 {
+                    let t = (0.0 - current.location) / (s.location - current.location)
+                    stops2.append(Stop(color: .lerp(current.color, s.color, t),
+                                      location: 0.0))
+                }
                 let t = (1.0 - current.location) / (s.location - current.location)
                 stops2.append(Stop(color: .lerp(current.color, s.color, t),
                                   location: 1.0))
@@ -109,25 +114,70 @@ public struct Gradient {
 extension Gradient: ShapeStyle, Hashable {
     public typealias Resolved = Never
     public func _apply(to shape: inout _ShapeStyle_Shape) {
+        LinearGradient(gradient: self, startPoint: .top, endPoint: .bottom)._apply(to: &shape)
+    }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
+}
+
+protocol GradientProvider: Hashable, Serializable {
+    var tag: Gradient.ProviderTag { get }
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient
+    func fallbackColor(in environment: EnvironmentValues) -> Color?
+}
+
+extension GradientProvider {
+    func fallbackColor(in environment: EnvironmentValues) -> Color? { nil }
+}
+
+class AnyGradientBox: AnyShapeStyleBox, AnyCodableBox, @unchecked Sendable {
+    typealias Box = AnyGradientBox
+    typealias Tag = Gradient.ProviderTag
+
+    var tag: Tag { fatalError("Abstract gradient box.") }
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        fatalError("Abstract gradient box.")
+    }
+    func fallbackColor(in environment: EnvironmentValues) -> Color? {
+        fatalError("Abstract gradient box.")
+    }
+    func hash(into hasher: inout Hasher) { fatalError("Abstract gradient box.") }
+
+    override func apply(to shape: inout _ShapeStyle_Shape) {
+        _AnyLinearGradient(gradient: AnyGradient(provider: self),
+                           startPoint: .top, endPoint: .bottom)._apply(to: &shape)
     }
 }
 
-class AnyGradientBox: AnyShapeStyleBox, @unchecked Sendable {
-    init(style: Gradient) {
-        super.init(style: style)
+final class GradientBox<T: GradientProvider>: AnyGradientBox, CodableBox, @unchecked Sendable {
+    let base: T
+
+    init(_ base: T) { self.base = base }
+
+    override var tag: Tag { base.tag }
+    override func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        base.resolve(in: environment)
     }
-    var gradient: Gradient {
-        self.style as! Gradient
+    override func fallbackColor(in environment: EnvironmentValues) -> Color? {
+        base.fallbackColor(in: environment)
+    }
+    override func hash(into hasher: inout Hasher) { base.hash(into: &hasher) }
+    override func isEqual(to other: AnyShapeStyleBox) -> Bool {
+        guard let other = other as? GradientBox<T> else { return false }
+        return base == other.base
+    }
+    func serialize(to encoder: any Encoder) throws { try base.serialize(to: encoder) }
+    static func deserialize(from decoder: any Decoder) throws -> GradientBox<T> {
+        GradientBox(try T.deserialize(from: decoder))
     }
 }
 
-struct AnyGradient: Hashable, ShapeStyle {
-    static func == (lhs: AnyGradient, rhs: AnyGradient) -> Bool {
-        ObjectIdentifier(lhs.provider) == ObjectIdentifier(rhs.provider)
+public struct AnyGradient: Hashable, ShapeStyle, Serializable {
+    public static func == (lhs: AnyGradient, rhs: AnyGradient) -> Bool {
+        lhs.provider === rhs.provider || lhs.provider.isEqual(to: rhs.provider)
     }
 
-    func hash(into: inout Hasher) {
-        into.combine(ObjectIdentifier(provider))
+    public func hash(into hasher: inout Hasher) {
+        provider.hash(into: &hasher)
     }
 
     var provider: AnyGradientBox
@@ -137,10 +187,130 @@ struct AnyGradient: Hashable, ShapeStyle {
     }
 
     public init(_ gradient: Gradient) {
-        self.provider = AnyGradientBox(style: gradient)
+        self.provider = GradientBox(gradient)
     }
 
     public func colorSpace(_ space: Gradient.ColorSpace) -> AnyGradient {
-        self
+        AnyGradient(provider: GradientBox(ColorSpaceGradientProvider(
+            base: .anyGradient(self), colorSpace: space.base
+        )))
+    }
+
+    public typealias Resolved = Never
+    public func _apply(to shape: inout _ShapeStyle_Shape) { provider.apply(to: &shape) }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        provider.resolve(in: environment)
+    }
+    func serialize(to encoder: any Encoder) throws { try provider.encode(to: encoder) }
+    static func deserialize(from decoder: any Decoder) throws -> AnyGradient {
+        AnyGradient(provider: try AnyGradientBox.decode(from: decoder))
+    }
+}
+
+enum EitherGradient: Hashable, CodableByProxy {
+    case gradient(Gradient)
+    case anyGradient(AnyGradient)
+
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        switch self {
+        case let .gradient(gradient): gradient.resolve(in: environment)
+        case let .anyGradient(gradient): gradient.resolve(in: environment)
+        }
+    }
+
+    func fallbackColor(in environment: EnvironmentValues) -> Color? {
+        switch self {
+        case .gradient: nil
+        case let .anyGradient(gradient): gradient.provider.fallbackColor(in: environment)
+        }
+    }
+
+    var codingProxy: Gradient.EitherGradientDefinition {
+        switch self {
+        case let .gradient(gradient): .gradient(ProxyCodable(gradient))
+        case let .anyGradient(gradient): .anyGradient(ProxyCodable(gradient))
+        }
+    }
+
+    static func unwrap(codingProxy: Gradient.EitherGradientDefinition) -> Self {
+        switch codingProxy {
+        case let .gradient(gradient): .gradient(gradient.wrappedValue)
+        case let .anyGradient(gradient): .anyGradient(gradient.wrappedValue)
+        }
+    }
+}
+
+struct ColorSpaceGradientProvider: GradientProvider, CodableByProxy {
+    var base: EitherGradient
+    var colorSpace: ResolvedGradient.ColorSpace
+
+    var tag: Gradient.ProviderTag { .colorSpace }
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        var gradient = base.resolve(in: environment)
+        gradient.colorSpace = colorSpace
+        return gradient
+    }
+    var codingProxy: Gradient.ColorSpaceGradientDefinition {
+        .init(base: base, colorSpace: colorSpace)
+    }
+    static func unwrap(codingProxy: Gradient.ColorSpaceGradientDefinition) -> Self {
+        .init(base: codingProxy.base, colorSpace: codingProxy.colorSpace)
+    }
+}
+
+extension Gradient: GradientProvider, CodableByProxy {
+    var tag: ProviderTag { .basic }
+
+    func resolve(in environment: EnvironmentValues) -> ResolvedGradient {
+        var headroom: Float?
+        var resolved: [ResolvedGradient.Stop] = []
+        resolved.reserveCapacity(stops.count)
+        for stop in stops {
+            let color = stop.color.resolveHDR(in: environment)
+            resolved.append(.init(color: color.base, location: stop.location, interpolation: nil))
+            if let value = color.headroom {
+                headroom = headroom.map { max($0, value) } ?? value
+            }
+        }
+        return .init(stops: resolved, colorSpace: .perceptual, headroom: headroom)
+    }
+
+    public func colorSpace(_ space: ColorSpace) -> AnyGradient {
+        AnyGradient(provider: GradientBox(ColorSpaceGradientProvider(
+            base: .gradient(self), colorSpace: space.base
+        )))
+    }
+
+    var codingProxy: GradientDefinition {
+        .init(stops: stops.map { .init(color: $0.color, location: $0.location) })
+    }
+    static func unwrap(codingProxy: GradientDefinition) -> Gradient {
+        Gradient(stops: codingProxy.stops.map { .init(color: $0.color, location: $0.location) })
+    }
+
+    struct GradientDefinition: Codable { var stops: [StopDefinition] }
+    struct StopDefinition: Codable {
+        @ProxyCodable var color: Color
+        var location: CGFloat
+    }
+    enum EitherGradientDefinition: Codable {
+        case gradient(ProxyCodable<Gradient>)
+        case anyGradient(ProxyCodable<AnyGradient>)
+    }
+    struct ColorSpaceGradientDefinition: Codable {
+        @ProxyCodable var base: EitherGradient
+        @CodableRawRepresentable var colorSpace: ResolvedGradient.ColorSpace
+    }
+    enum ProviderTag: Codable, CodableBoxTag {
+        case basic, colorSpace
+
+        typealias Box = AnyGradientBox
+        var box: any CodableBox<AnyGradientBox>.Type {
+            switch self {
+            case .basic: GradientBox<Gradient>.self
+            case .colorSpace: GradientBox<ColorSpaceGradientProvider>.self
+            }
+        }
     }
 }

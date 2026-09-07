@@ -632,8 +632,8 @@ final class GraphicsContextShadingGeometryTests: XCTestCase {
             .init(color: .red, location: -1), .init(color: .blue, location: 0)
         ]))
         XCTAssertGreaterThan(gradients[1].normalized().stops.count, locations.count)
-        // Keep the existing normalized endpoint and empty-input behavior.
-        XCTAssertEqual(gradients[4].normalized().stops.count, 1)
+        // Preserve both endpoints of the segment spanning the unit interval.
+        XCTAssertEqual(gradients[4].normalized().stops.map(\.location), [0, 1])
         XCTAssertTrue(gradients[5].normalized().stops.isEmpty)
 
         let transforms: [CGAffineTransform] = [

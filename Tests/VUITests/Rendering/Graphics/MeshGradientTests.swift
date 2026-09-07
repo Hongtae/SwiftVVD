@@ -452,6 +452,53 @@ final class MeshGradientTests: XCTestCase {
         )
     }
 
+    func testMetalRendererLowersRetainedLinearPaintWithBoundsAndOpacity() throws {
+        guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        let colors: [VUI.Color] = [
+            .init(.sRGB, red: 1, green: 0, blue: 0),
+            .init(.sRGB, red: 0, green: 0, blue: 1),
+        ]
+        let gradient = AnyGradient(Gradient(colors: colors))
+        var shape = _ShapeStyle_Shape(
+            operation: .resolveStyle(name: .foreground, levels: 1..<2),
+            environment: EnvironmentValues()
+        )
+        gradient._apply(to: &shape)
+        guard case let .pack(pack) = shape.result,
+              let style = pack.styles.first?.style,
+              case let .paint(paint) = style.fill else {
+            return XCTFail("Expected a retained unit-point paint.")
+        }
+        XCTAssertTrue(paint is _AnyResolvedPaint<LinearGradient._Paint>)
+        XCTAssertEqual(style.opacity, 0.5)
+
+        let shadings: [GraphicsContext.Shading] = [
+            .linearGradient(Gradient(colors: colors.map { $0.opacity(0.5) }),
+                            startPoint: CGPoint(x: 28, y: 12), endPoint: CGPoint(x: 28, y: 44)),
+            .style(AnyGradient(Gradient(colors: colors.map { $0.opacity(0.5) }))),
+            .init(property: .resolvedPaint(paint: paint, bounds: nil, opacity: style.opacity)),
+        ]
+        for shading in shadings {
+            let pixels = try render(
+                shading: shading,
+                frame: CGRect(x: 8, y: 12, width: 40, height: 32),
+                deviceContext: deviceContext
+            )
+            let top = pixels.pixel(x: 28, y: 13)
+            let bottom = pixels.pixel(x: 28, y: 42)
+            XCTAssertGreaterThan(top.r, 110)
+            XCTAssertLessThan(top.b, 20)
+            XCTAssertLessThan(bottom.r, 20)
+            XCTAssertGreaterThan(bottom.b, 110)
+            XCTAssertEqual(top.a, 128, accuracy: 2)
+            XCTAssertEqual(bottom.a, 128, accuracy: 2)
+            XCTAssertEqual(pixels.pixel(x: 28, y: 10).a, 0)
+            XCTAssertEqual(pixels.pixel(x: 28, y: 45).a, 0)
+        }
+    }
+
     func testMetalRendererProducesObservedDeviceAndInvalidLocationPixels() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
@@ -746,6 +793,16 @@ final class MeshGradientTests: XCTestCase {
         _ mesh: MeshGradient,
         deviceContext: GraphicsDeviceContext
     ) throws -> Pixels {
+        try render(shading: .meshGradient(mesh),
+                   frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+                   deviceContext: deviceContext)
+    }
+
+    private func render(
+        shading: GraphicsContext.Shading,
+        frame: CGRect,
+        deviceContext: GraphicsDeviceContext
+    ) throws -> Pixels {
         let width = 64
         let height = 64
         let queue = try XCTUnwrap(deviceContext.renderQueue())
@@ -760,8 +817,7 @@ final class MeshGradientTests: XCTestCase {
             commandBuffer: commandBuffer
         ))
         context.clear(with: .clear)
-        let frame = CGRect(x: 0, y: 0, width: width, height: height)
-        context.fill(Path(frame), with: .meshGradient(mesh))
+        context.fill(Path(frame), with: shading)
         try waitForCompletion(commandBuffer)
 
         let staging = try XCTUnwrap(deviceContext.makeCPUAccessible(texture: context.backdrop))

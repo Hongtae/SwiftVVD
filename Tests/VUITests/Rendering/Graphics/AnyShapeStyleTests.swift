@@ -2,6 +2,48 @@ import XCTest
 @testable import VUI
 
 final class AnyShapeStyleTests: XCTestCase {
+    private struct NumberStyle: ShapeStyle { var number: Int }
+    private struct OtherNumberStyle: ShapeStyle { var number: Int }
+    private struct AlwaysEqualStyle: ShapeStyle, Equatable {
+        var number: Int
+        static func == (lhs: Self, rhs: Self) -> Bool { true }
+    }
+    private final class Token: Sendable {}
+    private struct ReferenceStyle: ShapeStyle { var token: Token }
+
+    func testStorageEqualityUsesConcreteStoredValuesAndReferenceIdentity() {
+        XCTAssertEqual(AnyShapeStyle(NumberStyle(number: 1)).storage,
+                       AnyShapeStyle(NumberStyle(number: 1)).storage)
+        XCTAssertNotEqual(AnyShapeStyle(NumberStyle(number: 1)).storage,
+                          AnyShapeStyle(NumberStyle(number: 2)).storage)
+        XCTAssertNotEqual(AnyShapeStyle(NumberStyle(number: 1)).storage,
+                          AnyShapeStyle(OtherNumberStyle(number: 1)).storage)
+        XCTAssertNotEqual(AnyShapeStyle(AlwaysEqualStyle(number: 1)).storage,
+                          AnyShapeStyle(AlwaysEqualStyle(number: 2)).storage)
+        let token = Token()
+        XCTAssertEqual(AnyShapeStyle(ReferenceStyle(token: token)).storage,
+                       AnyShapeStyle(ReferenceStyle(token: token)).storage)
+        XCTAssertNotEqual(AnyShapeStyle(ReferenceStyle(token: Token())).storage,
+                          AnyShapeStyle(ReferenceStyle(token: Token())).storage)
+    }
+
+    func testErasureReusesProviderBoxesAndBaseHasNoStoredStyle() {
+        let color = Color(.sRGBLinear, red: 0.25, green: 0.5, blue: 0.75)
+        let gradient = AnyGradient(Gradient(colors: [color, .white]))
+        XCTAssertTrue(AnyShapeStyle(color).storage.box === color.provider)
+        XCTAssertTrue(AnyShapeStyle(gradient).storage.box === gradient.provider)
+        let box = AnyShapeStyle(NumberStyle(number: 1)).storage.box
+        XCTAssertNotNil(box as? ShapeStyleBox<NumberStyle>)
+        XCTAssertEqual(Mirror(reflecting: box).children.map(\.label), ["base"])
+        XCTAssertTrue(Mirror(reflecting: box).superclassMirror!.children.isEmpty)
+        let base = AnyShapeStyleBox()
+        XCTAssertFalse(base.isEqual(to: base))
+        var shape = _ShapeStyle_Shape(operation: .multiLevel,
+                                     result: .bool(true), environment: EnvironmentValues())
+        base.apply(to: &shape)
+        guard case .bool(true) = shape.result else { return XCTFail("Base application must preserve the result.") }
+    }
+
     private struct BooleanStyle: ShapeStyle {
         var value: Bool
 

@@ -241,6 +241,7 @@ extension GraphicsContext {
             case tiledImage(image: Image, origin: CGPoint, sourceRect: CGRect, scale: CGFloat)
             case shader(shader: Shader, bounds: CGRect)
             case meshGradient(mesh: MeshGradient)
+            case resolvedPaint(paint: AnyResolvedPaint, bounds: CGRect?, opacity: Float)
         }
         let properties: [Property]
 
@@ -961,8 +962,9 @@ extension GraphicsContext {
         var property = shading.properties.first
         if case let .style(style) = property {
             var shape = _ShapeStyle_Shape(
-                operation: .fallbackColor(level: 0),
-                environment: environment
+                operation: .resolveStyle(name: .foreground, levels: 0..<1),
+                environment: environment,
+                bounds: bounds.isNull ? nil : bounds
             )
             style._apply(to: &shape)
             property = shape.resolvedShading?.properties.first
@@ -970,6 +972,13 @@ extension GraphicsContext {
 
         if let property {
             switch property {
+            case let .resolvedPaint(paint, paintBounds, opacity):
+                guard let shading = paint.renderingShading(in: paintBounds ?? bounds, opacity: opacity) else {
+                    return
+                }
+                encodeShadingBoxCommand(renderPass: renderPass, shading: shading,
+                                        stencil: stencil, blendState: blendState, bounds: bounds)
+                return
             case let .color(c):
                 shader = .vertexColor
                 let color = _premultipliedVertexColor(c.backendColor(in: self.environment))

@@ -904,15 +904,23 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         var background = DisplayList()
         background.appendShapeItem(role: .fill, style: BackgroundStyle(), bounds: bounds) { _ in }
 
-        XCTAssertEqual(gradient.itemRecords.first?.shapeStyle, .gradient(redBlue))
-        XCTAssertEqual(changedGradient.itemRecords.first?.shapeStyle, .gradient(blueGreen))
+        for (list, expected) in [(gradient, redBlue), (changedGradient, blueGreen)] {
+            guard case let .paint(box)? = list.itemRecords.first?.shapeStyle,
+                  let paint = box as? _AnyResolvedPaint<LinearGradient._Paint> else {
+                return XCTFail("Gradient records must retain their resolved paint.")
+            }
+            XCTAssertEqual(paint.paint.gradient.stops.map(\.color),
+                           expected.stops.map { $0.color.resolve(in: EnvironmentValues()) })
+            XCTAssertEqual(paint.paint.startPoint, .top)
+            XCTAssertEqual(paint.paint.endPoint, .bottom)
+        }
         XCTAssertTrue(gradient.hasSameInterpolationSurface(as: sameGradient))
         XCTAssertTrue(gradient.hasSameInterpolationSurface(as: erasedGradient))
         XCTAssertFalse(gradient.hasSameInterpolationSurface(as: changedGradient))
         XCTAssertFalse(gradient.hasSameInterpolationSurface(as: color))
         XCTAssertEqual(
             foreground.itemRecords.first?.shapeStyle,
-            .color(.primary)
+            .color(Color(Color.primary.resolveHDR(in: EnvironmentValues())))
         )
         XCTAssertEqual(background.itemRecords.first?.shapeStyle, .color(Color(.sRGB, white: 1)))
         XCTAssertFalse(foreground.hasSameInterpolationSurface(as: background))
@@ -1264,65 +1272,65 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         let red = VUI.Color(.sRGB, red: 1, green: 0, blue: 0)
         let blue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1)
         let sRGBMidpoint = try midpointColor(from: red, to: blue)
-        XCTAssertEqual(sRGBMidpoint.provider.colorSpace, .sRGB)
-        XCTAssertEqual(sRGBMidpoint.provider.red, 0.5504410671, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBMidpoint.provider.green, 0.3256206847, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBMidpoint.provider.blue, 0.6365006535, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.renderingComponents().colorSpace, .sRGB)
+        XCTAssertEqual(sRGBMidpoint.renderingComponents().red, 0.5504410671, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.renderingComponents().green, 0.3256206847, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.renderingComponents().blue, 0.6365006535, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBMidpoint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         let linearRed = VUI.Color(.sRGBLinear, red: 1, green: 0, blue: 0)
         let linearBlue = VUI.Color(.sRGBLinear, red: 0, green: 0, blue: 1)
         let linearMidpoint = try midpointColor(from: linearRed, to: linearBlue)
-        XCTAssertEqual(linearMidpoint.provider.colorSpace, .sRGBLinear)
-        XCTAssertEqual(linearMidpoint.provider.red, 0.2637342898, accuracy: 0.000_001)
-        XCTAssertEqual(linearMidpoint.provider.green, 0.0865716757, accuracy: 0.000_001)
-        XCTAssertEqual(linearMidpoint.provider.blue, 0.3628242654, accuracy: 0.000_001)
-        XCTAssertEqual(linearMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.renderingComponents().colorSpace, .sRGB)
+        XCTAssertEqual(linearMidpoint.resolve(in: EnvironmentValues()).linearRed, 0.2637342898, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.resolve(in: EnvironmentValues()).linearGreen, 0.0865716757, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.resolve(in: EnvironmentValues()).linearBlue, 0.3628242654, accuracy: 0.000_001)
+        XCTAssertEqual(linearMidpoint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         let p3Red = VUI.Color(.displayP3, red: 1, green: 0, blue: 0)
         let p3Blue = VUI.Color(.displayP3, red: 0, green: 0, blue: 1)
         let p3Midpoint = try midpointColor(from: p3Red, to: p3Blue)
-        XCTAssertEqual(p3Midpoint.provider.colorSpace, .displayP3)
-        XCTAssertEqual(p3Midpoint.provider.red, 0.5674134830, accuracy: 0.000_001)
-        XCTAssertEqual(p3Midpoint.provider.green, 0.3382744906, accuracy: 0.000_001)
-        XCTAssertEqual(p3Midpoint.provider.blue, 0.6287854995, accuracy: 0.000_001)
-        XCTAssertEqual(p3Midpoint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.renderingComponents().colorSpace, .displayP3)
+        XCTAssertEqual(p3Midpoint.renderingComponents().red, 0.5674134830, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.renderingComponents().green, 0.3382744906, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.renderingComponents().blue, 0.6287854995, accuracy: 0.000_001)
+        XCTAssertEqual(p3Midpoint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         let sRGBToP3Midpoint = try midpointColor(from: red, to: p3Blue)
-        XCTAssertEqual(sRGBToP3Midpoint.provider.colorSpace, .sRGB)
-        XCTAssertEqual(sRGBToP3Midpoint.provider.red, 0.5552106371, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBToP3Midpoint.provider.green, 0.3330116465, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBToP3Midpoint.provider.blue, 0.6563702302, accuracy: 0.000_001)
-        XCTAssertEqual(sRGBToP3Midpoint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.renderingComponents().colorSpace, .sRGB)
+        XCTAssertEqual(sRGBToP3Midpoint.renderingComponents().red, 0.5552106371, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.renderingComponents().green, 0.3330116465, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.renderingComponents().blue, 0.6563702302, accuracy: 0.000_001)
+        XCTAssertEqual(sRGBToP3Midpoint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         let p3ToSRGBMidpoint = try midpointColor(from: p3Red, to: blue)
-        XCTAssertEqual(p3ToSRGBMidpoint.provider.colorSpace, .displayP3)
-        XCTAssertEqual(p3ToSRGBMidpoint.provider.red, 0.5621900129, accuracy: 0.000_001)
-        XCTAssertEqual(p3ToSRGBMidpoint.provider.green, 0.3308116657, accuracy: 0.000_001)
-        XCTAssertEqual(p3ToSRGBMidpoint.provider.blue, 0.6096897172, accuracy: 0.000_001)
-        XCTAssertEqual(p3ToSRGBMidpoint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.renderingComponents().colorSpace, .displayP3)
+        XCTAssertEqual(p3ToSRGBMidpoint.renderingComponents().red, 0.5621900129, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.renderingComponents().green, 0.3308116657, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.renderingComponents().blue, 0.6096897172, accuracy: 0.000_001)
+        XCTAssertEqual(p3ToSRGBMidpoint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         let transparentBlue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0)
         let opaqueToTransparent = try midpointColor(from: red, to: transparentBlue)
-        XCTAssertEqual(opaqueToTransparent.provider.red, 1, accuracy: 0.000_001)
-        XCTAssertEqual(opaqueToTransparent.provider.green, 0, accuracy: 0.000_001)
-        XCTAssertEqual(opaqueToTransparent.provider.blue, 0, accuracy: 0.000_001)
-        XCTAssertEqual(opaqueToTransparent.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.renderingComponents().red, 1, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.renderingComponents().green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.renderingComponents().blue, 0, accuracy: 0.000_001)
+        XCTAssertEqual(opaqueToTransparent.renderingComponents().alpha, 0.5, accuracy: 0.000_001)
 
         let transparentRed = VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0)
         let transparentToOpaque = try midpointColor(from: transparentRed, to: blue)
-        XCTAssertEqual(transparentToOpaque.provider.red, 0, accuracy: 0.000_001)
-        XCTAssertEqual(transparentToOpaque.provider.green, 0, accuracy: 0.000_001)
-        XCTAssertEqual(transparentToOpaque.provider.blue, 1, accuracy: 0.000_001)
-        XCTAssertEqual(transparentToOpaque.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.renderingComponents().red, 0, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.renderingComponents().green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.renderingComponents().blue, 1, accuracy: 0.000_001)
+        XCTAssertEqual(transparentToOpaque.renderingComponents().alpha, 0.5, accuracy: 0.000_001)
 
         let quarterRed = VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0.25)
         let threeQuarterBlue = VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0.75)
         let alphaMidpoint = try midpointColor(from: quarterRed, to: threeQuarterBlue)
-        XCTAssertEqual(alphaMidpoint.provider.red, 0.3164174757, accuracy: 0.000_001)
-        XCTAssertEqual(alphaMidpoint.provider.green, 0.2788379121, accuracy: 0.000_001)
-        XCTAssertEqual(alphaMidpoint.provider.blue, 0.8218085756, accuracy: 0.000_001)
-        XCTAssertEqual(alphaMidpoint.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.renderingComponents().red, 0.3164174757, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.renderingComponents().green, 0.2788379121, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.renderingComponents().blue, 0.8218085756, accuracy: 0.000_001)
+        XCTAssertEqual(alphaMidpoint.renderingComponents().alpha, 0.5, accuracy: 0.000_001)
     }
 
     func testRBDisplayListInterpolatorMixesTypedLinearGradientStopsGeometryAndFallback() throws {
@@ -1386,11 +1394,11 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             file: StaticString = #filePath,
             line: UInt = #line
         ) {
-            XCTAssertEqual(color.provider.colorSpace, .sRGB, file: file, line: line)
-            XCTAssertEqual(color.provider.red, red, accuracy: 0.000_001, file: file, line: line)
-            XCTAssertEqual(color.provider.green, green, accuracy: 0.000_001, file: file, line: line)
-            XCTAssertEqual(color.provider.blue, blue, accuracy: 0.000_001, file: file, line: line)
-            XCTAssertEqual(color.provider.alpha, 1, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.renderingComponents().colorSpace, .sRGB, file: file, line: line)
+            XCTAssertEqual(color.renderingComponents().red, red, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.renderingComponents().green, green, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.renderingComponents().blue, blue, accuracy: 0.000_001, file: file, line: line)
+            XCTAssertEqual(color.renderingComponents().alpha, 1, accuracy: 0.000_001, file: file, line: line)
         }
 
         let sourceGradient = Gradient(stops: [
@@ -2080,10 +2088,10 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
               case let .color(renderedTint) = shading.properties.first else {
             return XCTFail("compatible image tint should remain one typed image item")
         }
-        XCTAssertEqual(recordedTint.provider.red, 0.25, accuracy: 0.000_001)
-        XCTAssertEqual(recordedTint.provider.green, 0, accuracy: 0.000_001)
-        XCTAssertEqual(recordedTint.provider.blue, 0.75, accuracy: 0.000_001)
-        XCTAssertEqual(recordedTint.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.renderingComponents().red, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.renderingComponents().green, 0, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.renderingComponents().blue, 0.75, accuracy: 0.000_001)
+        XCTAssertEqual(recordedTint.renderingComponents().alpha, 0.5, accuracy: 0.000_001)
         XCTAssertEqual(renderedTint, recordedTint)
 
         var untinted = DisplayList()
@@ -2108,10 +2116,10 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             whiteToBlue.itemRecords.first?.image?.shading else {
             return XCTFail("missing identity-white to blue tint mix")
         }
-        XCTAssertEqual(whiteToBlueTint.provider.red, 0.5, accuracy: 0.000_001)
-        XCTAssertEqual(whiteToBlueTint.provider.green, 0.5, accuracy: 0.000_001)
-        XCTAssertEqual(whiteToBlueTint.provider.blue, 1, accuracy: 0.000_001)
-        XCTAssertEqual(whiteToBlueTint.provider.alpha, 1, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.renderingComponents().red, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.renderingComponents().green, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.renderingComponents().blue, 1, accuracy: 0.000_001)
+        XCTAssertEqual(whiteToBlueTint.renderingComponents().alpha, 1, accuracy: 0.000_001)
 
         var differentColorSpace = DisplayList()
         differentColorSpace.appendImageItem(
@@ -2905,7 +2913,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             return XCTFail("mixed mask should retain typed color shape content")
         }
         assertPathElementsEqual(maskShape.path, Path(midpointMaskBounds))
-        XCTAssertEqual(maskColor.provider.alpha, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(maskColor.renderingComponents().alpha, 0.5, accuracy: 0.000_001)
         XCTAssertEqual(effect.contents.interpolationBounds, contentBounds)
     }
 
@@ -3312,8 +3320,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         }
         XCTAssertEqual(sourceMaskShape.path, Path(sourceMaskBounds))
         XCTAssertEqual(targetMaskShape.path, Path(targetMaskBounds))
-        XCTAssertEqual(sourceMaskColor.provider.alpha, 0.25, accuracy: 0.000_001)
-        XCTAssertEqual(targetMaskColor.provider.alpha, 0.75, accuracy: 0.000_001)
+        XCTAssertEqual(sourceMaskColor.renderingComponents().alpha, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(targetMaskColor.renderingComponents().alpha, 0.75, accuracy: 0.000_001)
     }
 
     func testRBDisplayListInterpolatorEndpointPreservesTargetEffectFallback() throws {

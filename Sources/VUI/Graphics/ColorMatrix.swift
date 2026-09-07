@@ -2,7 +2,7 @@
 //  File: ColorMatrix.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2023 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 
@@ -82,11 +82,12 @@ public struct ColorMatrix: Equatable, Sendable {
     }
 
     static func constantColor(_ color: Color) -> ColorMatrix {
+        let components = color.renderingComponents()
         var cm = ColorMatrix.zero
-        cm.r5 = Float(color.provider.red)
-        cm.g5 = Float(color.provider.green)
-        cm.b5 = Float(color.provider.blue)
-        cm.a5 = Float(color.provider.alpha)
+        cm.r5 = Float(components.red)
+        cm.g5 = Float(components.green)
+        cm.b5 = Float(components.blue)
+        cm.a5 = Float(components.alpha)
         return cm
     }
 
@@ -297,10 +298,11 @@ public struct _ColorMatrix: Equatable, Codable, Sendable {
 
 extension Color {
     public func applying(_ m: ColorMatrix) -> Color {
-        let r = Float(provider.red)
-        let g = Float(provider.green)
-        let b = Float(provider.blue)
-        let a = Float(provider.alpha)
+        let components = renderingComponents()
+        let r = Float(components.red)
+        let g = Float(components.green)
+        let b = Float(components.blue)
+        let a = Float(components.alpha)
 
         let r1 = m.r1 * r + m.r2 * g + m.r3 * b + m.r4 * a + m.r5
         let g1 = m.g1 * r + m.g2 * g + m.g3 * b + m.g4 * a + m.g5

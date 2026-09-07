@@ -420,10 +420,13 @@ struct _ShapeStyle_RenderedShape {
         case let .color(color):
             shading = .color(Color(color))
         case let .paint(paint):
-            guard let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> else {
-                return
+            if let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> {
+                shading = .meshGradient(paint.paint.meshGradient)
+            } else {
+                shading = GraphicsContext.Shading(property: .resolvedPaint(
+                    paint: paint, bounds: frame, opacity: 1
+                ))
             }
-            shading = .meshGradient(paint.paint.meshGradient)
         }
 
         var list = displayList(shading: shading)

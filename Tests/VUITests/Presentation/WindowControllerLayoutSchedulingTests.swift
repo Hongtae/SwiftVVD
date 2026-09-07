@@ -193,8 +193,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(host.pendingContext).contentOffset, .zero)
         XCTAssertFalse(
             shapeFillRecords(in: try displayList(in: controller)).contains {
-                $0.color.provider.red > $0.color.provider.green &&
-                    $0.color.provider.red > $0.color.provider.blue
+                $0.color.renderingComponents().red > $0.color.renderingComponents().green &&
+                    $0.color.renderingComponents().red > $0.color.renderingComponents().blue
             }
         )
 
@@ -258,8 +258,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let records = shapeFillRecords(in: try displayList(in: controller))
         XCTAssertTrue(
             records.contains {
-                $0.color.provider.red > $0.color.provider.green &&
-                    $0.color.provider.red > $0.color.provider.blue
+                $0.color.renderingComponents().red > $0.color.renderingComponents().green &&
+                    $0.color.renderingComponents().red > $0.color.renderingComponents().blue
             },
             "records: " + records.map {
                 "\(String(reflecting: $0.color)):\($0.bounds)"
@@ -4118,7 +4118,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             item records: \(initialDisplayList.itemRecords)
             """
         )
-        XCTAssertLessThan(initialColor.provider.red, initialColor.provider.green)
+        XCTAssertLessThan(initialColor.renderingComponents().red, initialColor.renderingComponents().green)
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -4142,8 +4142,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         let finalColor = try XCTUnwrap(samples.last?.color)
         let sampledColor = try XCTUnwrap(
             samples.dropFirst().dropLast().first { sample in
-                sample.color.provider.red > initialColor.provider.red &&
-                    sample.color.provider.red < finalColor.provider.red
+                sample.color.renderingComponents().red > initialColor.renderingComponents().red &&
+                    sample.color.renderingComponents().red < finalColor.renderingComponents().red
             }?.color,
             """
             expected intermediate dynamic child background color:
@@ -4152,7 +4152,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             samples=\(samples.map { ($0.time, $0.color) })
             """
         )
-        XCTAssertEqual(sampledColor.provider.alpha, 0.35, accuracy: 0.01)
+        XCTAssertEqual(sampledColor.renderingComponents().alpha, 0.35, accuracy: 0.01)
     }
 
     func testConditionalChildCombinedTransitionRetainsRemovalAndDelaysCompletion() throws {
@@ -6514,8 +6514,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                       !sample.isStroke,
                       sample.opacity > 0.0001,
                       let color = sample.color,
-                      color.provider.green > color.provider.red,
-                      color.provider.green > color.provider.blue else {
+                      color.renderingComponents().green > color.renderingComponents().red,
+                      color.renderingComponents().green > color.renderingComponents().blue else {
                     return nil
                 }
                 return sample.bounds
@@ -7195,7 +7195,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             translucentShapeFillColors(in: initialDisplayList).first,
             "shape records: \(shapeFillDebugRecords(in: initialDisplayList))"
         )
-        XCTAssertLessThan(initialColor.provider.red, initialColor.provider.green)
+        XCTAssertLessThan(initialColor.renderingComponents().red, initialColor.renderingComponents().green)
 
         let run = try XCTUnwrap(probe.toggle)
         run()
@@ -7217,12 +7217,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
 
         let finalColor = try XCTUnwrap(samples.last?.color)
-        XCTAssertGreaterThan(finalColor.provider.red, initialColor.provider.red)
+        XCTAssertGreaterThan(finalColor.renderingComponents().red, initialColor.renderingComponents().red)
 
         let sampledColor = try XCTUnwrap(
             samples.dropFirst().dropLast().first { sample in
-                sample.color.provider.red > initialColor.provider.red &&
-                    sample.color.provider.red < finalColor.provider.red
+                sample.color.renderingComponents().red > initialColor.renderingComponents().red &&
+                    sample.color.renderingComponents().red < finalColor.renderingComponents().red
             }?.color,
             """
             expected intermediate background color:
@@ -7231,7 +7231,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             samples=\(samples.map { ($0.time, $0.color) })
             """
         )
-        XCTAssertEqual(sampledColor.provider.alpha, 0.35, accuracy: 0.01)
+        XCTAssertEqual(sampledColor.renderingComponents().alpha, 0.35, accuracy: 0.01)
     }
 
     func testBackgroundShapeContributesToGeometryEffectSurfaceDuringSpringMove() throws {
@@ -7427,7 +7427,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             )
             let background = try XCTUnwrap(
                 translucentShapeFillRecords(in: list).first { record in
-                    record.color.provider.alpha < 0.8 &&
+                    record.color.renderingComponents().alpha < 0.8 &&
                         record.bounds.width > 120 &&
                         record.bounds.height > 40
                 }?.bounds,
@@ -8454,9 +8454,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
     private func opaqueGreenShapeBounds(in displayList: DisplayList) -> [CGRect] {
         shapeFillRecords(in: displayList).compactMap { record -> CGRect? in
-            guard record.color.provider.alpha >= 0.8,
-                  record.color.provider.green > record.color.provider.red,
-                  record.color.provider.green > record.color.provider.blue else {
+            guard record.color.renderingComponents().alpha >= 0.8,
+                  record.color.renderingComponents().green > record.color.renderingComponents().red,
+                  record.color.renderingComponents().green > record.color.renderingComponents().blue else {
                 return nil
             }
             return record.bounds
@@ -8665,7 +8665,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
     private func translucentShapeFillRecords(in displayList: DisplayList) -> [(bounds: CGRect, color: VUI.Color)] {
         shapeFillRecords(in: displayList).filter {
-            $0.color.provider.alpha < 0.8
+            $0.color.renderingComponents().alpha < 0.8
         }
     }
 
@@ -9566,8 +9566,8 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
 
     private func translucentGreenShapeBounds(in displayList: DisplayList) -> CGRect? {
         translucentShapeFillRecords(in: displayList).first { record in
-            record.color.provider.green > record.color.provider.red &&
-                record.color.provider.green > record.color.provider.blue
+            record.color.renderingComponents().green > record.color.renderingComponents().red &&
+                record.color.renderingComponents().green > record.color.renderingComponents().blue
         }?.bounds
     }
 
