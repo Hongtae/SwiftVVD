@@ -193,6 +193,19 @@ final class TextVariantPreferenceTests: XCTestCase {
         }
     }
 
+    func testDateStyleUnitConfigurationRetainsRawUnitsOnRoundTrip() throws {
+        let units = NSCalendar.Unit.hour.union(.minute).rawValue
+        let data = Data("{\"storage\":4,\"unitConfiguration\":{\"_units\":\(units),\"style\":0}}".utf8)
+        let style = try JSONDecoder().decode(Text.DateStyle.self, from: data)
+        let encoded = try JSONEncoder().encode(style)
+        XCTAssertEqual(try JSONDecoder().decode(Text.DateStyle.self, from: encoded), style)
+        XCTAssertNotEqual(style, .timer)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let configuration = try XCTUnwrap(object["unitConfiguration"] as? [String: Any])
+        XCTAssertEqual(configuration["_units"] as? UInt, units)
+        XCTAssertEqual(configuration["style"] as? Int, 0)
+    }
+
     func testRelativeDateStorageOffersARegularCandidateAndOptionalNarrowerCandidate() {
         let text = Text(Date.now.addingTimeInterval(93_784), style: .relative)
         let variants = text._sizeVariantTexts(in: EnvironmentValues())

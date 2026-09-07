@@ -204,33 +204,6 @@ private func _dynamicArchiveStorage(
     return dynamicStorage
 }
 
-private struct CodableRawRepresentable<Value>: Codable, Equatable, @unchecked Sendable
-where Value: RawRepresentable & Equatable,
-      Value.RawValue: Codable & Equatable {
-    var wrappedValue: Value
-
-    init(_ wrappedValue: Value) {
-        self.wrappedValue = wrappedValue
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let rawValue = try container.decode(Value.RawValue.self)
-        guard let value = Value(rawValue: rawValue) else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid raw value for \(Value.self)."
-            )
-        }
-        wrappedValue = value
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wrappedValue.rawValue)
-    }
-}
-
 private class AnyFormatStyleBox {
     func resolve(
         locale: Locale,

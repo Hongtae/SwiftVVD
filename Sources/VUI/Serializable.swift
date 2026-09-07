@@ -54,6 +54,79 @@ extension CodableByProxy {
     }
 }
 
+protocol CodableProxy: Codable {
+    associatedtype Base
+    var base: Base { get }
+}
+
+extension CodableByProxy where CodingProxy: CodableProxy, CodingProxy.Base == Self {
+    static func unwrap(codingProxy: CodingProxy) -> Self {
+        codingProxy.base
+    }
+}
+
+extension RawRepresentable where RawValue: Codable {
+    var codingProxy: RawRepresentableProxy<Self> {
+        RawRepresentableProxy(base: self)
+    }
+}
+
+struct RawRepresentableProxy<Base: RawRepresentable>: CodableProxy where Base.RawValue: Codable {
+    let base: Base
+
+    init(base: Base) {
+        self.base = base
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(Base.RawValue.self)
+        guard let base = Base(rawValue: rawValue) else {
+            throw Error.unarchivingError
+        }
+        self.base = base
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(base.rawValue)
+    }
+}
+
+@propertyWrapper
+struct CodableRawRepresentable<Value: RawRepresentable>: Codable where Value.RawValue: Codable {
+    var wrappedValue: Value
+
+    init(wrappedValue: Value) {
+        self.wrappedValue = wrappedValue
+    }
+
+    init(_ value: Value) {
+        self.wrappedValue = value
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(Value.RawValue.self)
+        guard let value = Value(rawValue: rawValue) else {
+            throw Error.unarchivingError
+        }
+        wrappedValue = value
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue.rawValue)
+    }
+}
+
+extension CodableRawRepresentable: Equatable where Value: Equatable {}
+extension CodableRawRepresentable: Hashable where Value: Hashable {}
+
+private enum Error: Swift.Error {
+    case unarchivingError
+}
+
 @propertyWrapper
 struct ProxyCodable<Value: Serializable>: Codable {
     var wrappedValue: Value
@@ -76,6 +149,9 @@ struct ProxyCodable<Value: Serializable>: Codable {
         try wrappedValue.serialize(to: encoder)
     }
 }
+
+extension ProxyCodable: Equatable where Value: Equatable {}
+extension ProxyCodable: Hashable where Value: Hashable {}
 
 protocol AnyCodableBox<Box> {
     associatedtype Box where Box == Tag.Box, Tag == Box.Tag

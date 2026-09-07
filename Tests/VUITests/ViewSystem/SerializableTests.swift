@@ -68,6 +68,103 @@ final class SerializableTests: XCTestCase {
         XCTAssertEqual(original.wrappedValue.number, 9)
         _ = try JSONDecoder().decode(ProxyCodable<Empty>.self, from: Data("42".utf8))
     }
+
+    func testRawRepresentableProxyUsesRawValueWithoutRequiringBaseCodable() throws {
+        let proxy = RawChoice.high.codingProxy
+        let data = try JSONEncoder().encode(proxy)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "7")
+        XCTAssertEqual(try JSONDecoder().decode(RawRepresentableProxy<RawChoice>.self, from: data).base, .high)
+        let serialized = try JSONEncoder().encode(ProxyCodable(RawChoice.low))
+        XCTAssertEqual(String(decoding: serialized, as: UTF8.self), "2")
+        XCTAssertEqual(try JSONDecoder().decode(ProxyCodable<RawChoice>.self, from: serialized).wrappedValue, .low)
+    }
+
+    func testRawPropertyWrapperEncodesScalarAndCopiesWrappedValue() throws {
+        var value = RawRecord(choice: .low)
+        let copy = value
+        value.choice = .high
+        XCTAssertEqual(copy.choice, .low)
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"choice":7}"#)
+        XCTAssertEqual(try JSONDecoder().decode(RawRecord.self, from: data).choice, .high)
+        XCTAssertEqual(CodableRawRepresentable(RawChoice.low).wrappedValue, .low)
+    }
+
+    func testRawWrapperEqualityAndHashingUseValueConformance() {
+        let first = CodableRawRepresentable(GroupedRaw(rawValue: .init(number: 2)))
+        let equivalent = CodableRawRepresentable(GroupedRaw(rawValue: .init(number: 12)))
+        let other = CodableRawRepresentable(GroupedRaw(rawValue: .init(number: 3)))
+        XCTAssertEqual(first, equivalent)
+        XCTAssertNotEqual(first, other)
+        XCTAssertEqual(Set([first, equivalent, other]).count, 2)
+        XCTAssertEqual(ProxyCodable(first.wrappedValue), ProxyCodable(equivalent.wrappedValue))
+        XCTAssertEqual(Set([ProxyCodable(first.wrappedValue), ProxyCodable(equivalent.wrappedValue),
+                            ProxyCodable(other.wrappedValue)]).count, 2)
+    }
+
+    func testInvalidRawValueThrowsSharedUnarchivingError() throws {
+        var errors: [any Swift.Error] = []
+        for decode in rawDecoders {
+            do {
+                try decode(Data(#"{"choice":127}"#.utf8))
+                XCTFail("An unknown raw value must fail")
+            } catch {
+                errors.append(error)
+                XCTAssertFalse(error is DecodingError)
+                XCTAssertEqual(String(describing: error), "unarchivingError")
+                XCTAssertEqual(Mirror(reflecting: error).displayStyle, .enum)
+                XCTAssertTrue(Mirror(reflecting: error).children.isEmpty)
+            }
+        }
+        XCTAssertEqual(errors.count, 3)
+        XCTAssertTrue(errors.dropFirst().allSatisfy { type(of: $0) == type(of: errors[0]) })
+    }
+
+    func testRawDecoderPreservesTypeMismatchAndMissingKeyErrors() throws {
+        for decode in rawDecoders {
+            XCTAssertThrowsError(try decode(Data(#"{"choice":"bad"}"#.utf8))) {
+                guard case let DecodingError.typeMismatch(type, context) = $0 else {
+                    return XCTFail("Unexpected error: \($0)")
+                }
+                XCTAssertTrue(type == Int8.self)
+                XCTAssertEqual(context.codingPath.map(\.stringValue), ["choice"])
+            }
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(RawRecord.self, from: Data("{}".utf8))) {
+            guard case let DecodingError.keyNotFound(key, _) = $0 else {
+                return XCTFail("Unexpected error: \($0)")
+            }
+            XCTAssertEqual(key.stringValue, "choice")
+        }
+    }
+
+    private var rawDecoders: [(Data) throws -> Void] {
+        [
+            { _ = try JSONDecoder().decode([String: RawRepresentableProxy<RawChoice>].self, from: $0) },
+            { _ = try JSONDecoder().decode(RawRecord.self, from: $0) },
+            { _ = try JSONDecoder().decode([String: ProxyCodable<RawChoice>].self, from: $0) }
+        ]
+    }
+}
+
+private enum RawChoice: Int8, CodableByProxy {
+    case low = 2
+    case high = 7
+}
+
+private struct RawRecord: Codable {
+    @CodableRawRepresentable var choice: RawChoice
+}
+
+private struct GroupedRaw: RawRepresentable, Hashable, CodableByProxy {
+    struct RawValue: Codable {
+        var number: Int
+    }
+    var rawValue: RawValue
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.rawValue.number % 10 == rhs.rawValue.number % 10
+    }
+    func hash(into hasher: inout Hasher) { hasher.combine(rawValue.number % 10) }
 }
 
 private struct Number: CodableSerializable {
