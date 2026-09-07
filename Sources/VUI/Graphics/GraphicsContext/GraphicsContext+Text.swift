@@ -1971,6 +1971,9 @@ extension GraphicsContext {
             fatalError("Invalid shading property!")
         }
         if drawing.isEmpty { return }
+        if recording != nil, record(bounds: rect, {
+            $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin)
+        }) { return }
 
         var scissorRect: ScissorRect? = nil
         let clipBounds = true

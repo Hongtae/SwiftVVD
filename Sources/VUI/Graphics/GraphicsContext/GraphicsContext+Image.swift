@@ -201,6 +201,7 @@ extension GraphicsContext {
         return resolved
     }
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
+        if recording != nil, record(bounds: rect, { $0.draw(image, in: rect, style: style) }) { return }
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
             if let replacement = image.symbolReplacementPresentation {
                 drawSymbolReplacement(

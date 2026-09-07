@@ -202,8 +202,13 @@ func _AGCompareValues<Value>(_ lhs: Value, _ rhs: Value, options: AGComparisonOp
     compareValues(lhs, rhs, options: options)
 }
 
-func _AGGraphAnyInputsChanged() -> Bool {
-    _AGGraph._currentStatefulInputsChanged()
+func _AGGraphAnyInputsChanged(
+    _ excludedInputs: UnsafePointer<UInt32>? = nil,
+    _ count: Int = 0
+) -> Bool {
+    _AGGraph._currentStatefulInputsChanged(
+        excluding: UnsafeBufferPointer(start: excludedInputs, count: count)
+    )
 }
 
 func _AGGraphCancelUpdate() {

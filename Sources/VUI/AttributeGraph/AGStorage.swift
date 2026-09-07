@@ -375,10 +375,27 @@ extension _AGGraph {
         _AGGraphAnyInputsChanged()
     }
 
-    static func _currentStatefulInputsChanged() -> Bool {
+    static func _currentStatefulInputsChanged(
+        excluding excludedInputs: UnsafeBufferPointer<UInt32>
+    ) -> Bool {
         guard let graph = _AGGraph.current,
-              let nodeID = _AGGraph.currentlyEvaluatingNode else { return true }
-        return graph.slots[Int(nodeID.rawValue)].node?.pointee.inputsChanged ?? true
+              let nodeID = _AGGraph.currentlyEvaluatingNode,
+              let node = graph.slots[Int(nodeID.rawValue)].node else {
+            fatalError("Input change scanning requires an active graph attribute.")
+        }
+        return node.pointee.inputs.withUnsafeMutableBufferPointer { inputs in
+            for index in inputs.indices {
+                let oldFlags = inputs[index].flags
+                // A cached consumer still depends on every visited input even
+                // when it does not read the input's value again in this update.
+                inputs[index].flags |= InputEdge.readThisEvaluation
+                if oldFlags & InputEdge.changed != 0,
+                   !excludedInputs.contains(inputs[index].attribute) {
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     static func currentStatefulInputChanged(_ attribute: AGAttribute) -> Bool {

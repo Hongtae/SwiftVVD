@@ -101,6 +101,9 @@ public struct GraphicsContext {
     public var opacity: Double
     public var blendMode: BlendMode
     public internal(set) var environment: EnvironmentValues
+    var symbols: GraphicsContextSymbols?
+    var recording: DrawingCommands?
+    var recordedClips: [DrawingClip] = []
     public var transform: CGAffineTransform {
         didSet {
             self.clipBoundingRect = Self.remappedClipBoundingRect(

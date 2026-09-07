@@ -304,6 +304,9 @@ extension GraphicsContext {
 
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
         if shading.properties.isEmpty { return }
+        if recording != nil, record(bounds: path.boundingBoxOfPath, {
+            $0.fill(path, with: shading, style: style)
+        }) { return }
 
         let isAntialiased = self.environment.disableMSAA == false && style.isAntialiased
         if let renderPass = self.beginRenderPass(enableStencil: true, enableMSAA: isAntialiased) {
@@ -327,6 +330,10 @@ extension GraphicsContext {
 
     public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle, isAntialiased: Bool) {
         if shading.properties.isEmpty { return }
+        let halfWidth = style.lineWidth * 0.5
+        if recording != nil, record(bounds: path.boundingBoxOfPath.insetBy(dx: -halfWidth, dy: -halfWidth), {
+            $0.stroke(path, with: shading, style: style, isAntialiased: isAntialiased)
+        }) { return }
         
         let isAntialiased = self.environment.disableMSAA == false && isAntialiased
         if let renderPass = self.beginRenderPass(enableStencil: true, enableMSAA: isAntialiased) {

@@ -16,7 +16,7 @@ public struct EmptyView: View {
     public static func _makeViewList(view: _GraphValue<Self>, inputs: _ViewListInputs) -> _ViewListOutputs {
         // EmptyView contributes zero children to any list.
         _ViewListOutputs(views: .staticList(.merged([])),
-                         nextImplicitID: 0,
+                         nextImplicitID: inputs.implicitID,
                          staticCount: 0)
     }
 

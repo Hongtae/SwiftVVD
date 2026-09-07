@@ -21,6 +21,15 @@ extension GraphicsContext {
                               options: ClipOptions = ClipOptions()) {
         if path.isEmpty && options.contains(.inverse) { return }
         
+        if recording != nil {
+            recordedClips.append(DrawingClip(transform: transform) {
+                $0.clip(to: path, style: style, options: options)
+            })
+            clipBoundingRect = Self.resolvedClipBoundingRect(
+                clipBoundingRect, pathBounds: path.boundingBoxOfPath, options: options
+            )
+            return
+        }
         let resolution = self.resolution
         let width = Int(resolution.width.rounded())
         let height = Int(resolution.height.rounded())
@@ -114,6 +123,19 @@ extension GraphicsContext {
     public mutating func clipToLayer(opacity: Double = 1,
                                      options: ClipOptions = ClipOptions(),
                                      content: (inout GraphicsContext) throws -> Void) rethrows {
+        if recording != nil {
+            var layer = recordingContext(size: viewport.size / contentScaleFactor)
+            layer.clipBoundingRect = clipBoundingRect
+            try content(&layer)
+            let commands = layer.recording!
+            recordedClips.append(DrawingClip(transform: transform) {
+                $0.clipToLayer(opacity: opacity, options: options) { commands.draw(in: $0) }
+            })
+            clipBoundingRect = Self.resolvedLayerClipBoundingRect(
+                clipBoundingRect, layerBounds: commands.bounds, opacity: opacity, options: options
+            )
+            return
+        }
         if var context = self.makeLayerContext() {
             context.transform = self.transform
             context.clipBoundingRect = self.clipBoundingRect

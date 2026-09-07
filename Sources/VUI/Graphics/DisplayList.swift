@@ -3610,6 +3610,22 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 }
 
             case let .shader(shader):
+                if context.recording != nil, shader.shader != nil {
+                    let layer = context.recordingContext(size: frame.size)
+                    renderItems(in: contents, context: layer, includeDebug: includeDebug)
+                    let commands = layer.recording!
+                    context.record(bounds: frame) { context in
+                        guard let layer = context.makeLayerContext() else {
+                            commands.draw(in: context)
+                            return
+                        }
+                        commands.draw(in: layer)
+                        if !context.drawCustomShaderLayer(shader, sourceTexture: layer.backdrop, frame: frame) {
+                            commands.draw(in: context)
+                        }
+                    }
+                    return
+                }
                 guard shader.shader != nil,
                       let layer = context.makeLayerContext() else {
                     renderItems(in: contents, context: context, includeDebug: includeDebug)

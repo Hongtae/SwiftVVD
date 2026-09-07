@@ -26,6 +26,7 @@ extension GraphicsContext {
         // applied when the completed layer texture is composited, so copying it here would
         // apply the same transform twice.
         context.clipBoundingRect = self.clipBoundingRect
+        context.symbols = self.symbols
         context.clear(with: .clear)
         return context
     }
@@ -36,7 +37,7 @@ extension GraphicsContext {
 
         guard width > 0 && height > 0 else { return nil }
 
-        let context = GraphicsContext(
+        var context = GraphicsContext(
             sceneResources: self.sceneResources,
             environment: self.environment,
             viewport: CGRect(x: 0, y: 0, width: width, height: height),
@@ -46,11 +47,21 @@ extension GraphicsContext {
             commandBuffer: self.commandBuffer,
             uploadBufferArena: self.uploadBufferArena,
             pathGeometryScratch: self.pathGeometryScratch)
+        context?.symbols = self.symbols
         context?.clear(with: .clear)
         return context
     }
 
     func drawLayer(in frame: CGRect, content: (inout GraphicsContext, CGSize) throws -> Void) rethrows {
+        if recording != nil {
+            var layer = recordingContext(size: frame.size)
+            try content(&layer, frame.size)
+            let commands = layer.recording!
+            record(bounds: frame) { context in
+                context.drawLayer(in: frame) { layer, _ in commands.draw(in: layer) }
+            }
+            return
+        }
         if frame.minX > self.viewport.maxX * self.contentScaleFactor ||
             frame.minY > self.viewport.maxY * self.contentScaleFactor {
             return
@@ -80,6 +91,16 @@ extension GraphicsContext {
     }
 
     public func drawLayer(content: (inout GraphicsContext) throws -> Void) rethrows {
+        if recording != nil {
+            var layer = recordingContext(size: viewport.size / contentScaleFactor)
+            layer.clipBoundingRect = clipBoundingRect
+            try content(&layer)
+            let commands = layer.recording!
+            record(bounds: commands.bounds) { context in
+                context.drawLayer { commands.draw(in: $0) }
+            }
+            return
+        }
         if var context = self.makeLayerContext() {
             try content(&context)
             let offset = -context.contentOffset
@@ -112,6 +133,17 @@ extension GraphicsContext {
         contentBounds: CGRect,
         content: (GraphicsContext) -> Void
     ) {
+        if recording != nil {
+            let layer = recordingContext(size: viewport.size / contentScaleFactor)
+            content(layer)
+            let commands = layer.recording!
+            record(bounds: contentBounds) { context in
+                context.drawProjectiveLayer(transform: transform, contentBounds: contentBounds) {
+                    commands.draw(in: $0)
+                }
+            }
+            return
+        }
         guard transform.isInvertible,
               let sourceBounds = projectiveSourceBounds(
                   transform: transform,
