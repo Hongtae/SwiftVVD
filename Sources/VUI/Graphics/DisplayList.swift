@@ -1354,8 +1354,9 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     context.concatenate(transform)
                 }
                 if let renderer = view.renderer {
-                    context.environment = renderer.environment
                     context.translateBy(x: frame.minX, y: frame.minY)
+                    context.copyOnWrite()
+                    context.environment = renderer.environment
                     var source = resolvedText
                     source.shading = shading
                     let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(source))
@@ -1572,6 +1573,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         func renderContext(from context: GraphicsContext) -> GraphicsContext {
             guard let environment else { return context }
             var context = context
+            context.copyOnWrite()
             context.environment = environment
             return context
         }

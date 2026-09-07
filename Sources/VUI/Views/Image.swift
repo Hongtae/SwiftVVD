@@ -2537,6 +2537,7 @@ extension Image: View {
 
             list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
                 var context = context
+                context.copyOnWrite()
                 context.environment = renderEnvironment
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).

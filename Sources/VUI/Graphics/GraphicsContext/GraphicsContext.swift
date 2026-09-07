@@ -98,59 +98,52 @@ public struct GraphicsContext {
         }
     }
 
-    public var opacity: Double
-    public var blendMode: BlendMode
-    public internal(set) var environment: EnvironmentValues
-    var symbols: GraphicsContextSymbols?
-    var recording: DrawingCommands?
-    var recordedClips: [DrawingClip] = []
+    var storage: Storage
+
+    public var opacity: Double {
+        get { Double(storage.opacity) }
+        set {
+            let value = Float(newValue)
+            guard value != storage.opacity else { return }
+            copyOnWrite()
+            storage.opacity = value
+        }
+    }
+
+    public var blendMode: BlendMode {
+        get { BlendMode(rawValue: storage.blendMode.rawValue) }
+        set {
+            guard newValue.rawValue != storage.blendMode.rawValue else { return }
+            copyOnWrite()
+            storage.blendMode = RBBlendMode(rawValue: newValue.rawValue)
+        }
+    }
+
+    public internal(set) var environment: EnvironmentValues {
+        get { storage.environmentOverride ?? storage.shared._environment }
+        set { storage.environmentOverride = newValue }
+        _modify {
+            if storage.environmentOverride == nil {
+                storage.environmentOverride = storage.shared._environment
+            }
+            yield &storage.environmentOverride!
+        }
+    }
+
     public var transform: CGAffineTransform {
-        didSet {
-            self.clipBoundingRect = Self.remappedClipBoundingRect(
-                self.clipBoundingRect,
-                from: oldValue,
-                to: self.transform
+        get { storage.state.pointee.transform }
+        set {
+            let previous = storage.state.pointee.transform
+            guard previous != newValue else { return }
+            copyOnWrite()
+            storage.state.pointee.transform = newValue
+            storage.state.pointee.clipBoundingRect = Self.remappedClipBoundingRect(
+                storage.state.pointee.clipBoundingRect,
+                from: previous,
+                to: newValue
             )
         }
     }
-
-    // MARK: -
-    var viewTransform: CGAffineTransform
-    var contentOffset: CGPoint {
-        didSet {
-            let origin = self.contentOffset
-            let scale = self.viewport.size / self.contentScaleFactor
-            let offset = CGAffineTransform(translationX: origin.x, y: origin.y)
-            let normalize = CGAffineTransform(scaleX: 1.0 / scale.width, y: 1.0 / scale.height)
-
-            // transform to screen viewport space.
-            let clipSpace = CGAffineTransform(scaleX: 2.0, y: -2.0)
-                .concatenating(CGAffineTransform(translationX: -1.0, y: 1.0))
-
-            self.viewTransform = CGAffineTransform.identity
-                .concatenating(offset)
-                .concatenating(normalize)
-                .concatenating(clipSpace)
-        }
-    }
-    let contentScaleFactor: CGFloat
-
-    var maskTexture: Texture
-    let renderTargets: RenderTargets
-    let viewport: CGRect
-
-    let sceneResources: SceneResources
-    let commandBuffer: CommandBuffer
-    let pipeline: GraphicsPipelineStates
-    let uploadBufferArena: UploadBufferArena
-    // Serial command recording shares CPU capacity, not cached tessellation.
-    // Uploads copy the payload before another fill or stroke reuses the vertex array.
-    let pathGeometryScratch: StencilPathGeometryScratch
-
-    let bindingSet1: ShaderBindingSet // for 1-texture
-    let bindingSet2: ShaderBindingSet // for 2-textures
-    // Value copies share this reference so nonmutating draw calls accumulate visible content bounds.
-    let contentBoundsState: ContentBoundsState
 
     final class ContentBoundsState {
         var bounds: CGRect = .null
@@ -175,51 +168,14 @@ public struct GraphicsContext {
             Log.error("Invalid viewport size!")
             return nil
         }
-        self.viewport = viewport
-        self.sceneResources = sceneResources
-        self.opacity = 1
-        self.blendMode = .normal
-        self.transform = .identity
-        self.clipBoundingRect = viewport
-        self.environment = environment
-        self.commandBuffer = commandBuffer
-        self.uploadBufferArena = uploadBufferArena ?? UploadBufferArena(
-            device: commandBuffer.device
-        )
-        self.pathGeometryScratch = pathGeometryScratch ?? StencilPathGeometryScratch()
-        self.contentScaleFactor = contentScaleFactor
-        self.renderTargets = renderTargets
-        self.contentBoundsState = ContentBoundsState()
-
-        let queue = commandBuffer.commandQueue
-        guard let pipeline = GraphicsPipelineStates.sharedInstance(
-            commandQueue: queue) else {
-            Log.error("GraphicsPipelineStates error")
-            return nil
-        }
-        self.pipeline = pipeline
-        self.maskTexture = pipeline.defaultMaskTexture
-        guard let bindingSet1 = pipeline.makeBindingSet1() else {
-            Log.error("Failed to make bindingSet1")
-            return nil
-        }
-        self.bindingSet1 = bindingSet1
-        guard let bindingSet2 = pipeline.makeBindingSet2() else {
-            Log.error("Failed to make bindingSet2")
-            return nil
-        }
-        self.bindingSet2 = bindingSet2
-
-        self.contentOffset = .zero
-        self.viewTransform = .identity
-
-        defer {
-            // contentOffset.didSet will be called.
-            let initContentOffset = { (context: inout GraphicsContext, offset: CGPoint) in
-                context.contentOffset = offset
-            }
-            initContentOffset(&self, contentOffset)
-        }
+        guard let backend = DrawingBackend(
+            sceneResources: sceneResources, viewport: viewport,
+            contentScaleFactor: contentScaleFactor, renderTargets: renderTargets,
+            commandBuffer: commandBuffer, uploadBufferArena: uploadBufferArena,
+            pathGeometryScratch: pathGeometryScratch
+        ) else { return nil }
+        self.init(displayList: RBDisplayList(backend: backend), environment: environment)
+        self.contentOffset = contentOffset
     }
 
     public mutating func scaleBy(x: CGFloat, y: CGFloat) {
@@ -249,7 +205,14 @@ public struct GraphicsContext {
         return bounds.applying(oldTransform.concatenating(newTransform.inverted()))
     }
 
-    public internal(set) var clipBoundingRect: CGRect = .zero
+    public internal(set) var clipBoundingRect: CGRect {
+        get { storage.state.pointee.clipBoundingRect }
+        set {
+            guard newValue != storage.state.pointee.clipBoundingRect else { return }
+            copyOnWrite()
+            storage.state.pointee.clipBoundingRect = newValue
+        }
+    }
 
     func recordContentBounds(_ bounds: CGRect) {
         guard self.opacity > 0,
@@ -274,8 +237,6 @@ public struct GraphicsContext {
         return self.contentBoundsState.bounds.applying(self.transform.inverted())
     }
 
-    var filters: [(Filter, FilterOptions)] = []
-
     var backdrop: Texture { renderTargets.backdrop }
     var stencilBuffer: Texture { renderTargets.stencilBuffer }
     var sourceTexture: Texture { renderTargets.source }
@@ -289,6 +250,9 @@ public struct GraphicsContext {
 
     var commandQueue: CommandQueue { commandBuffer.commandQueue }
 }
+
+@available(*, unavailable)
+extension GraphicsContext: Sendable {}
 
 extension GraphicsContext {
     class RenderTargets {

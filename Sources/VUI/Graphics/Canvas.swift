@@ -302,3 +302,6 @@ private struct CanvasSymbols: StatefulRule, AsyncAttribute {
         }
     }
 }
+
+@available(*, unavailable)
+extension Canvas: Sendable {}

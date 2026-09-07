@@ -44,3 +44,6 @@ class GraphicsContextSymbols {
         fatalError("GraphicsContextSymbols requires a concrete symbol renderer.")
     }
 }
+
+@available(*, unavailable)
+extension GraphicsContext.ResolvedSymbol: Sendable {}

@@ -49,19 +49,22 @@ extension GraphicsContext {
             context.transform = transform.concatenating(baseTransform)
             context.opacity *= opacity
             if blendMode != .normal { context.blendMode = blendMode }
-            context.environment = environment
             context.filters = filters + context.filters
+            context.environment = environment
         }
     }
 
     func recordingContext(size: CGSize) -> GraphicsContext {
-        var context = self
+        var context = GraphicsContext(
+            displayList: RBDisplayList(
+                backend: drawingBackend,
+                colorSpace: RBDrawingStateGetDefaultColorSpace(storage.state)
+            ),
+            environment: environment
+        )
+        context.symbols = symbols
+        context.contentOffset = contentOffset
         context.recording = DrawingCommands()
-        context.recordedClips = []
-        context.transform = .identity
-        context.opacity = 1
-        context.blendMode = .normal
-        context.filters = []
         context.clipBoundingRect = CGRect(origin: .zero, size: size)
         return context
     }

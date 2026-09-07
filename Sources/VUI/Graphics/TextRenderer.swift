@@ -632,6 +632,7 @@ private final class TextRendererBox<Renderer: TextRenderer>: TextRendererBoxBase
     }
 
     override func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        context.copyOnWrite()
         context.environment = values
         renderer.draw(layout: layout, in: &context)
     }

@@ -2348,6 +2348,7 @@ extension Text: View {
 
             list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
                 var context = context
+                context.copyOnWrite()
                 context.environment = renderEnvironment
                 guard let resolved = text._resolveStyledText(
                     context: context,
