@@ -62,9 +62,16 @@ extension GraphicsContext {
             }
             return
         }
-        if frame.minX > self.viewport.maxX * self.contentScaleFactor ||
-            frame.minY > self.viewport.maxY * self.contentScaleFactor {
-            return
+        // Recording must retain the layer for its eventual destination. Only
+        // unfiltered execution can be culled from the source geometry alone.
+        if filters.isEmpty {
+            // Use the texture composite's clip-space mapping, including the
+            // caller transform, content offset and logical-to-pixel scale.
+            let bounds = frame.applying(transform.concatenating(viewTransform))
+            if bounds.maxX < -1 || bounds.minX > 1 ||
+                bounds.maxY < -1 || bounds.minY > 1 {
+                return
+            }
         }
 
         if var context = self.makeLayerContext(frame.size) {
