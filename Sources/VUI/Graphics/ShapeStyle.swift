@@ -662,7 +662,11 @@ public struct AnyShapeStyle: ShapeStyle {
     }
     var storage: Storage
     public init<S>(_ style: S) where S: ShapeStyle {
-        self.storage = Storage(box: AnyShapeStyleBox(style: style))
+        if let style = style as? AnyShapeStyle {
+            self.storage = style.storage
+        } else {
+            self.storage = Storage(box: AnyShapeStyleBox(style: style))
+        }
     }
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
@@ -670,7 +674,7 @@ public struct AnyShapeStyle: ShapeStyle {
     }
 
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
-        AnyShapeStyleBox._apply(to: &type)
+        type.result = .bool(true)
     }
 }
 
@@ -682,8 +686,5 @@ class AnyShapeStyleBox {
 
     func _apply(to shape: inout _ShapeStyle_Shape) {
         self.style._apply(to: &shape)
-    }
-
-    static func _apply(to type: inout _ShapeStyle_ShapeType) {
     }
 }
