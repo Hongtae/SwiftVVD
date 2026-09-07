@@ -46,6 +46,19 @@ struct EnvironmentPropertyKey<K: EnvironmentKey>: PropertyKey {
     static func valuesEqual(_ a: K.Value, _ b: K.Value) -> Bool { K._valuesEqual(a, b) }
 }
 
+protocol DerivedEnvironmentKey {
+    associatedtype Value: Equatable
+    static func value(in environment: EnvironmentValues) -> Value
+}
+
+struct DerivedEnvironmentPropertyKey<K: DerivedEnvironmentKey>: DerivedPropertyKey {
+    static func value(in plist: PropertyList) -> K.Value {
+        // The outer tracker observes the aggregate value, not each input read
+        // performed while computing it.
+        K.value(in: EnvironmentValues(plist))
+    }
+}
+
 // Stores Observable objects in the environment property list via a per-type key.
 // ObservableObjectKey<T> is the PropertyList carrier for object storage.
 struct ObservableObjectKey<T: AnyObject & Observable>: PropertyKey {
@@ -82,10 +95,10 @@ extension EnvironmentValues {
         EnvironmentValues(plist, tracker: _PropertyListTracker())
     }
 
-    init(_ plist: PropertyList, tracker: _PropertyListTracker) {
+    init(_ plist: PropertyList, tracker: _PropertyListTracker? = nil) {
         self._plist = plist
         self.tracker = tracker
-        tracker.initializeValues(from: plist)
+        tracker?.initializeValues(from: plist)
     }
 
     func trackingCopy() -> EnvironmentValues {
@@ -105,6 +118,13 @@ extension EnvironmentValues {
             return tracker.derivedValue(_plist, for: key)
         }
         return _plist[key]
+    }
+
+    subscript<K: DerivedEnvironmentKey>(_ key: K.Type) -> K.Value {
+        if let tracker {
+            return tracker.derivedValue(_plist, for: DerivedEnvironmentPropertyKey<K>.self)
+        }
+        return K.value(in: self)
     }
 
     func valueWithSecondaryLookup<K: PropertyKeyLookup>(_ lookup: K.Type) -> K.Primary.Value {

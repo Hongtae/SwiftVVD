@@ -288,6 +288,12 @@ extension View {
 }
 
 struct TextLayoutProperties: Equatable {
+    struct Key: DerivedEnvironmentKey {
+        static func value(in environment: EnvironmentValues) -> TextLayoutProperties {
+            TextLayoutProperties(from: environment)
+        }
+    }
+
     private struct Flags: OptionSet, Equatable {
         let rawValue: UInt8
 
@@ -355,7 +361,7 @@ struct TextLayoutProperties: Equatable {
         flags = []
     }
 
-    init(_ environment: EnvironmentValues) {
+    init(from environment: EnvironmentValues) {
         lineLimit = environment.lineLimit.map { max($0, 1) }
         lowerLineLimit = environment.lowerLineLimit.map { max($0, 0) }
         truncationMode = environment.truncationMode

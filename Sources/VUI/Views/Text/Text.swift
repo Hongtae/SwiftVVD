@@ -1727,7 +1727,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         }
 
         let environment = context.environment
-        let layoutProperties = TextLayoutProperties(environment)
+        let layoutProperties = environment[TextLayoutProperties.Key.self]
         let transitionText = _resolveTransitionText(in: environment)
         let needsDynamicArchive = _needsDynamicRenderingInArchive(in: environment)
         let version = _resolutionVersion(

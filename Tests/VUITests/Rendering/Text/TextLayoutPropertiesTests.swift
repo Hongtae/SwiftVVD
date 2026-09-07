@@ -57,7 +57,7 @@ final class TextLayoutPropertiesTests: XCTestCase {
         environment.textShape = .excludeTop(.trailing, size: CGSize(width: 8, height: 9))
         environment.textJustification = .full(allLines: false, flexible: true)
 
-        let value = TextLayoutProperties(environment)
+        let value = TextLayoutProperties(from: environment)
         XCTAssertEqual(value.lineLimit, 1)
         XCTAssertEqual(value.lowerLineLimit, 0)
         XCTAssertEqual(value.truncationMode, .middle)
@@ -78,6 +78,77 @@ final class TextLayoutPropertiesTests: XCTestCase {
         XCTAssertEqual(value.textShape, environment.textShape)
         XCTAssertTrue(value.widthIsFlexible)
         XCTAssertFalse(value.sizeFitting)
+    }
+
+    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
+    func testDerivedLayoutReadTracksNormalizedResultInsteadOfRawLineLimits() throws {
+        var original = EnvironmentValues()
+        original.lineLimit = 0
+        original.lowerLineLimit = -3
+        let environment = original.trackingCopy()
+        let tracker = try XCTUnwrap(environment.tracker)
+        let properties = environment[TextLayoutProperties.Key.self]
+        XCTAssertEqual(properties.lineLimit, 1)
+        XCTAssertEqual(properties.lowerLineLimit, 0)
+        XCTAssertEqual(properties, TextLayoutProperties(from: original))
+
+        var equivalent = original
+        equivalent.lineLimit = -4
+        equivalent.lowerLineLimit = -8
+        equivalent.colorScheme = .dark
+        XCTAssertFalse(tracker.hasDifferentUsedValues(equivalent._plist))
+
+        var different = equivalent
+        different.lineLimit = 2
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+        different = equivalent
+        different.lineSpacing = 3
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+    }
+
+    func testDerivedLayoutValueCopiesRemainIndependentAcrossTrackedOverrides() {
+        var original = EnvironmentValues()
+        original.lineLimit = 3
+        var environment = original.trackingCopy()
+        let saved = environment[TextLayoutProperties.Key.self]
+        var edited = saved
+        edited.lineLimit = 7
+        edited.sizeFitting = true
+        XCTAssertEqual(environment[TextLayoutProperties.Key.self], saved)
+
+        environment.lineLimit = 5
+        let overridden = environment[TextLayoutProperties.Key.self]
+        XCTAssertEqual(overridden.lineLimit, 5)
+        XCTAssertFalse(overridden.sizeFitting)
+        XCTAssertEqual(saved.lineLimit, 3)
+        XCTAssertEqual(edited.lineLimit, 7)
+        XCTAssertTrue(edited.sizeFitting)
+        XCTAssertEqual(original[TextLayoutProperties.Key.self].lineLimit, 3)
+    }
+
+    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
+    func testStyledTextProducerTracksDerivedLayoutInsteadOfRawLineLimit() throws {
+        var original = EnvironmentValues()
+        original.font = Font.system(size: 14).resolved(in: original)
+        original.lineLimit = 0
+        let environment = original.trackingCopy()
+        let tracker = try XCTUnwrap(environment.tracker)
+        let context = GraphTextResolutionContext(
+            environment: environment, sceneResources: SceneResources()
+        )
+        let text = Text(verbatim: "Layout").foregroundColor(.black)
+        let resolved = try XCTUnwrap(text._resolveStyledText(
+            context: context, referenceDate: Date(timeIntervalSinceReferenceDate: 0),
+            archiveOptions: .init(), features: [], sizeFitting: false
+        ))
+        XCTAssertEqual(resolved.layoutProperties.lineLimit, 1)
+        XCTAssertFalse(tracker.hasDifferentUsedValues(original._plist))
+        var equivalent = original
+        equivalent.lineLimit = -4
+        XCTAssertFalse(tracker.hasDifferentUsedValues(equivalent._plist))
+        var different = original
+        different.lineLimit = 2
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
     }
 
     func testProtobufFieldMappingMatchesObservedTags() throws {

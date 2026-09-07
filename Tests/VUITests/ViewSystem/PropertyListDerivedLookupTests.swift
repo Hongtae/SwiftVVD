@@ -23,6 +23,22 @@ private struct DerivedLookupEnvironmentKey: EnvironmentKey {
     static let defaultValue = "environment-default"
 }
 
+private final class DerivedEnvironmentCounter {
+    var value = 0
+}
+
+private struct DerivedEnvironmentCounterKey: EnvironmentKey {
+    static var defaultValue: DerivedEnvironmentCounter? { nil }
+}
+
+private struct CountedDerivedEnvironmentKey: DerivedEnvironmentKey {
+    static func value(in environment: EnvironmentValues) -> Int {
+        XCTAssertNil(environment.tracker)
+        environment[DerivedEnvironmentCounterKey.self]?.value += 1
+        return environment[DerivedLookupEnvironmentKey.self].count
+    }
+}
+
 private struct SecondaryToPrimaryLookup: PropertyKeyLookup {
     typealias Primary = DerivedLookupPrimaryKey
     typealias Secondary = DerivedLookupSecondaryKey
@@ -33,6 +49,38 @@ private struct SecondaryToPrimaryLookup: PropertyKeyLookup {
 }
 
 final class PropertyListDerivedLookupTests: XCTestCase {
+    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
+    func testDerivedEnvironmentAdapterCachesAggregateWithoutTrackingItsInputReads() throws {
+        let counter = DerivedEnvironmentCounter()
+        var original = EnvironmentValues()
+        original[DerivedEnvironmentCounterKey.self] = counter
+        original[DerivedLookupEnvironmentKey.self] = "first"
+        var environment = original.trackingCopy()
+        let tracker = try XCTUnwrap(environment.tracker)
+        XCTAssertEqual(environment[CountedDerivedEnvironmentKey.self], 5)
+        XCTAssertEqual(environment[CountedDerivedEnvironmentKey.self], 5)
+        XCTAssertEqual(counter.value, 1)
+
+        var equivalent = original
+        equivalent[DerivedLookupEnvironmentKey.self] = "other"
+        XCTAssertFalse(tracker.hasDifferentUsedValues(equivalent._plist))
+        var different = original
+        different[DerivedLookupEnvironmentKey.self] = "longer"
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+
+        environment[DerivedLookupEnvironmentKey.self] = "updated"
+        XCTAssertEqual(environment[CountedDerivedEnvironmentKey.self], 7)
+        let beforeRepeat = counter.value
+        XCTAssertEqual(environment[CountedDerivedEnvironmentKey.self], 7)
+        XCTAssertEqual(counter.value, beforeRepeat)
+
+        let untracked = original.untrackedCopy()
+        let beforeUntracked = counter.value
+        XCTAssertEqual(untracked[CountedDerivedEnvironmentKey.self], 5)
+        XCTAssertEqual(untracked[CountedDerivedEnvironmentKey.self], 5)
+        XCTAssertEqual(counter.value, beforeUntracked + 2)
+    }
+
     func testDerivedPropertyKeySubscriptComputesFromPropertyList() {
         var plist = PropertyList()
 
