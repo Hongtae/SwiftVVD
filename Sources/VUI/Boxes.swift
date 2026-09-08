@@ -25,6 +25,6 @@ struct WeakBox<Base: AnyObject> {
     }
 }
 
-typealias UnsafeBox<T> = VVD.UnsafeBox<T>
+typealias UnsafeSendableBox<T> = VVD.UnsafeSendableBox<T>
 typealias WeakObject<T: AnyObject> = VVD.WeakObject<T>
 typealias AnyWeakObject = VVD.AnyWeakObject

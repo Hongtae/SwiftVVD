@@ -70,7 +70,7 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
         withObservationTracking {
             result = viewCopy.body
         } onChange: { [weak inbox, handle] in
-            let transactionBox = UnsafeBox(Transaction.current)
+            let transactionBox = UnsafeSendableBox(Transaction.current)
             inbox?.enqueue {
                 if let id = handle.value {
                     _AGGraph.current?.markNeedsEvaluation(
@@ -114,7 +114,7 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
         withObservationTracking {
             result = viewCopy.body
         } onChange: { [weak inbox, handle] in
-            let transactionBox = UnsafeBox(Transaction.current)
+            let transactionBox = UnsafeSendableBox(Transaction.current)
             inbox?.enqueue {
                 if let id = handle.value {
                     _AGGraph.current?.markNeedsEvaluation(

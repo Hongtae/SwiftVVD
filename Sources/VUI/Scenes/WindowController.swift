@@ -2942,7 +2942,7 @@ class WindowController: WindowDelegate,
         let wrapper = ViewGraphHostEnvironmentWrapper()
         wrapper.environment = environment.untrackedCopy()
         wrapper.phase = viewPhase
-        let snapshot = UnsafeBox(wrapper)
+        let snapshot = UnsafeSendableBox(wrapper)
         viewGraph.data.graph.inbox.enqueue { [weak self, snapshot] in
             guard let self else { return }
             var environment = snapshot.value.environment.trackingCopy()

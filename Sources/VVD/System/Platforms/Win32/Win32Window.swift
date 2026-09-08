@@ -366,7 +366,7 @@ final class Win32Window: Window {
                 cbSize: UINT(MemoryLayout<WNDCLASSEXW>.size),
                 style: UINT(CS_OWNDC),
                 lpfnWndProc: { (hWnd, uMsg, wParam, lParam) -> LRESULT in
-                    let box = UnsafeBox(hWnd)
+                    let box = UnsafeSendableBox(hWnd)
                     return MainActor.assumeIsolated {
                         Win32Window.windowProc(box.value, uMsg, wParam, lParam)
                     }

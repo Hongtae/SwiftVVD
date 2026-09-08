@@ -2579,8 +2579,8 @@ extension Image: View {
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
                     let resolved = context.resolveImageDrawing(image)
-                    let boxedResolved = UnsafeBox(resolved)
-                    let boxedTransaction = UnsafeBox(resourceTransaction)
+                    let boxedResolved = UnsafeSendableBox(resolved)
+                    let boxedTransaction = UnsafeSendableBox(resourceTransaction)
 
                     // 2. [State Invalidation] Notify completion and trigger a layout recomputation.
                     let publish: @Sendable () -> Void = {

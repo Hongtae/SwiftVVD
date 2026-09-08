@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 import VVD
 @testable import VUI
@@ -151,23 +152,35 @@ final class GraphicsContextPipelineStateTests: XCTestCase {
     }
 
     private final class TestBindingSet: ShaderBindingSet {
+        private struct Bindings: Sendable {
+            var textures: [Int: Texture] = [:]
+            var samplers: [Int: SamplerState] = [:]
+            var samplerWrites: [Int] = []
+        }
+
         let device: GraphicsDevice
-        var textures: [Int: Texture] = [:]
-        var samplers: [Int: SamplerState] = [:]
-        var samplerWrites: [Int] = []
+        private let bindings = Mutex(Bindings())
+
+        var textures: [Int: Texture] { bindings.withLock { $0.textures } }
+        var samplers: [Int: SamplerState] { bindings.withLock { $0.samplers } }
+        var samplerWrites: [Int] { bindings.withLock { $0.samplerWrites } }
 
         init(device: GraphicsDevice) { self.device = device }
         func setBuffer(_ buffer: GPUBuffer, offset: Int, length: Int, binding: Int) {}
         func setBufferArray(_ buffers: [BufferBindingInfo], binding: Int) {}
-        func setTexture(_ texture: Texture, binding: Int) { textures[binding] = texture }
+        func setTexture(_ texture: Texture, binding: Int) {
+            bindings.withLock { $0.textures[binding] = texture }
+        }
         func setTextureArray(_ textures: [Texture], binding: Int) {
             for (offset, texture) in textures.enumerated() {
                 setTexture(texture, binding: binding + offset)
             }
         }
         func setSamplerState(_ sampler: SamplerState, binding: Int) {
-            samplers[binding] = sampler
-            samplerWrites.append(binding)
+            bindings.withLock {
+                $0.samplers[binding] = sampler
+                $0.samplerWrites.append(binding)
+            }
         }
         func setSamplerStateArray(_ samplers: [SamplerState], binding: Int) {
             for (offset, sampler) in samplers.enumerated() {

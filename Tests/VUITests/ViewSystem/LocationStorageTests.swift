@@ -186,8 +186,8 @@ final class LocationStorageTests: XCTestCase {
                     return 1
                 },
                 onCommit: { value, transaction in
-                    let valueBox = UnsafeBox(value)
-                    let transactionBox = UnsafeBox(transaction)
+                    let valueBox = UnsafeSendableBox(value)
+                    let transactionBox = UnsafeSendableBox(transaction)
                     inbox.enqueue {
                         sourceAttribute.setValue(valueBox.value, transaction: transactionBox.value)
                     }

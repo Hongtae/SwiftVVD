@@ -1021,7 +1021,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     ) {
         guard let contentAttr else { return }
         let graph = viewGraph.graph
-        let content = UnsafeBox(AnyView(contextMenuPopupContent(
+        let content = UnsafeSendableBox(AnyView(contextMenuPopupContent(
             items: items,
             actions: popupActions,
             keyboardSelectionID: keyboardSelectionID,

@@ -269,10 +269,10 @@ private struct SecondaryLookupTrackedValue<K: PropertyKeyLookup>: _AnyTrackedVal
 }
 
 private final class AtomicBuffer<Value> {
-    private let storage: Mutex<UnsafeBox<Value>>
+    private let storage: Mutex<UnsafeSendableBox<Value>>
 
     init(_ value: Value) {
-        self.storage = Mutex(UnsafeBox(value))
+        self.storage = Mutex(UnsafeSendableBox(value))
     }
 
     func read<Result>(_ body: (Value) throws -> Result) rethrows -> Result {
@@ -285,7 +285,7 @@ private final class AtomicBuffer<Value> {
     func update<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
         try storage.withLock { box in
             var value = box.value
-            defer { box = UnsafeBox(value) }
+            defer { box = UnsafeSendableBox(value) }
             return try body(&value)
         }
     }
@@ -304,7 +304,7 @@ private final class AtomicBuffer<Value> {
         return try source.storage.withLock { sourceBox in
             return try storage.withLock { box in
                 var value = box.value
-                defer { box = UnsafeBox(value) }
+                defer { box = UnsafeSendableBox(value) }
                 return try body(sourceBox.value, &value)
             }
         }

@@ -139,7 +139,7 @@ extension FocusState {
         private func scheduleDeferredUpdate(
             for location: FocusStoreLocation<Value>
         ) {
-            let action = UnsafeBox { [weak location] in
+            let action = UnsafeSendableBox { [weak location] in
                 location?.performDeferredUpdate()
             }
             RunLoop.main.perform {

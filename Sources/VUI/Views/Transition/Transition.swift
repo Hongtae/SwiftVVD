@@ -208,7 +208,7 @@ struct ApplyTransitionModifier<T: Transition>: MultiViewModifier {
                     phase: modifier.phase
                 )
             } onChange: { [weak inbox] in
-                let transaction = UnsafeBox(Transaction.current)
+                let transaction = UnsafeSendableBox(Transaction.current)
                 inbox?.enqueue {
                     _AGGraph.current?.markNeedsEvaluation(
                         owner,

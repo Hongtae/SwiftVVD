@@ -958,7 +958,7 @@ extension _AGGraph {
                 continue
             }
             let targetNodeID = entry.targetNodeID
-            let transactionBox = transaction.map(UnsafeBox.init)
+            let transactionBox = transaction.map(UnsafeSendableBox.init)
             targetGraph.inbox.enqueue(transaction: transaction) { [weak targetGraph] in
                 let transaction = transactionBox?.value
                 targetGraph?.markNeedsEvaluation(

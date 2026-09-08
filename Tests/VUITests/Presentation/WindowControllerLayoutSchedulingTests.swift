@@ -12412,11 +12412,11 @@ private struct LayoutSchedulingTransitionTextMarker: View {
         view[\.probe]._attribute.value.insertionPosition = position
         view[\.probe]._attribute.value.insertionSize = inputSize
         let resolvedSize = graph.makeInput(value: CGSize.zero)
-        let boxedSize = UnsafeBox(view._attribute.value.size)
+        let boxedSize = UnsafeSendableBox(view._attribute.value.size)
         let transaction = graph.transaction(
             for: view._attribute.identifier
         ) ?? Transaction()
-        let boxedTransaction = UnsafeBox(transaction)
+        let boxedTransaction = UnsafeSendableBox(transaction)
         graph.inbox.enqueue(transaction: transaction) {
             resolvedSize.setValue(boxedSize.value, transaction: boxedTransaction.value)
         }
@@ -12462,7 +12462,7 @@ private struct LayoutSchedulingDeferredIntrinsicSizeMarker: View {
 
         let size = view._attribute.value.resolvedSize
         let resolvedSize = graph.makeInput(value: CGSize.zero)
-        let boxedSize = UnsafeBox(size)
+        let boxedSize = UnsafeSendableBox(size)
         graph.inbox.enqueue {
             resolvedSize.setValue(boxedSize.value)
         }

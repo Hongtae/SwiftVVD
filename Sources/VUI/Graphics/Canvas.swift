@@ -153,7 +153,7 @@ private struct CanvasDisplayList<Symbols: View>: StatefulRule, AsyncAttribute {
                         withObservationTracking {
                             canvas.renderer(&layerContext, size)
                         } onChange: { [weak inbox] in
-                            let transaction = UnsafeBox(Transaction.current)
+                            let transaction = UnsafeSendableBox(Transaction.current)
                             inbox?.enqueue {
                                 _AGGraph.current?.markNeedsEvaluation(
                                     owner, transaction: transaction.value,

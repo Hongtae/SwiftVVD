@@ -2333,8 +2333,8 @@ extension Text: View {
                     fatalError("A graphics text context must resolve backend attachments.")
                 }
                 resolved.resolvedText?.prepareResources()
-                let boxedResolved = UnsafeBox(resolved)
-                let boxedTransaction = UnsafeBox(resourceTransaction)
+                let boxedResolved = UnsafeSendableBox(resolved)
+                let boxedTransaction = UnsafeSendableBox(resourceTransaction)
 
                 let publish: @Sendable () -> Void = {
                     backendResolvedTextTransactionAttr.setValue(boxedTransaction.value)

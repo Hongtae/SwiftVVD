@@ -29,8 +29,8 @@ import Synchronization
 /// }
 /// ```
 final class AGInbox: @unchecked Sendable {
-    private struct WorkItem: Sendable {
-        var transaction: UnsafeBox<Transaction>?
+    private struct WorkItem: @unchecked Sendable {
+        var transaction: Transaction?
         var work: @Sendable () -> Void
     }
 
@@ -44,7 +44,7 @@ final class AGInbox: @unchecked Sendable {
     /// removing or executing it.
     var nextTransaction: Transaction? {
         pendingWork.withLock { work in
-            guard let transaction = work.first?.transaction?.value,
+            guard let transaction = work.first?.transaction,
                   !transaction.isEmpty else {
                 return nil
             }
@@ -56,7 +56,7 @@ final class AGInbox: @unchecked Sendable {
     /// The closure runs when the owning graph drains this inbox.
     func enqueue(transaction: Transaction? = nil, _ work: @escaping @Sendable () -> Void) {
         pendingWork.withLock {
-            $0.append(WorkItem(transaction: transaction.map(UnsafeBox.init), work: work))
+            $0.append(WorkItem(transaction: transaction, work: work))
         }
     }
 
@@ -74,7 +74,7 @@ final class AGInbox: @unchecked Sendable {
         }
         var transaction: Transaction?
         for item in pending {
-            if let itemTransaction = item.transaction?.value,
+            if let itemTransaction = item.transaction,
                !itemTransaction.isEmpty {
                 transaction = itemTransaction
             }
@@ -95,7 +95,7 @@ final class AGInbox: @unchecked Sendable {
             return work.removeFirst()
         }
         guard let item else { return nil }
-        let transaction = item.transaction?.value
+        let transaction = item.transaction
         item.work()
         return transaction?.isEmpty == false ? transaction : nil
     }

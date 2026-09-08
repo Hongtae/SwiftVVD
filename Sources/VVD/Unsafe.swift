@@ -5,7 +5,7 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public struct UnsafeBox<T>: Sendable {
+public struct UnsafeSendableBox<T>: Sendable {
     nonisolated(unsafe) public let value: T
     public init(_ value: T) {
         self.value = value
