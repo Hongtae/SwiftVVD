@@ -3,6 +3,28 @@ import XCTest
 @testable import VUI
 
 final class EffectProtobufTests: XCTestCase {
+    func testRectangleDecoderRejectsZeroFieldNumbers() throws {
+        let xCoordinate: [UInt8] = [0x0d, 0x00, 0x00, 0x40, 0x40]
+        var validDecoder = ProtobufDecoder(Data([0x78, 1] + xCoordinate))
+        XCTAssertEqual(try CGRect(from: &validDecoder), CGRect(x: 3, y: 0, width: 0, height: 0))
+
+        for tag: UInt8 in 0...7 {
+            let payload: [UInt8]
+            switch tag {
+            case 0, 2: payload = [0]
+            case 1: payload = Array(repeating: 0, count: 8)
+            case 5: payload = Array(repeating: 0, count: 4)
+            default: payload = []
+            }
+            for prefix in [[], xCoordinate] {
+                var decoder = ProtobufDecoder(Data(prefix + [tag] + payload))
+                XCTAssertThrowsError(try CGRect(from: &decoder), "tag \(tag), prefix \(prefix)") { error in
+                    XCTAssertEqual(error as? ProtobufDecoder.DecodingError, .failed)
+                }
+            }
+        }
+    }
+
     func testDefaultEffectValuesElideAllFields() throws {
         XCTAssertEqual(
             try ProtobufEncoder.encoding(_OpacityEffect(opacity: 1)),

@@ -460,6 +460,7 @@ extension CGRect: ProtobufEncodableMessage, ProtobufDecodableMessage {
         var height: CGFloat = 0
         while !decoder.isAtEnd {
             let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
             let fieldNumber = tag >> 3
             let wireType = tag & 0x7
             switch fieldNumber {
