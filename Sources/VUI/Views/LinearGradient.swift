@@ -52,11 +52,25 @@ public struct LinearGradient: ShapeStyle, View, Sendable {
                          ? environment.effectiveAllowedDynamicRange(explicitRange: nil) : .standard)
     }
 
-    struct _Paint: Equatable, Sendable {
+    struct _Paint: Equatable, Animatable, Sendable {
         var gradient: ResolvedGradient
         var startPoint: UnitPoint
         var endPoint: UnitPoint
         var allowedDynamicRange: Image.DynamicRange
+
+        typealias AnimatableData = AnimatablePair<AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>>, ResolvedGradientVector>
+
+        var animatableData: AnimatableData {
+            get {
+                .init(.init(.init(startPoint.x * 128, startPoint.y * 128),
+                            .init(endPoint.x * 128, endPoint.y * 128)), gradient.animatableData)
+            }
+            set {
+                startPoint = UnitPoint(x: newValue.first.first.first / 128, y: newValue.first.first.second / 128)
+                endPoint = UnitPoint(x: newValue.first.second.first / 128, y: newValue.first.second.second / 128)
+                gradient.animatableData = newValue.second
+            }
+        }
 
         func store(in shape: inout _ShapeStyle_Shape, name: _ShapeStyle_Name, level: Int) {
             let paint: AnyResolvedPaint
@@ -78,11 +92,24 @@ public struct LinearGradient: ShapeStyle, View, Sendable {
         }
     }
 
-    struct AbsolutePaint: Equatable, Sendable {
+    struct AbsolutePaint: Equatable, Animatable, Sendable {
         var gradient: ResolvedGradient
         var startPoint: CGPoint
         var endPoint: CGPoint
         var allowedDynamicRange: Image.DynamicRange
+
+        typealias AnimatableData = AnimatablePair<AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>>, ResolvedGradientVector>
+
+        var animatableData: AnimatableData {
+            get {
+                .init(.init(.init(startPoint.x, startPoint.y), .init(endPoint.x, endPoint.y)), gradient.animatableData)
+            }
+            set {
+                startPoint = CGPoint(x: newValue.first.first.first, y: newValue.first.first.second)
+                endPoint = CGPoint(x: newValue.first.second.first, y: newValue.first.second.second)
+                gradient.animatableData = newValue.second
+            }
+        }
     }
 }
 

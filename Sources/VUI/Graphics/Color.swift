@@ -750,68 +750,21 @@ extension Color: ShapeStyle {
         
         public typealias AnimatableData = AnimatablePair<Float, AnimatablePair<Float, AnimatablePair<Float, Float>>>
         public var animatableData: AnimatableData {
-            get { Self.interpolatableColor(from: self) }
-            set { self = Self.resolvedColor(from: newValue) }
-        }
-
-        fileprivate static func interpolatableColor(
-            from color: Self
-        ) -> AnimatableData {
-            let l = signedCubeRoot(
-                0.4122214708 * color.linearRed +
-                    0.5363325363 * color.linearGreen +
-                    0.0514459929 * color.linearBlue
-            )
-            let m = signedCubeRoot(
-                0.2119034982 * color.linearRed +
-                    0.6806995451 * color.linearGreen +
-                    0.1073969566 * color.linearBlue
-            )
-            let s = signedCubeRoot(
-                0.0883024619 * color.linearRed +
-                    0.2817188376 * color.linearGreen +
-                    0.6299787005 * color.linearBlue
-            )
-            let scale = color.opacity * 128
-            return AnimatableData(
-                l * scale,
-                .init(
-                    m * scale,
-                    .init(s * scale, color.opacity * 128)
-                )
-            )
-        }
-
-        fileprivate static func resolvedColor(
-            from data: AnimatableData
-        ) -> Self {
-            let inverseScale: Float = 1 / 128
-            var l = data.first * inverseScale
-            var m = data.second.first * inverseScale
-            var s = data.second.second.first * inverseScale
-            let opacity = data.second.second.second * inverseScale
-            if opacity != 0 {
-                l /= opacity
-                m /= opacity
-                s /= opacity
+            get {
+                let color = ResolvedGradient.ColorSpace.perceptual.convertIn(self)
+                return AnimatableData(color.r * 128, .init(color.g * 128, .init(color.b * 128, color.a * 128)))
             }
-            l *= l * l
-            m *= m * m
-            s *= s * s
-            return Self(
-                colorSpace: .sRGBLinear,
-                red: 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-                green: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-                blue: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
-                opacity: opacity
-            )
+            set {
+                let inverseScale: Float = 1 / 128
+                self = ResolvedGradient.ColorSpace.perceptual.convertOut(.init(
+                    r: newValue.first * inverseScale,
+                    g: newValue.second.first * inverseScale,
+                    b: newValue.second.second.first * inverseScale,
+                    a: newValue.second.second.second * inverseScale
+                ))
+            }
         }
 
-        private static func signedCubeRoot(_ value: Float) -> Float {
-            let result = pow(abs(value), 1.0 / 3.0)
-            return value.sign == .minus ? -result : result
-        }
-        
         public var description: String {
             String(
                 format: "#%02X%02X%02X%02X",

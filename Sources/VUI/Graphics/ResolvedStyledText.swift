@@ -188,6 +188,7 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
 
         enum AnimatableData: VectorArithmetic, Sendable {
             case color(Color.ResolvedHDR._Animatable)
+            case linearGradient(LinearGradient._Paint.AnimatableData)
             case meshGradient(MeshGradientData)
             case zero
 
@@ -196,7 +197,9 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
                 case let .color(color):
                     self = .color(color.animatableData)
                 case let .paint(paint):
-                    if let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> {
+                    if let paint = paint as? _AnyResolvedPaint<LinearGradient._Paint> {
+                        self = .linearGradient(paint.paint.animatableData)
+                    } else if let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> {
                         self = .meshGradient(paint.paint.animatableData)
                     } else {
                         self = .zero
@@ -212,6 +215,8 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
                     break
                 case let (.color(lhsValue), .color(rhsValue)):
                     lhs = .color(lhsValue + rhsValue)
+                case let (.linearGradient(lhsValue), .linearGradient(rhsValue)):
+                    lhs = .linearGradient(lhsValue + rhsValue)
                 case let (.meshGradient(lhsValue), .meshGradient(rhsValue)):
                     lhs = .meshGradient(lhsValue + rhsValue)
                 default:
@@ -227,6 +232,8 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
                     lhs = value
                 case let (.color(lhsValue), .color(rhsValue)):
                     lhs = .color(lhsValue - rhsValue)
+                case let (.linearGradient(lhsValue), .linearGradient(rhsValue)):
+                    lhs = .linearGradient(lhsValue - rhsValue)
                 case let (.meshGradient(lhsValue), .meshGradient(rhsValue)):
                     lhs = .meshGradient(lhsValue - rhsValue)
                 default:
@@ -251,6 +258,9 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
                 case var .color(value):
                     value.scale(by: rhs)
                     self = .color(value)
+                case var .linearGradient(value):
+                    value.scale(by: rhs)
+                    self = .linearGradient(value)
                 case var .meshGradient(value):
                     value.scale(by: rhs)
                     self = .meshGradient(value)
@@ -262,6 +272,8 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
             var magnitudeSquared: Double {
                 switch self {
                 case let .color(value):
+                    value.magnitudeSquared
+                case let .linearGradient(value):
                     value.magnitudeSquared
                 case let .meshGradient(value):
                     value.magnitudeSquared
@@ -276,6 +288,13 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
                     var color = original
                     color.animatableData = data
                     fill = .color(color)
+                case let (.paint(paint), .linearGradient(data)):
+                    guard let paint = paint as? _AnyResolvedPaint<LinearGradient._Paint> else {
+                        return
+                    }
+                    var resolved = paint.paint
+                    resolved.animatableData = data
+                    fill = .paint(_AnyResolvedPaint(resolved))
                 case let (.paint(paint), .meshGradient(data)):
                     guard let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> else {
                         return
