@@ -17,6 +17,8 @@ struct ResolvedGradient: Equatable, Animatable, Sendable {
     enum ColorSpace: UInt8, Hashable, Sendable {
         case device, linear, perceptual
 
+        static let `default` = ColorSpace.perceptual
+
         struct InterpolatableColor: Equatable, Sendable {
             var r: Float
             var g: Float
@@ -118,6 +120,76 @@ struct ResolvedGradient: Equatable, Animatable, Sendable {
             for stop in newValue.stops {
                 stops.append(Stop(color: newValue.colorSpace.convertOut(stop.color),
                                   location: stop.location, interpolation: stop.interpolation))
+            }
+        }
+    }
+}
+
+extension ResolvedGradient: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        for stop in stops {
+            try encoder.encodeMessageField(1, stop)
+        }
+        if colorSpace != .device {
+            encoder.encodeVarint(2 << 3)
+            encoder.encodeVarint(UInt(colorSpace.rawValue))
+        }
+        if let headroom {
+            encoder.encodeFloatFieldAlways(3, headroom)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self.init(stops: [], colorSpace: .default, headroom: nil)
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                stops.append(try decoder.decodeMessage(Stop.self))
+            case 2:
+                let raw = try decoder.decodeUIntField(wireType: wireType)
+                colorSpace = UInt8(exactly: raw).flatMap(ColorSpace.init(rawValue:)) ?? .device
+            case 3:
+                headroom = try decoder.decodeFloatField(wireType: wireType)
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+    }
+}
+
+extension ResolvedGradient.Stop: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        try encoder.encodeMessageField(1, color)
+        if location != 0 {
+            encoder.encodeCGFloatFieldAlways(2, location)
+        }
+        if let interpolation {
+            try encoder.encodeMessageField(3, interpolation)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self.init(color: .init(colorSpace: .sRGBLinear, red: 0, green: 0, blue: 0, opacity: 0),
+                  location: 0, interpolation: nil)
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                color = try decoder.decodeMessage(Color.Resolved.self)
+            case 2:
+                location = try decoder.decodeCGFloatField(wireType: wireType)
+            case 3:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                interpolation = try decoder.decodeMessage(BezierTimingFunction<Float>.self)
+            default:
+                try decoder.skipField(wireType: wireType)
             }
         }
     }

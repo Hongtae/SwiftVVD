@@ -113,6 +113,95 @@ public struct LinearGradient: ShapeStyle, View, Sendable {
     }
 }
 
+extension LinearGradient._Paint: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        try encoder.encodeMessageField(1, gradient)
+        if startPoint.x != 0 || startPoint.y != 0 {
+            try encoder.encodeMessageField(2, startPoint)
+        }
+        if endPoint.x != 0 || endPoint.y != 0 {
+            try encoder.encodeMessageField(3, endPoint)
+        }
+        if allowedDynamicRange != .standard {
+            encoder.encodeVarint(4 << 3)
+            encoder.encodeVarint(UInt(allowedDynamicRange.storage.rawValue))
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self.init(gradient: .init(stops: [], colorSpace: .default, headroom: nil),
+                  startPoint: .init(x: 0, y: 0), endPoint: .init(x: 0, y: 0),
+                  allowedDynamicRange: .standard)
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                gradient = try decoder.decodeMessage(ResolvedGradient.self)
+            case 2:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                startPoint = try decoder.decodeMessage(UnitPoint.self)
+            case 3:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                endPoint = try decoder.decodeMessage(UnitPoint.self)
+            case 4:
+                let raw = try decoder.decodeUIntField(wireType: wireType)
+                allowedDynamicRange = Image.DynamicRange(
+                    UInt8(exactly: raw).flatMap(Image.DynamicRange.Storage.init(rawValue:)) ?? .standard
+                )
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+    }
+}
+
+extension LinearGradient.AbsolutePaint: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        try encoder.encodeMessageField(1, gradient)
+        if startPoint != .zero {
+            try encoder.encodeMessageField(2, startPoint)
+        }
+        if endPoint != .zero {
+            try encoder.encodeMessageField(3, endPoint)
+        }
+        if allowedDynamicRange != .standard {
+            encoder.encodeVarint(4 << 3)
+            encoder.encodeVarint(UInt(allowedDynamicRange.storage.rawValue))
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self.init(gradient: .init(stops: [], colorSpace: .default, headroom: nil),
+                  startPoint: .zero, endPoint: .zero, allowedDynamicRange: .standard)
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                gradient = try decoder.decodeMessage(ResolvedGradient.self)
+            case 2:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                startPoint = try decoder.decodeMessage(CGPoint.self)
+            case 3:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                endPoint = try decoder.decodeMessage(CGPoint.self)
+            case 4:
+                let raw = try decoder.decodeUIntField(wireType: wireType)
+                allowedDynamicRange = Image.DynamicRange(
+                    UInt8(exactly: raw).flatMap(Image.DynamicRange.Storage.init(rawValue:)) ?? .standard
+                )
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+    }
+}
+
 public struct _AnyLinearGradient: ShapeStyle {
     var gradient: AnyGradient
     var startPoint: UnitPoint

@@ -16,20 +16,31 @@ protocol ProtobufDecodableMessage {
 }
 
 struct ProtobufEncoder {
+    struct Options: OptionSet {
+        let rawValue: UInt32
+
+        static let singlePrecisionCGFloat = Options(rawValue: 1 << 0)
+    }
+
     enum EncodingError: Error, Hashable {
         case failed
     }
 
     private var buffer: [UInt8] = []
     private var lengthDelimitedStarts: [Int] = []
+    var options: Options
     let archiveVersion: UInt8
 
-    init(archiveVersion: UInt8 = 4) {
+    init(archiveVersion: UInt8 = 4, options: Options = []) {
         self.archiveVersion = archiveVersion
+        self.options = options
     }
 
-    static func encoding<Message: ProtobufEncodableMessage>(_ message: Message) throws -> Data {
-        var encoder = ProtobufEncoder()
+    static func encoding<Message: ProtobufEncodableMessage>(
+        _ message: Message,
+        options: Options = []
+    ) throws -> Data {
+        var encoder = ProtobufEncoder(options: options)
         try message.encode(to: &encoder)
         return encoder.data
     }
@@ -77,7 +88,12 @@ struct ProtobufEncoder {
     }
 
     mutating func encodeCGFloatFieldAlways(_ fieldNumber: UInt, _ value: CGFloat) {
-        encodeDoubleFieldAlways(fieldNumber, Double(value))
+        // Small coordinates intentionally trade precision for a shorter field.
+        if options.contains(.singlePrecisionCGFloat) || abs(value) < 65_536 {
+            encodeFloatFieldAlways(fieldNumber, Float(value))
+        } else {
+            encodeDoubleFieldAlways(fieldNumber, Double(value))
+        }
     }
 
     mutating func encodeMessageField<Message: ProtobufEncodableMessage>(
@@ -176,6 +192,24 @@ struct ProtobufDecoder {
         let value = try decodeVarint()
         let signMask = UInt(bitPattern: -Int(value & 1))
         return Int(bitPattern: (value >> 1) ^ signMask)
+    }
+
+    mutating func decodeUIntField(wireType: UInt) throws -> UInt {
+        switch wireType {
+        case 0:
+            return try decodeVarint()
+        case 2:
+            return try decodeLengthDelimited { decoder in
+                var value: UInt?
+                while !decoder.isAtEnd {
+                    value = try decoder.decodeVarint()
+                }
+                guard let value else { throw DecodingError.failed }
+                return value
+            }
+        default:
+            throw DecodingError.failed
+        }
     }
 
     mutating func decodeFixed32() throws -> UInt32 {
@@ -365,6 +399,7 @@ private func decodeProtobufCGFloatPair(
 
     while !decoder.isAtEnd {
         let tag = try decoder.decodeVarint()
+        guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
         let fieldNumber = tag >> 3
         let wireType = tag & 0x7
 

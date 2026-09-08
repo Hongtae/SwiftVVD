@@ -11,3 +11,28 @@ struct BezierTimingFunction<T: BinaryFloatingPoint & Sendable>: Equatable, Senda
     var p2x: T
     var p2y: T
 }
+
+extension BezierTimingFunction: ProtobufEncodableMessage, ProtobufDecodableMessage where T == Float {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        if p1x != 0 { encoder.encodeFloatFieldAlways(1, p1x) }
+        if p1y != 0 { encoder.encodeFloatFieldAlways(2, p1y) }
+        if p2x != 1 { encoder.encodeFloatFieldAlways(3, p2x) }
+        if p2y != 1 { encoder.encodeFloatFieldAlways(4, p2y) }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        self.init(p1x: 0, p1y: 0, p2x: 1, p2y: 1)
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1: p1x = try decoder.decodeFloatField(wireType: wireType)
+            case 2: p1y = try decoder.decodeFloatField(wireType: wireType)
+            case 3: p2x = try decoder.decodeFloatField(wireType: wireType)
+            case 4: p2y = try decoder.decodeFloatField(wireType: wireType)
+            default: try decoder.skipField(wireType: wireType)
+            }
+        }
+    }
+}
