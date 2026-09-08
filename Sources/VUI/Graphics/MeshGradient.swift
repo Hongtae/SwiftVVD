@@ -165,6 +165,160 @@ extension MeshGradient: View {
     public typealias Body = _ShapeView<Rectangle, MeshGradient>
 }
 
+extension MeshGradient.Locations: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        switch self {
+        case let .points(points):
+            for point in points {
+                encoder.encodeVarint(1 << 3 | 2)
+                encoder.startLengthDelimited()
+                if point.x != 0 { encoder.encodeFloatFieldAlways(1, point.x) }
+                if point.y != 0 { encoder.encodeFloatFieldAlways(2, point.y) }
+                encoder.endLengthDelimited()
+            }
+        case let .bezierPoints(points):
+            for point in points {
+                encoder.encodeVarint(2 << 3 | 2)
+                encoder.startLengthDelimited()
+                withUnsafeBytes(of: point) { bytes in
+                    // The five SIMD2 values contain ten consecutive Float components.
+                    for index in 0..<10 {
+                        let value = bytes.load(fromByteOffset: index * MemoryLayout<Float>.stride, as: Float.self)
+                        if value != 0 { encoder.encodeFloatFieldAlways(UInt(index + 1), value) }
+                    }
+                }
+                encoder.endLengthDelimited()
+            }
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var points: [SIMD2<Float>] = []
+        var bezierPoints: [MeshGradient.BezierPoint] = []
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                let point = try decoder.decodeLengthDelimited { decoder in
+                    var point = SIMD2<Float>.zero
+                    while !decoder.isAtEnd {
+                        let tag = try decoder.decodeVarint()
+                        guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+                        let wireType = tag & 7
+                        switch tag >> 3 {
+                        case 1: point.x = try decoder.decodeFloatField(wireType: wireType)
+                        case 2: point.y = try decoder.decodeFloatField(wireType: wireType)
+                        default: try decoder.skipField(wireType: wireType)
+                        }
+                    }
+                    return point
+                }
+                points.append(point)
+            case 2:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                let point = try decoder.decodeLengthDelimited { decoder in
+                    var point = MeshGradient.BezierPoint(
+                        position: .zero, leadingControlPoint: .zero, topControlPoint: .zero,
+                        trailingControlPoint: .zero, bottomControlPoint: .zero
+                    )
+                    try withUnsafeMutableBytes(of: &point) { bytes in
+                        while !decoder.isAtEnd {
+                            let tag = try decoder.decodeVarint()
+                            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+                            let field = tag >> 3
+                            let wireType = tag & 7
+                            if field <= 10 {
+                                let value = try decoder.decodeFloatField(wireType: wireType)
+                                bytes.storeBytes(of: value, toByteOffset: Int(field - 1) * MemoryLayout<Float>.stride, as: Float.self)
+                            } else {
+                                try decoder.skipField(wireType: wireType)
+                            }
+                        }
+                    }
+                    return point
+                }
+                bezierPoints.append(point)
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self = bezierPoints.isEmpty ? .points(points) : .bezierPoints(bezierPoints)
+    }
+}
+
+extension MeshGradient._Paint: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) throws {
+        try encoder.encodeMessageField(1, locations)
+        for color in colors { try encoder.encodeMessageField(2, color) }
+        if background.linearRed != 0 || background.linearGreen != 0 || background.linearBlue != 0
+            || background.opacity != 0 || !background._headroom.isNaN {
+            try encoder.encodeMessageField(3, background)
+        }
+        if width > 0 {
+            encoder.encodeVarint(4 << 3)
+            encoder.encodeVarint(UInt(width))
+        }
+        if height > 0 {
+            encoder.encodeVarint(5 << 3)
+            encoder.encodeVarint(UInt(height))
+        }
+        if flags.rawValue != 0 {
+            encoder.encodeVarint(6 << 3)
+            encoder.encodeVarint(UInt(flags.rawValue))
+        }
+        if allowedDynamicRange != .standard {
+            encoder.encodeVarint(7 << 3)
+            encoder.encodeVarint(allowedDynamicRange == .constrainedHigh ? 1 : 2)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var locations = MeshGradient.Locations.points([])
+        var colors: [Color.Resolved] = []
+        var background = Color.ResolvedHDR(.init(colorSpace: .sRGBLinear, red: 0, green: 0, blue: 0, opacity: 0))
+        var width = 0
+        var height = 0
+        var flags = MeshGradient._PaintFlags(rawValue: 0)
+        var allowedDynamicRange = Image.DynamicRange.standard
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                locations = try decoder.decodeMessage()
+            case 2:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                colors.append(try decoder.decodeMessage())
+            case 3:
+                guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
+                background = try decoder.decodeMessage()
+            case 4:
+                try decoder.decodeUIntField(wireType: wireType) {
+                    if let value = Int(exactly: $0) { width = value }
+                }
+            case 5:
+                try decoder.decodeUIntField(wireType: wireType) {
+                    if let value = Int(exactly: $0) { height = value }
+                }
+            case 6:
+                flags = .init(rawValue: UInt32(truncatingIfNeeded: try decoder.decodeUIntField(wireType: wireType)))
+            case 7:
+                let value = try decoder.decodeUIntField(wireType: wireType)
+                allowedDynamicRange = value == 1 ? .constrainedHigh : value == 2 ? .high : .standard
+            default:
+                try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(locations: locations, colors: colors, background: background,
+                  width: width, height: height, allowedDynamicRange: allowedDynamicRange, flags: flags)
+    }
+}
+
 extension MeshGradient {
     struct _PaintFlags: OptionSet, Equatable, Sendable {
         let rawValue: UInt32

@@ -852,6 +852,43 @@ extension Color.Resolved: ProtobufEncodableMessage, ProtobufDecodableMessage {
     }
 }
 
+extension Color.ResolvedHDR: ProtobufEncodableMessage, ProtobufDecodableMessage {
+    func encode(to encoder: inout ProtobufEncoder) {
+        if linearRed != 0 { encoder.encodeFloatFieldAlways(1, linearRed) }
+        if linearGreen != 0 { encoder.encodeFloatFieldAlways(2, linearGreen) }
+        if linearBlue != 0 { encoder.encodeFloatFieldAlways(3, linearBlue) }
+        if opacity != 1 { encoder.encodeFloatFieldAlways(4, opacity) }
+        if _headroom != 0 && !_headroom.isNaN {
+            encoder.encodeFloatFieldAlways(5, _headroom)
+        }
+    }
+
+    init(from decoder: inout ProtobufDecoder) throws {
+        var red: Float = 0
+        var green: Float = 0
+        var blue: Float = 0
+        var opacity: Float = 1
+        var headroom: Float = .nan
+        while !decoder.isAtEnd {
+            let tag = try decoder.decodeVarint()
+            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
+            let wireType = tag & 7
+            switch tag >> 3 {
+            case 1: red = try decoder.decodeFloatField(wireType: wireType)
+            case 2: green = try decoder.decodeFloatField(wireType: wireType)
+            case 3: blue = try decoder.decodeFloatField(wireType: wireType)
+            case 4: opacity = try decoder.decodeFloatField(wireType: wireType)
+            case 5: headroom = try decoder.decodeFloatField(wireType: wireType)
+            default: try decoder.skipField(wireType: wireType)
+            }
+        }
+        self.init(
+            .init(colorSpace: .sRGBLinear, red: red, green: green, blue: blue, opacity: opacity),
+            headroom: headroom
+        )
+    }
+}
+
 extension Color.Resolved: CodableByProxy {
     var codingProxy: Color.RGBADefinition<Float, Float> {
         .init(red: linearRed, green: linearGreen, blue: linearBlue, opacity: opacity)

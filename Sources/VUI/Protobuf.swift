@@ -195,17 +195,21 @@ struct ProtobufDecoder {
     }
 
     mutating func decodeUIntField(wireType: UInt) throws -> UInt {
+        var value: UInt = 0
+        try decodeUIntField(wireType: wireType) { value = $0 }
+        return value
+    }
+
+    mutating func decodeUIntField(wireType: UInt, _ body: (UInt) -> Void) throws {
         switch wireType {
         case 0:
-            return try decodeVarint()
+            body(try decodeVarint())
         case 2:
-            return try decodeLengthDelimited { decoder in
-                var value: UInt?
-                while !decoder.isAtEnd {
-                    value = try decoder.decodeVarint()
-                }
-                guard let value else { throw DecodingError.failed }
-                return value
+            try decodeLengthDelimited { decoder in
+                guard !decoder.isAtEnd else { throw DecodingError.failed }
+                repeat {
+                    body(try decoder.decodeVarint())
+                } while !decoder.isAtEnd
             }
         default:
             throw DecodingError.failed
