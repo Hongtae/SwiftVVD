@@ -145,6 +145,37 @@ final class CodableAnimationTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS codableAnimationArchiveVersionObserved
+    func testModifiersReadSignedArchiveVersionFromUserInfo() throws {
+        let messages: [(any ProtobufEncodableMessage, Data, Data)] = [
+            (DelayAnimation(delay: 2),
+             Data([0x21, 0, 0, 0, 0, 0, 0, 0, 0x40]),
+             Data([0x42, 0x09, 0x09, 0, 0, 0, 0, 0, 0, 0, 0x40])),
+            (SpeedAnimation(speed: 3),
+             Data([0x31, 0, 0, 0, 0, 0, 0, 0x08, 0x40]),
+             Data([0x42, 0x09, 0x19, 0, 0, 0, 0, 0, 0, 0x08, 0x40])),
+            (RepeatAnimation(repeatCount: 4, autoreverses: true),
+             Data([0x2a, 0x04, 0x08, 0x08, 0x10, 0x01]),
+             Data([0x42, 0x06, 0x12, 0x04, 0x08, 0x08, 0x10, 0x01])),
+        ]
+        for version in Int8.min...Int8.max {
+            for flags: UInt8 in [0, 255] {
+                for options: UInt32 in [0, 1, 0x400] {
+                    for (message, legacy, current) in messages {
+                        let result = try ProtobufEncoder.encoding(options: .init(rawValue: options)) { encoder in
+                            encoder.userInfo[ArchivedViewCore.archiveOptionsKey] = ArchivedViewInput.Value(
+                                flags: .init(rawValue: flags), deploymentVersion: .init(rawValue: version)
+                            )
+                            try message.encode(to: &encoder)
+                        }
+                        XCTAssertEqual(result, version >= 4 ? current : legacy,
+                                       "version: \(version), flags: \(flags), options: \(options)")
+                    }
+                }
+            }
+        }
+    }
+
     func testCodableAnimationWrapsLeavesAndOrderedModifiers() throws {
         XCTAssertEqual(
             try ProtobufEncoder.encoding(CodableAnimation(.default)),
@@ -272,11 +303,14 @@ final class CodableAnimationTests: XCTestCase {
 
     private func encode<Message: ProtobufEncodableMessage>(
         _ message: Message,
-        archiveVersion: UInt8
+        archiveVersion: Int8
     ) throws -> Data {
-        var encoder = ProtobufEncoder(archiveVersion: archiveVersion)
-        try message.encode(to: &encoder)
-        return encoder.data
+        try ProtobufEncoder.encoding { encoder in
+            encoder.userInfo[ArchivedViewCore.archiveOptionsKey] = ArchivedViewInput.Value(
+                deploymentVersion: .init(rawValue: archiveVersion)
+            )
+            try message.encode(to: &encoder)
+        }
     }
 }
 

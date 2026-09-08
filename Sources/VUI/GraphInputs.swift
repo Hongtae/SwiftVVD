@@ -26,9 +26,10 @@ struct UsingGraphicsRenderer: ViewInput {
     static var defaultValue: Bool { false }
 }
 
+// Archive options shared by graph inputs and encoding contexts.
 struct ArchivedViewInput: ViewInput {
     struct Flags: OptionSet {
-        var rawValue: UInt8
+        let rawValue: UInt8
 
         init(rawValue: UInt8) {
             self.rawValue = rawValue
@@ -43,8 +44,9 @@ struct ArchivedViewInput: ViewInput {
         static let publicArchive = Flags(rawValue: 1 << 6)
     }
 
-    struct DeploymentVersion: RawRepresentable, Hashable, Comparable, Codable {
-        var rawValue: Int8
+    // Selects archive representations independently of the UI behavior baseline.
+    struct DeploymentVersion: Hashable, Comparable, Codable {
+        let rawValue: Int8
 
         init(rawValue: Int8) {
             self.rawValue = rawValue

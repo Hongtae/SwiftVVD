@@ -15,6 +15,10 @@ protocol ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws
 }
 
+struct ArchivedViewCore {
+    static let archiveOptionsKey = CodingUserInfoKey(rawValue: "VUI.ArchivedViewInput")!
+}
+
 struct ProtobufEncoder {
     struct Options: OptionSet {
         let rawValue: UInt32
@@ -28,21 +32,34 @@ struct ProtobufEncoder {
 
     private var buffer: [UInt8] = []
     private var lengthDelimitedStarts: [Int] = []
+    var userInfo: [CodingUserInfoKey: Any] = [:]
     var options: Options
-    let archiveVersion: UInt8
 
-    init(archiveVersion: UInt8 = 4, options: Options = []) {
-        self.archiveVersion = archiveVersion
+    init(options: Options = []) {
         self.options = options
+    }
+
+    var archiveOptions: ArchivedViewInput.Value {
+        userInfo[ArchivedViewCore.archiveOptionsKey] as? ArchivedViewInput.Value
+            ?? ArchivedViewInput.Value()
+    }
+
+    static func encoding(
+        options: Options = [],
+        _ body: (inout ProtobufEncoder) throws -> Void
+    ) throws -> Data {
+        var encoder = ProtobufEncoder(options: options)
+        try body(&encoder)
+        return encoder.data
     }
 
     static func encoding<Message: ProtobufEncodableMessage>(
         _ message: Message,
         options: Options = []
     ) throws -> Data {
-        var encoder = ProtobufEncoder(options: options)
-        try message.encode(to: &encoder)
-        return encoder.data
+        try encoding(options: options) { encoder in
+            try message.encode(to: &encoder)
+        }
     }
 
     var data: Data {

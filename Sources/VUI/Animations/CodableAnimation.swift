@@ -204,7 +204,7 @@ extension FluidSpringAnimation: EncodableAnimation, ProtobufDecodableMessage {
 
 extension DelayAnimation: ProtobufEncodableMessage {
     func encode(to encoder: inout ProtobufEncoder) throws {
-        if encoder.archiveVersion >= 4 {
+        if encoder.archiveOptions.deploymentVersion >= .v7_4 {
             encoder.encodeVarint(0x42)
             encoder.startLengthDelimited()
             if delay != 0 {
@@ -219,7 +219,7 @@ extension DelayAnimation: ProtobufEncodableMessage {
 
 extension SpeedAnimation: ProtobufEncodableMessage {
     func encode(to encoder: inout ProtobufEncoder) throws {
-        if encoder.archiveVersion >= 4 {
+        if encoder.archiveOptions.deploymentVersion >= .v7_4 {
             encoder.encodeVarint(0x42)
             encoder.startLengthDelimited()
             if speed != 0 {
@@ -234,10 +234,11 @@ extension SpeedAnimation: ProtobufEncodableMessage {
 
 extension RepeatAnimation: ProtobufEncodableMessage {
     func encode(to encoder: inout ProtobufEncoder) throws {
-        let fieldNumber: UInt = encoder.archiveVersion >= 4 ? 8 : 5
+        let usesModifierEnvelope = encoder.archiveOptions.deploymentVersion >= .v7_4
+        let fieldNumber: UInt = usesModifierEnvelope ? 8 : 5
         encoder.encodeVarint((fieldNumber << 3) | 2)
         encoder.startLengthDelimited()
-        if encoder.archiveVersion >= 4 {
+        if usesModifierEnvelope {
             encoder.encodeVarint(0x12)
             encoder.startLengthDelimited()
         }
@@ -249,7 +250,7 @@ extension RepeatAnimation: ProtobufEncodableMessage {
             encoder.encodeVarint(0x10)
             encoder.encodeVarint(1)
         }
-        if encoder.archiveVersion >= 4 {
+        if usesModifierEnvelope {
             encoder.endLengthDelimited()
         }
         encoder.endLengthDelimited()
