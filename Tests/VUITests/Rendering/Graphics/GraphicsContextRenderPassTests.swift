@@ -3,7 +3,7 @@ import VVD
 @testable import VUI
 
 final class GraphicsContextRenderPassTests: XCTestCase {
-    private final class TestTexture: Texture {
+    private final class TestTexture: Texture, @unchecked Sendable {
         let format: PixelFormat
         var formatReads = 0
 

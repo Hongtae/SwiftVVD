@@ -9,7 +9,7 @@ import Foundation
 import VVD
 
 struct PlatformImageRepresentableContext {
-    var image: GraphicsContext.ResolvedImage
+    var image: ImageDrawing
     var tintColor: Color?
     var foregroundStyle: AnyShapeStyle?
 }
@@ -104,6 +104,17 @@ class AnyImageProviderBox: @unchecked Sendable {
     var usesSymbolFontMetrics: Bool { false }
     var resizingProvider: ResizableProvider? { nil }
 
+    func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
+        if let symbol = makeVectorSymbol() {
+            return GraphicsImage(symbol: symbol.applyingEffectiveFontMetrics(in: context.environment))
+        }
+        if let svg = makeSVG() {
+            return GraphicsImage(svg: svg)
+        }
+        let texture = makeTexture(context)
+        return GraphicsImage(texture: texture, scale: context.sceneResources.contentScaleFactor / scaleFactor)
+    }
+
     func makeTexture(_ context: GraphicsContext) -> Texture? {
         nil
     }
@@ -151,6 +162,12 @@ final class ResizableProvider: AnyImageProviderBox, @unchecked Sendable {
 
     override var resizingProvider: ResizableProvider? {
         self
+    }
+
+    override func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
+        var image = base.provider.makeGraphicsImage(context)
+        image.resizingInfo = Image.ResizingInfo(capInsets: capInsets, mode: resizingMode)
+        return image
     }
 
     override func makeTexture(_ context: GraphicsContext) -> Texture? {
@@ -276,20 +293,25 @@ final class RenderedImageProviderBox: AnyImageProviderBox, @unchecked Sendable {
 }
 
 final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
-    let texture: Texture
+    let resource: ImageTexture
     let scale: CGFloat
     let orientation: Image.Orientation
     let label: Text?
 
     init(texture: Texture, scale: CGFloat, orientation: Image.Orientation, label: Text?) {
-        self.texture = texture
+        self.resource = ImageTexture(texture)
         self.scale = scale
         self.orientation = orientation
         self.label = label
     }
 
     override func makeTexture(_ context: GraphicsContext) -> Texture? {
-        self.texture
+        resource.texture
+    }
+
+    override func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
+        GraphicsImage(contents: .texture(resource), scale: scale,
+                      unrotatedPixelSize: resource.pixelSize, orientation: orientation)
     }
 
     override var scaleFactor: CGFloat {
@@ -298,7 +320,7 @@ final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
 
     override func isEqual(to: AnyImageProviderBox) -> Bool {
         if let other = to as? Self {
-            return self.texture === other.texture &&
+            return resource == other.resource &&
             self.scale == other.scale &&
             orientation == other.orientation &&
             label == other.label
@@ -366,10 +388,10 @@ final class SVGImageProvider: AnyImageProviderBox, @unchecked Sendable {
 /// Resolution can begin with a nil value, while interpolation requires stable
 /// non-optional endpoints. Unresolved publication boundaries are ignored.
 private struct ResolvedImageTransitionContent: InterpolatableContent {
-    var image: GraphicsContext.ResolvedImage?
+    var image: ImageDrawing?
 
     static var defaultTransition: ContentTransition {
-        GraphicsContext.ResolvedImage.defaultTransition
+        ImageDrawing.defaultTransition
     }
 
     func requiresTransition(to target: Self) -> Bool {
@@ -387,7 +409,7 @@ private struct ResolvedImageTransitionContent: InterpolatableContent {
 private struct ResolvedImageLayoutComputer: StatefulRule, AsyncAttribute {
     typealias Value = LayoutComputer
 
-    var _image: Attribute<GraphicsContext.ResolvedImage?>
+    var _image: Attribute<ImageDrawing?>
 
     mutating func updateValue() {
         update(to: ResolvedImageLayoutEngine(image: _image.value))
@@ -396,7 +418,7 @@ private struct ResolvedImageLayoutComputer: StatefulRule, AsyncAttribute {
 
 /// Measures a resolved image and exposes its direct layout characteristics.
 private struct ResolvedImageLayoutEngine: LayoutEngine {
-    var image: GraphicsContext.ResolvedImage?
+    var image: ImageDrawing?
 
     func spacing() -> Spacing {
         Spacing()
@@ -439,9 +461,9 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
         case image(
             view: Attribute<Image>,
             backendSource: Attribute<Image?>,
-            backendImage: Attribute<GraphicsContext.ResolvedImage?>
+            backendImage: Attribute<ImageDrawing?>
         )
-        case resolved(Attribute<GraphicsContext.ResolvedImage?>)
+        case resolved(Attribute<ImageDrawing?>)
     }
 
     struct ActivePulse {
@@ -557,7 +579,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     }
 
     struct Value {
-        var image: GraphicsContext.ResolvedImage?
+        var image: ImageDrawing?
         var symbolAnimator: SymbolAnimator?
         var symbolEffects: [IdentifiedSymbolEffect]
         var symbolEffectVersion: UInt32
@@ -584,7 +606,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     var phase = Phase()
     private var symbolAnimator: SymbolAnimator?
     private var synchronousSource: Image?
-    private var synchronousImage: GraphicsContext.ResolvedImage?
+    private var synchronousImage: ImageDrawing?
     private var synchronousVectorSymbol: ResolvedVectorSymbol?
     private var synchronousSymbolFont: Font?
     private var attemptedSynchronousResolution = false
@@ -592,7 +614,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     init(
         view: Attribute<Image>,
         backendSource: Attribute<Image?>,
-        backendImage: Attribute<GraphicsContext.ResolvedImage?>,
+        backendImage: Attribute<ImageDrawing?>,
         environment: Attribute<EnvironmentValues>,
         transaction: Attribute<Transaction>,
         time: Attribute<Time>
@@ -608,7 +630,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     }
 
     init(
-        resolvedImage: Attribute<GraphicsContext.ResolvedImage?>,
+        resolvedImage: Attribute<ImageDrawing?>,
         environment: Attribute<EnvironmentValues>,
         transaction: Attribute<Transaction>,
         time: Attribute<Time>
@@ -846,7 +868,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
     }
 
     private mutating func updateSymbolAnimator(
-        image: GraphicsContext.ResolvedImage?,
+        image: ImageDrawing?,
         state: ContentTransition.State,
         transaction: Transaction
     ) -> SymbolAnimator? {
@@ -872,7 +894,7 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
 
     private mutating func resolvedImage(
         in environment: EnvironmentValues
-    ) -> GraphicsContext.ResolvedImage? {
+    ) -> ImageDrawing? {
         switch source {
         case let .resolved(image):
             return image.value
@@ -898,20 +920,20 @@ struct ImageViewChild: StatefulRule, AsyncAttribute {
                 return synchronousImage
             }
 
-            var resolved: GraphicsContext.ResolvedImage?
+            var resolved: ImageDrawing?
             if synchronousSource == image,
                let symbol = synchronousVectorSymbol {
-                resolved = GraphicsContext.ResolvedImage(
+                resolved = ImageDrawing(
                     symbol: symbol.applyingEffectiveFontMetrics(in: environment)
                 )
             } else if let symbol = image.provider.makeVectorSymbol() {
                 synchronousVectorSymbol = symbol
-                resolved = GraphicsContext.ResolvedImage(
+                resolved = ImageDrawing(
                     symbol: symbol.applyingEffectiveFontMetrics(in: environment)
                 )
             } else if let svg = image.provider.makeSVG() {
                 synchronousVectorSymbol = nil
-                resolved = GraphicsContext.ResolvedImage(svg: svg)
+                resolved = ImageDrawing(svg: svg)
             } else {
                 synchronousVectorSymbol = nil
                 resolved = nil
@@ -1545,7 +1567,7 @@ private struct ResolvedImageContentView: ShapeStyledLeafView {
     }
 
     static func resolverMode(
-        for image: GraphicsContext.ResolvedImage?
+        for image: ImageDrawing?
     ) -> _ShapeStyle_ResolverMode {
         guard let symbol = image?.symbol else {
             return _ShapeStyle_ResolverMode()
@@ -2327,6 +2349,21 @@ final class _ImageResourceResolutionState {
 }
 
 extension Image {
+    struct ResizingInfo: Equatable {
+        var capInsets: EdgeInsets
+        var mode: ResizingMode
+    }
+
+    public enum Interpolation: Hashable, Sendable {
+        case none
+        case low
+        case medium
+        case high
+    }
+}
+
+
+extension Image {
     public enum ResizingMode: Hashable, Sendable {
         case tile
         case stretch
@@ -2480,7 +2517,7 @@ extension Image: View {
 
         // Backend-only image contents are published by the resource pass.
         // Portable vector contents resolve in ImageViewChild with the source image.
-        let resolvedImageAttr = graph.makeInput(value: GraphicsContext.ResolvedImage?.none)
+        let resolvedImageAttr = graph.makeInput(value: ImageDrawing?.none)
         let resolvedSourceAttr = graph.makeInput(value: Image?.none)
         let resolvedImageTransactionAttr = graph.makeInput(value: Transaction())
         let resourceResolutionState = _ImageResourceResolutionState()
@@ -2541,7 +2578,7 @@ extension Image: View {
                 context.environment = renderEnvironment
                 AnyImageProviderBox.$_preferredBundle.withValue(bundle) {
                     // 1. [Synchronous Loading] Resolve the image (loads data and creates texture).
-                    let resolved = context.resolve(image)
+                    let resolved = context.resolveImageDrawing(image)
                     let boxedResolved = UnsafeBox(resolved)
                     let boxedTransaction = UnsafeBox(resourceTransaction)
 
@@ -2676,7 +2713,7 @@ extension Image: View {
             let context: Attribute<PlatformImageRepresentableContext> =
                 graph.makeRule {
                     let image = intrinsicImageAttr.value
-                        ?? GraphicsContext.ResolvedImage(
+                        ?? ImageDrawing(
                             baseline: 0,
                             shading: nil,
                             texture: nil,

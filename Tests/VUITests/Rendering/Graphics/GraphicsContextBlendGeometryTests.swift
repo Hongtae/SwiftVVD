@@ -83,7 +83,7 @@ final class GraphicsContextBlendGeometryTests: XCTestCase {
     }
 
 
-    private final class DimensionTexture: Texture {
+    private final class DimensionTexture: Texture, @unchecked Sendable {
         let base: Texture
         let size: (Int, Int, Int)
         private(set) var reads = [0, 0, 0]

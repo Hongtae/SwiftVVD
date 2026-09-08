@@ -116,7 +116,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
             variableValue: nil,
             bundle: nil
         ))
-        var image = GraphicsContext.ResolvedImage(symbol: symbol)
+        var image = ImageDrawing(symbol: symbol)
         image.symbolLayerOpacities = layerOpacities
         image.symbolVariableColorOpacities = variableColorOpacities
         image.symbolDrawProgresses = drawProgresses
@@ -1779,14 +1779,14 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         )
         let texture = try XCTUnwrap(bitmap.makeTexture(commandQueue: queue))
         let bounds = CGRect(x: 0, y: 0, width: 4, height: 4)
-        let sourceImage = GraphicsContext.ResolvedImage(
+        let sourceImage = ImageDrawing(
             baseline: 1,
             shading: .color(VUI.Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 0.25)),
             texture: texture,
             textureTransform: .identity,
             scaleFactor: 1
         )
-        let targetImage = GraphicsContext.ResolvedImage(
+        let targetImage = ImageDrawing(
             baseline: 1,
             shading: .color(VUI.Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 0.75)),
             texture: texture,
@@ -1839,7 +1839,7 @@ final class GraphicsContextClipBoundsTests: XCTestCase {
         )
         let texture = try XCTUnwrap(bitmap.makeTexture(commandQueue: queue))
         let coverage = CGRect(x: 0, y: 0, width: 20, height: 20)
-        let image = GraphicsContext.ResolvedImage(
+        let image = ImageDrawing(
             baseline: 1,
             shading: nil,
             texture: texture,

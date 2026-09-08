@@ -123,7 +123,7 @@ struct PlatformItemListTextRepresentable: PlatformTextRepresentable {
 // MARK: - Image representation
 
 struct PlatformItemResolvedImageView: View {
-    var image: GraphicsContext.ResolvedImage
+    var image: ImageDrawing
 
     var body: some View {
         Canvas { context, size in

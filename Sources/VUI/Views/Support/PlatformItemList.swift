@@ -41,7 +41,7 @@ struct PlatformItemList {
         var indentationLevel: Int
         var imageColorResolver: ImageColorResolver?
         var isEnabled: Bool
-        var resolvedImage: GraphicsContext.ResolvedImage?
+        var resolvedImage: ImageDrawing?
         var namedResolvedImage: Image?
         var systemItem: SystemItem?
         var selectionBehavior: SelectionBehavior?

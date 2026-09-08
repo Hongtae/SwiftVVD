@@ -142,7 +142,7 @@ final class SymbolEffectsTests: XCTestCase {
             let image = graph.makeInput(value: Image(systemName: "photo.fill"))
             let backendSource = graph.makeInput(value: Optional<Image>.none)
             let backendImage = graph.makeInput(
-                value: Optional<GraphicsContext.ResolvedImage>.none
+                value: Optional<ImageDrawing>.none
             )
             var values = EnvironmentValues()
             values.font = .system(size: 40)
@@ -460,7 +460,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var values = EnvironmentValues()
             values.appendSymbolEffect(
@@ -518,7 +518,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var values = EnvironmentValues()
             values.appendSymbolEffect(
@@ -623,7 +623,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var delayed = EnvironmentValues()
             delayed.appendSymbolEffect(
@@ -823,7 +823,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var effects = EnvironmentValues()
             effects.appendSymbolEffect(
@@ -1081,7 +1081,7 @@ final class SymbolEffectsTests: XCTestCase {
                 .map(\.duration)
             let longest = try XCTUnwrap(durations.max())
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let time = graph.makeInput(value: Time(seconds: 0))
@@ -1301,7 +1301,7 @@ final class SymbolEffectsTests: XCTestCase {
             let hideCompletionTime =
                 symbol.drawMotionGroupDurations.reduce(0, +) / 0.5
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let transaction = graph.makeInput(value: Transaction())
@@ -1526,7 +1526,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let transaction = graph.makeInput(value: Transaction())
@@ -1573,7 +1573,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let transaction = graph.makeInput(value: Transaction())
@@ -1654,7 +1654,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional<GraphicsContext.ResolvedImage>.none
+                value: Optional<ImageDrawing>.none
             )
             var effects = EnvironmentValues()
             effects.appendSymbolEffect(
@@ -1691,7 +1691,7 @@ final class SymbolEffectsTests: XCTestCase {
 
             transaction.setValue(willAppearTransaction)
             resolved.setValue(
-                GraphicsContext.ResolvedImage(symbol: symbol),
+                ImageDrawing(symbol: symbol),
                 transaction: willAppearTransaction
             )
             XCTAssertEqual(child.value.symbolDrawProgresses, [0, 0])
@@ -1716,7 +1716,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var effects = EnvironmentValues()
             effects.appendSymbolEffect(
@@ -1795,7 +1795,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var effects = EnvironmentValues()
             effects.appendSymbolEffect(
@@ -1894,7 +1894,7 @@ final class SymbolEffectsTests: XCTestCase {
                 bundle: nil
             ))
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let transaction = graph.makeInput(value: Transaction())
@@ -2020,7 +2020,7 @@ final class SymbolEffectsTests: XCTestCase {
                 variableValue: nil,
                 bundle: nil
             ))
-            resolved.setValue(GraphicsContext.ResolvedImage(symbol: fallbackSymbol))
+            resolved.setValue(ImageDrawing(symbol: fallbackSymbol))
             time.setValue(Time(seconds: 7))
             environment.setValue(EnvironmentValues())
             _ = presentation.value
@@ -2066,7 +2066,7 @@ final class SymbolEffectsTests: XCTestCase {
             let strokeGroup = try XCTUnwrap(symbol.layers[1].draw?.motionGroup)
             let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var hidden = EnvironmentValues()
             hidden.appendSymbolEffect(
@@ -2162,7 +2162,7 @@ final class SymbolEffectsTests: XCTestCase {
             let strokeGroup = try XCTUnwrap(symbol.layers[1].draw?.motionGroup)
             let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var hidden = EnvironmentValues()
             hidden.appendSymbolEffect(
@@ -2283,7 +2283,7 @@ final class SymbolEffectsTests: XCTestCase {
             )
             let strokeDuration = symbol.drawMotionGroupDurations[strokeGroup]
             let resolved = graph.makeInput(
-                value: Optional(GraphicsContext.ResolvedImage(symbol: symbol))
+                value: Optional(ImageDrawing(symbol: symbol))
             )
             var hidden = EnvironmentValues()
             hidden.appendSymbolEffect(

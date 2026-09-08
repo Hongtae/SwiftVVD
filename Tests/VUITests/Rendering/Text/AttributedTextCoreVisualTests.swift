@@ -668,7 +668,7 @@ private struct CoreVisualTextResolutionContext: TextResolutionContext {
 
     func resolveTextAttachment(
         _ image: VUI.Image
-    ) -> GraphicsContext.ResolvedImage? {
+    ) -> ImageDrawing? {
         nil
     }
 }

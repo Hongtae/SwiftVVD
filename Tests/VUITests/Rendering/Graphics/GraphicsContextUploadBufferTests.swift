@@ -10,7 +10,7 @@ final class GraphicsContextUploadBufferTests: XCTestCase {
         var released = false
     }
 
-    private final class TestBuffer: GPUBuffer {
+    private final class TestBuffer: GPUBuffer, @unchecked Sendable {
         let device: GraphicsDevice
         let metrics: BufferMetrics
         private let capacity: Int

@@ -30,7 +30,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
     func testResolvedRunsProduceCrossPlatformAttributedStorage() throws {
         let face = ResolvedStorageTestTypeface()
-        let image = GraphicsContext.ResolvedImage(
+        let image = ImageDrawing(
             baseline: 0,
             shading: nil,
             texture: nil,

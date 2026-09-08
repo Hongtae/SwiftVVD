@@ -706,7 +706,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             }
 
             init(
-                _ image: GraphicsContext.ResolvedImage,
+                _ image: ImageDrawing,
                 placementRect: CGRect,
                 shading: ShadingRecord?
             ) {
@@ -1044,7 +1044,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         struct ImageValue {
-            var image: GraphicsContext.ResolvedImage
+            var image: ImageDrawing
             var frame: CGRect
             var transform: CGAffineTransform
             var command: ItemCommand
@@ -1388,7 +1388,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         init(
-            image: GraphicsContext.ResolvedImage,
+            image: ImageDrawing,
             frame: CGRect,
             command: ItemCommand,
             seed: Seed = Seed(),
@@ -1704,7 +1704,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         init(
-            image: GraphicsContext.ResolvedImage,
+            image: ImageDrawing,
             frame: CGRect,
             command: ItemCommand,
             environment: EnvironmentValues? = nil,
@@ -2097,7 +2097,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
     }
 
     mutating func appendImageItem(
-        _ image: GraphicsContext.ResolvedImage,
+        _ image: ImageDrawing,
         bounds: CGRect? = nil,
         opacity: Float = 1,
         environment: EnvironmentValues? = nil,
@@ -2122,7 +2122,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
     }
 
     mutating func appendImageItem(
-        _ image: GraphicsContext.ResolvedImage,
+        _ image: ImageDrawing,
         bounds: CGRect,
         placementRect: CGRect? = nil,
         opacity: Float = 1,

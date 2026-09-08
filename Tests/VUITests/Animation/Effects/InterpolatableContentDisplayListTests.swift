@@ -1868,13 +1868,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             variableValue: nil,
             bundle: nil
         ))
-        let sourceImage = GraphicsContext.ResolvedImage(symbol: sourceSymbol)
-        let targetImage = GraphicsContext.ResolvedImage(symbol: targetSymbol)
+        let sourceImage = ImageDrawing(symbol: sourceSymbol)
+        let targetImage = ImageDrawing(symbol: targetSymbol)
 
         func makeAnimator(
             transition: ContentTransition,
-            source: GraphicsContext.ResolvedImage = sourceImage,
-            target: GraphicsContext.ResolvedImage = targetImage
+            source: ImageDrawing = sourceImage,
+            target: ImageDrawing = targetImage
         ) -> SymbolAnimator {
             var transaction = Transaction()
             transaction.animation = .linear(duration: 3)
@@ -1989,8 +1989,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testSymbolAnimatorRetargetRetainsPresentationGenerations() throws {
-        func image(_ name: String) throws -> GraphicsContext.ResolvedImage {
-            GraphicsContext.ResolvedImage(
+        func image(_ name: String) throws -> ImageDrawing {
+            ImageDrawing(
                 symbol: try XCTUnwrap(SymbolAssetCatalog.resolve(
                     name: name,
                     variableValue: nil,
@@ -7753,7 +7753,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     }
 
     func testResolvedImageInterpolatableContentSurface() throws {
-        XCTAssertEqual(GraphicsContext.ResolvedImage.defaultTransition, .interpolate)
+        XCTAssertEqual(ImageDrawing.defaultTransition, .interpolate)
 
         let image = makeResolvedImage()
         XCTAssertFalse(image.requiresTransition(to: makeResolvedImage()))
@@ -7790,8 +7790,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             variableValue: nil,
             bundle: nil
         ))
-        let sourceImage = GraphicsContext.ResolvedImage(symbol: sourceSymbol)
-        let targetImage = GraphicsContext.ResolvedImage(symbol: targetSymbol)
+        let sourceImage = ImageDrawing(symbol: sourceSymbol)
+        let targetImage = ImageDrawing(symbol: targetSymbol)
         var replacementState = ContentTransition.State(
             transition: .symbolEffect(.replace.upUp),
             style: .animatedWidget,
@@ -7814,7 +7814,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
 
         var contentTransitionTargetSymbol = targetSymbol
         contentTransitionTargetSymbol.allowsContentTransitions = true
-        let contentTransitionTargetImage = GraphicsContext.ResolvedImage(
+        let contentTransitionTargetImage = ImageDrawing(
             symbol: contentTransitionTargetSymbol
         )
         var contentTransitionState = ContentTransition.State(
@@ -8051,7 +8051,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let image = graph.makeInput(value: Image(provider: provider))
             let backendSource = graph.makeInput(value: Optional<VUI.Image>.none)
             let backendImage = graph.makeInput(
-                value: GraphicsContext.ResolvedImage?.none
+                value: ImageDrawing?.none
             )
             let environment = graph.makeInput(value: EnvironmentValues())
             let transaction = graph.makeInput(value: Transaction())
@@ -8554,8 +8554,8 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         texture: Texture? = nil,
         textureTransform: CGAffineTransform = .identity,
         scaleFactor: CGFloat = 1
-    ) -> GraphicsContext.ResolvedImage {
-        GraphicsContext.ResolvedImage(
+    ) -> ImageDrawing {
+        ImageDrawing(
             baseline: baseline,
             shading: shading,
             texture: texture,

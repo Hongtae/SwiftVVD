@@ -701,9 +701,9 @@ private final class PlatformCommandMenuImageRenderer {
             return nil
         }
 
-        var resolved: GraphicsContext.ResolvedImage
+        var resolved: ImageDrawing
         if let namedImage = item.namedResolvedImage {
-            resolved = context.resolve(namedImage)
+            resolved = context.resolveImageDrawing(namedImage)
         } else if let image = item.resolvedImage {
             resolved = image
         } else {

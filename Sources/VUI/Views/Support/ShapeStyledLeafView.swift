@@ -313,7 +313,7 @@ struct _ShapeStyle_RenderedShape {
     enum Shape {
         case path(Path, FillStyle)
         case text(StyledTextContentView)
-        case image(GraphicsContext.ResolvedImage, opacity: Double)
+        case image(ImageDrawing, opacity: Double)
         case empty
 
         func translated(by offset: CGPoint) -> Self {

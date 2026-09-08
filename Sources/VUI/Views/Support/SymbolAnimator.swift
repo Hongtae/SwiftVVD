@@ -17,7 +17,7 @@ final class SymbolAnimator {
     }
 
     private struct ActiveReplacement {
-        var source: GraphicsContext.ResolvedImage
+        var source: ImageDrawing
         var configuration: RBSymbolReplacementConfiguration
         var timeline: ReplacementTimeline
         var presentationStart: ImageViewChild.PresentationStart
@@ -25,17 +25,17 @@ final class SymbolAnimator {
     }
 
     private struct LevelPresentation {
-        var source: GraphicsContext.ResolvedImage
+        var source: ImageDrawing
             .SymbolReplacementLevelPresentation
-        var target: GraphicsContext.ResolvedImage
+        var target: ImageDrawing
             .SymbolReplacementLevelPresentation
     }
 
-    private var image: GraphicsContext.ResolvedImage
+    private var image: ImageDrawing
     private var activeReplacements: [ActiveReplacement] = []
     private(set) var version: UInt32 = 0
 
-    init(image: GraphicsContext.ResolvedImage) {
+    init(image: ImageDrawing) {
         self.image = image
     }
 
@@ -44,7 +44,7 @@ final class SymbolAnimator {
     }
 
     func update(
-        image target: GraphicsContext.ResolvedImage,
+        image target: ImageDrawing,
         state: ContentTransition.State,
         transaction: Transaction
     ) {
@@ -84,7 +84,7 @@ final class SymbolAnimator {
 
     func presentation(
         at time: Time
-    ) -> GraphicsContext.ResolvedImage.SymbolReplacementPresentation? {
+    ) -> ImageDrawing.SymbolReplacementPresentation? {
         guard !activeReplacements.isEmpty else {
             return nil
         }
@@ -97,7 +97,7 @@ final class SymbolAnimator {
         }
 
         var symbols: [
-            GraphicsContext.ResolvedImage
+            ImageDrawing
                 .SymbolReplacementSymbolPresentation
         ] = []
         if let active = activeReplacements.last {
@@ -116,7 +116,7 @@ final class SymbolAnimator {
                 at: time
             )
         })
-        return GraphicsContext.ResolvedImage.SymbolReplacementPresentation(
+        return ImageDrawing.SymbolReplacementPresentation(
             symbols: symbols
         )
     }
@@ -131,11 +131,11 @@ final class SymbolAnimator {
     }
 
     private func symbolPresentation(
-        image: GraphicsContext.ResolvedImage,
+        image: ImageDrawing,
         side: PresentationSide,
         active: ActiveReplacement,
         at time: Time
-    ) -> GraphicsContext.ResolvedImage.SymbolReplacementSymbolPresentation {
+    ) -> ImageDrawing.SymbolReplacementSymbolPresentation {
         guard let start = active.presentationStart.time,
               let symbol = image.symbol else {
             preconditionFailure(
@@ -185,7 +185,7 @@ final class SymbolAnimator {
                 )
             }
         }
-        return GraphicsContext.ResolvedImage
+        return ImageDrawing
             .SymbolReplacementSymbolPresentation(
             image: image,
             levels: levels,
@@ -380,12 +380,12 @@ final class SymbolAnimator {
             targetOpacity = targetOpacityCurve
         }
         return LevelPresentation(
-            source: GraphicsContext.ResolvedImage
+            source: ImageDrawing
                 .SymbolReplacementLevelPresentation(
                     scale: sourceScale,
                     opacity: Double(sourceOpacity)
                 ),
-            target: GraphicsContext.ResolvedImage
+            target: ImageDrawing
                 .SymbolReplacementLevelPresentation(
                     scale: targetScale,
                     opacity: Double(targetOpacity)

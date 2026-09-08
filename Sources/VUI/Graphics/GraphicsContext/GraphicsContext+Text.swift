@@ -13,9 +13,9 @@ extension GraphicsContext {
     public struct ResolvedText {
         enum Run {
             case text([Typeface], String)
-            case attachment([Typeface], ResolvedImage)
+            case attachment([Typeface], ImageDrawing)
             case attributedText([Typeface], String, _TextAttributeValues)
-            case attributedAttachment([Typeface], ResolvedImage, _TextAttributeValues)
+            case attributedAttachment([Typeface], ImageDrawing, _TextAttributeValues)
             case styledText(
                 [Typeface],
                 String,
@@ -1872,7 +1872,7 @@ extension GraphicsContext {
                         char1 = UnicodeScalar(0)
                     }
                 }
-                let attachmentRun: ([Typeface], ResolvedImage, _TextAttributeValues)?
+                let attachmentRun: ([Typeface], ImageDrawing, _TextAttributeValues)?
                 switch s {
                 case let .attachment(faces, image):
                     attachmentRun = (faces, image, _TextAttributeValues())

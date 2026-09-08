@@ -66,7 +66,7 @@ protocol TextResolutionContext {
     var sceneResources: SceneResources { get }
     var contentScaleFactor: CGFloat { get }
 
-    func resolveTextAttachment(_ image: Image) -> GraphicsContext.ResolvedImage?
+    func resolveTextAttachment(_ image: Image) -> ImageDrawing?
 }
 
 extension TextResolutionContext {
@@ -80,8 +80,8 @@ extension TextResolutionContext {
 }
 
 extension GraphicsContext: TextResolutionContext {
-    func resolveTextAttachment(_ image: Image) -> ResolvedImage? {
-        resolve(image)
+    func resolveTextAttachment(_ image: Image) -> ImageDrawing? {
+        resolveImageDrawing(image)
     }
 }
 
@@ -89,14 +89,14 @@ struct GraphTextResolutionContext: TextResolutionContext {
     var environment: EnvironmentValues
     let sceneResources: SceneResources
 
-    func resolveTextAttachment(_ image: Image) -> GraphicsContext.ResolvedImage? {
-        var resolved: GraphicsContext.ResolvedImage
+    func resolveTextAttachment(_ image: Image) -> ImageDrawing? {
+        var resolved: ImageDrawing
         if let symbol = image.provider.makeVectorSymbol() {
-            resolved = GraphicsContext.ResolvedImage(
+            resolved = ImageDrawing(
                 symbol: symbol.applyingEffectiveFontMetrics(in: environment)
             )
         } else if let svg = image.provider.makeSVG() {
-            resolved = GraphicsContext.ResolvedImage(svg: svg)
+            resolved = ImageDrawing(svg: svg)
         } else {
             return nil
         }

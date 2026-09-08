@@ -10,197 +10,32 @@ import VVD
 
 extension GraphicsContext {
     public struct ResolvedImage {
-        struct SymbolReplacementLevelPresentation {
-            var scale: CGFloat
-            var opacity: Double
-        }
-
-        struct SymbolReplacementSymbolPresentation {
-            var image: ResolvedImage
-            var levels: [SymbolReplacementLevelPresentation]
-            var isLayered: Bool
-            var drawProgresses: [Double]?
-        }
-
-        final class SymbolReplacementPresentation {
-            var symbols: [SymbolReplacementSymbolPresentation]
-
-            init(
-                symbols: [SymbolReplacementSymbolPresentation]
-            ) {
-                self.symbols = symbols
-            }
-        }
-
-        final class Storage: AppLifetimeResource, @unchecked Sendable {
-            enum Contents {
-                case texture(Texture)
-                case symbol(ResolvedVectorSymbol)
-                case svg(SVG)
-            }
-
-            var contents: Contents?
-            var resizingMode: Image.ResizingMode?
-            let width: Int
-            let height: Int
-
-            init(contents: Contents?) {
-                self.contents = contents
-                self.resizingMode = nil
-                switch contents {
-                case let .texture(texture):
-                    self.width = texture.width
-                    self.height = texture.height
-                case let .symbol(symbol):
-                    self.width = Int(ceil(symbol.viewport.width))
-                    self.height = Int(ceil(symbol.viewport.height))
-                case let .svg(svg):
-                    let size = svg.intrinsicSize ?? svg.viewBox.size
-                    self.width = Int(ceil(size.width))
-                    self.height = Int(ceil(size.height))
-                case nil:
-                    self.width = 0
-                    self.height = 0
-                }
-            }
-
-            override func purgeResources(reason: ResourcePurgeReason) {
-                if reason == .appTermination,
-                   case .texture = contents {
-                    contents = nil
-                }
-            }
-        }
-
-        public var size: CGSize {
-            CGSize(width: CGFloat(storage.width) * scaleFactor,
-                   height: CGFloat(storage.height) * scaleFactor)
-        }
+        var resolved: GraphicsImage
         public let baseline: CGFloat
         public var shading: Shading?
-        var symbolLayerOpacities: [Double]?
-        var symbolReplacementLayerOpacities: [Double]?
-        var symbolReplacementPresentation: SymbolReplacementPresentation?
-        var symbolVariableColorOpacities: [Double]?
-        var symbolDrawPathIntervals:
-            [[ResolvedVectorSymbol.DrawPathInterval]]?
-        var symbolDrawProgresses: [Double]?
-        var symbolDrawFallbackProgresses: [Double]?
-        var symbolDrawFallbackOpacity: Double?
-        var symbolDrawsReversed: Bool
 
-        private let storage: Storage
-        let textureTransform: CGAffineTransform
-        let scaleFactor: CGFloat
-
-        var texture: Texture? {
-            guard case let .texture(texture) = storage.contents else {
-                return nil
-            }
-            return texture
-        }
-
-        var symbol: ResolvedVectorSymbol? {
-            guard case let .symbol(symbol) = storage.contents else {
-                return nil
-            }
-            return symbol
-        }
-
-        var svg: SVG? {
-            guard case let .svg(svg) = storage.contents else {
-                return nil
-            }
-            return svg
-        }
-
-        var vectorID: ObjectIdentifier? {
-            guard case .svg = storage.contents else { return nil }
-            return ObjectIdentifier(storage)
-        }
-
-        var resizingMode: Image.ResizingMode? {
-            get { storage.resizingMode }
-            set { storage.resizingMode = newValue }
-        }
-
-        init(baseline: CGFloat, shading: Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
-            self.baseline = baseline
-            self.shading = shading
-            self.symbolLayerOpacities = nil
-            self.symbolReplacementLayerOpacities = nil
-            self.symbolReplacementPresentation = nil
-            self.symbolVariableColorOpacities = nil
-            self.symbolDrawPathIntervals = nil
-            self.symbolDrawProgresses = nil
-            self.symbolDrawFallbackProgresses = nil
-            self.symbolDrawFallbackOpacity = nil
-            self.symbolDrawsReversed = false
-            self.storage = Storage(contents: texture.map(Storage.Contents.texture))
-            self.textureTransform = textureTransform
-            self.scaleFactor = scaleFactor
-        }
-
-        init(symbol: ResolvedVectorSymbol, shading: Shading? = nil) {
-            self.baseline = symbol.viewport.height * symbol.intrinsicScale
-            self.shading = shading
-            self.symbolLayerOpacities = nil
-            self.symbolReplacementLayerOpacities = nil
-            self.symbolReplacementPresentation = nil
-            self.symbolVariableColorOpacities = nil
-            self.symbolDrawPathIntervals = nil
-            self.symbolDrawProgresses = nil
-            self.symbolDrawFallbackProgresses = nil
-            self.symbolDrawFallbackOpacity = nil
-            self.symbolDrawsReversed = false
-            self.storage = Storage(contents: .symbol(symbol))
-            self.textureTransform = .identity
-            self.scaleFactor = symbol.intrinsicScale
-        }
-
-        init(svg: SVG, shading: Shading? = nil) {
-            self.baseline = svg.intrinsicSize?.height ?? svg.viewBox.height
-            self.shading = shading
-            self.symbolLayerOpacities = nil
-            self.symbolReplacementLayerOpacities = nil
-            self.symbolReplacementPresentation = nil
-            self.symbolVariableColorOpacities = nil
-            self.symbolDrawPathIntervals = nil
-            self.symbolDrawProgresses = nil
-            self.symbolDrawFallbackProgresses = nil
-            self.symbolDrawFallbackOpacity = nil
-            self.symbolDrawsReversed = false
-            self.storage = Storage(contents: .svg(svg))
-            self.textureTransform = .identity
-            self.scaleFactor = 1
-        }
+        public var size: CGSize { resolved.size }
+        var texture: Texture? { resolved.texture }
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {
-        var resolved: ResolvedImage
-        if let symbol = image.provider.makeVectorSymbol() {
-            resolved = ResolvedImage(
-                symbol: symbol.applyingEffectiveFontMetrics(in: environment)
-            )
-        } else if let svg = image.provider.makeSVG() {
-            resolved = ResolvedImage(svg: svg)
-        } else {
-            let texture = image.provider.makeTexture(self)
-            let displayScale = self.sceneResources.contentScaleFactor
-            let scaleFactor = image.provider.scaleFactor / displayScale
-            let baseline = CGFloat(texture?.height ?? 0) * scaleFactor
-            resolved = ResolvedImage(
-                baseline: baseline,
-                shading: nil,
-                texture: texture,
-                textureTransform: .identity,
-                scaleFactor: scaleFactor
-            )
-        }
-        resolved.applyResizingProvider(image.provider)
-        return resolved
+        let resolved = image.provider.makeGraphicsImage(self)
+        return ResolvedImage(resolved: resolved, baseline: resolved.size.height)
     }
+
+    func resolveImageDrawing(_ image: Image) -> ImageDrawing {
+        ImageDrawing(resolve(image))
+    }
+
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {
+        draw(ImageDrawing(image), in: rect, style: style)
+    }
+
+    public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
+        draw(ImageDrawing(image), at: point, anchor: anchor)
+    }
+
+    func draw(_ image: ImageDrawing, in rect: CGRect, style: FillStyle = FillStyle()) {
         if recording != nil, record(bounds: rect, { $0.draw(image, in: rect, style: style) }) { return }
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
             if let replacement = image.symbolReplacementPresentation {
@@ -247,7 +82,7 @@ extension GraphicsContext {
 
     private func draw(
         _ symbol: ResolvedVectorSymbol,
-        image: ResolvedImage,
+        image: ImageDrawing,
         in rect: CGRect,
         style: FillStyle,
         opacityMultiplier: Double = 1
@@ -394,8 +229,8 @@ extension GraphicsContext {
 
     private func drawSymbolReplacement(
         targetSymbol _: ResolvedVectorSymbol,
-        targetImage _: ResolvedImage,
-        presentation: ResolvedImage.SymbolReplacementPresentation,
+        targetImage _: ImageDrawing,
+        presentation: ImageDrawing.SymbolReplacementPresentation,
         in rect: CGRect,
         style: FillStyle
     ) {
@@ -565,7 +400,7 @@ extension GraphicsContext {
             return shape.resolvedShading ?? .style(BackgroundStyle())
         }
     }
-    public func draw(_ image: ResolvedImage, at point: CGPoint, anchor: UnitPoint = .center) {
+    func draw(_ image: ImageDrawing, at point: CGPoint, anchor: UnitPoint = .center) {
         let size = image.size
         let x = point.x - anchor.x * size.width
         let y = point.y - anchor.y * size.height
@@ -624,25 +459,7 @@ extension GraphicsContext {
     }
 }
 
-extension GraphicsContext.ResolvedImage {
-    func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-        guard resizingMode != nil else { return size }
-        return CGSize(
-            width: proposal.width ?? size.width,
-            height: proposal.height ?? size.height
-        )
-    }
-
-    mutating func applyResizingProvider(_ provider: AnyImageProviderBox) {
-        guard let resizingProvider = provider.resizingProvider else {
-            resizingMode = nil
-            return
-        }
-        resizingMode = resizingProvider.resizingMode
-    }
-}
-
-private extension GraphicsContext.ResolvedImage {
+private extension ImageDrawing {
     func premultipliedTintColor(in environment: EnvironmentValues) -> BackendColor {
         guard let shading,
               shading.properties.count == 1,
@@ -656,56 +473,5 @@ private extension GraphicsContext.ResolvedImage {
             backendColor.b * backendColor.a,
             backendColor.a
         )
-    }
-}
-
-extension GraphicsContext.ResolvedImage: InterpolatableContent {
-    static var defaultTransition: ContentTransition {
-        _SemanticFeature<Semantics_v4>.isEnabled ? .interpolate : .identity
-    }
-
-    func requiresTransition(to target: Self) -> Bool {
-        if baseline != target.baseline { return true }
-        if scaleFactor != target.scaleFactor { return true }
-        if !textureIdentityEquals(texture, target.texture) { return true }
-        if symbol?.identity != target.symbol?.identity { return true }
-        if vectorID != target.vectorID { return true }
-        if !textureTransform.isTransitionEqual(to: target.textureTransform) { return true }
-        if shading != nil || target.shading != nil { return true }
-        return false
-    }
-
-    func modifyTransition(state: inout ContentTransition.State, to target: Self) {
-        if symbol != nil,
-           let targetSymbol = target.symbol,
-           !targetSymbol.allowsContentTransitions {
-            state.transition = .identity
-            return
-        }
-        guard !state.options.contains(.animatesDifferentContent) else { return }
-        guard requiresTransition(to: target) else { return }
-        state.transition = .opacity
-    }
-}
-
-private func textureIdentityEquals(_ lhs: Texture?, _ rhs: Texture?) -> Bool {
-    switch (lhs, rhs) {
-    case (.none, .none):
-        true
-    case let (.some(lhs), .some(rhs)):
-        lhs === rhs
-    default:
-        false
-    }
-}
-
-private extension CGAffineTransform {
-    func isTransitionEqual(to other: CGAffineTransform) -> Bool {
-        a == other.a
-            && b == other.b
-            && c == other.c
-            && d == other.d
-            && tx == other.tx
-            && ty == other.ty
     }
 }

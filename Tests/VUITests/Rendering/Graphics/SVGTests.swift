@@ -171,7 +171,7 @@ final class SVGTests: XCTestCase {
         XCTAssertEqual(provider.makeSVG(), svg)
         XCTAssertNil(provider.makeVectorSymbol())
 
-        let resolved = GraphicsContext.ResolvedImage(svg: svg)
+        let resolved = ImageDrawing(svg: svg)
         XCTAssertEqual(resolved.svg, svg)
         XCTAssertNil(resolved.symbol)
         XCTAssertEqual(resolved.size, CGSize(width: 12, height: 8))
