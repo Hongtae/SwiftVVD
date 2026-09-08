@@ -146,239 +146,224 @@ struct ProtobufEncoder {
     }
 }
 
+enum ProtobufFormat {
+    struct WireType: Equatable {
+        let rawValue: UInt
+
+        static let varint = WireType(rawValue: 0)
+        static let fixed64 = WireType(rawValue: 1)
+        static let lengthDelimited = WireType(rawValue: 2)
+        static let fixed32 = WireType(rawValue: 5)
+    }
+
+    struct Field: Equatable {
+        var rawValue: UInt
+
+        init(rawValue: UInt) {
+            self.rawValue = rawValue
+        }
+
+        init(_ tag: UInt, wireType: WireType) {
+            self.rawValue = (tag << 3) | wireType.rawValue
+        }
+
+        var tag: UInt { rawValue >> 3 }
+        var wireType: WireType { WireType(rawValue: rawValue & 7) }
+        var _isEmpty: Bool { rawValue == 0 }
+    }
+}
+
 struct ProtobufDecoder {
     enum DecodingError: Error, Hashable {
         case failed
     }
 
-    private var buffer: [UInt8]
-    private var index: Int = 0
-    private var messageEnds: [Int] = []
+    // The retained immutable owner keeps every cursor and borrowed buffer alive.
+    var data: NSData
+    var ptr: UnsafeRawPointer
+    var end: UnsafeRawPointer
+    var packedField: ProtobufFormat.Field
+    var packedEnd: UnsafeRawPointer
+    var stack: [UnsafeRawPointer] = []
+    var userInfo: [CodingUserInfoKey: Any] = [:]
 
     init(_ data: Data) {
-        self.buffer = Array(data)
+        let owner = data as NSData
+        self.data = owner
+        self.ptr = owner.bytes
+        self.end = owner.bytes + owner.length
+        self.packedField = .init(rawValue: 0)
+        self.packedEnd = owner.bytes
     }
 
-    var position: Int {
-        index
-    }
-
-    var isAtEnd: Bool {
-        index >= currentEnd
+    mutating func nextField() throws -> ProtobufFormat.Field? {
+        // Enclosing EOF takes precedence even if a scalar crossed its packed end.
+        if ptr >= end {
+            packedField.rawValue = 0
+            return nil
+        }
+        if !packedField._isEmpty {
+            if ptr < packedEnd { return packedField }
+            if ptr > packedEnd { throw DecodingError.failed }
+            packedField.rawValue = 0
+        }
+        let tag = try decodeVarint()
+        guard tag >= 8 else { throw DecodingError.failed }
+        return .init(rawValue: tag)
     }
 
     mutating func decodeVarint() throws -> UInt {
-        var result: UInt = 0
+        var value: UInt = 0
         var shift = 0
-
-        for _ in 0..<10 {
-            let byte = try readByte()
-            let payload = UInt(byte & 0x7f)
-            if shift >= UInt.bitWidth || (shift == UInt.bitWidth - 1 && payload > 1) {
-                throw DecodingError.failed
-            }
-            result |= payload << UInt(shift)
-
-            if byte & 0x80 == 0 {
-                return result
-            }
+        while ptr < end {
+            let byte = ptr.load(as: UInt8.self)
+            ptr += 1
+            // Continue consuming overlong encodings after the result is full.
+            value |= UInt(byte & 0x7f) << shift
+            if byte & 0x80 == 0 { return value }
             shift += 7
         }
-
         throw DecodingError.failed
     }
 
-    mutating func decodeSignedVarint() throws -> Int {
-        let value = try decodeVarint()
-        let signMask = UInt(bitPattern: -Int(value & 1))
-        return Int(bitPattern: (value >> 1) ^ signMask)
+    mutating func uintField(_ field: ProtobufFormat.Field) throws -> UInt {
+        try prepareScalar(field, wireType: .varint)
+        return try decodeVarint()
     }
 
-    mutating func decodeUIntField(wireType: UInt) throws -> UInt {
-        var value: UInt = 0
-        try decodeUIntField(wireType: wireType) { value = $0 }
-        return value
+    mutating func uint64Field(_ field: ProtobufFormat.Field) throws -> UInt64 {
+        UInt64(try uintField(field))
     }
 
-    mutating func decodeUIntField(wireType: UInt, _ body: (UInt) -> Void) throws {
-        switch wireType {
-        case 0:
-            body(try decodeVarint())
-        case 2:
-            try decodeLengthDelimited { decoder in
-                guard !decoder.isAtEnd else { throw DecodingError.failed }
-                repeat {
-                    body(try decoder.decodeVarint())
-                } while !decoder.isAtEnd
-            }
-        default:
-            throw DecodingError.failed
+    mutating func uint32Field(_ field: ProtobufFormat.Field) throws -> UInt32 {
+        UInt32(truncatingIfNeeded: try uintField(field))
+    }
+
+    mutating func uint16Field(_ field: ProtobufFormat.Field) throws -> UInt16 {
+        UInt16(truncatingIfNeeded: try uintField(field))
+    }
+
+    mutating func uint8Field(_ field: ProtobufFormat.Field) throws -> UInt8 {
+        UInt8(truncatingIfNeeded: try uintField(field))
+    }
+
+    mutating func intField(_ field: ProtobufFormat.Field) throws -> Int {
+        let value = Int(bitPattern: try uintField(field))
+        return (value >> 1) ^ -(value & 1)
+    }
+
+    mutating func boolField(_ field: ProtobufFormat.Field) throws -> Bool {
+        try uintField(field) != 0
+    }
+
+    mutating func fixed32Field(_ field: ProtobufFormat.Field) throws -> UInt32 {
+        try prepareScalar(field, wireType: .fixed32)
+        return try readFixed(UInt32.self)
+    }
+
+    mutating func fixed64Field(_ field: ProtobufFormat.Field) throws -> UInt64 {
+        try prepareScalar(field, wireType: .fixed64)
+        return try readFixed(UInt64.self)
+    }
+
+    mutating func floatField(_ field: ProtobufFormat.Field) throws -> Float {
+        Float(bitPattern: try fixed32Field(field))
+    }
+
+    mutating func doubleField(_ field: ProtobufFormat.Field) throws -> Double {
+        if field.wireType == .fixed32 {
+            return Double(try floatField(field))
         }
+        return Double(bitPattern: try fixed64Field(field))
     }
 
-    mutating func decodeFixed32() throws -> UInt32 {
-        try decodeFixed32(limitedBy: currentEnd)
+    mutating func cgFloatField(_ field: ProtobufFormat.Field) throws -> CGFloat {
+        CGFloat(try doubleField(field))
     }
 
-    mutating func decodeFixed32(limitedBy endIndex: Int) throws -> UInt32 {
-        guard endIndex <= currentEnd, index <= endIndex - 4 else {
-            throw DecodingError.failed
-        }
-
-        let value =
-            UInt32(buffer[index]) |
-            (UInt32(buffer[index + 1]) << 8) |
-            (UInt32(buffer[index + 2]) << 16) |
-            (UInt32(buffer[index + 3]) << 24)
-        index += 4
-        return value
+    mutating func beginMessage() throws {
+        // A failed length read retains the pushed enclosing boundary.
+        stack.append(end)
+        end = try decodeLengthEnd()
     }
 
-    mutating func decodeFixed64() throws -> UInt64 {
-        try decodeFixed64(limitedBy: currentEnd)
+    mutating func decodeMessage<Message: ProtobufDecodableMessage>() throws -> Message {
+        try beginMessage()
+        defer { end = stack.removeLast() }
+        return try Message(from: &self)
     }
 
-    mutating func decodeFixed64(limitedBy endIndex: Int) throws -> UInt64 {
-        guard endIndex <= currentEnd, index <= endIndex - 8 else {
-            throw DecodingError.failed
-        }
-
-        var value: UInt64 = 0
-        for offset in 0..<8 {
-            value |= UInt64(buffer[index + offset]) << UInt64(offset * 8)
-        }
-        index += 8
-        return value
-    }
-
-    mutating func decodeFloatField(wireType: UInt) throws -> Float {
-        switch wireType {
-        case 5:
-            return Float(bitPattern: try decodeFixed32())
-        case 2:
-            return try decodeLengthDelimited { decoder in
-                var value: Float?
-                while !decoder.isAtEnd {
-                    value = Float(bitPattern: try decoder.decodeFixed32())
-                }
-                guard let value else { throw DecodingError.failed }
-                return value
-            }
-        default:
-            throw DecodingError.failed
-        }
-    }
-
-    mutating func decodeDoubleField(wireType: UInt) throws -> Double {
-        switch wireType {
-        case 1:
-            return Double(bitPattern: try decodeFixed64())
-        case 2:
-            return try decodeLengthDelimited { decoder in
-                var value: Double?
-                while !decoder.isAtEnd {
-                    value = Double(bitPattern: try decoder.decodeFixed64())
-                }
-                guard let value else { throw DecodingError.failed }
-                return value
-            }
-        default:
-            throw DecodingError.failed
-        }
-    }
-
-    mutating func decodeCGFloatField(wireType: UInt) throws -> CGFloat {
-        switch wireType {
-        case 1:
-            return CGFloat(Double(bitPattern: try decodeFixed64()))
-        case 5:
-            return CGFloat(Float(bitPattern: try decodeFixed32()))
-        case 2:
-            return try decodeLengthDelimited { decoder in
-                var value: CGFloat?
-                while !decoder.isAtEnd {
-                    value = CGFloat(Double(bitPattern: try decoder.decodeFixed64()))
-                }
-                guard let value else { throw DecodingError.failed }
-                return value
-            }
-        default:
-            throw DecodingError.failed
-        }
-    }
-
-    func endIndexForLengthDelimitedField(byteCount: UInt) throws -> Int {
-        guard byteCount <= UInt(Int.max) else {
-            throw DecodingError.failed
-        }
-
-        let count = Int(byteCount)
-        guard count <= currentEnd - index else {
-            throw DecodingError.failed
-        }
-        return index + count
-    }
-
-    mutating func decodeLengthDelimited<Result>(
+    mutating func decodeMessage<Result>(
         _ body: (inout ProtobufDecoder) throws -> Result
     ) throws -> Result {
-        let length = try decodeVarint()
-        let endIndex = try endIndexForLengthDelimitedField(byteCount: length)
-        messageEnds.append(endIndex)
-        defer { messageEnds.removeLast() }
-
-        let result = try body(&self)
-        guard index == endIndex else {
-            throw DecodingError.failed
-        }
-        return result
+        try beginMessage()
+        defer { end = stack.removeLast() }
+        return try body(&self)
     }
 
-    mutating func decodeMessage<Message: ProtobufDecodableMessage>(
-        _ type: Message.Type = Message.self
+    mutating func messageField<Message: ProtobufDecodableMessage>(
+        _ field: ProtobufFormat.Field
     ) throws -> Message {
-        try decodeLengthDelimited { decoder in
-            try Message(from: &decoder)
+        guard field.wireType == .lengthDelimited else { throw DecodingError.failed }
+        return try decodeMessage()
+    }
+
+    mutating func messageField<Result>(
+        _ field: ProtobufFormat.Field,
+        _ body: (inout ProtobufDecoder) throws -> Result
+    ) throws -> Result {
+        guard field.wireType == .lengthDelimited else { throw DecodingError.failed }
+        return try decodeMessage(body)
+    }
+
+    mutating func decodeDataBuffer() throws -> UnsafeRawBufferPointer {
+        let stop = try decodeLengthEnd()
+        defer { ptr = stop }
+        return UnsafeRawBufferPointer(start: ptr, count: ptr.distance(to: stop))
+    }
+
+    mutating func dataBufferField(_ field: ProtobufFormat.Field) throws -> UnsafeRawBufferPointer {
+        guard field.wireType == .lengthDelimited else { throw DecodingError.failed }
+        return try decodeDataBuffer()
+    }
+
+    mutating func skipField(_ field: ProtobufFormat.Field) throws {
+        switch field.wireType {
+        case .varint: _ = try decodeVarint()
+        case .lengthDelimited: _ = try decodeDataBuffer()
+        case .fixed64, .fixed32:
+            let count = field.wireType == .fixed64 ? 8 : 4
+            guard count <= ptr.distance(to: end) else { throw DecodingError.failed }
+            ptr += count
+        default: throw DecodingError.failed
         }
     }
 
-    mutating func skipField(wireType: UInt) throws {
-        switch wireType {
-        case 0:
-            _ = try decodeVarint()
-        case 1:
-            try skipBytes(8)
-        case 2:
-            let length = try decodeVarint()
-            guard length <= UInt(Int.max) else {
-                throw DecodingError.failed
-            }
-            try skipBytes(Int(length))
-        case 5:
-            try skipBytes(4)
-        default:
+    private mutating func prepareScalar(
+        _ field: ProtobufFormat.Field, wireType: ProtobufFormat.WireType
+    ) throws {
+        if field.wireType == .lengthDelimited {
+            let stop = try decodeLengthEnd()
+            packedField = .init(field.tag, wireType: wireType)
+            packedEnd = stop
+        } else if field.wireType != wireType {
             throw DecodingError.failed
         }
     }
 
-    private mutating func readByte() throws -> UInt8 {
-        guard index < currentEnd else {
-            throw DecodingError.failed
-        }
-
-        defer { index += 1 }
-        return buffer[index]
+    private mutating func readFixed<Value: FixedWidthInteger>(_ type: Value.Type) throws -> Value {
+        let count = MemoryLayout<Value>.size
+        guard count <= ptr.distance(to: end) else { throw DecodingError.failed }
+        defer { ptr += count }
+        return Value(littleEndian: ptr.loadUnaligned(as: Value.self))
     }
 
-    private mutating func skipBytes(_ count: Int) throws {
-        guard count >= 0, count <= currentEnd - index else {
+    private mutating func decodeLengthEnd() throws -> UnsafeRawPointer {
+        let length = try decodeVarint()
+        guard let count = Int(exactly: length), count <= ptr.distance(to: end) else {
             throw DecodingError.failed
         }
-        index += count
-    }
-
-    private var currentEnd: Int {
-        messageEnds.last ?? buffer.count
+        return ptr + count
     }
 }
 
@@ -401,19 +386,16 @@ private func decodeProtobufCGFloatPair(
     var first: CGFloat = 0
     var second: CGFloat = 0
 
-    while !decoder.isAtEnd {
-        let tag = try decoder.decodeVarint()
-        guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-        let fieldNumber = tag >> 3
-        let wireType = tag & 0x7
+    while let field = try decoder.nextField() {
+        let fieldNumber = field.tag
 
         switch fieldNumber {
         case 1:
-            first = try decoder.decodeCGFloatField(wireType: wireType)
+            first = try decoder.cgFloatField(field)
         case 2:
-            second = try decoder.decodeCGFloatField(wireType: wireType)
+            second = try decoder.cgFloatField(field)
         default:
-            try decoder.skipField(wireType: wireType)
+            try decoder.skipField(field)
         }
     }
     return (first, second)
@@ -462,22 +444,19 @@ extension CGRect: ProtobufEncodableMessage, ProtobufDecodableMessage {
         var y: CGFloat = 0
         var width: CGFloat = 0
         var height: CGFloat = 0
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
             switch fieldNumber {
             case 1:
-                x = try decoder.decodeCGFloatField(wireType: wireType)
+                x = try decoder.cgFloatField(field)
             case 2:
-                y = try decoder.decodeCGFloatField(wireType: wireType)
+                y = try decoder.cgFloatField(field)
             case 3:
-                width = try decoder.decodeCGFloatField(wireType: wireType)
+                width = try decoder.cgFloatField(field)
             case 4:
-                height = try decoder.decodeCGFloatField(wireType: wireType)
+                height = try decoder.cgFloatField(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(x: x, y: y, width: width, height: height)

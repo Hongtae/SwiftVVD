@@ -169,6 +169,37 @@ final class MeshGradientProtobufTests: XCTestCase {
         }
     }
 
+    func testPackedScalarsUseTheEnclosingEndInMeshHDRAndPointMessages() throws {
+        // ASSERTIONS canvasMeshProtobufDecoderBoundaryObserved
+        for length in 0...3 {
+            let payload = String(format: "0a%02x0000803f", length)
+            var hdr = ProtobufDecoder(data(payload))
+            XCTAssertEqual(try Color.ResolvedHDR(from: &hdr).base.linearRed, 1)
+            XCTAssertTrue(hdr.packedField._isEmpty)
+            var followed = ProtobufDecoder(data(payload + "3001"))
+            XCTAssertThrowsError(try Color.ResolvedHDR(from: &followed))
+            XCTAssertEqual(followed.data.bytes.distance(to: followed.ptr), 6)
+            XCTAssertEqual(followed.packedField.rawValue, 13)
+        }
+        XCTAssertEqual((try decode("22008101") as MeshGradient._Paint).width, 129)
+        var followed = ProtobufDecoder(data("220081012802"))
+        XCTAssertThrowsError(try MeshGradient._Paint(from: &followed))
+        XCTAssertEqual(followed.data.bytes.distance(to: followed.ptr), 4)
+        XCTAssertEqual(followed.packedField.rawValue, 32)
+        XCTAssertEqual(try decode("0a060a030000803f") as MeshGradient.Locations, .points([SIMD2(1, 0)]))
+    }
+
+    func testNestedMeshLengthFailureRetainsItsDistinctStackState() throws {
+        // ASSERTIONS canvasMeshProtobufDecoderBoundaryObserved
+        for (bytes, stack): (String, [Int]) in [("0a030a0500", [5]), ("12030a0500", []), ("1a030a0500", [])] {
+            var decoder = ProtobufDecoder(data(bytes))
+            XCTAssertThrowsError(try MeshGradient._Paint(from: &decoder))
+            XCTAssertEqual(decoder.data.bytes.distance(to: decoder.ptr), 4)
+            XCTAssertEqual(decoder.data.bytes.distance(to: decoder.end), 5)
+            XCTAssertEqual(decoder.stack.map { decoder.data.bytes.distance(to: $0) }, stack)
+        }
+    }
+
     private func decode<T: ProtobufDecodableMessage>(_ text: String) throws -> T {
         var decoder = ProtobufDecoder(data(text))
         return try T(from: &decoder)

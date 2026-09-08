@@ -1,3 +1,10 @@
+//
+//  File: EffectAnimation.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
 import Foundation
 
 protocol _DisplayList_AnyEffectAnimation:
@@ -39,21 +46,20 @@ extension EffectAnimation {
         var to: Value?
         var animation: Animation?
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1 where wireType == 2:
-                from = try decoder.decodeMessage(Value.self)
+                from = try decoder.messageField(field) as Value
             case 2 where wireType == 2:
-                to = try decoder.decodeMessage(Value.self)
+                to = try decoder.messageField(field) as Value
             case 3 where wireType == 2:
-                animation = try decoder.decodeMessage(CodableAnimation.self).base
+                animation = try (decoder.messageField(field) as CodableAnimation).base
             case 1, 2, 3:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
 
@@ -203,25 +209,24 @@ struct CodableEffectAnimation: ProtobufEncodableMessage, ProtobufDecodableMessag
         var base: (any _DisplayList_AnyEffectAnimation)?
         var size = CGSize.zero
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1 where wireType == 2:
-                base = try decoder.decodeMessage(DisplayList.OffsetAnimation.self)
+                base = try decoder.messageField(field) as DisplayList.OffsetAnimation
             case 2 where wireType == 2:
-                base = try decoder.decodeMessage(DisplayList.ScaleAnimation.self)
+                base = try decoder.messageField(field) as DisplayList.ScaleAnimation
             case 3 where wireType == 2:
-                base = try decoder.decodeMessage(DisplayList.RotationAnimation.self)
+                base = try decoder.messageField(field) as DisplayList.RotationAnimation
             case 4 where wireType == 2:
-                base = try decoder.decodeMessage(DisplayList.OpacityAnimation.self)
+                base = try decoder.messageField(field) as DisplayList.OpacityAnimation
             case 5 where wireType == 2:
-                size = try decoder.decodeMessage(CGSize.self)
+                size = try decoder.messageField(field) as CGSize
             case 1, 2, 3, 4, 5:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
 

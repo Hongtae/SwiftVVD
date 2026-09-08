@@ -163,14 +163,12 @@ extension _OpacityEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
 
     init(from decoder: inout ProtobufDecoder) throws {
         var opacity = 1.0
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
             if fieldNumber == 1 {
-                opacity = Double(try decoder.decodeFloatField(wireType: wireType))
+                opacity = Double(try decoder.floatField(field))
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(opacity: opacity)

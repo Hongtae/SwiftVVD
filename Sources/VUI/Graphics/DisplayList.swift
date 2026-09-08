@@ -205,40 +205,14 @@ extension _DisplayList_StableIdentity: ProtobufEncodableMessage, ProtobufDecodab
         var hash = StrongHash(words: (0, 0, 0, 0, 0))
         var serial: UInt32 = 0
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 0x08 else {
-                throw ProtobufDecoder.DecodingError.failed
-            }
-
-            let field = tag >> 3
-            let wireType = tag & 0x07
-            switch field {
+        while let field = try decoder.nextField() {
+            switch field.tag {
             case 1:
-                guard wireType == 2 else {
-                    throw ProtobufDecoder.DecodingError.failed
-                }
-                hash = try decoder.decodeMessage(StrongHash.self)
+                hash = try decoder.messageField(field)
             case 2:
-                switch wireType {
-                case 0:
-                    serial = UInt32(truncatingIfNeeded: try decoder.decodeVarint())
-                case 2:
-                    serial = try decoder.decodeLengthDelimited { packedDecoder in
-                        var value: UInt32?
-                        while !packedDecoder.isAtEnd {
-                            value = UInt32(truncatingIfNeeded: try packedDecoder.decodeVarint())
-                        }
-                        guard let value else {
-                            throw ProtobufDecoder.DecodingError.failed
-                        }
-                        return value
-                    }
-                default:
-                    throw ProtobufDecoder.DecodingError.failed
-                }
+                serial = try decoder.uint32Field(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
 
@@ -264,58 +238,22 @@ extension _DisplayList_StableIdentityMap: ProtobufEncodableMessage, ProtobufDeco
     init(from decoder: inout ProtobufDecoder) throws {
         var map: [_DisplayList_Identity: _DisplayList_StableIdentity] = [:]
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 0x08 else {
-                throw ProtobufDecoder.DecodingError.failed
-            }
-
-            let field = tag >> 3
-            let wireType = tag & 0x07
-            if field == 1 {
-                guard wireType == 2 else {
-                    throw ProtobufDecoder.DecodingError.failed
-                }
-                let entry = try decoder.decodeLengthDelimited { entryDecoder in
+        while let field = try decoder.nextField() {
+            if field.tag == 1 {
+                let entry = try decoder.messageField(field) { entryDecoder in
                     var identity: _DisplayList_Identity?
                     var stableIdentity: _DisplayList_StableIdentity?
 
-                    while !entryDecoder.isAtEnd {
-                        let entryTag = try entryDecoder.decodeVarint()
-                        guard entryTag >= 0x08 else {
-                            throw ProtobufDecoder.DecodingError.failed
-                        }
-
-                        let entryField = entryTag >> 3
-                        let entryWireType = entryTag & 0x07
-                        switch entryField {
+                    while let field = try entryDecoder.nextField() {
+                        switch field.tag {
                         case 1:
-                            switch entryWireType {
-                            case 0:
-                                identity = _DisplayList_Identity(
-                                    decodedValue: UInt32(truncatingIfNeeded: try entryDecoder.decodeVarint())
-                                )
-                            case 2:
-                                identity = try entryDecoder.decodeLengthDelimited { packedDecoder in
-                                    var value: UInt32?
-                                    while !packedDecoder.isAtEnd {
-                                        value = UInt32(truncatingIfNeeded: try packedDecoder.decodeVarint())
-                                    }
-                                    guard let value else {
-                                        throw ProtobufDecoder.DecodingError.failed
-                                    }
-                                    return _DisplayList_Identity(decodedValue: value)
-                                }
-                            default:
-                                throw ProtobufDecoder.DecodingError.failed
-                            }
+                            identity = _DisplayList_Identity(
+                                decodedValue: try entryDecoder.uint32Field(field)
+                            )
                         case 2:
-                            guard entryWireType == 2 else {
-                                throw ProtobufDecoder.DecodingError.failed
-                            }
-                            stableIdentity = try entryDecoder.decodeMessage(_DisplayList_StableIdentity.self)
+                            stableIdentity = try entryDecoder.messageField(field)
                         default:
-                            try entryDecoder.skipField(wireType: entryWireType)
+                            try entryDecoder.skipField(field)
                         }
                     }
 
@@ -326,7 +264,7 @@ extension _DisplayList_StableIdentityMap: ProtobufEncodableMessage, ProtobufDeco
                 }
                 map[entry.0] = entry.1
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
 

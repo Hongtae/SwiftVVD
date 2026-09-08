@@ -611,25 +611,23 @@ extension ContentTransition.Style: ProtobufEncodableMessage, ProtobufDecodableMe
     init(from decoder: inout ProtobufDecoder) throws {
         self = .default
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
 
             switch fieldNumber {
             case 1, 2:
                 guard wireType == 2 else {
                     throw ProtobufDecoder.DecodingError.failed
                 }
-                try decoder.decodeLengthDelimited { nested in
-                    while !nested.isAtEnd {
-                        let nestedTag = try nested.decodeVarint()
-                        try nested.skipField(wireType: nestedTag & 0x7)
+                try decoder.messageField(field) { nested in
+                    while let field = try nested.nextField() {
+                        try nested.skipField(field)
                     }
                 }
                 self = fieldNumber == 1 ? .sessionWidget : .animatedWidget
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }

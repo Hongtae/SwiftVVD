@@ -22,16 +22,13 @@ extension BezierTimingFunction: ProtobufEncodableMessage, ProtobufDecodableMessa
 
     init(from decoder: inout ProtobufDecoder) throws {
         self.init(p1x: 0, p1y: 0, p2x: 1, p2y: 1)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
-            case 1: p1x = try decoder.decodeFloatField(wireType: wireType)
-            case 2: p1y = try decoder.decodeFloatField(wireType: wireType)
-            case 3: p2x = try decoder.decodeFloatField(wireType: wireType)
-            case 4: p2y = try decoder.decodeFloatField(wireType: wireType)
-            default: try decoder.skipField(wireType: wireType)
+        while let field = try decoder.nextField() {
+            switch field.tag {
+            case 1: p1x = try decoder.floatField(field)
+            case 2: p1y = try decoder.floatField(field)
+            case 3: p2x = try decoder.floatField(field)
+            case 4: p2y = try decoder.floatField(field)
+            default: try decoder.skipField(field)
             }
         }
     }

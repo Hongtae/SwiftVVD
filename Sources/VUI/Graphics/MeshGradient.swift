@@ -195,23 +195,18 @@ extension MeshGradient.Locations: ProtobufEncodableMessage, ProtobufDecodableMes
     init(from decoder: inout ProtobufDecoder) throws {
         var points: [SIMD2<Float>] = []
         var bezierPoints: [MeshGradient.BezierPoint] = []
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                let point = try decoder.decodeLengthDelimited { decoder in
+                let point = try decoder.messageField(field) { decoder in
                     var point = SIMD2<Float>.zero
-                    while !decoder.isAtEnd {
-                        let tag = try decoder.decodeVarint()
-                        guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-                        let wireType = tag & 7
-                        switch tag >> 3 {
-                        case 1: point.x = try decoder.decodeFloatField(wireType: wireType)
-                        case 2: point.y = try decoder.decodeFloatField(wireType: wireType)
-                        default: try decoder.skipField(wireType: wireType)
+                    while let field = try decoder.nextField() {
+                        switch field.tag {
+                        case 1: point.x = try decoder.floatField(field)
+                        case 2: point.y = try decoder.floatField(field)
+                        default: try decoder.skipField(field)
                         }
                     }
                     return point
@@ -219,22 +214,19 @@ extension MeshGradient.Locations: ProtobufEncodableMessage, ProtobufDecodableMes
                 points.append(point)
             case 2:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                let point = try decoder.decodeLengthDelimited { decoder in
+                let point = try decoder.messageField(field) { decoder in
                     var point = MeshGradient.BezierPoint(
                         position: .zero, leadingControlPoint: .zero, topControlPoint: .zero,
                         trailingControlPoint: .zero, bottomControlPoint: .zero
                     )
                     try withUnsafeMutableBytes(of: &point) { bytes in
-                        while !decoder.isAtEnd {
-                            let tag = try decoder.decodeVarint()
-                            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-                            let field = tag >> 3
-                            let wireType = tag & 7
-                            if field <= 10 {
-                                let value = try decoder.decodeFloatField(wireType: wireType)
-                                bytes.storeBytes(of: value, toByteOffset: Int(field - 1) * MemoryLayout<Float>.stride, as: Float.self)
+                        while let field = try decoder.nextField() {
+                            let fieldNumber = field.tag
+                            if fieldNumber <= 10 {
+                                let value = try decoder.floatField(field)
+                                bytes.storeBytes(of: value, toByteOffset: Int(fieldNumber - 1) * MemoryLayout<Float>.stride, as: Float.self)
                             } else {
-                                try decoder.skipField(wireType: wireType)
+                                try decoder.skipField(field)
                             }
                         }
                     }
@@ -242,7 +234,7 @@ extension MeshGradient.Locations: ProtobufEncodableMessage, ProtobufDecodableMes
                 }
                 bezierPoints.append(point)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self = bezierPoints.isEmpty ? .points(points) : .bezierPoints(bezierPoints)
@@ -283,35 +275,29 @@ extension MeshGradient._Paint: ProtobufEncodableMessage, ProtobufDecodableMessag
         var height = 0
         var flags = MeshGradient._PaintFlags(rawValue: 0)
         var allowedDynamicRange = Image.DynamicRange.standard
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                locations = try decoder.decodeMessage()
+                locations = try decoder.messageField(field)
             case 2:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                colors.append(try decoder.decodeMessage())
+                colors.append(try decoder.messageField(field))
             case 3:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                background = try decoder.decodeMessage()
+                background = try decoder.messageField(field)
             case 4:
-                try decoder.decodeUIntField(wireType: wireType) {
-                    if let value = Int(exactly: $0) { width = value }
-                }
+                if let value = Int(exactly: try decoder.uintField(field)) { width = value }
             case 5:
-                try decoder.decodeUIntField(wireType: wireType) {
-                    if let value = Int(exactly: $0) { height = value }
-                }
+                if let value = Int(exactly: try decoder.uintField(field)) { height = value }
             case 6:
-                flags = .init(rawValue: UInt32(truncatingIfNeeded: try decoder.decodeUIntField(wireType: wireType)))
+                flags = .init(rawValue: UInt32(truncatingIfNeeded: try decoder.uintField(field)))
             case 7:
-                let value = try decoder.decodeUIntField(wireType: wireType)
+                let value = try decoder.uintField(field)
                 allowedDynamicRange = value == 1 ? .constrainedHigh : value == 2 ? .high : .standard
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(locations: locations, colors: colors, background: background,

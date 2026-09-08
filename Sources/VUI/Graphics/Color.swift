@@ -836,16 +836,13 @@ extension Color.Resolved: ProtobufEncodableMessage, ProtobufDecodableMessage {
         var green: Float = 0
         var blue: Float = 0
         var opacity: Float = 1
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
-            case 1: red = try decoder.decodeFloatField(wireType: wireType)
-            case 2: green = try decoder.decodeFloatField(wireType: wireType)
-            case 3: blue = try decoder.decodeFloatField(wireType: wireType)
-            case 4: opacity = try decoder.decodeFloatField(wireType: wireType)
-            default: try decoder.skipField(wireType: wireType)
+        while let field = try decoder.nextField() {
+            switch field.tag {
+            case 1: red = try decoder.floatField(field)
+            case 2: green = try decoder.floatField(field)
+            case 3: blue = try decoder.floatField(field)
+            case 4: opacity = try decoder.floatField(field)
+            default: try decoder.skipField(field)
             }
         }
         self.init(colorSpace: .sRGBLinear, red: red, green: green, blue: blue, opacity: opacity)
@@ -869,17 +866,14 @@ extension Color.ResolvedHDR: ProtobufEncodableMessage, ProtobufDecodableMessage 
         var blue: Float = 0
         var opacity: Float = 1
         var headroom: Float = .nan
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
-            case 1: red = try decoder.decodeFloatField(wireType: wireType)
-            case 2: green = try decoder.decodeFloatField(wireType: wireType)
-            case 3: blue = try decoder.decodeFloatField(wireType: wireType)
-            case 4: opacity = try decoder.decodeFloatField(wireType: wireType)
-            case 5: headroom = try decoder.decodeFloatField(wireType: wireType)
-            default: try decoder.skipField(wireType: wireType)
+        while let field = try decoder.nextField() {
+            switch field.tag {
+            case 1: red = try decoder.floatField(field)
+            case 2: green = try decoder.floatField(field)
+            case 3: blue = try decoder.floatField(field)
+            case 4: opacity = try decoder.floatField(field)
+            case 5: headroom = try decoder.floatField(field)
+            default: try decoder.skipField(field)
             }
         }
         self.init(

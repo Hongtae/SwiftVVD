@@ -259,30 +259,11 @@ extension StrongHash: ProtobufEncodableMessage, ProtobufDecodableMessage {
             decodedWordCount += 1
         }
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 0x08 else {
-                throw ProtobufDecoder.DecodingError.failed
-            }
-
-            let field = tag & ~UInt(0x07)
-            let wireType = tag & 0x07
-
-            if field == 0x08 {
-                switch wireType {
-                case 2:
-                    let length = try decoder.decodeVarint()
-                    let endIndex = try decoder.endIndexForLengthDelimitedField(byteCount: length)
-                    while decoder.position < endIndex {
-                        assign(try decoder.decodeFixed32(limitedBy: endIndex))
-                    }
-                case 5:
-                    assign(try decoder.decodeFixed32())
-                default:
-                    throw ProtobufDecoder.DecodingError.failed
-                }
+        while let field = try decoder.nextField() {
+            if field.tag == 1 {
+                assign(try decoder.fixed32Field(field))
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
 

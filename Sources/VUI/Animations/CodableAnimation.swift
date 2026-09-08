@@ -41,14 +41,12 @@ extension UnitCurve.CubicSolver: ProtobufEncodableMessage, ProtobufDecodableMess
 
     init(from decoder: inout ProtobufDecoder) throws {
         var values = Array(repeating: 0.0, count: 4)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
             if (1...4).contains(fieldNumber) {
-                values[Int(fieldNumber - 1)] = try decoder.decodeDoubleField(wireType: wireType)
+                values[Int(fieldNumber - 1)] = try decoder.doubleField(field)
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(
@@ -95,19 +93,18 @@ extension BezierAnimation: EncodableAnimation, ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws {
         var duration = 0.0
         var curve = Self.defaultCurve
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1:
-                duration = try decoder.decodeDoubleField(wireType: wireType)
+                duration = try decoder.doubleField(field)
             case 2 where wireType == 2:
-                curve = try decoder.decodeMessage(UnitCurve.CubicSolver.self)
+                curve = try decoder.messageField(field) as UnitCurve.CubicSolver
             case 2:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(duration: duration, curve: curve)
@@ -139,21 +136,19 @@ extension SpringAnimation: EncodableAnimation, ProtobufDecodableMessage {
         var stiffness = 100.0
         var damping = 20.0
         var initialVelocity = 0.0
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
             switch fieldNumber {
             case 1:
-                mass = try decoder.decodeDoubleField(wireType: wireType)
+                mass = try decoder.doubleField(field)
             case 2:
-                stiffness = try decoder.decodeDoubleField(wireType: wireType)
+                stiffness = try decoder.doubleField(field)
             case 3:
-                damping = try decoder.decodeDoubleField(wireType: wireType)
+                damping = try decoder.doubleField(field)
             case 4:
-                initialVelocity = try decoder.decodeDoubleField(wireType: wireType)
+                initialVelocity = try decoder.doubleField(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(
@@ -186,19 +181,17 @@ extension FluidSpringAnimation: EncodableAnimation, ProtobufDecodableMessage {
         var response = 0.0
         var dampingFraction = 0.0
         var blendDuration = 0.0
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
             switch fieldNumber {
             case 1:
-                response = try decoder.decodeDoubleField(wireType: wireType)
+                response = try decoder.doubleField(field)
             case 2:
-                dampingFraction = try decoder.decodeDoubleField(wireType: wireType)
+                dampingFraction = try decoder.doubleField(field)
             case 3:
-                blendDuration = try decoder.decodeDoubleField(wireType: wireType)
+                blendDuration = try decoder.doubleField(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(
@@ -304,30 +297,29 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
 
     init(from decoder: inout ProtobufDecoder) throws {
         var animation: Animation?
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1 where wireType == 2:
-                let value = try decoder.decodeMessage(BezierAnimation.self)
+                let value = try decoder.messageField(field) as BezierAnimation
                 animation = Animation(box: value.animationBox)
             case 2 where wireType == 2:
-                let value = try decoder.decodeMessage(SpringAnimation.self)
+                let value = try decoder.messageField(field) as SpringAnimation
                 animation = Animation(box: value.animationBox)
             case 3 where wireType == 2:
-                let value = try decoder.decodeMessage(FluidSpringAnimation.self)
+                let value = try decoder.messageField(field) as FluidSpringAnimation
                 animation = Animation(box: value.animationBox)
             case 4:
                 guard let current = animation else {
                     throw ProtobufDecoder.DecodingError.failed
                 }
-                animation = current.delay(try decoder.decodeDoubleField(wireType: wireType))
+                animation = current.delay(try decoder.doubleField(field))
             case 5 where wireType == 2:
                 guard let current = animation else {
                     throw ProtobufDecoder.DecodingError.failed
                 }
-                let repeatValue = try decoder.decodeLengthDelimited { nested in
+                let repeatValue = try decoder.messageField(field) { nested in
                     try Self.decodeRepeatMessage(from: &nested)
                 }
                 animation = Self.applying(repeatValue, to: current)
@@ -335,18 +327,18 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
                 guard let current = animation else {
                     throw ProtobufDecoder.DecodingError.failed
                 }
-                animation = current.speed(try decoder.decodeDoubleField(wireType: wireType))
+                animation = current.speed(try decoder.doubleField(field))
             case 7 where wireType == 2:
-                _ = try decoder.decodeMessage(DefaultAnimation.self)
+                _ = try decoder.messageField(field) as DefaultAnimation
                 animation = .default
             case 8 where wireType == 2:
-                animation = try decoder.decodeLengthDelimited { nested in
+                animation = try decoder.messageField(field) { nested in
                     try Self.decodeModifierEnvelope(from: &nested, applyingTo: animation)
                 }
             case 1, 2, 3, 5, 7, 8:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         guard let animation else {
@@ -362,17 +354,16 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
         guard var animation = initialAnimation else {
             throw ProtobufDecoder.DecodingError.failed
         }
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1:
                 animation = animation.delay(
-                    try decoder.decodeDoubleField(wireType: wireType)
+                    try decoder.doubleField(field)
                 )
             case 2 where wireType == 2:
-                let repeatValue = try decoder.decodeLengthDelimited { nested in
+                let repeatValue = try decoder.messageField(field) { nested in
                     try decodeRepeatMessage(from: &nested)
                 }
                 animation = applying(repeatValue, to: animation)
@@ -380,10 +371,10 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
                 throw ProtobufDecoder.DecodingError.failed
             case 3:
                 animation = animation.speed(
-                    try decoder.decodeDoubleField(wireType: wireType)
+                    try decoder.doubleField(field)
                 )
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         return animation
@@ -394,19 +385,18 @@ struct CodableAnimation: ProtobufEncodableMessage, ProtobufDecodableMessage {
     ) throws -> (count: Int?, autoreverses: Bool) {
         var count: Int?
         var autoreverses = false
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1 where wireType == 0:
-                count = try decoder.decodeSignedVarint()
+                count = try decoder.intField(field)
             case 2 where wireType == 0:
                 autoreverses = try decoder.decodeVarint() != 0
             case 1, 2:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         return (count, autoreverses)

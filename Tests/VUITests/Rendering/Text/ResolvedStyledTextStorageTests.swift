@@ -13,17 +13,16 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         _ decoder: inout ProtobufDecoder
     ) throws -> ResolvedArchiveFields {
         var result = ResolvedArchiveFields()
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             result.fields.append(fieldNumber)
             if fieldNumber == 8, wireType == 2 {
-                result.smaller.append(try decoder.decodeLengthDelimited { nested in
+                result.smaller.append(try decoder.decodeMessage { nested in
                     try decodeResolvedArchiveFields(&nested)
                 })
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         return result
@@ -660,7 +659,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
         var decoder = ProtobufDecoder(try placeholder.encodedData())
         XCTAssertEqual(try decoder.decodeVarint(), (1 << 3) | 2)
-        let fields = try decoder.decodeLengthDelimited { nested in
+        let fields = try decoder.decodeMessage { nested in
             try decodeResolvedArchiveFields(&nested)
         }
         XCTAssertTrue(fields.fields.contains(1))
@@ -670,9 +669,9 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertTrue(fields.smaller.first?.fields.contains(8) == true)
 
         XCTAssertEqual(try decoder.decodeVarint(), (2 << 3) | 2)
-        let size = try decoder.decodeMessage(CGSize.self)
+        let size: CGSize = try decoder.decodeMessage()
         XCTAssertEqual(size, CGSize(width: 120, height: 24))
-        XCTAssertTrue(decoder.isAtEnd)
+        XCTAssertNil(try decoder.nextField())
     }
 
     func testResolvedPropertiesSupplementalCarrierDefaultsAndAttachmentRegistration() throws {

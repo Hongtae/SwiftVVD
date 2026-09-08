@@ -463,10 +463,9 @@ extension TextLayoutProperties: ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws {
         self.init()
 
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
 
             switch fieldNumber {
             case 1:
@@ -476,26 +475,26 @@ extension TextLayoutProperties: ProtobufDecodableMessage {
                 truncationMode = value
             case 2:
                 guard wireType == 0 else { throw ProtobufDecoder.DecodingError.failed }
-                lineLimit = try decoder.decodeSignedVarint()
+                lineLimit = try decoder.intField(field)
             case 3:
                 guard wireType == 0 else { throw ProtobufDecoder.DecodingError.failed }
-                lowerLineLimit = try decoder.decodeSignedVarint()
+                lowerLineLimit = try decoder.intField(field)
             case 4:
-                minScaleFactor = try decoder.decodeCGFloatField(wireType: wireType)
+                minScaleFactor = try decoder.cgFloatField(field)
             case 5:
-                lineSpacing = try decoder.decodeCGFloatField(wireType: wireType)
+                lineSpacing = try decoder.cgFloatField(field)
             case 6:
-                lineHeightMultiple = try decoder.decodeCGFloatField(wireType: wireType)
+                lineHeightMultiple = try decoder.cgFloatField(field)
             case 7:
-                maximumLineHeight = try decoder.decodeCGFloatField(wireType: wireType)
+                maximumLineHeight = try decoder.cgFloatField(field)
             case 8:
-                minimumLineHeight = try decoder.decodeCGFloatField(wireType: wireType)
+                minimumLineHeight = try decoder.cgFloatField(field)
             case 9:
-                hyphenationFactor = try decoder.decodeCGFloatField(wireType: wireType)
+                hyphenationFactor = try decoder.cgFloatField(field)
             case 10:
-                bodyHeadOutdent = try decoder.decodeCGFloatField(wireType: wireType)
+                bodyHeadOutdent = try decoder.cgFloatField(field)
             case 11:
-                pixelLength = try decoder.decodeCGFloatField(wireType: wireType)
+                pixelLength = try decoder.cgFloatField(field)
             case 12:
                 guard wireType == 0,
                       let value = TextAlignment(protobufValue: try decoder.decodeVarint())
@@ -506,7 +505,7 @@ extension TextLayoutProperties: ProtobufDecodableMessage {
                 layoutDirection = try decoder.decodeVarint() == 1 ? .rightToLeft : .leftToRight
             case 14:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                transitionStyle = try decoder.decodeMessage(ContentTransition.Style.self)
+                transitionStyle = try decoder.messageField(field) as ContentTransition.Style
             case 16:
                 guard wireType == 0,
                       let storage = Text.WritingMode.Storage(rawValue: UInt8(try decoder.decodeVarint()))
@@ -527,7 +526,7 @@ extension TextLayoutProperties: ProtobufDecodableMessage {
                 guard wireType == 0 else { throw ProtobufDecoder.DecodingError.failed }
                 hyphenationDisabled = try decoder.decodeVarint() == 1
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }

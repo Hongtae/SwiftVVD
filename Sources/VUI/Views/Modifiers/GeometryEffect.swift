@@ -702,16 +702,15 @@ extension _OffsetEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
 
     init(from decoder: inout ProtobufDecoder) throws {
         var offset = CGSize.zero
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             if fieldNumber == 1, wireType == 2 {
-                offset = try decoder.decodeMessage(CGSize.self)
+                offset = try decoder.messageField(field) as CGSize
             } else if fieldNumber == 1 {
                 throw ProtobufDecoder.DecodingError.failed
             } else {
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(offset: offset)
@@ -731,19 +730,18 @@ extension _ScaleEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws {
         var scale = CGSize(width: 1, height: 1)
         var anchor = UnitPoint.center
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1 where wireType == 2:
-                scale = try decoder.decodeMessage(CGSize.self)
+                scale = try decoder.messageField(field) as CGSize
             case 2 where wireType == 2:
-                anchor = try decoder.decodeMessage(UnitPoint.self)
+                anchor = try decoder.messageField(field) as UnitPoint
             case 1, 2:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(scale: scale, anchor: anchor)
@@ -763,19 +761,18 @@ extension _RotationEffect: ProtobufEncodableMessage, ProtobufDecodableMessage {
     init(from decoder: inout ProtobufDecoder) throws {
         var angle = Angle.zero
         var anchor = UnitPoint.center
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            let fieldNumber = tag >> 3
-            let wireType = tag & 0x7
+        while let field = try decoder.nextField() {
+            let fieldNumber = field.tag
+            let wireType = field.wireType.rawValue
             switch fieldNumber {
             case 1:
-                angle = Angle(radians: try decoder.decodeDoubleField(wireType: wireType))
+                angle = Angle(radians: try decoder.doubleField(field))
             case 2 where wireType == 2:
-                anchor = try decoder.decodeMessage(UnitPoint.self)
+                anchor = try decoder.messageField(field) as UnitPoint
             case 2:
                 throw ProtobufDecoder.DecodingError.failed
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
         self.init(angle: angle, anchor: anchor)

@@ -141,21 +141,19 @@ extension ResolvedGradient: ProtobufEncodableMessage, ProtobufDecodableMessage {
 
     init(from decoder: inout ProtobufDecoder) throws {
         self.init(stops: [], colorSpace: .default, headroom: nil)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                stops.append(try decoder.decodeMessage(Stop.self))
+                stops.append(try decoder.messageField(field) as Stop)
             case 2:
-                let raw = try decoder.decodeUIntField(wireType: wireType)
+                let raw = try decoder.uintField(field)
                 colorSpace = UInt8(exactly: raw).flatMap(ColorSpace.init(rawValue:)) ?? .device
             case 3:
-                headroom = try decoder.decodeFloatField(wireType: wireType)
+                headroom = try decoder.floatField(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }
@@ -175,21 +173,19 @@ extension ResolvedGradient.Stop: ProtobufEncodableMessage, ProtobufDecodableMess
     init(from decoder: inout ProtobufDecoder) throws {
         self.init(color: .init(colorSpace: .sRGBLinear, red: 0, green: 0, blue: 0, opacity: 0),
                   location: 0, interpolation: nil)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                color = try decoder.decodeMessage(Color.Resolved.self)
+                color = try decoder.messageField(field) as Color.Resolved
             case 2:
-                location = try decoder.decodeCGFloatField(wireType: wireType)
+                location = try decoder.cgFloatField(field)
             case 3:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                interpolation = try decoder.decodeMessage(BezierTimingFunction<Float>.self)
+                interpolation = try decoder.messageField(field)
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }

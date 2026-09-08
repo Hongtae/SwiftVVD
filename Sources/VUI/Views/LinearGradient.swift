@@ -132,27 +132,25 @@ extension LinearGradient._Paint: ProtobufEncodableMessage, ProtobufDecodableMess
         self.init(gradient: .init(stops: [], colorSpace: .default, headroom: nil),
                   startPoint: .init(x: 0, y: 0), endPoint: .init(x: 0, y: 0),
                   allowedDynamicRange: .standard)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                gradient = try decoder.decodeMessage(ResolvedGradient.self)
+                gradient = try decoder.messageField(field) as ResolvedGradient
             case 2:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                startPoint = try decoder.decodeMessage(UnitPoint.self)
+                startPoint = try decoder.messageField(field) as UnitPoint
             case 3:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                endPoint = try decoder.decodeMessage(UnitPoint.self)
+                endPoint = try decoder.messageField(field) as UnitPoint
             case 4:
-                let raw = try decoder.decodeUIntField(wireType: wireType)
+                let raw = try decoder.uintField(field)
                 allowedDynamicRange = Image.DynamicRange(
                     UInt8(exactly: raw).flatMap(Image.DynamicRange.Storage.init(rawValue:)) ?? .standard
                 )
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }
@@ -176,27 +174,25 @@ extension LinearGradient.AbsolutePaint: ProtobufEncodableMessage, ProtobufDecoda
     init(from decoder: inout ProtobufDecoder) throws {
         self.init(gradient: .init(stops: [], colorSpace: .default, headroom: nil),
                   startPoint: .zero, endPoint: .zero, allowedDynamicRange: .standard)
-        while !decoder.isAtEnd {
-            let tag = try decoder.decodeVarint()
-            guard tag >= 8 else { throw ProtobufDecoder.DecodingError.failed }
-            let wireType = tag & 7
-            switch tag >> 3 {
+        while let field = try decoder.nextField() {
+            let wireType = field.wireType.rawValue
+            switch field.tag {
             case 1:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                gradient = try decoder.decodeMessage(ResolvedGradient.self)
+                gradient = try decoder.messageField(field) as ResolvedGradient
             case 2:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                startPoint = try decoder.decodeMessage(CGPoint.self)
+                startPoint = try decoder.messageField(field) as CGPoint
             case 3:
                 guard wireType == 2 else { throw ProtobufDecoder.DecodingError.failed }
-                endPoint = try decoder.decodeMessage(CGPoint.self)
+                endPoint = try decoder.messageField(field) as CGPoint
             case 4:
-                let raw = try decoder.decodeUIntField(wireType: wireType)
+                let raw = try decoder.uintField(field)
                 allowedDynamicRange = Image.DynamicRange(
                     UInt8(exactly: raw).flatMap(Image.DynamicRange.Storage.init(rawValue:)) ?? .standard
                 )
             default:
-                try decoder.skipField(wireType: wireType)
+                try decoder.skipField(field)
             }
         }
     }
