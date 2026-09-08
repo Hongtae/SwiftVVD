@@ -138,6 +138,7 @@ final class InspectorCommandsTests: XCTestCase {
         versionSeed: Int
     ) -> FocusedValues {
         var values = FocusedValues()
+        values.storageOptions.insert(.inFocusedViewHierarchy)
         values.inspectorCommandsTestBinding = binding
         values.version = DisplayList.Version(value: versionSeed)
         return values

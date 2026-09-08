@@ -966,8 +966,14 @@ final class ButtonEventRoutingTests: XCTestCase {
         ) { _, _ in }
 
         let root = controller.responderNode as? MultiViewResponder
+        func gestureResponderCount(in responder: ViewResponder) -> Int {
+            let ownCount = responder is any AnyGestureResponder ? 1 : 0
+            return responder.children.reduce(ownCount) {
+                $0 + gestureResponderCount(in: $1)
+            }
+        }
         XCTAssertEqual(
-            root?.children.compactMap { $0 as? any AnyGestureResponder }.count,
+            root.map { gestureResponderCount(in: $0) },
             14
         )
     }

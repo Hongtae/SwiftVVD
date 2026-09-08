@@ -53,7 +53,10 @@ final class EntryMacroTests: XCTestCase {
     }
 
     func testEntryMacroSynthesizesFocusedValueKeyAccessors() {
+        // ASSERTIONS commandsFocusedValueScopeDepthArbitrationRuntimeObserved
+        // ASSERTIONS commandsFocusedValueRepeatedAssignmentRuntimeObserved
         var values = FocusedValues()
+        values.storageOptions.insert(.inFocusedViewHierarchy)
 
         XCTAssertNil(values.macroFocusedCount)
 
@@ -61,7 +64,8 @@ final class EntryMacroTests: XCTestCase {
         XCTAssertEqual(values.macroFocusedCount, 9)
 
         values.macroFocusedCount = nil
-        XCTAssertNil(values.macroFocusedCount)
+        // A nil contribution does not erase an earlier focused entry.
+        XCTAssertEqual(values.macroFocusedCount, 9)
     }
 
     func testEntryMacroFocusedValuesDiagnosticsMatchSampledSwiftUI() throws {

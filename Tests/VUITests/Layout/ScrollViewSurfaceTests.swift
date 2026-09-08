@@ -3600,26 +3600,6 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 )
             )
             XCTAssertEqual(childSafeAreaInsets.value, childSafeAreaElement.insets)
-
-            let scrollableID = try XCTUnwrap(recorder.scrollableAttribute)
-            var stored = ScrollPosition(idType: String.self)
-            let target = ScrollPosition(idType: String.self, point: CGPoint(x: 12, y: 34))
-            let binding = Binding<ScrollPosition>(
-                get: { stored },
-                set: { value, _ in stored = value }
-            )
-            var request = ScrollToScrollStateRequest(
-                binding: binding,
-                anchor: nil,
-                id: ObjectIdentifier(recorder),
-                value: target,
-                baseTransaction: Transaction()
-            )
-            request.updateScrollable(Attribute<any Scrollable>(scrollableID))
-
-            XCTAssertTrue(request.update())
-            let updatedTranslations = try XCTUnwrap(recorder.transform?.value.translations)
-            XCTAssertEqual(Array(updatedTranslations.suffix(3)).first, CGSize(width: 12, height: 34))
         }
     }
 
@@ -4014,18 +3994,21 @@ final class ScrollViewSurfaceTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS systemScrollViewUpdaterConsumerFlagsObserved, scrollViewAnimationOffsetRuntimeObserved
     func testSystemScrollViewScrollableAppliesScrollToPointRequestToGeometryState() {
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        ref.withCurrent {
+        withScrollViewHost { viewGraph in
+            let graph = viewGraph.data.graph
             var preferenceKeys = PreferenceKeys()
             preferenceKeys.add(ScrollablePreferenceKey.self)
             preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ViewRespondersKey.self)
             let recorder = ScrollViewInputRecorder()
             let view = SystemScrollView(
-                configuration: ScrollViewConfiguration(),
-                content: ScrollViewRecordingContent(recorder: recorder)
+                configuration: ScrollViewConfiguration(axes: [.horizontal, .vertical]),
+                content: ScrollViewRecordingContent(
+                    recorder: recorder,
+                    size: CGSize(width: 240, height: 360)
+                )
             )
             let viewAttr = graph.makeInput(value: view)
             var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
@@ -4037,12 +4020,16 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             guard let scrollableID = recorder.scrollableAttribute,
-                  let geometryPreference = outputs.preferences.value(for: ScrollGeometryPreferenceKey.self) else {
+                  let geometryPreference = outputs.preferences.value(for: ScrollGeometryPreferenceKey.self),
+                  let respondersPreference = outputs.preferences.value(for: ViewRespondersKey.self) else {
                 XCTFail("expected scrollable and geometry outputs")
                 return
             }
 
             let geometryAttribute = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let responders = Attribute<[ViewResponder]>(respondersPreference)
+            _ = responders.value
+            viewGraph.flushTransactions()
             XCTAssertEqual(geometryAttribute.value.first?.geometry.contentOffset, .zero)
 
             var stored = ScrollPosition(idType: String.self)
@@ -4063,24 +4050,41 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertTrue(request.update())
             XCTAssertEqual(stored, target)
 
+            viewGraph.flushTransactions()
+            _ = responders.value
+            viewGraph.flushTransactions()
+            // An unanchored, partially visible target preserves the offset
+            // unless the request requires complete visibility.
+            XCTAssertEqual(geometryAttribute.value.first?.geometry.contentOffset, .zero)
+
+            request.baseTransaction.scrollToRequiresCompleteVisibility = true
+            XCTAssertTrue(request.update())
+            viewGraph.flushTransactions()
+            _ = responders.value
+            viewGraph.flushTransactions()
             let updatedGeometry = geometryAttribute.value.first?.geometry
             XCTAssertEqual(updatedGeometry?.contentOffset, CGPoint(x: 12, y: 34))
             XCTAssertEqual(updatedGeometry?.visibleRect.origin, CGPoint(x: 12, y: 34))
+            let updatedTranslations = recorder.transform?.value.translations
+            XCTAssertEqual(updatedTranslations.flatMap { $0.suffix(3).first }, CGSize(width: 12, height: 34))
         }
     }
 
+    // ASSERTIONS systemScrollViewUpdaterConsumerFlagsObserved, scrollViewAnimationOffsetRuntimeObserved
     func testSystemScrollViewScrollableAppliesAxisTargetsAndOffsetAdjustmentsToGeometryState() {
-        let graph = _AGGraph()
-        let ref = _AGGraphContext(graph: graph)
-
-        ref.withCurrent {
+        withScrollViewHost { viewGraph in
+            let graph = viewGraph.data.graph
             var preferenceKeys = PreferenceKeys()
             preferenceKeys.add(ScrollablePreferenceKey.self)
             preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+            preferenceKeys.add(ViewRespondersKey.self)
             let recorder = ScrollViewInputRecorder()
             let view = SystemScrollView(
-                configuration: ScrollViewConfiguration(),
-                content: ScrollViewRecordingContent(recorder: recorder)
+                configuration: ScrollViewConfiguration(axes: [.horizontal, .vertical]),
+                content: ScrollViewRecordingContent(
+                    recorder: recorder,
+                    size: CGSize(width: 240, height: 360)
+                )
             )
             let viewAttr = graph.makeInput(value: view)
             var inputs = makeViewInputs(graph: graph, preferenceKeys: preferenceKeys)
@@ -4092,7 +4096,8 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             guard let scrollableID = recorder.scrollableAttribute,
-                  let geometryPreference = outputs.preferences.value(for: ScrollGeometryPreferenceKey.self) else {
+                  let geometryPreference = outputs.preferences.value(for: ScrollGeometryPreferenceKey.self),
+                  let respondersPreference = outputs.preferences.value(for: ViewRespondersKey.self) else {
                 XCTFail("expected scrollable and geometry outputs")
                 return
             }
@@ -4100,6 +4105,9 @@ final class ScrollViewSurfaceTests: XCTestCase {
             let scrollableAttribute = Attribute<any Scrollable>(scrollableID)
             let scrollable = scrollableAttribute.value
             let geometryAttribute = Attribute<[ScrollGeometryState]>(geometryPreference)
+            let responders = Attribute<[ViewResponder]>(respondersPreference)
+            _ = responders.value
+            viewGraph.flushTransactions()
             var stored = ScrollPosition(idType: String.self)
             let binding = Binding<ScrollPosition>(
                 get: { stored },
@@ -4107,16 +4115,21 @@ final class ScrollViewSurfaceTests: XCTestCase {
             )
 
             func apply(_ target: ScrollPosition) {
+                var transaction = Transaction()
+                transaction.scrollToRequiresCompleteVisibility = true
                 var request = ScrollToScrollStateRequest(
                     binding: binding,
                     anchor: nil,
                     id: ObjectIdentifier(recorder),
                     value: target,
-                    baseTransaction: Transaction()
+                    baseTransaction: transaction
                 )
                 request.updateScrollable(scrollableAttribute)
                 XCTAssertTrue(request.update())
                 XCTAssertEqual(stored, target)
+                viewGraph.flushTransactions()
+                _ = responders.value
+                viewGraph.flushTransactions()
             }
 
             apply(ScrollPosition(idType: String.self, x: 14))
@@ -4133,7 +4146,9 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
             XCTAssertTrue(scrollable.allowsContentOffsetAdjustments)
             XCTAssertTrue(scrollable.adjustContentOffset(by: CGSize(width: -4, height: 6), reason: .translation))
-
+            viewGraph.flushTransactions()
+            _ = responders.value
+            viewGraph.flushTransactions()
             let adjustedGeometry = geometryAttribute.value.first?.geometry
             XCTAssertEqual(adjustedGeometry?.contentOffset, CGPoint(x: 10, y: 34))
             XCTAssertEqual(adjustedGeometry?.visibleRect.origin, CGPoint(x: 10, y: 34))
@@ -4194,9 +4209,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewScrollableResolvesLazyNonVisibleIDTarget() throws {
-        let host = GraphHost()
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
+        rendererHost.storage = host
         var scrollablePreference: AGAttribute!
         var geometryPreference: AGAttribute!
+        var respondersPreference: AGAttribute!
 
         try host.data.withCurrent {
             try AGSubgraph.withCurrent(host.data.rootSubgraph) {
@@ -4204,6 +4222,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 var preferenceKeys = PreferenceKeys()
                 preferenceKeys.add(ScrollablePreferenceKey.self)
                 preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+                preferenceKeys.add(ViewRespondersKey.self)
                 let rows = (0..<200).map { ScrollViewTargetRow(id: $0) }
                 let content = LazyVStack(spacing: 0) {
                     ForEach(rows, id: \.id) { row in
@@ -4228,8 +4247,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 geometryPreference = try XCTUnwrap(
                     outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
                 )
+                respondersPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ViewRespondersKey.self)
+                )
 
                 _ = Attribute<[any Scrollable]>(scrollablePreference).value
+                _ = Attribute<[ViewResponder]>(respondersPreference).value
             }
         }
 
@@ -4275,6 +4298,9 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 XCTAssertTrue(scrollable.scroll(to: 150))
             }
 
+            host.flushTransactions()
+            _ = Attribute<[ViewResponder]>(respondersPreference).value
+            host.flushTransactions()
             let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
             XCTAssertEqual(updatedGeometry.contentOffset, CGPoint(x: 0, y: 3_000))
             XCTAssertEqual(updatedGeometry.visibleRect.origin, CGPoint(x: 0, y: 3_000))
@@ -4282,9 +4308,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
     }
 
     func testSystemScrollViewLazyNonVisibleIDUsesInitialEstimateSamples() throws {
-        let host = GraphHost()
+        let rendererHost = TestViewRendererHost()
+        let host = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: rendererHost)
+        rendererHost.storage = host
         var scrollablePreference: AGAttribute!
         var geometryPreference: AGAttribute!
+        var respondersPreference: AGAttribute!
 
         try host.data.withCurrent {
             try AGSubgraph.withCurrent(host.data.rootSubgraph) {
@@ -4292,6 +4321,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 var preferenceKeys = PreferenceKeys()
                 preferenceKeys.add(ScrollablePreferenceKey.self)
                 preferenceKeys.add(ScrollGeometryPreferenceKey.self)
+                preferenceKeys.add(ViewRespondersKey.self)
                 let rows = (0..<200).map {
                     ScrollViewTargetRow(id: $0, height: $0 < 10 ? 10 : 30)
                 }
@@ -4318,8 +4348,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 geometryPreference = try XCTUnwrap(
                     outputs.preferences.value(for: ScrollGeometryPreferenceKey.self)
                 )
+                respondersPreference = try XCTUnwrap(
+                    outputs.preferences.value(for: ViewRespondersKey.self)
+                )
 
                 _ = Attribute<[any Scrollable]>(scrollablePreference).value
+                _ = Attribute<[ViewResponder]>(respondersPreference).value
             }
         }
 
@@ -4350,6 +4384,9 @@ final class ScrollViewSurfaceTests: XCTestCase {
                 XCTAssertTrue(scrollable.scroll(to: 150))
             }
 
+            host.flushTransactions()
+            _ = Attribute<[ViewResponder]>(respondersPreference).value
+            host.flushTransactions()
             let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
             XCTAssertEqual(updatedGeometry.contentOffset, CGPoint(x: 0, y: 1_500))
             XCTAssertEqual(updatedGeometry.visibleRect.origin, CGPoint(x: 0, y: 1_500))
@@ -4468,6 +4505,11 @@ final class ScrollViewSurfaceTests: XCTestCase {
             withTransaction(transaction) {
                 XCTAssertTrue(scrollable.scroll(to: targetID))
             }
+            // The request transaction adds another placement sample before
+            // the host resolves its deferred target. It must use that current
+            // estimate, not freeze the earlier inspection's rectangle.
+            let appliedTarget = try XCTUnwrap(targetBuilder(initialGeometry, .leftToRight))
+            XCTAssertEqual(appliedTarget.rect.minY, 1_527.2, accuracy: 0.001)
         }
 
         viewGraph.data.withCurrent {
@@ -4479,9 +4521,10 @@ final class ScrollViewSurfaceTests: XCTestCase {
         try viewGraph.data.withCurrent {
             let geometry = Attribute<[ScrollGeometryState]>(geometryPreference)
             let updatedGeometry = try XCTUnwrap(geometry.value.first?.geometry)
+            // Graph geometry publishes the host's pixel-aligned offset.
             XCTAssertEqual(
                 updatedGeometry.contentOffset.y,
-                1_528.9473684210527,
+                1_527,
                 accuracy: 0.001
             )
         }
@@ -5495,6 +5538,21 @@ final class ScrollViewSurfaceTests: XCTestCase {
             XCTAssertEqual(calls[0].new, .tracking)
             XCTAssertEqual(calls[0].context.geometry.contentOffset.x, 42)
             XCTAssertEqual(calls[0].context.velocity, CGVector(dx: 3, dy: 4))
+        }
+    }
+
+    private func withScrollViewHost(_ body: (ViewGraph) -> Void) {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
+        viewGraph.data.withCurrent {
+            AGSubgraph.withCurrent(viewGraph.data.rootSubgraph) {
+                body(viewGraph)
+            }
         }
     }
 

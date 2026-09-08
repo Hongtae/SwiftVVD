@@ -3686,17 +3686,14 @@ final class ScrollableLayoutSurfaceTests: XCTestCase {
 
             sizeAttr.setValue(ViewSize(width: 100, height: 80))
             _ = materialization.value
-            XCTAssertEqual(
-                recorder.lifecycleEvents.filter { $0.hasPrefix("1 ") || $0.hasPrefix("2 ") },
-                [
-                    "1 appear",
-                    "2 appear",
-                    "1 disappear",
-                    "2 disappear",
-                    "1 appear",
-                    "2 appear",
-                ]
-            )
+            // Reused and rebuilt rows need the same per-row lifecycle, not
+            // a shared sibling callback order.
+            for id in 1...2 {
+                XCTAssertEqual(
+                    recorder.lifecycleEvents.filter { $0.hasPrefix("\(id) ") },
+                    ["\(id) appear", "\(id) disappear", "\(id) appear"]
+                )
+            }
         }
 
         XCTAssertEqual(recorder.makeViewIDs.filter { $0 == 1 }.count, 1)

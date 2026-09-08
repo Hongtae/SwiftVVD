@@ -415,6 +415,13 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         appContext = testAppContext
         defer { appContext = previousAppContext }
 
+        let configuration = BundledFontCatalog.shared.configuration
+        let descriptor = try XCTUnwrap(
+            configuration.fontDescriptors[configuration.systemFont(for: .default)]
+        )
+        let logicalEmbolden = descriptor.appliesSyntheticWeight
+            ? SystemFontProvider.embolden(for: .semibold)
+            : 0
         let renderingModes: [(String, VUI.Font.RenderingMode)] = [
             ("bitmap", .bitmap()),
             ("vector", .vector()),
@@ -435,8 +442,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                         dpi: dpi
                     )
                 )
-                let expectedEmbolden =
-                    SystemFontProvider.embolden(for: .semibold) * scale
+                let expectedEmbolden = logicalEmbolden * scale
                 if let textureTypeface = typeface as? TextureTypeface {
                     XCTAssertEqual(
                         textureTypeface.textureFont.boldStrength,

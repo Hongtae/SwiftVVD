@@ -2,6 +2,25 @@ import XCTest
 @testable import VUI
 
 final class FocusedValuesTests: XCTestCase {
+    func testRepeatedAssignmentsPreserveFocusedEntryArbitration() {
+        // ASSERTIONS commandsFocusedValueRepeatedAssignmentRuntimeObserved
+        let cases: [(UInt8, [Int?])] = [
+            (0, [nil, nil, nil, nil]),
+            (1, [nil, 9, 9, 9]),
+            (2, [nil, 9, 10, 10]),
+            (3, [nil, 9, 10, 10]),
+        ]
+        let writes: [Int?] = [nil, 9, 10, nil]
+        for (options, expected) in cases {
+            var values = FocusedValues()
+            values.storageOptions = .init(rawValue: options)
+            for (index, value) in writes.enumerated() {
+                values.focusedValuesRootOnlyValue = value
+                XCTAssertEqual(values.focusedValuesRootOnlyValue, expected[index])
+            }
+        }
+    }
+
     func testListResolutionAppliesLaterItemsAsHigherPriority() {
         // ASSERTIONS commandsFocusedSceneValueHierarchyRuntimeObserved
         let list = FocusedValueList(

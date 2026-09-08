@@ -33,6 +33,8 @@ final class EffectAnimationTests: XCTestCase {
     }
 
     func testCodableEffectAnimationUsesSizeFieldFive() throws {
+        // ASSERTIONS displayListEffectAnimationProtobufObserved
+        // ASSERTIONS canvasProtobufCGFloatPrecisionObserved
         let value = CodableEffectAnimation(
             base: DisplayList.OffsetAnimation(
                 from: _OffsetEffect(offset: .zero),
@@ -44,7 +46,14 @@ final class EffectAnimationTests: XCTestCase {
         let data = try ProtobufEncoder.encoding(value)
 
         XCTAssertEqual(data.first, 0x0a)
-        XCTAssertEqual(data[data.count - 20], 0x2a)
+        XCTAssertEqual(
+            Data(data.suffix(12)),
+            Data([
+                0x2a, 0x0a,
+                0x0d, 0x00, 0x00, 0xc8, 0x42,
+                0x15, 0x00, 0x00, 0x48, 0x43,
+            ])
+        )
         var decoder = ProtobufDecoder(data)
         let decoded = try CodableEffectAnimation(from: &decoder)
         let animation = try XCTUnwrap(decoded.base as? DisplayList.OffsetAnimation)

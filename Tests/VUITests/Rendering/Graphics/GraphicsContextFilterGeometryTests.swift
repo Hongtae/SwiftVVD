@@ -5,6 +5,16 @@ import VVD
 
 private typealias ProjectionTransform = VUI.ProjectionTransform
 
+private func projectionConstantBytes(_ transform: ProjectionTransform) -> [UInt8] {
+    // The shader matrix uses three 16-byte vectors, not the host CGFloat layout.
+    let components: [Float32] = [
+        Float32(transform.m11), Float32(transform.m12), Float32(transform.m13), 0,
+        Float32(transform.m21), Float32(transform.m22), Float32(transform.m23), 0,
+        Float32(transform.m31), Float32(transform.m32), Float32(transform.m33), 0,
+    ]
+    return components.withUnsafeBytes { Array($0) }
+}
+
 final class GraphicsContextFilterGeometryTests: XCTestCase {
     private final class CaptureEncoder: RenderCommandEncoder {
         var isCompleted = false
@@ -293,7 +303,9 @@ final class GraphicsContextFilterGeometryTests: XCTestCase {
             projective
         ]
         var cases: [(Operation, [UInt8])] = projections.map { projection in
-            (.projection(projection), withUnsafeBytes(of: projection) { Array($0) })
+            let constants = projectionConstantBytes(projection)
+            XCTAssertEqual(constants.count, 48)
+            return (.projection(projection), constants)
         }
         for radius: CGFloat in [-0.0, 0.375, 2.5, .nan, .infinity] {
             for pass in 0..<6 {
@@ -484,9 +496,10 @@ private extension GraphicsContext {
         self.bindingSet1.setTexture(texture, binding: 0)
         encoder.setResource(self.bindingSet1, index: 0)
 
-        withUnsafeBytes(of: projectionTransform) {
-            encoder.pushConstant(stages: .fragment, offset: 0, data: $0)
-        }
+        encoder.pushConstant(
+            stages: .fragment, offset: 0,
+            data: projectionConstantBytes(projectionTransform)
+        )
         encoder.setCullMode(.none)
         encoder.setVertexBuffer(
             vertexBuffer.buffer,
