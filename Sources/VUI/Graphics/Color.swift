@@ -1110,11 +1110,11 @@ struct ColorView: Equatable, Animatable {
     }
 
     var isClear: Bool {
-        color.opacity <= 0
+        color.opacity == 0
     }
 
     var isOpaque: Bool {
-        color.opacity >= 1
+        color.opacity == 1
     }
 }
 

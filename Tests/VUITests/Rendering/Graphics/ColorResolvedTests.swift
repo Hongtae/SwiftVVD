@@ -2,6 +2,64 @@ import XCTest
 @testable import VUI
 
 final class ColorResolvedTests: XCTestCase {
+    func testColorViewOpacityClassificationUsesExactEndpoints() {
+        let cases: [(Float, Bool, Bool)] = [
+            (-.infinity, false, false),
+            (-1, false, false),
+            (-Float.leastNonzeroMagnitude, false, false),
+            (-0.0, true, false),
+            (0, true, false),
+            (Float.leastNonzeroMagnitude, false, false),
+            (0.5, false, false),
+            (Float(1).nextDown, false, false),
+            (1, false, true),
+            (Float(1).nextUp, false, false),
+            (2, false, false),
+            (.infinity, false, false),
+            (.nan, false, false),
+        ]
+        for (opacity, clear, opaque) in cases {
+            let color = Color.Resolved(
+                colorSpace: .sRGBLinear,
+                red: 0.25, green: -0.5, blue: 2, opacity: opacity
+            )
+            let view = ColorView(Color.ResolvedHDR(color, headroom: 4))
+            XCTAssertEqual(view.isClear, clear, "opacity: \(opacity)")
+            XCTAssertEqual(view.isOpaque, opaque, "opacity: \(opacity)")
+        }
+        // ASSERTIONS canvasColorPaintPropertiesObserved
+    }
+
+    func testColorViewHeadroomKeepsStoredRenderOptionsIndependent() {
+        let color = Color.Resolved(
+            colorSpace: .sRGBLinear,
+            red: 0.25, green: -0.5, blue: 2, opacity: 0.5
+        )
+        let cases: [(Float?, Float)] = [
+            (nil, 1), (-0.0, -0.0), (0, 0), (0.5, 0.5), (1, 1),
+            (4, 4), (-1, -1), (.infinity, .infinity), (-.infinity, -.infinity),
+            (Float(bitPattern: 0xffc12345), 1),
+        ]
+        let ranges: [Image.DynamicRange] = [.standard, .constrainedHigh, .high]
+        for (headroom, expected) in cases {
+            for antialiased in [false, true] {
+                for range in ranges {
+                    let view = ColorView(
+                        Color.ResolvedHDR(color, headroom: headroom),
+                        isAntialiased: antialiased,
+                        allowedDynamicRange: range
+                    )
+                    XCTAssertEqual(view.contentHeadroom.bitPattern, expected.bitPattern)
+                    XCTAssertEqual(view.isAntialiased, antialiased)
+                    XCTAssertEqual(view.allowedDynamicRange, range)
+                    XCTAssertFalse(view.isClear)
+                    XCTAssertFalse(view.isOpaque)
+                }
+            }
+        }
+        // ASSERTIONS canvasColorPaintPropertiesObserved
+    }
+
     private func environment(
         _ scheme: ColorScheme,
         contrast: ColorSchemeContrast = .standard
