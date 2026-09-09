@@ -2,7 +2,7 @@
 //  File: UIKitApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 #if ENABLE_UIKIT
@@ -102,12 +102,17 @@ final class UIKitApplication: Application, @unchecked Sendable {
         if self.initialized {
             Task { @MainActor in
                 self.delegate?.finalize(application: self)
+                appFinalize()
                 self.initialized = false
-            }
-        }
 
-        DispatchQueue.main.async {
-            exit(0)
+                DispatchQueue.main.async {
+                    exit(exitCode)
+                }
+            }
+        } else {
+            DispatchQueue.main.async {
+                exit(exitCode)
+            }
         }
     }
 

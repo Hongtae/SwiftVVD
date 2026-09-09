@@ -2,7 +2,7 @@
 //  File: HeadlessApplication.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -37,7 +37,9 @@ final class HeadlessApplication: Application, @unchecked Sendable {
         }
 
         delegate?.finalize(application: app)
-        self.shared = nil        
+        appFinalize()
+
+        self.shared = nil
         return exitCode
     }
 

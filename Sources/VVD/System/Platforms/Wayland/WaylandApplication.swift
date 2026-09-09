@@ -324,7 +324,9 @@ final class WaylandApplication: Application, @unchecked Sendable {
         }
 
         delegate?.finalize(application: app)
-        self.shared = nil        
+        appFinalize()
+
+        self.shared = nil
         return result
     }
 

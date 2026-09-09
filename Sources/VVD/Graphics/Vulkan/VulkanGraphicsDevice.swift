@@ -256,13 +256,8 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
         self.loadPipelineCache()
 
-        self.task = .detached(priority: .background) { [weak self] in
-            let taskID = UUID()
-            detachedServiceTasks.withLock { $0[taskID] = "VulkanGraphicsDevice Helper task" }
-            defer {
-                detachedServiceTasks.withLock { $0[taskID] = nil }
-            }
-
+        let task = Task.detached(name: "VulkanGraphicsDevice Helper",
+                                 priority: .background) { [weak self] in
             Log.info("VulkanGraphicsDevice Helper task is started.")
 
             var err: VkResult = VK_SUCCESS
@@ -346,6 +341,17 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
             assert(completionHandlers.isEmpty, "completionHandlers must be empty!")
             Log.info("VulkanGraphicsDevice Helper task is finished.")
         }
+        Task { @MainActor in
+            let uuid = UUID()
+#if compiler(>=6.4)
+            detachedServiceTasks[uuid] = task
+#else
+            detachedServiceTasks[uuid] = (task, "VulkanGraphicsDevice Helper")
+#endif
+            await task.value
+            detachedServiceTasks.removeValue(forKey: uuid)
+        }
+        self.task = task
     }
     
     deinit {

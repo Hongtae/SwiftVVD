@@ -26,13 +26,8 @@ public final class AudioDeviceContext: @unchecked Sendable {
         self.device = device
         self.listener = AudioListener(device: self.device)
 
-        self.task = .detached(priority: .background) { [weak self] in
-            let taskID = UUID()
-            detachedServiceTasks.withLock { $0[taskID] = "AudioDeviceContext playback task" }
-            defer {
-                detachedServiceTasks.withLock { $0[taskID] = nil }
-            }
-
+        let task = Task.detached(name: "AudioDeviceContext Playback",
+                                 priority: .background) { [weak self] in
             Log.info("AudioDeviceContext playback task is started.")
 
             var buffer: UnsafeMutableRawBufferPointer = .allocate(byteCount: 1024, alignment: 16)
@@ -70,6 +65,17 @@ public final class AudioDeviceContext: @unchecked Sendable {
             retainedPlayers.removeAll()
             Log.info("AudioDeviceContext playback task is finished.")
         }
+        Task { @MainActor in
+            let uuid = UUID()
+#if compiler(>=6.4)
+            detachedServiceTasks[uuid] = task
+#else
+            detachedServiceTasks[uuid] = (task, "AudioDeviceContext Playback")
+#endif
+            await task.value
+            detachedServiceTasks.removeValue(forKey: uuid)
+        }
+        self.task = task
     }
 
     deinit {

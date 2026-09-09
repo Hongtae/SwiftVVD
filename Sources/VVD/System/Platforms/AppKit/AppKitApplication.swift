@@ -106,6 +106,7 @@ final class AppKitApplication: Application, @unchecked Sendable {
         app.running.store(false, ordering: .relaxed)
 
         delegate?.finalize(application: app)
+        appFinalize()
 
         observers.forEach { NotificationCenter.default.removeObserver($0) }
 

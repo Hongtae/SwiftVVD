@@ -2,7 +2,7 @@
 //  File: Platform.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2024 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -20,8 +20,20 @@ public protocol PlatformFactory {
 }
 
 typealias UUID = Foundation.UUID
-let detachedServiceTasks = Mutex<[UUID:String]>([:])
 
+// `Task.name` is gated behind macOS/iOS 27 availability. Windows and Linux do
+// not follow those OS versions, so the compiler version is used as the proxy
+// instead: 6.4 is the first toolchain where the property is usable on every
+// platform we build for. Until then, carry the name alongside the task.
+#if compiler(>=6.4)
+@MainActor
+var detachedServiceTasks: [UUID: Task<Void, Never>] = [:]
+#else
+@MainActor
+var detachedServiceTasks: [UUID: (task: Task<Void, Never>, name: String)] = [:]
+#endif
+
+@MainActor
 func appFinalize() {
     let timeout = DispatchTimeInterval.milliseconds(2500)
     var timestamp = DispatchTime.now()
@@ -32,12 +44,16 @@ func appFinalize() {
             continue
         }
 
-        let tasks: [UUID:String] = detachedServiceTasks.withLock { $0 }
+        let tasks = detachedServiceTasks
         if tasks.isEmpty == false {
             if DispatchTime.now() > timestamp + timeout {
                 Log.info("Waiting for system service threads to finish. (\(tasks.count))")
-                tasks.values.forEach { task in
-                    Log.debug(" -- Task: \(task)")
+                tasks.forEach { uuid, task in
+#if compiler(>=6.4)
+                    Log.debug(" -- Task: \(task.name ?? uuid.uuidString)")
+#else
+                    Log.debug(" -- Task: \(task.name)")
+#endif
                 }
                 timestamp = DispatchTime.now()
             }
