@@ -251,6 +251,203 @@ public class Font: @unchecked Sendable {
         public let maximumValue: CGFloat
     }
 
+    public struct VariationInstance: Hashable, Sendable {
+        /// One-based identity within the source and collection face.
+        public let index: Int
+        public let styleName: String?
+        public let postScriptName: String?
+        /// Coordinates in the parent FaceMetadata.variationAxes order.
+        public let coordinates: [CGFloat]
+    }
+
+    public struct SFNTStyleMetadata: Hashable, Sendable {
+        public let weightClass: UInt16?
+        public let widthClass: UInt16?
+        public let familyClass: Int16?
+        public let selection: UInt16?
+        public let macStyle: UInt16?
+        /// The raw post table angle in degrees.
+        public let italicAngle: CGFloat?
+        public let fixedPitch: UInt32?
+    }
+
+    /// Copied resource metadata, independent of a rendering face and source buffer.
+    public struct FaceMetadata: Hashable, Sendable {
+        public let faceIndex: Int
+        public let numFaces: Int
+        public let familyName: String?
+        public let styleName: String?
+        public let postScriptName: String?
+        public let variationAxes: [VariationAxis]
+        public let variationInstances: [VariationInstance]
+        /// One-based instance identity; nil when the face has no default instance.
+        public let defaultVariationInstanceIndex: Int?
+        public let sfntStyle: SFNTStyleMetadata
+    }
+
+    /// Inspects a collection face without creating a rendering Font.
+    /// Returns nil if the source, collection index, or required variation data is invalid.
+    public static func metadata(path: String, faceIndex: Int = 0) -> FaceMetadata? {
+        guard !path.utf8.contains(0) else { return nil }
+        return withMetadataFace(faceIndex: faceIndex) { library, index, face in
+            FT_New_Face(library, path, index, &face)
+        }
+    }
+
+    /// Borrows contiguous bytes when available and copies all returned metadata.
+    public static func metadata(data: any DataProtocol, faceIndex: Int = 0) -> FaceMetadata? {
+        guard !data.isEmpty, let count = FT_Long(exactly: data.count) else {
+            return nil
+        }
+        func inspect(_ address: UnsafeRawPointer?) -> FaceMetadata? {
+            withMetadataFace(faceIndex: faceIndex) { library, index, face in
+                FT_New_Memory_Face(library, address, count, index, &face)
+            }
+        }
+        if let result = data.withContiguousStorageIfAvailable({ bytes in
+            inspect(bytes.baseAddress)
+        }) {
+            return result
+        }
+        let storage = data.makeFixedAddressStorage()
+        // FreeType borrows these bytes until the inspection face is destroyed.
+        return withExtendedLifetime(storage) { inspect(storage.address) }
+    }
+
+    private static func withMetadataFace(
+        faceIndex: Int,
+        open: (FT_Library, FT_Long, inout FT_Face?) -> FT_Error
+    ) -> FaceMetadata? {
+        // Higher bits select named instances in FreeType, not collection faces.
+        guard (0...0xffff).contains(faceIndex) else { return nil }
+        let library = sharedFTLibrary()
+        guard let handle = library.library else { return nil }
+        var face: FT_Face?
+        let error = library.withFaceLifecycleLock {
+            open(handle, FT_Long(faceIndex), &face)
+        }
+        guard error == 0, let face else { return nil }
+        defer {
+            _ = library.withFaceLifecycleLock { FT_Done_Face(face) }
+        }
+        guard face.pointee.face_index == FT_Long(faceIndex),
+              face.pointee.num_faces > FT_Long(faceIndex) else {
+            return nil
+        }
+        return readMetadata(face: face, library: handle)
+    }
+
+    private static func readMetadata(face: FT_Face, library: FT_Library) -> FaceMetadata? {
+        // Instance selection can change names and metrics, so copy the base first.
+        let faceIndex = Int(face.pointee.face_index)
+        let numFaces = Int(face.pointee.num_faces)
+        let familyName = face.pointee.family_name.map { String(cString: $0) }
+        let styleName = face.pointee.style_name.map { String(cString: $0) }
+        let postScriptName = FT_Get_Postscript_Name(face).map { String(cString: $0) }
+        let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?
+            .assumingMemoryBound(to: TT_OS2.self).pointee
+        let head = FT_Get_Sfnt_Table(face, FT_SFNT_HEAD)?
+            .assumingMemoryBound(to: TT_Header.self).pointee
+        var post: TT_Postscript?
+        var postLength: FT_ULong = 0
+        // The parsed post struct can exist even if the source table is missing.
+        if FT_Load_Sfnt_Table(face, 0x706f_7374, 0, nil, &postLength) == 0,
+           postLength >= 32 {
+            post = FT_Get_Sfnt_Table(face, FT_SFNT_POST)?
+                .assumingMemoryBound(to: TT_Postscript.self).pointee
+        }
+        let sfntStyle = SFNTStyleMetadata(
+            weightClass: os2?.usWeightClass,
+            widthClass: os2?.usWidthClass,
+            familyClass: os2?.sFamilyClass,
+            selection: os2?.fsSelection,
+            macStyle: head?.Mac_Style,
+            italicAngle: post.map { ft16d16ToFloat($0.italicAngle) },
+            fixedPitch: post.flatMap { UInt32(exactly: $0.isFixedPitch) }
+        )
+
+        var axes: [VariationAxis] = []
+        var instances: [VariationInstance] = []
+        var defaultInstanceIndex: Int?
+        if face.pointee.face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS != 0 {
+            var descriptor: UnsafeMutablePointer<FT_MM_Var>?
+            guard FT_Get_MM_Var(face, &descriptor) == 0, let descriptor else {
+                return nil
+            }
+            defer { _ = FT_Done_MM_Var(library, descriptor) }
+            let value = descriptor.pointee
+            guard value.num_axis > 0, let rawAxes = value.axis,
+                  value.num_namedstyles <= 0x7fff else {
+                return nil
+            }
+            axes.reserveCapacity(Int(value.num_axis))
+            var tags = Set<UInt32>()
+            for index in 0..<Int(value.num_axis) {
+                let axis = rawAxes[index]
+                guard let tag = UInt32(exactly: axis.tag),
+                      tags.insert(tag).inserted,
+                      axis.minimum <= axis.def, axis.def <= axis.maximum else {
+                    return nil
+                }
+                axes.append(VariationAxis(
+                    tag: tag,
+                    minimumValue: ft16d16ToFloat(axis.minimum),
+                    defaultValue: ft16d16ToFloat(axis.def),
+                    maximumValue: ft16d16ToFloat(axis.maximum)
+                ))
+            }
+            var defaultIndex: FT_UInt = 0
+            guard FT_Get_Default_Named_Instance(face, &defaultIndex) == 0,
+                  defaultIndex <= value.num_namedstyles else {
+                return nil
+            }
+            defaultInstanceIndex = defaultIndex == 0 ? nil : Int(defaultIndex)
+            if value.num_namedstyles > 0 {
+                guard let styles = value.namedstyle else { return nil }
+                instances.reserveCapacity(Int(value.num_namedstyles))
+                for index in 0..<Int(value.num_namedstyles) {
+                    guard let rawCoordinates = styles[index].coords else { return nil }
+                    var coordinates: [CGFloat] = []
+                    coordinates.reserveCapacity(axes.count)
+                    for axisIndex in axes.indices {
+                        let coordinate = rawCoordinates[axisIndex]
+                        let axis = rawAxes[axisIndex]
+                        guard coordinate >= axis.minimum, coordinate <= axis.maximum else {
+                            return nil
+                        }
+                        coordinates.append(ft16d16ToFloat(coordinate))
+                    }
+                    guard FT_Set_Named_Instance(face, FT_UInt(index + 1)) == 0 else {
+                        return nil
+                    }
+                    // Copy resolved names, including generated names when psid is absent.
+                    instances.append(VariationInstance(
+                        index: index + 1,
+                        styleName: face.pointee.style_name.map { String(cString: $0) },
+                        postScriptName: FT_Get_Postscript_Name(face).map { String(cString: $0) },
+                        coordinates: coordinates
+                    ))
+                }
+            }
+            if let defaultInstanceIndex {
+                guard instances[defaultInstanceIndex - 1].coordinates == axes.map(\.defaultValue) else {
+                    return nil
+                }
+            }
+        }
+        return FaceMetadata(
+            faceIndex: faceIndex,
+            numFaces: numFaces,
+            familyName: familyName,
+            styleName: styleName,
+            postScriptName: postScriptName,
+            variationAxes: axes,
+            variationInstances: instances,
+            defaultVariationInstanceIndex: defaultInstanceIndex,
+            sfntStyle: sfntStyle
+        )
+    }
+
     package enum ShapingDirection: Hashable, Sendable {
         case leftToRight
         case rightToLeft
