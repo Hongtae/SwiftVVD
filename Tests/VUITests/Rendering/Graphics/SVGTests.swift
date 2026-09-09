@@ -260,6 +260,26 @@ final class SVGTests: XCTestCase {
         // ASSERTIONS imageResizableFixedFrameRuntimeObserved
     }
 
+    func testResizableImageLayoutKeepsUnspecifiedAxesBelowCapInsetMinimum() throws {
+        let svg = try SVG(source: "<svg viewBox=\"0 0 4 2\"><path d=\"M0 0H4V2H0Z\"/></svg>")
+        let image = VUI.Image(svg: svg).resizable(
+            capInsets: EdgeInsets(top: 7, leading: 10, bottom: 9, trailing: 20), resizingMode: .tile)
+        let host = GraphHost()
+        let graph = host.data.graph
+        try host.data.withCurrent {
+            var inputs = makeViewInputs(graph: graph)
+            inputs.requestsLayoutComputer = true
+            let outputs = VUI.Image._makeView(
+                view: _GraphValue(_attribute: graph.makeInput(value: image)), inputs: inputs)
+            let layout = try XCTUnwrap(outputs._layoutComputer.attribute?.value)
+            XCTAssertEqual(layout.sizeThatFits(.unspecified), CGSize(width: 4, height: 2))
+            XCTAssertEqual(layout.sizeThatFits(.zero), CGSize(width: 30, height: 16))
+            XCTAssertEqual(layout.sizeThatFits(_ProposedSize(width: nil, height: 1)), CGSize(width: 4, height: 16))
+            XCTAssertEqual(layout.sizeThatFits(_ProposedSize(width: 1, height: nil)), CGSize(width: 30, height: 2))
+        }
+        // ASSERTIONS imageResolvedLayoutMetricsObserved
+    }
+
     func testResizableSVGStretchesIntoTheProposedFrameOnGPU() throws {
         guard let deviceContext = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")

@@ -104,15 +104,17 @@ class AnyImageProviderBox: @unchecked Sendable {
     var usesSymbolFontMetrics: Bool { false }
     var resizingProvider: ResizableProvider? { nil }
 
-    func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
+    func resolveImage(in context: GraphicsContext) -> Image.Resolved {
         if let symbol = makeVectorSymbol() {
-            return GraphicsImage(symbol: symbol.applyingEffectiveFontMetrics(in: context.environment))
+            return Image.Resolved(image: GraphicsImage(
+                symbol: symbol.applyingEffectiveFontMetrics(in: context.environment)), decorative: true)
         }
         if let svg = makeSVG() {
-            return GraphicsImage(svg: svg)
+            return Image.Resolved(image: GraphicsImage(svg: svg), decorative: true)
         }
         let texture = makeTexture(context)
-        return GraphicsImage(texture: texture, scale: context.sceneResources.contentScaleFactor / scaleFactor)
+        return Image.Resolved(image: GraphicsImage(
+            texture: texture, scale: context.sceneResources.contentScaleFactor / scaleFactor), decorative: true)
     }
 
     func makeTexture(_ context: GraphicsContext) -> Texture? {
@@ -164,9 +166,9 @@ final class ResizableProvider: AnyImageProviderBox, @unchecked Sendable {
         self
     }
 
-    override func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
-        var image = base.provider.makeGraphicsImage(context)
-        image.resizingInfo = Image.ResizingInfo(capInsets: capInsets, mode: resizingMode)
+    override func resolveImage(in context: GraphicsContext) -> Image.Resolved {
+        var image = base.provider.resolveImage(in: context)
+        image.image.resizingInfo = Image.ResizingInfo(capInsets: capInsets, mode: resizingMode)
         return image
     }
 
@@ -309,9 +311,10 @@ final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
         resource.texture
     }
 
-    override func makeGraphicsImage(_ context: GraphicsContext) -> GraphicsImage {
-        GraphicsImage(contents: .texture(resource), scale: scale,
-                      unrotatedPixelSize: resource.pixelSize, orientation: orientation)
+    override func resolveImage(in context: GraphicsContext) -> Image.Resolved {
+        Image.Resolved(image: GraphicsImage(contents: .texture(resource), scale: scale,
+            unrotatedPixelSize: resource.pixelSize, orientation: orientation),
+            decorative: label == nil, label: label.map(AccessibilityImageLabel.text))
     }
 
     override var scaleFactor: CGFloat {
@@ -1569,16 +1572,7 @@ private struct ResolvedImageContentView: ShapeStyledLeafView {
     static func resolverMode(
         for image: ImageDrawing?
     ) -> _ShapeStyle_ResolverMode {
-        guard let symbol = image?.symbol else {
-            return _ShapeStyle_ResolverMode()
-        }
-        let foregroundLevels = UInt16(clamping:
-            (symbol.layers.map(\.semanticLevel).max() ?? 0) + 1
-        )
-        return _ShapeStyle_ResolverMode(
-            foregroundLevels: foregroundLevels,
-            options: foregroundLevels > 1 ? .foregroundPalette : []
-        )
+        image?.resolved.styleResolverMode ?? _ShapeStyle_ResolverMode(foregroundLevels: 0)
     }
 }
 

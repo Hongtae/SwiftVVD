@@ -101,6 +101,15 @@ extension GraphicsImage {
         return ObjectIdentifier(resource)
     }
 
+    var styleResolverMode: _ShapeStyle_ResolverMode {
+        if let symbol {
+            let levels = UInt16(clamping: (symbol.layers.map(\.semanticLevel).max() ?? 0) + 1)
+            return _ShapeStyle_ResolverMode(
+                foregroundLevels: levels, options: levels > 1 ? .foregroundPalette : [])
+        }
+        return _ShapeStyle_ResolverMode(foregroundLevels: contents != nil && maskColor != nil ? 1 : 0)
+    }
+
     // Map destination-normalized coordinates back into the unrotated texture.
     var textureTransform: CGAffineTransform {
         switch orientation {

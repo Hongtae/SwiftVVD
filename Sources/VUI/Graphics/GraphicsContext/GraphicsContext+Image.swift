@@ -19,12 +19,13 @@ extension GraphicsContext {
     }
 
     public func resolve(_ image: Image) -> ResolvedImage {
-        let resolved = image.provider.makeGraphicsImage(self)
-        return ResolvedImage(resolved: resolved, baseline: resolved.size.height)
+        let resolved = image.provider.resolveImage(in: self)
+        return ResolvedImage(resolved: resolved.image,
+                             baseline: resolved.size.height - resolved.baselineOffset)
     }
 
     func resolveImageDrawing(_ image: Image) -> ImageDrawing {
-        ImageDrawing(resolve(image))
+        ImageDrawing(image.provider.resolveImage(in: self))
     }
 
     public func draw(_ image: ResolvedImage, in rect: CGRect, style: FillStyle = FillStyle()) {

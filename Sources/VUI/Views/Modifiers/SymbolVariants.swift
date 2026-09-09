@@ -13,7 +13,7 @@ public struct SymbolVariants: Hashable, Sendable {
         static let slash = Self(rawValue: 1 << 1)
     }
 
-    private enum Shape: UInt8, Hashable, Sendable {
+    enum Shape: UInt8, Hashable, Sendable {
         case circle
         case square
         case rectangle

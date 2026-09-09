@@ -48,7 +48,11 @@ struct ImageDrawing {
     var symbolDrawFallbackOpacity: Double?
     var symbolDrawsReversed: Bool = false
 
-    var image: GraphicsImage
+    var resolved: Image.Resolved
+    var image: GraphicsImage {
+        get { resolved.image }
+        set { resolved.image = newValue }
+    }
     let textureTransform: CGAffineTransform
     var scaleFactor: CGFloat { image.scale == 0 ? 0 : 1 / image.scale }
 
@@ -67,41 +71,45 @@ struct ImageDrawing {
     }
 
     init(_ resolved: GraphicsContext.ResolvedImage) {
-        self.image = resolved.resolved
+        self.resolved = Image.Resolved(image: resolved.resolved, decorative: true)
         self.baseline = resolved.baseline
         self.shading = resolved.shading
         self.textureTransform = resolved.resolved.textureTransform
     }
 
+    init(_ resolved: Image.Resolved) {
+        self.resolved = resolved
+        self.baseline = resolved.size.height - resolved.baselineOffset
+        self.textureTransform = resolved.image.textureTransform
+    }
+
     init(baseline: CGFloat, shading: GraphicsContext.Shading?, texture: Texture?, textureTransform: CGAffineTransform, scaleFactor: CGFloat) {
         self.baseline = baseline
         self.shading = shading
-        self.image = GraphicsImage(texture: texture, scale: scaleFactor == 0 ? 0 : 1 / scaleFactor)
+        self.resolved = Image.Resolved(
+            image: GraphicsImage(texture: texture, scale: scaleFactor == 0 ? 0 : 1 / scaleFactor),
+            decorative: true)
         self.textureTransform = textureTransform
     }
 
     init(symbol: ResolvedVectorSymbol, shading: GraphicsContext.Shading? = nil) {
         self.baseline = symbol.viewport.height * symbol.intrinsicScale
         self.shading = shading
-        self.image = GraphicsImage(symbol: symbol)
+        self.resolved = Image.Resolved(image: GraphicsImage(symbol: symbol), decorative: true)
         self.textureTransform = .identity
     }
 
     init(svg: SVG, shading: GraphicsContext.Shading? = nil) {
         self.baseline = svg.intrinsicSize?.height ?? svg.viewBox.height
         self.shading = shading
-        self.image = GraphicsImage(svg: svg)
+        self.resolved = Image.Resolved(image: GraphicsImage(svg: svg), decorative: true)
         self.textureTransform = .identity
     }
 }
 
 extension ImageDrawing {
     func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
-        guard resizingMode != nil else { return size }
-        return CGSize(
-            width: proposal.width ?? size.width,
-            height: proposal.height ?? size.height
-        )
+        resolved.sizeThatFits(in: proposal)
     }
 
     mutating func applyResizingProvider(_ provider: AnyImageProviderBox) {
