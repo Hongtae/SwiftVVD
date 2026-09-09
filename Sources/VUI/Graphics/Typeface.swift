@@ -1,0 +1,713 @@
+//
+//  File: Typeface.swift
+//  Author: Hongtae Kim (tiff2766@gmail.com)
+//
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
+//
+
+import Foundation
+import Synchronization
+import VVD
+
+enum TypefaceGlyph {
+    case texture(TextureTypeface.GlyphData)
+    case vector(VectorTypeface.GlyphData)
+}
+
+struct TypefaceGlyphMetrics {
+    var advance: CGSize
+    var ascender: CGFloat
+    var descender: CGFloat
+}
+
+typealias TypefaceShapingDirection = VVD.Font.ShapingDirection
+typealias TypefaceShapingFeature = VVD.Font.ShapingFeature
+
+struct TypefaceShapedGlyph {
+    var index: UInt32
+    var sourceRange: Range<Int>
+    var advance: CGSize
+    var offset: CGPoint
+}
+
+struct TypefaceShapedText {
+    var glyphs: [TypefaceShapedGlyph]
+    var direction: TypefaceShapingDirection
+}
+
+protocol Typeface {
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph?
+    func glyph(at index: UInt32) -> TypefaceGlyph?
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics?
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics?
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
+    func hasGlyph(for: UnicodeScalar) -> Bool
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText?
+
+    var lineHeight: CGFloat { get }
+    var ascender: CGFloat { get }
+    var descender: CGFloat { get }
+    var decorationMetrics: TypefaceDecorationMetrics? { get }
+    var resolvedMetrics: ResolvedFontMetrics { get }
+    var identifier: String { get }
+
+    func isEqual(to: any Typeface) -> Bool
+    func hashIdentity(into hasher: inout Hasher)
+    func purgeResources(reason: ResourcePurgeReason)
+}
+
+extension Typeface {
+    func glyph(at index: UInt32) -> TypefaceGlyph? { nil }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        nil
+    }
+
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        guard let glyph = glyph(for: c) else { return nil }
+        switch glyph {
+        case let .texture(data):
+            return TypefaceGlyphMetrics(
+                advance: data.advance,
+                ascender: data.ascender,
+                descender: data.descender
+            )
+        case let .vector(data):
+            return TypefaceGlyphMetrics(
+                advance: data.metrics.advance,
+                ascender: data.metrics.ascender,
+                descender: data.metrics.descender
+            )
+        }
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        guard let glyph = glyph(at: index) else { return nil }
+        switch glyph {
+        case let .texture(data):
+            return TypefaceGlyphMetrics(
+                advance: data.advance,
+                ascender: data.ascender,
+                descender: data.descender
+            )
+        case let .vector(data):
+            return TypefaceGlyphMetrics(
+                advance: data.metrics.advance,
+                ascender: data.metrics.ascender,
+                descender: data.metrics.descender
+            )
+        }
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        ResolvedFontMetrics(
+            capHeight: ascender,
+            ascender: ascender,
+            descender: descender,
+            leading: max(lineHeight - (ascender - descender), 0)
+        )
+    }
+
+    var decorationMetrics: TypefaceDecorationMetrics? { nil }
+
+    func purgeResources(reason: ResourcePurgeReason) {}
+}
+
+struct ResolvedFontMetrics: Equatable, Sendable {
+    var capHeight: CGFloat
+    var ascender: CGFloat
+    var descender: CGFloat
+    var leading: CGFloat
+    var outsets: EdgeInsets
+
+    init(
+        capHeight: CGFloat,
+        ascender: CGFloat,
+        descender: CGFloat,
+        leading: CGFloat,
+        outsets: EdgeInsets = EdgeInsets()
+    ) {
+        self.capHeight = capHeight
+        self.ascender = ascender
+        self.descender = descender
+        self.leading = leading
+        self.outsets = outsets
+    }
+
+    func scaled(by scale: CGFloat) -> ResolvedFontMetrics {
+        guard scale != 0, scale != 1 else { return self }
+        return ResolvedFontMetrics(
+            capHeight: capHeight / scale,
+            ascender: ascender / scale,
+            descender: descender / scale,
+            leading: leading / scale,
+            outsets: EdgeInsets(
+                top: outsets.top / scale,
+                leading: outsets.leading / scale,
+                bottom: outsets.bottom / scale,
+                trailing: outsets.trailing / scale
+            )
+        )
+    }
+
+    mutating func formUnion(_ other: ResolvedFontMetrics) {
+        capHeight = max(capHeight, other.capHeight)
+        ascender = max(ascender, other.ascender)
+        descender = min(descender, other.descender)
+        leading = max(leading, other.leading)
+        outsets.top = max(outsets.top, other.outsets.top)
+        outsets.leading = max(outsets.leading, other.outsets.leading)
+        outsets.bottom = max(outsets.bottom, other.outsets.bottom)
+        outsets.trailing = max(outsets.trailing, other.outsets.trailing)
+    }
+}
+
+private protocol VVDFontBackedTypeface: Typeface {
+    var font: VVD.Font { get }
+}
+
+extension VVDFontBackedTypeface {
+    var lineHeight: CGFloat { font.height }
+    var ascender: CGFloat { font.ascender }
+    var descender: CGFloat { font.descender }
+    var decorationMetrics: TypefaceDecorationMetrics? {
+        typefaceDecorationMetrics(for: font)
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        let metrics = font.baseMetrics
+        let capHeight = font.glyphMetrics(for: UnicodeScalar("H"))?.bearing.y
+            ?? metrics.ascender
+        return ResolvedFontMetrics(
+            capHeight: capHeight,
+            ascender: metrics.ascender,
+            descender: metrics.descender,
+            leading: max(metrics.height - (metrics.ascender - metrics.descender), 0)
+        )
+    }
+
+    var identifier: String {
+        if let data = font.fontData {
+            return "\(font.familyName):\(unsafeBitCast(data.address, to: Int.self))"
+        } else {
+            return "<\(font.filePath)>"
+        }
+    }
+
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        font.kernAdvance(left: left, right: right)
+    }
+
+    func isEqual(to: any Typeface) -> Bool {
+        if let other = to as? Self {
+            return font === other.font
+        }
+        return false
+    }
+
+    func hashIdentity(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(Self.self))
+        hasher.combine(ObjectIdentifier(font))
+    }
+}
+
+private struct ScaleInvariantTypefaceMetrics {
+    let font: VVD.Font
+    let renderScale: CGFloat
+    let embolden: CGFloat
+    let decorationMetrics: TypefaceDecorationMetrics?
+
+    init(
+        font: VVD.Font,
+        renderScale: CGFloat,
+        embolden: CGFloat
+    ) {
+        self.font = font
+        self.renderScale = renderScale
+        self.embolden = embolden
+        self.decorationMetrics = typefaceDecorationMetrics(
+            for: font
+        )?.scaled(by: renderScale)
+    }
+
+    var lineHeight: CGFloat { font.height * renderScale }
+    var ascender: CGFloat { font.ascender * renderScale }
+    var descender: CGFloat { font.descender * renderScale }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        let metrics = font.baseMetrics
+        let capHeight = font.glyphMetrics(
+            for: UnicodeScalar("H"),
+            embolden: embolden
+        )?.bearing.y ?? metrics.ascender
+        return ResolvedFontMetrics(
+            capHeight: capHeight * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale,
+            leading: max(
+                metrics.height - (metrics.ascender - metrics.descender),
+                0
+            ) * renderScale
+        )
+    }
+
+    func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        guard let metrics = font.glyphMetrics(
+            for: scalar,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale
+        )
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        guard let metrics = font.glyphMetrics(
+            at: index,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance * renderScale,
+            ascender: metrics.ascender * renderScale,
+            descender: metrics.descender * renderScale
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: (glyph.advance.width + embolden) * renderScale,
+                        height: glyph.advance.height * renderScale
+                    ),
+                    offset: glyph.offset * renderScale
+                )
+            },
+            direction: shaped.direction
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        font.kernAdvance(left: left, right: right) * renderScale
+    }
+}
+
+struct TextureTypeface: VVDFontBackedTypeface {
+    let textureFont: VVD.TextureFont
+    private let layoutMetrics: ScaleInvariantTypefaceMetrics?
+    let decorationMetrics: TypefaceDecorationMetrics?
+    typealias GlyphData = VVD.TextureFont.GlyphData
+
+    init(
+        textureFont: VVD.TextureFont,
+        layoutFont: VVD.Font? = nil,
+        renderScale: CGFloat = 1,
+        logicalEmbolden: CGFloat = 0
+    ) {
+        let layoutMetrics = layoutFont.map {
+            ScaleInvariantTypefaceMetrics(
+                font: $0,
+                renderScale: renderScale,
+                embolden: logicalEmbolden
+            )
+        }
+        self.textureFont = textureFont
+        self.layoutMetrics = layoutMetrics
+        self.decorationMetrics = layoutMetrics?.decorationMetrics ??
+            typefaceDecorationMetrics(for: textureFont)
+    }
+
+    var font: VVD.Font { textureFont }
+
+    var lineHeight: CGFloat {
+        layoutMetrics?.lineHeight ?? font.height
+    }
+
+    var ascender: CGFloat {
+        layoutMetrics?.ascender ?? font.ascender
+    }
+
+    var descender: CGFloat {
+        layoutMetrics?.descender ?? font.descender
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        layoutMetrics?.resolvedMetrics ?? {
+            let metrics = font.baseMetrics
+            let capHeight = font.glyphMetrics(
+                for: UnicodeScalar("H")
+            )?.bearing.y ?? metrics.ascender
+            return ResolvedFontMetrics(
+                capHeight: capHeight,
+                ascender: metrics.ascender,
+                descender: metrics.descender,
+                leading: max(
+                    metrics.height - (metrics.ascender - metrics.descender),
+                    0
+                )
+            )
+        }()
+    }
+
+    func hasGlyph(for c: UnicodeScalar) -> Bool {
+        textureFont.hasGlyph(for: c)
+    }
+
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
+        if let data = textureFont.glyphData(for: c) {
+            return .texture(data)
+        }
+        return nil
+    }
+
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        textureFont.glyphData(at: index).map(TypefaceGlyph.texture)
+    }
+
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(for: c)
+        }
+        guard let metrics = textureFont.glyphMetrics(
+            for: c,
+            embolden: textureFont.boldStrength
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(at: index)
+        }
+        guard let metrics = textureFont.glyphMetrics(
+            at: index,
+            embolden: textureFont.boldStrength
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        if let layoutMetrics {
+            return layoutMetrics.shape(
+                text,
+                direction: direction,
+                language: language,
+                features: features
+            )
+        }
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: glyph.advance.width + textureFont.boldStrength,
+                        height: glyph.advance.height
+                    ),
+                    offset: glyph.offset
+                )
+            },
+            direction: shaped.direction
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        layoutMetrics?.kernAdvance(left: left, right: right)
+            ?? font.kernAdvance(left: left, right: right)
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+        textureFont.clearCache()
+    }
+}
+
+final class VectorTypeface: VVDFontBackedTypeface {
+    let font: VVD.Font
+    let embolden: CGFloat
+    let outlineThickness: CGFloat
+    private let layoutMetrics: ScaleInvariantTypefaceMetrics?
+    let decorationMetrics: TypefaceDecorationMetrics?
+
+    struct GlyphData: @unchecked Sendable {
+        let metrics: VVD.Font.GlyphMetrics
+        let path: Path
+    }
+
+    private enum CacheEntry: Sendable {
+        case glyph(GlyphData)
+        case unavailable
+    }
+
+    private let cache = Mutex<[UInt32: CacheEntry]>([:])
+
+    init(font: VVD.Font,
+         embolden: CGFloat = 0,
+         outlineThickness: CGFloat = 0,
+         layoutFont: VVD.Font? = nil,
+         renderScale: CGFloat = 1,
+         logicalEmbolden: CGFloat? = nil) {
+        let layoutMetrics = layoutFont.map {
+            ScaleInvariantTypefaceMetrics(
+                font: $0,
+                renderScale: renderScale,
+                embolden: logicalEmbolden ?? embolden
+            )
+        }
+        self.font = font
+        self.embolden = embolden
+        self.outlineThickness = outlineThickness
+        self.layoutMetrics = layoutMetrics
+        self.decorationMetrics = layoutMetrics?.decorationMetrics ??
+            typefaceDecorationMetrics(for: font)
+    }
+
+    var lineHeight: CGFloat {
+        layoutMetrics?.lineHeight ?? font.height
+    }
+
+    var ascender: CGFloat {
+        layoutMetrics?.ascender ?? font.ascender
+    }
+
+    var descender: CGFloat {
+        layoutMetrics?.descender ?? font.descender
+    }
+
+    var resolvedMetrics: ResolvedFontMetrics {
+        layoutMetrics?.resolvedMetrics ?? {
+            let metrics = font.baseMetrics
+            let capHeight = font.glyphMetrics(
+                for: UnicodeScalar("H"),
+                embolden: embolden
+            )?.bearing.y ?? metrics.ascender
+            return ResolvedFontMetrics(
+                capHeight: capHeight,
+                ascender: metrics.ascender,
+                descender: metrics.descender,
+                leading: max(
+                    metrics.height - (metrics.ascender - metrics.descender),
+                    0
+                )
+            )
+        }()
+    }
+
+    func hasGlyph(for c: UnicodeScalar) -> Bool {
+        font.hasGlyph(for: c)
+    }
+
+    func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(for: c)
+        }
+        guard let metrics = font.glyphMetrics(
+            for: c,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
+        if let layoutMetrics {
+            return layoutMetrics.glyphMetrics(at: index)
+        }
+        guard let metrics = font.glyphMetrics(
+            at: index,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return TypefaceGlyphMetrics(
+            advance: metrics.advance,
+            ascender: metrics.ascender,
+            descender: metrics.descender
+        )
+    }
+
+    func shape(
+        _ text: String,
+        direction: TypefaceShapingDirection?,
+        language: String?,
+        features: [TypefaceShapingFeature]
+    ) -> TypefaceShapedText? {
+        if let layoutMetrics {
+            return layoutMetrics.shape(
+                text,
+                direction: direction,
+                language: language,
+                features: features
+            )
+        }
+        guard let shaped = font.shape(
+            text,
+            direction: direction,
+            language: language,
+            features: features
+        ) else {
+            return nil
+        }
+        return TypefaceShapedText(
+            glyphs: shaped.glyphs.map { glyph in
+                TypefaceShapedGlyph(
+                    index: glyph.index,
+                    sourceRange: glyph.sourceRange,
+                    advance: CGSize(
+                        width: glyph.advance.width + embolden,
+                        height: glyph.advance.height
+                    ),
+                    offset: glyph.offset
+                )
+            },
+            direction: shaped.direction
+        )
+    }
+
+    func kernAdvance(
+        left: UnicodeScalar,
+        right: UnicodeScalar
+    ) -> CGPoint {
+        layoutMetrics?.kernAdvance(left: left, right: right)
+            ?? font.kernAdvance(left: left, right: right)
+    }
+
+    func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
+        guard let metrics = font.glyphMetrics(
+            for: c,
+            embolden: embolden
+        ) else {
+            return nil
+        }
+        return glyph(at: metrics.index)
+    }
+
+    func glyph(at index: UInt32) -> TypefaceGlyph? {
+        if let cached = cache.withLock({ $0[index] }) {
+            switch cached {
+            case let .glyph(data):
+                return .vector(data)
+            case .unavailable:
+                return nil
+            }
+        }
+
+        var path = Path()
+        var hasOpenContour = false
+
+        let metrics = font.decomposeGlyphOutline(
+            at: index,
+            embolden: embolden,
+            outline: outlineThickness) { command in
+            switch command {
+            case .move(to: let p):
+                if hasOpenContour {
+                    path.closeSubpath()
+                }
+                path.move(to: p)
+                hasOpenContour = true
+            case .line(to: let p):
+                path.addLine(to: p)
+            case .quadCurve(to: let p, control: let c):
+                path.addQuadCurve(to: p, control: c)
+            case .curve(to: let p, control1: let c1, control2: let c2):
+                path.addCurve(to: p, control1: c1, control2: c2)
+            }
+        }
+        if hasOpenContour {
+            path.closeSubpath()
+        }
+        path = path.applying(CGAffineTransform(scaleX: 1, y: -1))
+        guard let metrics else {
+            cache.withLock { cache in
+                cache[index] = cache[index] ?? .unavailable
+            }
+            return nil
+        }
+
+        let result = GlyphData(metrics: metrics, path: path)
+        let cached = cache.withLock { cache in
+            let cached = cache[index] ?? .glyph(result)
+            cache[index] = cached
+            return cached
+        }
+        switch cached {
+        case let .glyph(data):
+            return .vector(data)
+        case .unavailable:
+            return nil
+        }
+    }
+
+    func purgeResources(reason: ResourcePurgeReason) {
+        font.clearCache()
+        cache.withLock { $0.removeAll() }
+    }
+}
