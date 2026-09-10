@@ -69,6 +69,16 @@ final class FontResourceCatalog: Sendable {
     let resourceDirectory: URL
     private let sources: [String: Source]
     private let names = Mutex<[NameKind: [String: [Match]]]?>(nil)
+    private let descriptorResolver = Mutex<FontResourceResolver?>(nil)
+
+    var resolver: FontResourceResolver {
+        descriptorResolver.withLock { resolver in
+            if let resolver { return resolver }
+            let resolved = FontResourceResolver(faces: allFaces)
+            resolver = resolved
+            return resolved
+        }
+    }
 
     init(configuration: FontFallbackConfiguration, resourceDirectory: URL) {
         let resourceDirectory = resourceDirectory.standardizedFileURL
@@ -230,7 +240,7 @@ struct BundledFontCatalog: Sendable {
     func resource(
         for family: BundledFontID,
         locale: Locale,
-        weight: CGFloat = Font.Weight.regular.value,
+        weight: CGFloat = 400,
         isItalic: Bool = false
     ) -> BundledFontResource? {
         guard let descriptor = configuration.fontDescriptors[family] else { return nil }

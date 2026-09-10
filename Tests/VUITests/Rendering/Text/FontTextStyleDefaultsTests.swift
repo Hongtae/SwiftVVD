@@ -16,7 +16,7 @@ final class FontTextStyleDefaultsTests: XCTestCase {
 
         for (style, size, weight) in rows {
             let font = Font.system(style)
-            let provider = try XCTUnwrap(font.provider.fontBox as? SystemFontProvider)
+            let provider = try XCTUnwrap(font.resolved(in: EnvironmentValues()).typefaceProvider as? SystemFontProvider)
             XCTAssertEqual(provider.size, size)
             XCTAssertEqual(provider.weight, weight)
         }
@@ -24,7 +24,7 @@ final class FontTextStyleDefaultsTests: XCTestCase {
 
     func testExplicitRenderingModesKeepTextStyleDefaultWeight() throws {
         for font in [Font.bitmap(.headline), Font.vector(.headline)] {
-            let provider = try XCTUnwrap(font.provider.fontBox as? SystemFontProvider)
+            let provider = try XCTUnwrap(font.resolved(in: EnvironmentValues()).typefaceProvider as? SystemFontProvider)
             XCTAssertEqual(provider.size, 13)
             XCTAssertEqual(provider.weight, .bold)
         }

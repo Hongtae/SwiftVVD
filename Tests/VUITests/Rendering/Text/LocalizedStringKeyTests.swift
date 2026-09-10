@@ -238,7 +238,7 @@ final class LocalizedStringKeyTests: XCTestCase {
         let strongAttributed: LocalizedStringKey = "**\(attributed)**"
         let emphasisAttributed: LocalizedStringKey = "*\(attributed)*"
         var attributedRegularFont = attributed
-        attributedRegularFont.font = .system(size: 20, weight: .regular)
+        attributedRegularFont.font = VUI.Font.system(size: 20, weight: .regular)
         let strongRegularFontAttributed: LocalizedStringKey =
             "**\(attributedRegularFont)**"
 
@@ -269,9 +269,9 @@ final class LocalizedStringKeyTests: XCTestCase {
         )
         #endif
 
-        guard let boldProvider = Font.system(size: 20).bold().provider.fontBox
+        guard let boldProvider = Font.system(size: 20).bold().resolved(in: EnvironmentValues()).typefaceProvider
                 as? SystemFontProvider,
-              let italicProvider = Font.system(size: 20).italic().provider.fontBox
+              let italicProvider = Font.system(size: 20).italic().resolved(in: EnvironmentValues()).typefaceProvider
                 as? SystemFontProvider else {
             return XCTFail("Expected system font modifier providers")
         }

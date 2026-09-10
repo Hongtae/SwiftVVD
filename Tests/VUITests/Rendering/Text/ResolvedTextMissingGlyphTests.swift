@@ -580,8 +580,8 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             renderingMode: .vector()
         )
         XCTAssertFalse(primaryProvider.isEqual(to: fallbackProvider))
-        let primaryFont = VUI.Font(provider: AnyFontBox(primaryProvider))
-        let fallbackFont = VUI.Font(provider: AnyFontBox(fallbackProvider))
+        let primaryFont = VUI.Font(typefaceProvider: primaryProvider)
+        let fallbackFont = VUI.Font(typefaceProvider: fallbackProvider)
         XCTAssertNotEqual(primaryFont, fallbackFont)
         XCTAssertEqual(Set([primaryFont, fallbackFont]).count, 2)
 
@@ -879,7 +879,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             try XCTUnwrap(catalog.resource(
                 for: BundledFontID(family),
                 locale: locale,
-                weight: weight.value,
+                weight: weight.weightClass,
                 isItalic: isItalic
             )).url.lastPathComponent
         }
@@ -1110,7 +1110,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             renderingMode: .vector()
         )
         let provider = try XCTUnwrap(
-            font.provider.fontBox as? ExternalFontProvider
+            font.typefaceProvider as? ExternalFontProvider
         )
         let face = try XCTUnwrap(provider.makeTypeface(
             MissingGlyphTestAppContext(),
@@ -1131,7 +1131,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             renderingMode: .vector()
         )
         let remoteProvider = try XCTUnwrap(
-            remote.provider.fontBox as? ExternalFontProvider
+            remote.typefaceProvider as? ExternalFontProvider
         )
         XCTAssertNil(remoteProvider.makeTypeface(
             MissingGlyphTestAppContext(),
@@ -1155,7 +1155,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             renderingMode: .vector()
         )
         let provider = try XCTUnwrap(
-            font.provider.fontBox as? ExternalFontProvider
+            font.typefaceProvider as? ExternalFontProvider
         )
         let face = try XCTUnwrap(provider.makeTypeface(
             MissingGlyphTestAppContext(),
@@ -1229,12 +1229,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "en")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let cascade = font.typefaceCascade(
             in: environment,
             forContext: SceneResources(),
@@ -1273,12 +1273,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "ko_KR")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let sceneResources = SceneResources()
         let cascade = font.typefaceCascade(
             in: environment,
@@ -1327,45 +1327,38 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let inactive = base.monospaced(false)
         let digits = base.monospacedDigit()
 
-        XCTAssertNotNil(monospaced.provider.fontBox as?
-            VUI.Font.StaticModifierProvider<VUI.Font.MonospacedModifier>)
-        XCTAssertNotNil(inactive.provider.fontBox as?
-            VUI.Font.StaticModifierProvider<
-                VUI.Font.UndoModifier<VUI.Font.MonospacedModifier>
-            >)
-        XCTAssertNotNil(digits.provider.fontBox as?
-            VUI.Font.StaticModifierProvider<
-                VUI.Font.MonospacedDigitModifier
-            >)
+        XCTAssertNotNil(monospaced.provider as? FontBox<VUI.Font.StaticModifierProvider<VUI.Font.MonospacedModifier>>)
+        XCTAssertNotNil(inactive.provider as? FontBox<VUI.Font.StaticModifierProvider<VUI.Font.UndoModifier<VUI.Font.MonospacedModifier>>>)
+        XCTAssertNotNil(digits.provider as? FontBox<VUI.Font.StaticModifierProvider<VUI.Font.MonospacedDigitModifier>>)
 
         let environment = EnvironmentValues()
         let resolvedMonospaced = try XCTUnwrap(
-            monospaced.resolved(in: environment).provider.fontBox as?
+            monospaced.resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let resolvedInactive = try XCTUnwrap(
-            inactive.resolved(in: environment).provider.fontBox as?
+            inactive.resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let resolvedTrueThenFalse = try XCTUnwrap(
             base.monospaced().monospaced(false)
-                .resolved(in: environment).provider.fontBox as?
+                .resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let resolvedFalseThenTrue = try XCTUnwrap(
             base.monospaced(false).monospaced()
-                .resolved(in: environment).provider.fontBox as?
+                .resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let resolvedExplicitDesign = try XCTUnwrap(
             VUI.Font.system(size: 17, design: .monospaced)
                 .monospaced(false)
-                .resolved(in: environment).provider.fontBox as?
+                .resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let resolvedWeighted = try XCTUnwrap(
             monospaced.weight(.bold)
-                .resolved(in: environment).provider.fontBox as?
+                .resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
 
@@ -1389,7 +1382,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = .vector()
         let provider = try XCTUnwrap(
-            font.resolved(in: environment).provider.fontBox as?
+            font.resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
         let face = try XCTUnwrap(provider.makeTypeface(
@@ -1424,7 +1417,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             .monospaced(true),
         ]
         let contentNearestTrue = try XCTUnwrap(
-            base.resolved(in: environment).provider.fontBox as?
+            base.resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
 
@@ -1433,7 +1426,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             .monospaced(false),
         ]
         let contentNearestFalse = try XCTUnwrap(
-            base.resolved(in: environment).provider.fontBox as?
+            base.resolved(in: environment).typefaceProvider as?
                 SystemFontProvider
         )
 
@@ -1603,12 +1596,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "ko_KR")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .bold,
             design: .monospaced,
             renderingMode: .vector()
-        )))
+        ))
         let cascade = font.typefaceCascade(
             in: environment,
             forContext: SceneResources(),
@@ -1673,12 +1666,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "en_US")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let cascade = font.typefaceCascade(
             in: environment,
             forContext: SceneResources(),
@@ -1721,12 +1714,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "en_US")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let sceneResources = SceneResources()
         let cascade = font.typefaceCascade(
             in: environment,
@@ -1769,12 +1762,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "en")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let cascade = font.typefaceCascade(
             in: environment,
             forContext: SceneResources(),
@@ -1802,12 +1795,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "en")
         environment.defaultFontRenderingMode = .vector()
-        let font = VUI.Font(provider: AnyFontBox(SystemFontProvider(
+        let font = VUI.Font(typefaceProvider: SystemFontProvider(
             size: 17,
             weight: .regular,
             design: .default,
             renderingMode: .vector()
-        )))
+        ))
         let sceneResources = SceneResources()
         let faces = font.typefaceCascade(
             in: environment,

@@ -326,7 +326,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         defer { appContext = previousAppContext }
 
         let provider = DPIRecordingTypefaceProvider()
-        let font = VUI.Font(provider: AnyFontBox(provider))
+        let font = VUI.Font(typefaceProvider: provider)
         let sceneResources = SceneResources()
         sceneResources.contentScaleFactor = 2
 
@@ -367,7 +367,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         defer { appContext = previousAppContext }
 
         let provider = DPIRecordingTypefaceProvider()
-        let font = VUI.Font(provider: AnyFontBox(provider))
+        let font = VUI.Font(typefaceProvider: provider)
         let sceneResources = SceneResources()
         let scales = [CGFloat(1.49999), CGFloat(1.5)]
 
@@ -922,6 +922,7 @@ private final class FractionalWidthTestTypeface: Typeface {
 }
 
 private final class DPIRecordingTypefaceProvider: TypefaceProvider {
+    var pointSize: CGFloat { 10 }
     var requestedDPIs: [UInt32] = []
 
     func isEqual(to other: any TypefaceProvider) -> Bool {

@@ -46,37 +46,6 @@ private enum FontModifiersKey: EnvironmentKey {
     static var defaultValue: [AnyFontModifier] { [] }
 }
 
-struct AnyFontModifier: Hashable, Sendable {
-    enum Storage: Hashable, Sendable {
-        case monospaced
-        case undoMonospaced
-        case monospacedDigit
-    }
-
-    let storage: Storage
-
-    static func monospaced(_ isActive: Bool) -> Self {
-        Self(storage: isActive ? .monospaced : .undoMonospaced)
-    }
-
-    static let monospacedDigit = Self(storage: .monospacedDigit)
-
-    var monospacedValue: Bool? {
-        switch storage {
-        case .monospaced:
-            true
-        case .undoMonospaced:
-            false
-        case .monospacedDigit:
-            nil
-        }
-    }
-
-    var isMonospacedDigit: Bool {
-        storage == .monospacedDigit
-    }
-}
-
 private extension Array where Element == AnyFontModifier {
     mutating func appendAsNearest(_ modifier: AnyFontModifier) {
         removeAll { $0 == modifier }
@@ -104,7 +73,7 @@ extension EnvironmentValues {
     }
 
     var effectiveFont: Font {
-        font ?? defaultFont ?? .system(.body)
+        font ?? defaultFont ?? .system(size: Font.pointSize(for: .body))
     }
 
     var fontModifiers: [AnyFontModifier] {
@@ -134,55 +103,6 @@ extension EnvironmentValues {
     }
 }
 
-protocol StaticFontModifier {
-    static func modify(_ font: Font) -> Font
-    static var shapingFeatures: [TypefaceShapingFeature] { get }
-}
-
-protocol StaticModifierProviderProtocol {
-    var baseFont: Font { get }
-    var modifiedFont: Font { get }
-    func replacingBaseFont(_ base: Font) -> Font
-}
-
-extension StaticFontModifier {
-    static var shapingFeatures: [TypefaceShapingFeature] { [] }
-}
-
-class AnyFontBox: @unchecked Sendable {
-    let fontBox: any TypefaceProvider
-
-    init(_ fontBox: any TypefaceProvider) {
-        self.fontBox = fontBox
-    }
-
-    func isEqual(to other: AnyFontBox) -> Bool {
-        self.fontBox.isEqual(to: other.fontBox)
-    }
-
-    func hash(into hasher: inout Hasher) {
-        fontBox.hash(into: &hasher)
-    }
-
-    func resolved(in environment: EnvironmentValues) -> AnyFontBox {
-        AnyFontBox(fontBox.resolved(in: environment))
-    }
-
-    func makeTypeface(
-        _ context: AppContext,
-        dpi: UInt32
-    ) -> Typeface? {
-        fontBox.makeTypeface(
-            context,
-            dpi: dpi
-        )
-    }
-    var isShareable: Bool { fontBox.isShareable }
-    var shapingFeatures: [TypefaceShapingFeature] {
-        fontBox.shapingFeatures
-    }
-}
-
 public struct Font: Hashable, Sendable {
     let provider: AnyFontBox
 
@@ -198,48 +118,29 @@ public struct Font: Hashable, Sendable {
         provider.hash(into: &hasher)
     }
 
-    private var applyingStaticModifiers: Font {
-        guard let provider = provider.fontBox as?
-                any StaticModifierProviderProtocol else {
-            return self
-        }
-        return provider.modifiedFont
+    init(typefaceProvider: any TypefaceProvider, features: [TypefaceShapingFeature] = []) {
+        provider = FontBox(TypefaceFontProvider(typefaceProvider, features: features))
     }
 
-    private func transformingBase(
-        _ transform: (Font) -> Font
-    ) -> Font {
-        guard let provider = provider.fontBox as?
-                any StaticModifierProviderProtocol else {
-            return transform(self)
-        }
-        return provider.replacingBaseFont(
-            provider.baseFont.transformingBase(transform)
-        )
+    var typefaceProvider: (any TypefaceProvider)? {
+        (provider as? FontBox<TypefaceFontProvider>)?.base.base
     }
 
-    private func applyingMonospacedTrait() -> Font {
-        switch provider.fontBox {
-        case let system as SystemFontProvider:
-            return Font(provider: AnyFontBox(SystemFontProvider(
-                size: system.size,
-                weight: system.weight,
-                design: .monospaced,
-                renderingMode: system.renderingMode,
-                isItalic: system.isItalic
-            )))
-        case let external as ExternalFontProvider:
-            return Font(provider: AnyFontBox(ExternalFontProvider(
-                source: external.source,
-                size: external.size,
-                weight: external.weight,
-                design: .monospaced,
-                faceIndex: external.faceIndex,
-                renderingMode: external.renderingMode
-            )))
-        default:
-            return self
-        }
+    var typefaceFeatures: [TypefaceShapingFeature] {
+        (provider as? FontBox<TypefaceFontProvider>)?.base.features ?? []
+    }
+
+    func resolveDescriptor(in context: Context) -> FontDescriptor {
+        provider.resolveDescriptor(in: context)
+    }
+
+    func resolveTraits(in context: Context) -> ResolvedTraits {
+        provider.resolveTraits(in: context)
+    }
+
+    func removing<T: StaticFontModifier>(modifier: T.Type) -> Font {
+        func wrap<P: FontProvider>(_ value: P) -> Font { Font(provider: FontBox(value)) }
+        return _openExistential(provider.removing(modifier: modifier), do: wrap)
     }
 
     func typeface(
@@ -265,9 +166,11 @@ public struct Font: Hashable, Sendable {
     ) -> Typeface? {
         precondition(dpi > 0, "The font DPI must be positive.")
         guard let app = appContext else { return nil }
+        let font = typefaceProvider == nil ? resolved(in: EnvironmentValues()) : self
+        let provider = font.typefaceProvider!
         if provider.isShareable {
             let key = SceneResources.TypefaceKey(
-                font: self,
+                font: font,
                 dpi: dpi
             )
             if let typeface = context.cachedTypefaces[key] {
@@ -315,7 +218,8 @@ public struct Font: Hashable, Sendable {
         forContext context: SceneResources,
         dpi: UInt32
     ) -> TypefaceCascade {
-        var shapingFeatures = provider.shapingFeatures
+        let font = resolved(in: environment)
+        var shapingFeatures = font.typefaceFeatures
         if environment.fontModifiers.usesMonospacedDigits {
             shapingFeatures.append(
                 contentsOf: MonospacedDigitModifier.shapingFeatures
@@ -327,9 +231,8 @@ public struct Font: Hashable, Sendable {
             uniqueShapingFeatures.append(feature)
         }
 
-        let font = resolved(in: environment)
-        let system = font.provider.fontBox as? SystemFontProvider
-        let external = font.provider.fontBox as? ExternalFontProvider
+        let system = font.typefaceProvider as? SystemFontProvider
+        let external = font.typefaceProvider as? ExternalFontProvider
         let catalog = BundledFontCatalog.shared
         let locale = environment.locale
         let design = system?.design ?? external?.design ?? .default
@@ -339,7 +242,8 @@ public struct Font: Hashable, Sendable {
         )
 
         let size = font.pointSizeForSymbolMetrics ?? 17
-        let weight = system?.weight ?? external?.weight ?? .regular
+        let weight = system?.weight ?? external?.weight ??
+            (font.typefaceProvider as? BundledFontProvider)?.weight ?? .regular
         let renderingMode = font.bundledRenderingMode(in: environment)
         let primary = font.typeface(forContext: context, dpi: dpi)
 
@@ -353,7 +257,7 @@ public struct Font: Hashable, Sendable {
             if family == catalog.configuration.systemFont(for: design),
                let system {
                 face = primary ?? Font(
-                    provider: AnyFontBox(system)
+                    typefaceProvider: system
                 ).typeface(forContext: context, dpi: dpi)
             } else {
                 face = font.bundledTypeface(
@@ -436,7 +340,7 @@ public struct Font: Hashable, Sendable {
             isItalic: isItalic,
             catalog: catalog
         ) else { return nil }
-        let bundledFont = Font(provider: AnyFontBox(provider))
+        let bundledFont = Font(typefaceProvider: provider)
         if deferLoading {
             return DeferredTypeface(
                 font: bundledFont,
@@ -452,11 +356,8 @@ public struct Font: Hashable, Sendable {
     private func bundledRenderingMode(
         in environment: EnvironmentValues
     ) -> RenderingMode {
-        let font = applyingStaticModifiers
-        if font != self {
-            return font.bundledRenderingMode(in: environment)
-        }
-        switch font.provider.fontBox {
+        let font = self
+        switch font.typefaceProvider {
         case let system as SystemFontProvider:
             return system.renderingMode
         case let bundled as BundledFontProvider:
@@ -479,102 +380,38 @@ public struct Font: Hashable, Sendable {
     }
 
     func resolved(in environment: EnvironmentValues) -> Font {
-        var font = applyingStaticModifiers
-        if environment.fontModifiers.monospacedValue == true {
-            font = font.applyingMonospacedTrait()
+        let context = environment.fontResolutionContext
+        var descriptor = resolveDescriptor(in: context)
+        for modifier in context.fontModifiers where modifier.monospacedValue == nil {
+            modifier.modify(descriptor: &descriptor, in: context)
         }
-        if environment.fontModifiers.usesMonospacedDigits {
-            font = MonospacedDigitModifier.modify(font)
+        if context.fontModifiers.monospacedValue == true {
+            MonospacedModifier.modify(descriptor: &descriptor, in: context)
         }
-        return Font(provider: font.provider.resolved(in: environment))
+        return Font(typefaceProvider: descriptor.typefaceProvider(in: environment),
+                    features: descriptor.shapingFeatures)
     }
 
     var pointSizeForSymbolMetrics: CGFloat? {
-        if let provider = provider.fontBox as?
-                any StaticModifierProviderProtocol {
-            return provider.baseFont.pointSizeForSymbolMetrics
+        if let wrapper = provider.baseProvider as? any FontWrapperProvider {
+            return wrapper.baseFont.pointSizeForSymbolMetrics
         }
-        return switch provider.fontBox {
-        case let system as SystemFontProvider:
-            system.size
-        case let bundled as BundledFontProvider:
-            bundled.size
-        case let external as ExternalFontProvider:
-            external.size
-        case let custom as CustomFontProvider:
-            custom.size
-        case let fixed as FixedFontProvider:
-            fixed.face.lineHeight
+        switch provider.baseProvider {
+        case let system as SystemProvider:
+            return system.effectiveSize(in: EnvironmentValues().fontResolutionContext)
+        case let style as TextStyleProvider:
+            return Self.pointSize(for: style.style)
+        case let named as NamedProvider:
+            return named.textStyle == nil ? named.size : named.size.rounded()
+        case let rendering as TypefaceFontProvider:
+            return rendering.base.pointSize
         default:
-            nil
+            return nil
         }
     }
 }
 
 extension Font {
-
-    struct StaticModifierProvider<Modifier: StaticFontModifier>:
-        TypefaceProvider, StaticModifierProviderProtocol {
-        let base: Font
-
-        var baseFont: Font { base }
-
-        var modifiedFont: Font {
-            Modifier.modify(base.applyingStaticModifiers)
-        }
-
-        func replacingBaseFont(_ base: Font) -> Font {
-            Font(provider: AnyFontBox(Self(base: base)))
-        }
-
-        func isEqual(to other: any TypefaceProvider) -> Bool {
-            guard let other = other as? Self else { return false }
-            return base == other.base
-        }
-
-        func hash(into hasher: inout Hasher) {
-            hasher.combine(ObjectIdentifier(Modifier.self))
-            hasher.combine(base)
-        }
-
-        func makeTypeface(
-            _ context: AppContext,
-            dpi: UInt32
-        ) -> Typeface? {
-            modifiedFont.provider.makeTypeface(context, dpi: dpi)
-        }
-
-        var isShareable: Bool {
-            modifiedFont.provider.isShareable
-        }
-
-        var shapingFeatures: [TypefaceShapingFeature] {
-            base.provider.shapingFeatures + Modifier.shapingFeatures
-        }
-    }
-
-    struct MonospacedModifier: StaticFontModifier {
-        static func modify(_ font: Font) -> Font {
-            font.applyingMonospacedTrait()
-        }
-    }
-
-    struct MonospacedDigitModifier: StaticFontModifier {
-        static let shapingFeatures: [TypefaceShapingFeature] = [
-            TypefaceShapingFeature(tag: 0x746e_756d)
-        ]
-
-        static func modify(_ font: Font) -> Font {
-            font
-        }
-    }
-
-    struct UndoModifier<Modifier: StaticFontModifier>: StaticFontModifier {
-        static func modify(_ font: Font) -> Font {
-            font
-        }
-    }
-
     public enum RenderingMode: Hashable, Sendable {
         public struct Bitmap: Hashable, Sendable {
             public let outlineThickness: CGFloat
@@ -615,15 +452,18 @@ extension Font {
         case monospaced
     }
 
-    public enum TextStyle: CaseIterable {
+    public enum TextStyle: CaseIterable, Hashable, Sendable, Codable {
         case largeTitle
         case title
+        case title2
+        case title3
         case headline
         case subheadline
         case body
         case callout
         case footnote
         case caption
+        case caption2
     }
 }
 
@@ -631,7 +471,7 @@ extension Font {
 
     public init(_ font: TextureFont) {
         let fontBox = FixedFontProvider(TextureTypeface(textureFont: font))
-        self.init(provider: AnyFontBox(fontBox))
+        self.init(typefaceProvider: fontBox)
     }
 
     public init(vector font: VVD.Font,
@@ -642,19 +482,22 @@ extension Font {
             embolden: embolden,
             outlineThickness: outlineThickness)
         let fontBox = FixedFontProvider(typeface)
-        self.init(provider: AnyFontBox(fontBox))
+        self.init(typefaceProvider: fontBox)
     }
 
     static func pointSize(for style: TextStyle) -> CGFloat {
         switch style {
         case .largeTitle:   return 26
         case .title:        return 22
+        case .title2:       return 17
+        case .title3:       return 15
         case .headline:     return 13
         case .subheadline:  return 11
         case .body:         return 13
         case .callout:      return 12
         case .footnote:     return 10
         case .caption:      return 10
+        case .caption2:     return 10
         }
     }
 
@@ -662,25 +505,20 @@ extension Font {
         switch style {
         case .headline:
             return .bold
-        case .largeTitle, .title, .subheadline, .body, .callout, .footnote, .caption:
+        case .caption2:
+            return .medium
+        case .largeTitle, .title, .title2, .title3, .subheadline, .body, .callout, .footnote, .caption:
             return .regular
         }
     }
 
-    public static func system(_ style: Font.TextStyle, design: Font.Design = .default) -> Font {
-        let provider = SystemFontProvider(size: pointSize(for: style),
-                                          weight: weight(for: style),
-                                          design: design,
-                                          renderingMode: .automatic)
-        return Font(provider: AnyFontBox(provider))
+    public static func system(_ style: Font.TextStyle, design: Font.Design? = nil, weight: Font.Weight? = nil) -> Font {
+        Font(provider: FontBox(TextStyleProvider(style: style, design: design, weight: weight)))
     }
 
-    public static func system(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
-        let provider = SystemFontProvider(size: size,
-                                          weight: weight,
-                                          design: design,
-                                          renderingMode: .automatic)
-        return Font(provider: AnyFontBox(provider))
+    public static func system(size: CGFloat, weight: Font.Weight? = nil, design: Font.Design? = nil) -> Font {
+        Font(provider: FontBox(SystemProvider(size: size, weight: weight, design: design,
+                                              textStyle: nil, maximumSize: nil)))
     }
 
     public static func bitmap(_ style: Font.TextStyle,
@@ -710,7 +548,7 @@ extension Font {
                 outlineThickness: outlineThickness,
                 isBitmapPreferred: isBitmapPreferred,
                 isColorEnabled: isColorEnabled)))
-        return Font(provider: AnyFontBox(provider))
+        return Font(typefaceProvider: provider)
     }
 
     public static func vector(_ style: Font.TextStyle,
@@ -732,7 +570,7 @@ extension Font {
             design: design,
             renderingMode: .vector(.init(
                 outlineThickness: outlineThickness)))
-        return Font(provider: AnyFontBox(provider))
+        return Font(typefaceProvider: provider)
     }
 
     /// Creates a font backed by a local file URL.
@@ -756,7 +594,7 @@ extension Font {
             faceIndex: faceIndex,
             renderingMode: renderingMode
         )
-        return Font(provider: AnyFontBox(provider))
+        return Font(typefaceProvider: provider)
     }
 
     /// Creates a font backed by a retained copy of in-memory font data.
@@ -776,116 +614,58 @@ extension Font {
             faceIndex: faceIndex,
             renderingMode: renderingMode
         )
-        return Font(provider: AnyFontBox(provider))
+        return Font(typefaceProvider: provider)
     }
 
     public static func custom(_ name: String, size: CGFloat, relativeTo textStyle: Font.TextStyle) -> Font {
-        let provider = CustomFontProvider(name: name, size: pointSize(for: textStyle) + size)
-        return Font(provider: AnyFontBox(provider))
+        Font(provider: FontBox(NamedProvider(name: name, size: size, textStyle: textStyle)))
     }
 
     public static func custom(_ name: String, fixedSize: CGFloat) -> Font {
-        let provider = CustomFontProvider(name: name, size: fixedSize)
-        return Font(provider: AnyFontBox(provider))
+        Font(provider: FontBox(NamedProvider(name: name, size: fixedSize, textStyle: nil)))
     }
 
     public static func custom(_ name: String, size: CGFloat) -> Font {
-        let provider = CustomFontProvider(name: name, size: size)
-        return Font(provider: AnyFontBox(provider))
+        Font(provider: FontBox(NamedProvider(name: name, size: size, textStyle: .body)))
     }
 }
 
 extension Font {
-    public struct Weight: Hashable, Sendable {
-        public var value: CGFloat
-
-        public static let ultraLight = Weight(value: 100)
-        public static let thin = Weight(value: 200)
-        public static let light = Weight(value: 300)
-        public static let regular = Weight(value: 400)
-        public static let medium = Weight(value: 500)
-        public static let semibold = Weight(value: 600)
-        public static let bold = Weight(value: 700)
-        public static let heavy = Weight(value: 800)
-        public static let black = Weight(value: 900)
-    }
-
     public func weight(_ weight: Weight) -> Font {
-        transformingBase { font in
-            guard let system = font.provider.fontBox as?
-                    SystemFontProvider else {
-                return font
-            }
-            return Font(
-                provider: AnyFontBox(SystemFontProvider(
-                    size: system.size,
-                    weight: weight,
-                    design: system.design,
-                    renderingMode: system.renderingMode,
-                    isItalic: system.isItalic
-                ))
-            )
-        }
+        Font(provider: FontBox(ModifierProvider(base: self, modifier: WeightModifier(weight: weight))))
     }
 
-    public func bold() -> Font {
-        weight(.bold)
-    }
-
+    public func bold() -> Font { bold(true) }
     public func bold(_ isActive: Bool) -> Font {
-        isActive ? bold() : self
+        if isActive { return Font(provider: FontBox(StaticModifierProvider<BoldModifier>(base: self))) }
+        return Font(provider: FontBox(StaticModifierProvider<UndoModifier<BoldModifier>>(base: self)))
     }
 
-    public func italic() -> Font {
-        italic(true)
-    }
-
+    public func italic() -> Font { italic(true) }
     public func italic(_ isActive: Bool) -> Font {
-        guard isActive else { return self }
-        return transformingBase { font in
-            guard let system = font.provider.fontBox as?
-                    SystemFontProvider else {
-                return font
-            }
-            return Font(
-                provider: AnyFontBox(SystemFontProvider(
-                    size: system.size,
-                    weight: system.weight,
-                    design: system.design,
-                    renderingMode: system.renderingMode,
-                    isItalic: true
-                ))
-            )
-        }
+        if isActive { return Font(provider: FontBox(StaticModifierProvider<ItalicModifier>(base: self))) }
+        return Font(provider: FontBox(StaticModifierProvider<UndoModifier<ItalicModifier>>(base: self)))
     }
 
     public func monospacedDigit() -> Font {
-        Font(provider: AnyFontBox(StaticModifierProvider<
-            MonospacedDigitModifier
-        >(base: self)))
+        Font(provider: FontBox(StaticModifierProvider<MonospacedDigitModifier>(base: self)))
     }
 
-    public func monospaced() -> Font {
-        monospaced(true)
-    }
-
+    public func monospaced() -> Font { monospaced(true) }
     public func monospaced(_ isActive: Bool) -> Font {
-        if isActive {
-            return Font(provider: AnyFontBox(StaticModifierProvider<
-                MonospacedModifier
-            >(base: self)))
-        }
-        return Font(provider: AnyFontBox(StaticModifierProvider<
-            UndoModifier<MonospacedModifier>
-        >(base: self)))
+        if isActive { return Font(provider: FontBox(StaticModifierProvider<MonospacedModifier>(base: self))) }
+        return Font(provider: FontBox(StaticModifierProvider<UndoModifier<MonospacedModifier>>(base: self)))
     }
 
     public static let largeTitle = Font.system(Font.TextStyle.largeTitle)
     public static let title = Font.system(Font.TextStyle.title)
+    public static let title2 = Font.system(Font.TextStyle.title2)
+    public static let title3 = Font.system(Font.TextStyle.title3)
     public static let headline = Font.system(Font.TextStyle.headline)
     public static let subheadline = Font.system(Font.TextStyle.subheadline)
     public static let body = Font.system(Font.TextStyle.body)
     public static let callout = Font.system(Font.TextStyle.callout)
     public static let footnote = Font.system(Font.TextStyle.footnote)
     public static let caption = Font.system(Font.TextStyle.caption)
+    public static let caption2 = Font.system(Font.TextStyle.caption2)
 }

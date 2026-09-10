@@ -19,6 +19,7 @@ protocol TypefaceProvider {
     ) -> Typeface?
 
     var isShareable: Bool { get }
+    var pointSize: CGFloat { get }
     var shapingFeatures: [TypefaceShapingFeature] { get }
 }
 
@@ -61,7 +62,7 @@ struct BundledFontResource: Hashable, Sendable {
     }
 }
 
-struct BundledFontVariation: Hashable {
+struct BundledFontVariation: Hashable, Sendable {
     let tag: UInt32
     let value: CGFloat
 }
@@ -69,6 +70,7 @@ struct BundledFontVariation: Hashable {
 let defaultDPI = 72
 
 struct SystemFontProvider: TypefaceProvider {
+    var pointSize: CGFloat { size }
     let size: CGFloat
     let weight: Font.Weight
     let design: Font.Design
@@ -89,7 +91,7 @@ struct SystemFontProvider: TypefaceProvider {
 
     static func embolden(for weight: Font.Weight) -> CGFloat {
         let emboldenFactor = 1.0
-        return ((weight.value - 400.0) / 300.0) * emboldenFactor
+        return ((weight.weightClass - 400.0) / 300.0) * emboldenFactor
     }
 
     func resolved(in environment: EnvironmentValues) -> Self {
@@ -151,7 +153,9 @@ struct SystemFontProvider: TypefaceProvider {
 }
 
 struct BundledFontProvider: TypefaceProvider {
+    var pointSize: CGFloat { size }
     let resource: BundledFontResource
+    let instanceIndex: Int?
     let size: CGFloat
     let weight: Font.Weight
     let renderingMode: Font.RenderingMode
@@ -164,9 +168,11 @@ struct BundledFontProvider: TypefaceProvider {
         weight: Font.Weight,
         renderingMode: Font.RenderingMode,
         variations: [BundledFontVariation] = [],
-        appliesSyntheticWeight: Bool = true
+        appliesSyntheticWeight: Bool = true,
+        instanceIndex: Int? = nil
     ) {
         self.resource = resource
+        self.instanceIndex = instanceIndex
         self.size = size
         self.weight = weight
         self.renderingMode = renderingMode
@@ -187,13 +193,13 @@ struct BundledFontProvider: TypefaceProvider {
               let resource = catalog.resource(
                 for: family,
                 locale: locale,
-                weight: weight.value,
+                weight: weight.weightClass,
                 isItalic: isItalic
               ) else {
             return nil
         }
         let source = descriptor.source(
-            for: weight.value,
+            for: weight.weightClass,
             isItalic: isItalic
         )
         let variations: [BundledFontVariation]
@@ -201,7 +207,7 @@ struct BundledFontProvider: TypefaceProvider {
             variations = [BundledFontVariation(
                 tag: weightAxis.tag,
                 value: min(
-                    max(weight.value, weightAxis.minimum),
+                    max(weight.weightClass, weightAxis.minimum),
                     weightAxis.maximum
                 )
             )]
@@ -236,13 +242,15 @@ struct BundledFontProvider: TypefaceProvider {
             weight: weight,
             renderingMode: renderingMode,
             variations: variations,
-            appliesSyntheticWeight: appliesSyntheticWeight
+            appliesSyntheticWeight: appliesSyntheticWeight,
+            instanceIndex: instanceIndex
         )
     }
 
     func isEqual(to: any TypefaceProvider) -> Bool {
         guard let other = to as? Self else { return false }
         return resource == other.resource &&
+            instanceIndex == other.instanceIndex &&
             size == other.size &&
             weight == other.weight &&
             renderingMode == other.renderingMode &&
@@ -252,6 +260,7 @@ struct BundledFontProvider: TypefaceProvider {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(resource)
+        hasher.combine(instanceIndex)
         hasher.combine(size)
         hasher.combine(weight)
         hasher.combine(renderingMode)
@@ -449,6 +458,7 @@ enum ExternalFontSource: Hashable, @unchecked Sendable {
 }
 
 struct ExternalFontProvider: TypefaceProvider {
+    var pointSize: CGFloat { size }
     private static let weightVariationTag: UInt32 = 0x7767_6874
 
     let source: ExternalFontSource
@@ -571,9 +581,7 @@ struct ExternalFontProvider: TypefaceProvider {
         }) else {
             return true
         }
-        let requested = weight.value.isFinite
-            ? weight.value
-            : Font.Weight.regular.value
+        let requested = weight.weightClass
         let value = min(
             max(requested, axis.minimumValue),
             axis.maximumValue
@@ -584,38 +592,9 @@ struct ExternalFontProvider: TypefaceProvider {
     }
 }
 
-struct CustomFontProvider: TypefaceProvider {
-    let name: String
-    let size: CGFloat
-
-    init(name: String, size: CGFloat) {
-        self.name = name
-        self.size = size
-    }
-
-    func isEqual(to: any TypefaceProvider) -> Bool {
-        if let other = to as? Self {
-            return self.name == other.name &&
-                   self.size == other.size
-        }
-        return false
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(name)
-        hasher.combine(size)
-    }
-
-    func makeTypeface(
-        _ context: AppContext,
-        dpi: UInt32
-    ) -> Typeface? {
-        nil
-    }
-}
-
 struct FixedFontProvider: TypefaceProvider {
     let face: any Typeface
+    var pointSize: CGFloat { face.lineHeight }
 
     init(_ face: any Typeface) {
         self.face = face

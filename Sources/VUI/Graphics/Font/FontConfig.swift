@@ -78,7 +78,7 @@ struct BundledFontDescriptor: Equatable, Sendable {
         let candidates = matchingStyle.isEmpty
             ? sources.filter { !$0.isItalic }
             : matchingStyle
-        let regularWeight = Font.Weight.regular.value
+        let regularWeight: CGFloat = 400
         let requestedWeight = requestedWeight.isFinite
             ? requestedWeight
             : regularWeight
@@ -320,7 +320,7 @@ struct FontFallbackConfiguration: Sendable {
                 ).values {
                     guard styleSources.count == 1,
                           styleSources[0].weight ==
-                            Font.Weight.regular.value else {
+                            400 else {
                         throw FontFallbackConfigurationError
                             .invalidWeightConfiguration(fontID)
                     }
