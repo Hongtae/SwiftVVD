@@ -50,7 +50,7 @@ var defaultItalicFontURL: URL? {
     )?.url
 }
 
-struct BundledFontResource: Hashable {
+struct BundledFontResource: Hashable, Sendable {
     let url: URL
     let faceIndex: Int
 

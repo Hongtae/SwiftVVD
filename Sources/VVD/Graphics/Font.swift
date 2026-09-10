@@ -256,6 +256,9 @@ public class Font: @unchecked Sendable {
         public let index: Int
         public let styleName: String?
         public let postScriptName: String?
+        /// Source name-table identifiers, distinct from the resolved names.
+        public let styleNameID: UInt16?
+        public let postScriptNameID: UInt16?
         /// Coordinates in the parent FaceMetadata.variationAxes order.
         public let coordinates: [CGFloat]
     }
@@ -271,6 +274,27 @@ public class Font: @unchecked Sendable {
         public let fixedPitch: UInt32?
     }
 
+    public struct SFNTNameRecord: Hashable, Sendable {
+        public let platformID: UInt16
+        public let encodingID: UInt16
+        public let languageID: UInt16
+        public let nameID: UInt16
+        /// The original bytes remain available even for unsupported encodings.
+        public let data: Data
+
+        public var string: String? {
+            switch (platformID, encodingID) {
+            case (0, _), (3, 0), (3, 1), (3, 10):
+                guard data.count.isMultiple(of: 2) else { return nil }
+                return String(data: data, encoding: .utf16BigEndian)
+            case (1, 0):
+                return String(data: data, encoding: .macOSRoman)
+            default:
+                return nil
+            }
+        }
+    }
+
     /// Copied resource metadata, independent of a rendering face and source buffer.
     public struct FaceMetadata: Hashable, Sendable {
         public let faceIndex: Int
@@ -283,6 +307,8 @@ public class Font: @unchecked Sendable {
         /// One-based instance identity; nil when the face has no default instance.
         public let defaultVariationInstanceIndex: Int?
         public let sfntStyle: SFNTStyleMetadata
+        /// Unmerged source records; localized and legacy names keep their identities.
+        public let sfntNames: [SFNTNameRecord]
     }
 
     /// Inspects a collection face without creating a rendering Font.
@@ -344,6 +370,25 @@ public class Font: @unchecked Sendable {
         let familyName = face.pointee.family_name.map { String(cString: $0) }
         let styleName = face.pointee.style_name.map { String(cString: $0) }
         let postScriptName = FT_Get_Postscript_Name(face).map { String(cString: $0) }
+        var sfntNames: [SFNTNameRecord] = []
+        for index in 0..<FT_Get_Sfnt_Name_Count(face) {
+            var record = FT_SfntName()
+            guard FT_Get_Sfnt_Name(face, index, &record) == 0 else { continue }
+            let bytes: Data
+            if record.string_len == 0 {
+                bytes = Data()
+            } else {
+                guard let pointer = record.string else { continue }
+                bytes = Data(bytes: pointer, count: Int(record.string_len))
+            }
+            sfntNames.append(SFNTNameRecord(
+                platformID: record.platform_id,
+                encodingID: record.encoding_id,
+                languageID: record.language_id,
+                nameID: record.name_id,
+                data: bytes
+            ))
+        }
         let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?
             .assumingMemoryBound(to: TT_OS2.self).pointee
         let head = FT_Get_Sfnt_Table(face, FT_SFNT_HEAD)?
@@ -425,6 +470,9 @@ public class Font: @unchecked Sendable {
                         index: index + 1,
                         styleName: face.pointee.style_name.map { String(cString: $0) },
                         postScriptName: FT_Get_Postscript_Name(face).map { String(cString: $0) },
+                        styleNameID: UInt16(exactly: styles[index].strid),
+                        postScriptNameID: styles[index].psid == 0xffff
+                            ? nil : UInt16(exactly: styles[index].psid),
                         coordinates: coordinates
                     ))
                 }
@@ -444,7 +492,8 @@ public class Font: @unchecked Sendable {
             variationAxes: axes,
             variationInstances: instances,
             defaultVariationInstanceIndex: defaultInstanceIndex,
-            sfntStyle: sfntStyle
+            sfntStyle: sfntStyle,
+            sfntNames: sfntNames
         )
     }
 

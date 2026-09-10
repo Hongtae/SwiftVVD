@@ -53,6 +53,51 @@ final class FontMetadataTests: XCTestCase {
         XCTAssertTrue(value.variationInstances.allSatisfy { $0.postScriptName != nil })
     }
 
+    func testSourceNameRecordsRemainIndependentOfResolvedInstanceNames() throws {
+        let roboto = try XCTUnwrap(Font.metadata(path: Self.resource(Self.roboto).path))
+        let fullNames = roboto.sfntNames.filter { $0.nameID == 4 }.compactMap(\.string)
+        XCTAssertTrue(fullNames.contains("Roboto Regular"))
+        XCTAssertFalse(fullNames.contains("Roboto Regular ExtraLight"))
+        let extraLight = roboto.variationInstances[1]
+        XCTAssertTrue(roboto.sfntNames.contains {
+            $0.nameID == extraLight.styleNameID && $0.string == "ExtraLight"
+        })
+        XCTAssertTrue(roboto.sfntNames.contains {
+            $0.nameID == extraLight.postScriptNameID && $0.string == "Roboto-ExtraLight"
+        })
+        let nanum = try XCTUnwrap(Font.metadata(path: Self.resource(Self.nanum).path))
+        XCTAssertTrue(nanum.variationInstances.allSatisfy { $0.postScriptNameID == nil })
+        XCTAssertNotNil(nanum.variationInstances[1].postScriptName)
+        XCTAssertTrue(nanum.sfntNames.contains {
+            $0.nameID == nanum.variationInstances[1].styleNameID && $0.string == "Regular"
+        })
+        let english = try XCTUnwrap(roboto.sfntNames.first {
+            $0.platformID == 3 && $0.languageID == 1033 && $0.nameID == 4
+        })
+        XCTAssertEqual(english.data, "Roboto Regular".data(using: .utf16BigEndian))
+    }
+
+    func testUnsupportedNameEncodingPreservesCopiedBytes() throws {
+        var data = try Data(contentsOf: Self.resource(Self.roboto))
+        let offset = Int(readUInt32(data, at: try tableRecord("name", in: data) + 8))
+        let count = Int(readUInt16(data, at: offset + 2))
+        let stringOffset = offset + Int(readUInt16(data, at: offset + 4))
+        let record = try XCTUnwrap((0..<count).map { offset + 6 + $0 * 12 }.first {
+            readUInt16(data, at: $0) == 3 && readUInt16(data, at: $0 + 6) == 0
+        })
+        let start = stringOffset + Int(readUInt16(data, at: record + 10))
+        let length = Int(readUInt16(data, at: record + 8))
+        let original = data.subdata(in: start..<start + length)
+        writeUInt16(0xfffe, to: &data, at: record + 2)
+        let metadata = try XCTUnwrap(Font.metadata(data: data))
+        data.resetBytes(in: data.startIndex..<data.endIndex)
+        let copied = try XCTUnwrap(metadata.sfntNames.first {
+            $0.platformID == 3 && $0.encodingID == 0xfffe && $0.nameID == 0
+        })
+        XCTAssertEqual(copied.data, original)
+        XCTAssertNil(copied.string)
+    }
+
     func testAllBundledFacesAgreeBetweenFileAndMemoryInputs() throws {
         let fixtures: [(String, Int, Int)] = [
             ("LastResort/LastResort-Regular.ttf", 1, 0),
@@ -303,6 +348,7 @@ final class FontMetadataTests: XCTestCase {
         XCTAssertNil(value.sfntStyle.macStyle)
         XCTAssertNil(value.sfntStyle.italicAngle)
         XCTAssertNil(value.sfntStyle.fixedPitch)
+        XCTAssertTrue(value.sfntNames.isEmpty)
     }
 }
 
