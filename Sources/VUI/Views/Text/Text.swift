@@ -1675,6 +1675,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         )
         hasher.combine(environment.effectiveFont.hashValue)
         hasher.combine(environment.defaultFontRenderingMode)
+        hasher.combine(environment.emojiFontPreset)
+        hasher.combine(environment.resourceBundle?.bundleURL)
         hasher.combine(environment.displayScale)
         hasher.combine(environment._contentScaleFactor)
         hasher.combine(environment.fontModifiers)

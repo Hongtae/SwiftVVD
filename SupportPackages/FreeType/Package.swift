@@ -15,9 +15,13 @@ let package = Package(
                 ]
             ),
     ],
+    dependencies: [
+        .package(name: "VVDSupport", path: "../VVDSupport"),
+    ],
     targets: [
         .target(
             name: "FreeType",
+            dependencies: [.product(name: "PNG", package: "VVDSupport")],
             path: ".",
             sources: [
                 "src/autofit/autofit.c",
@@ -67,6 +71,7 @@ let package = Package(
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms:[.windows])),
                 .define("FT2_BUILD_LIBRARY"),
+                .define("FT_CONFIG_OPTION_USE_PNG"),
                 .define("FT_DEBUG_LEVEL_ERROR", .when(configuration:.debug)),
                 .define("FT_DEBUG_LEVEL_TRACE", .when(configuration:.debug)),
                 .headerSearchPath("include"),

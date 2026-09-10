@@ -3,5 +3,7 @@
 
 #include "../../../src/hb.h"
 #include "../../../src/hb-ft.h"
+#include "../../../src/hb-ot.h"
+#include "../../../src/hb-raster.h"
 
 #endif

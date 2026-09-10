@@ -38,6 +38,10 @@ private enum DefaultFontRenderingModeKey: EnvironmentKey {
     static var defaultValue: Font.DefaultRenderingMode { .bitmap() }
 }
 
+private enum EmojiFontPresetKey: EnvironmentKey {
+    static var defaultValue: String? { nil }
+}
+
 private enum FontModifiersKey: EnvironmentKey {
     static var defaultValue: [AnyFontModifier] { [] }
 }
@@ -120,6 +124,13 @@ extension EnvironmentValues {
     public var defaultFontRenderingMode: Font.DefaultRenderingMode {
         set { self[DefaultFontRenderingModeKey.self] = newValue }
         get { self[DefaultFontRenderingModeKey.self] }
+    }
+
+    /// Selects an emoji font priority list from the active font configuration.
+    /// A nil or unknown name uses the configuration's default preset.
+    public var emojiFontPreset: String? {
+        get { self[EmojiFontPresetKey.self] }
+        set { self[EmojiFontPresetKey.self] = newValue }
     }
 }
 
@@ -366,6 +377,23 @@ public struct Font: Hashable, Sendable {
             ordinaryFaces.append(face)
         }
 
+        let applicationCatalog = environment.resourceBundle.flatMap {
+            BundledFontCatalog.catalog(in: $0)
+        }
+        let emojiCatalog = applicationCatalog.flatMap {
+            $0.configuration.defaultEmojiPreset == nil ? nil : $0
+        } ?? catalog
+        for family in emojiCatalog.configuration.emojiFonts(preset: environment.emojiFontPreset) {
+            if let face = font.bundledTypeface(
+                family: family, locale: locale, size: size, weight: weight,
+                renderingMode: renderingMode, catalog: emojiCatalog,
+                context: context, dpi: dpi, isItalic: false,
+                deferLoading: true, isEmojiFallback: true
+            ) {
+                ordinaryFaces.append(face)
+            }
+        }
+
         let missingGlyphFace = font.bundledTypeface(
             family: catalog.configuration.missingGlyphFont,
             locale: locale,
@@ -395,7 +423,8 @@ public struct Font: Hashable, Sendable {
         context: SceneResources,
         dpi: UInt32,
         isItalic: Bool,
-        deferLoading: Bool = false
+        deferLoading: Bool = false,
+        isEmojiFallback: Bool = false
     ) -> Typeface? {
         guard appContext != nil else { return nil }
         guard let provider = BundledFontProvider(
@@ -413,7 +442,8 @@ public struct Font: Hashable, Sendable {
                 font: bundledFont,
                 context: context,
                 dpi: dpi,
-                identifier: "\(family.rawValue):\(provider.resource.faceIndex)"
+                identifier: "\(family.rawValue):\(provider.resource.faceIndex)",
+                isEmojiFallback: isEmojiFallback
             )
         }
         return bundledFont.typeface(forContext: context, dpi: dpi)

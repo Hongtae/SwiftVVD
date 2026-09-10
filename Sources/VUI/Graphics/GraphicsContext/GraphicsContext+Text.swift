@@ -757,11 +757,42 @@ extension GraphicsContext {
                     let visibleScalars = characterScalars.filter {
                         !$0.properties.isDefaultIgnorableCodePoint
                     }
+                    let emojiRequested = characterScalars.contains { $0.value == 0xfe0f }
+                    let textRequested = characterScalars.contains { $0.value == 0xfe0e }
+                    let emojiDefault = characterScalars.first?.properties.isEmojiPresentation == true
+                    let textPreferred = textRequested || (!emojiRequested && !emojiDefault &&
+                        characterScalars.first?.properties.isEmoji == true)
+                    let candidates: [Typeface]
+                    if emojiRequested {
+                        candidates = faces.filter(\.isEmojiFallback) + faces.filter { !$0.isEmojiFallback }
+                    } else if emojiDefault && !textRequested {
+                        // An explicit primary face keeps ownership when it covers
+                        // the cluster; emoji defaults precede ordinary fallbacks.
+                        candidates = Array(faces.prefix(1)) +
+                            faces.dropFirst().filter(\.isEmojiFallback) +
+                            faces.dropFirst().filter { !$0.isEmojiFallback }
+                    } else {
+                        candidates = faces
+                    }
+                    func supportedFace() -> Typeface? {
+                        func covers(_ face: Typeface) -> Bool {
+                            visibleScalars.allSatisfy(face.hasGlyph(for:))
+                        }
+                        if textPreferred {
+                            if let ordinary = faces.first(where: { !$0.isEmojiFallback && covers($0) }) {
+                                return ordinary
+                            }
+                            if let monochrome = faces.first(where: {
+                                $0.isEmojiFallback && !$0.hasColorGlyphs && covers($0)
+                            }) {
+                                return monochrome
+                            }
+                        }
+                        return candidates.first(where: covers)
+                    }
                     if visibleScalars.isEmpty {
                         appendSpan(range, face: faces[0], makesGlyphs: false)
-                    } else if let face = faces.first(where: { face in
-                        visibleScalars.allSatisfy(face.hasGlyph(for:))
-                    }) {
+                    } else if let face = supportedFace() {
                         appendSpan(range, face: face, makesGlyphs: true)
                     } else {
                         for index in range {
@@ -977,7 +1008,8 @@ extension GraphicsContext {
                 frame textureBounds: CGRect,
                 offset: CGPoint,
                 baseline: CGPoint,
-                foregroundColor: Color?
+                foregroundColor: Color?,
+                scale: CGFloat = 1
             ) {
                 guard let texture else { return }
                 let colorGlyphs: Bool
@@ -999,10 +1031,10 @@ extension GraphicsContext {
                 let textureFrame = textureBounds.insetBy(dx: -pad, dy: -pad)
                 let frame = CGRect(
                     x: baseline.x,
-                    y: baseline.y - offset.y,
-                    width: textureBounds.width,
-                    height: textureBounds.height
-                ).insetBy(dx: -pad, dy: -pad)
+                    y: baseline.y - offset.y * scale,
+                    width: textureBounds.width * scale,
+                    height: textureBounds.height * scale
+                ).insetBy(dx: -pad * scale, dy: -pad * scale)
                 let uvMinX = Float(textureFrame.minX) * invW
                 let uvMinY = Float(textureFrame.minY) * invH
                 let uvMaxX = Float(textureFrame.maxX) * invW
@@ -1068,16 +1100,17 @@ extension GraphicsContext {
                         content = glyph.face.glyph(for: glyph.scalar)
                     }
                     switch content {
-                    case let .texture(data):
+                    case let .texture(data, scale):
                         appendTexture(
                             texture: data.texture,
                             frame: data.frame,
                             offset: data.offset,
                             baseline: CGPoint(
-                                x: baseline.x + data.offset.x,
+                                x: baseline.x + data.offset.x * scale,
                                 y: baseline.y
                             ),
-                            foregroundColor: glyph.foregroundColor
+                            foregroundColor: glyph.foregroundColor,
+                            scale: scale
                         )
                     case let .vector(data):
                         appendVector(

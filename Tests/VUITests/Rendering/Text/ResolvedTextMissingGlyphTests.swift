@@ -1288,7 +1288,8 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let korean = UnicodeScalar("ㄱ")
         let han = UnicodeScalar("漢")
 
-        XCTAssertEqual(cascade.ordinaryFaces.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter(\.isEmojiFallback).count, 3)
         XCTAssertTrue(cascade.ordinaryFaces[0].hasGlyph(for: korean))
         XCTAssertFalse(cascade.ordinaryFaces[0].hasGlyph(for: han))
         XCTAssertTrue(cascade.ordinaryFaces[1].hasGlyph(for: han))
@@ -1616,7 +1617,8 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let latin = UnicodeScalar("A")
         let korean = UnicodeScalar("한")
 
-        XCTAssertEqual(cascade.ordinaryFaces.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter(\.isEmojiFallback).count, 3)
         XCTAssertTrue(cascade.ordinaryFaces[0].hasGlyph(for: latin))
         XCTAssertFalse(cascade.ordinaryFaces[0].hasGlyph(for: korean))
         XCTAssertTrue(cascade.ordinaryFaces[1].hasGlyph(for: korean))

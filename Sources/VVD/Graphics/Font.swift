@@ -147,6 +147,8 @@ public class Font: @unchecked Sendable {
     private struct State: @unchecked Sendable {
         let face: FT_Face
         let shapingFont: OpaquePointer
+        let hasColorPaint: Bool
+        var colorRasterizer: OpaquePointer?
         var size26d6: FT_F26Dot6
         var dpi: DPI
 
@@ -160,14 +162,21 @@ public class Font: @unchecked Sendable {
         fileprivate let pointer: FT_Face
         fileprivate let isBitmapPreferred: Bool
         fileprivate let isColorEnabled: Bool
+        fileprivate let shapingFont: OpaquePointer
+        fileprivate let colorRasterizer: OpaquePointer?
     }
 
     func withLockedFace<T>(_ body: (LockedFace) throws -> T) rethrows -> T {
         try state.withLock {
-            try body(LockedFace(
+            if $0.hasColorPaint && $0.colorRasterizer == nil {
+                $0.colorRasterizer = hb_raster_paint_create_or_fail()
+            }
+            return try body(LockedFace(
                 pointer: $0.face,
                 isBitmapPreferred: $0.isBitmapPreferred,
-                isColorEnabled: $0.isColorEnabled
+                isColorEnabled: $0.isColorEnabled,
+                shapingFont: $0.shapingFont,
+                colorRasterizer: $0.colorRasterizer
             ))
         }
     }
@@ -233,6 +242,21 @@ public class Font: @unchecked Sendable {
 
     public var hasColor: Bool {
         self.state.withLock { FT_HAS_COLOR($0.face) }
+    }
+
+    public var isScalable: Bool {
+        self.state.withLock { FT_IS_SCALABLE($0.face) }
+    }
+
+    /// Converts a selected fixed bitmap strike's pixels to the requested size.
+    /// Scalable faces already render at the requested size and return one.
+    public var bitmapScale: CGFloat {
+        state.withLock {
+            guard !FT_IS_SCALABLE($0.face) else { return 1 }
+            let pixelsPerEM = CGFloat($0.face.pointee.size.pointee.metrics.y_ppem)
+            guard pixelsPerEM > 0 else { return 1 }
+            return CGFloat($0.size26d6) / 64 * CGFloat($0.dpi.y) / 72 / pixelsPerEM
+        }
     }
 
     public struct GlyphMetrics: Sendable {
@@ -583,7 +607,7 @@ public class Font: @unchecked Sendable {
                 return nil
             }
         }
-        if FT_Set_Char_Size(face, 0, size26d6, dpi.x, dpi.y) != 0 {
+        if Self.setSize(face, size26d6: size26d6, dpi: dpi) != 0 {
             Log.warn("Failed to initialize font size. You should call Font.setPointSize() manually.")
         }
         guard let shapingFont = hb_ft_font_create(face, nil) else {
@@ -602,6 +626,7 @@ public class Font: @unchecked Sendable {
         self.state = Mutex(State(
             face: face,
             shapingFont: shapingFont,
+            hasColorPaint: hb_ot_color_has_paint(hb_font_get_face(shapingFont)) != 0,
             size26d6: size26d6,
             dpi: dpi
         ))
@@ -644,7 +669,7 @@ public class Font: @unchecked Sendable {
                 return nil
             }
         }
-        if FT_Set_Char_Size(face, 0, size26d6, dpi.x, dpi.y) != 0 {
+        if Self.setSize(face, size26d6: size26d6, dpi: dpi) != 0 {
             Log.warn("Failed to initialize font size. You should call Font.setPointSize() manually.")
         }
         guard let shapingFont = hb_ft_font_create(face, nil) else {
@@ -662,6 +687,7 @@ public class Font: @unchecked Sendable {
         self.state = Mutex(State(
             face: face,
             shapingFont: shapingFont,
+            hasColorPaint: hb_ot_color_has_paint(hb_font_get_face(shapingFont)) != 0,
             size26d6: size26d6,
             dpi: dpi
         ))
@@ -672,6 +698,9 @@ public class Font: @unchecked Sendable {
         self.state.withLock {
             let face = $0.face
             // The HarfBuzz font borrows `face`, so it must be destroyed first.
+            if let rasterizer = $0.colorRasterizer {
+                hb_raster_paint_destroy(rasterizer)
+            }
             hb_font_destroy($0.shapingFont)
             _ = self.library.withFaceLifecycleLock {
                 FT_Done_Face(face)
@@ -717,7 +746,7 @@ public class Font: @unchecked Sendable {
 
             if charSize != $0.size26d6 || resX != $0.dpi.x || resY != $0.dpi.y {
                 let face = $0.face
-                if FT_Set_Char_Size(face, 0, charSize, resX, resY) != 0 {
+                if Self.setSize(face, size26d6: charSize, dpi: (resX, resY)) != 0 {
                     Log.err("FT_Set_Char_Size failed! (size:\(String(format:"0x%x", charSize)), dpi:\(resX)x\(resY))")
                     return
                 }
@@ -728,6 +757,20 @@ public class Font: @unchecked Sendable {
                 self.clearCacheLocked()
             }
         }
+    }
+
+    private static func setSize(_ face: FT_Face, size26d6: FT_F26Dot6, dpi: DPI) -> FT_Error {
+        if FT_IS_SCALABLE(face) || face.pointee.num_fixed_sizes == 0 {
+            return FT_Set_Char_Size(face, 0, size26d6, dpi.x, dpi.y)
+        }
+        let requested = Double(size26d6) * Double(dpi.y) / 72
+        let sizes = face.pointee.available_sizes!
+        let index = (0..<Int(face.pointee.num_fixed_sizes)).min {
+            let lhs = abs(Double(sizes[$0].y_ppem) - requested)
+            let rhs = abs(Double(sizes[$1].y_ppem) - requested)
+            return lhs == rhs ? sizes[$0].y_ppem > sizes[$1].y_ppem : lhs < rhs
+        }!
+        return FT_Select_Size(face, FT_Int(index))
     }
 
     public var variationAxes: [VariationAxis] {
@@ -918,7 +961,7 @@ public class Font: @unchecked Sendable {
             }
             hb_buffer_set_cluster_level(
                 buffer,
-                HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS
+                HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES
             )
             if let direction {
                 hb_buffer_set_direction(buffer, direction.harfbuzzValue)
@@ -1209,6 +1252,7 @@ public class Font: @unchecked Sendable {
             }
             // loading font.
             var loadFlags = $0.isBitmapPreferred ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
+            if $0.hasColorPaint { loadFlags |= FT_Int32(FT_LOAD_NO_SVG) }
             if $0.isColorEnabled && FT_HAS_COLOR(face) { loadFlags |= FT_Int32(FT_LOAD_COLOR) }
             if FT_Load_Glyph(face, index, loadFlags) != 0 {
                 Log.err("Failed to load glyph for char=\(c)(0x\(String(format: "%x", c.value)))")
@@ -1229,6 +1273,7 @@ public class Font: @unchecked Sendable {
             var loadFlags = state.isBitmapPreferred
                 ? FT_Int32(FT_LOAD_RENDER)
                 : FT_Int32(FT_LOAD_DEFAULT)
+            if state.hasColorPaint { loadFlags |= FT_Int32(FT_LOAD_NO_SVG) }
             if state.isColorEnabled && FT_HAS_COLOR(state.face) {
                 loadFlags |= FT_Int32(FT_LOAD_COLOR)
             }
@@ -1334,6 +1379,10 @@ public class Font: @unchecked Sendable {
         using lockedFace: LockedFace
     ) -> GlyphBitmap? {
         let face = lockedFace.pointer
+        if let rasterizer = lockedFace.colorRasterizer,
+           let bitmap = loadColorGlyphBitmap(at: index, rasterizer: rasterizer, using: lockedFace) {
+            return bitmap
+        }
         // loading font.
         var loadFlags = lockedFace.isBitmapPreferred ? FT_Int32(FT_LOAD_RENDER) : FT_Int32(FT_LOAD_DEFAULT)
         if lockedFace.isColorEnabled && FT_HAS_COLOR(face) { loadFlags |= FT_Int32(FT_LOAD_COLOR) }
@@ -1552,6 +1601,65 @@ public class Font: @unchecked Sendable {
             data: bitmapData,
             glyphMetrics: glyphMetrics,
             bitmapInfo: bitmapInfo,
+            sizeMetrics: metrics
+        )
+    }
+
+    private func loadColorGlyphBitmap(
+        at index: UInt32,
+        rasterizer: OpaquePointer,
+        using lockedFace: LockedFace
+    ) -> GlyphBitmap? {
+        let font = lockedFace.shapingFont
+        // Paint coordinates and advances use the same 26.6 scale as shaping.
+        hb_raster_paint_set_scale_factor(rasterizer, 64, 64)
+        let advance = CGSize(
+            width: CGFloat(hb_font_get_glyph_h_advance(font, index)) / 64,
+            height: 0
+        )
+        let painted = hb_raster_paint_glyph_or_fail(rasterizer, font, index) != 0
+        // Rendering also clears accumulated state on failed paint operations.
+        guard let image = hb_raster_paint_render(rasterizer) else { return nil }
+        defer { hb_raster_image_destroy(image) }
+        guard painted,
+              hb_raster_image_get_format(image) == HB_RASTER_FORMAT_BGRA32,
+              let pixels = hb_raster_image_get_buffer(image) else { return nil }
+        var extents = hb_raster_extents_t()
+        hb_raster_image_get_extents(image, &extents)
+        let width = Int(extents.width)
+        let rows = Int(extents.height)
+        guard width > 0, rows > 0, Int(extents.stride) >= width * 4 else { return nil }
+        let bytesPerPixel = lockedFace.isColorEnabled ? 4 : 1
+        var data = [UInt8](repeating: 0, count: width * rows * bytesPerPixel)
+        data.withUnsafeMutableBytes { destination in
+            for row in 0..<rows {
+                // The rasterizer's first row is at the bottom of the glyph.
+                let source = pixels.advanced(by: (rows - row - 1) * Int(extents.stride))
+                if lockedFace.isColorEnabled {
+                    destination.baseAddress!.advanced(by: row * width * 4).copyMemory(
+                        from: source, byteCount: width * 4
+                    )
+                } else {
+                    for column in 0..<width {
+                        destination[row * width + column] = source[column * 4 + 3]
+                    }
+                }
+            }
+        }
+        let left = Int(extents.x_origin)
+        let top = Int(extents.y_origin) + rows
+        let metrics = baseMetrics(for: lockedFace.pointer)
+        return GlyphBitmap(
+            data: data,
+            glyphMetrics: GlyphMetrics(
+                index: index, advance: advance,
+                bearing: CGPoint(x: left, y: top),
+                size: CGSize(width: width, height: rows),
+                ascender: metrics.ascender, descender: metrics.descender
+            ),
+            bitmapInfo: BitmapInfo(left: left, top: top, width: extents.width,
+                                   rows: extents.height,
+                                   pixelMode: lockedFace.isColorEnabled ? .bgra : .gray),
             sizeMetrics: metrics
         )
     }

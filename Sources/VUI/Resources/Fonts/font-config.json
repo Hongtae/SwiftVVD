@@ -114,6 +114,40 @@
         }
       ],
       "syntheticWeight": false
+    },
+    "NotoColorEmoji": {
+      "sources": [
+        {
+          "file": "NotoColorEmoji/NotoColorEmoji-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoColorEmojiBitmap": {
+      "sources": [
+        {
+          "file": "NotoColorEmoji/NotoColorEmoji.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoEmoji": {
+      "sources": [
+        {
+          "file": "NotoEmoji/NotoEmoji-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 300,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
     }
   },
   "defaultLocale": "en",
@@ -136,5 +170,20 @@
       }
     }
   },
-  "missingGlyphFont": "LastResort"
+  "missingGlyphFont": "LastResort",
+  "emoji": {
+    "defaultPreset": "color",
+    "presets": {
+      "color": [
+        "NotoColorEmoji",
+        "NotoColorEmojiBitmap",
+        "NotoEmoji"
+      ],
+      "monochrome": [
+        "NotoEmoji",
+        "NotoColorEmoji",
+        "NotoColorEmojiBitmap"
+      ]
+    }
+  }
 }

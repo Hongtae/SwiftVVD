@@ -10,7 +10,7 @@ import Synchronization
 import VVD
 
 enum TypefaceGlyph {
-    case texture(TextureTypeface.GlyphData)
+    case texture(TextureTypeface.GlyphData, scale: CGFloat = 1)
     case vector(VectorTypeface.GlyphData)
 }
 
@@ -55,6 +55,8 @@ protocol Typeface {
     var decorationMetrics: TypefaceDecorationMetrics? { get }
     var resolvedMetrics: ResolvedFontMetrics { get }
     var identifier: String { get }
+    var isEmojiFallback: Bool { get }
+    var hasColorGlyphs: Bool { get }
 
     func isEqual(to: any Typeface) -> Bool
     func hashIdentity(into hasher: inout Hasher)
@@ -62,6 +64,8 @@ protocol Typeface {
 }
 
 extension Typeface {
+    var isEmojiFallback: Bool { false }
+    var hasColorGlyphs: Bool { false }
     func glyph(at index: UInt32) -> TypefaceGlyph? { nil }
 
     func shape(
@@ -76,11 +80,11 @@ extension Typeface {
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
         guard let glyph = glyph(for: c) else { return nil }
         switch glyph {
-        case let .texture(data):
+        case let .texture(data, scale):
             return TypefaceGlyphMetrics(
-                advance: data.advance,
-                ascender: data.ascender,
-                descender: data.descender
+                advance: data.advance * scale,
+                ascender: data.ascender * scale,
+                descender: data.descender * scale
             )
         case let .vector(data):
             return TypefaceGlyphMetrics(
@@ -94,11 +98,11 @@ extension Typeface {
     func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
         guard let glyph = glyph(at: index) else { return nil }
         switch glyph {
-        case let .texture(data):
+        case let .texture(data, scale):
             return TypefaceGlyphMetrics(
-                advance: data.advance,
-                ascender: data.ascender,
-                descender: data.descender
+                advance: data.advance * scale,
+                ascender: data.ascender * scale,
+                descender: data.descender * scale
             )
         case let .vector(data):
             return TypefaceGlyphMetrics(
@@ -177,6 +181,7 @@ private protocol VVDFontBackedTypeface: Typeface {
 }
 
 extension VVDFontBackedTypeface {
+    var hasColorGlyphs: Bool { font.hasColor }
     var lineHeight: CGFloat { font.height }
     var ascender: CGFloat { font.ascender }
     var descender: CGFloat { font.descender }
@@ -233,11 +238,11 @@ private struct ScaleInvariantTypefaceMetrics {
         embolden: CGFloat
     ) {
         self.font = font
-        self.renderScale = renderScale
+        self.renderScale = renderScale * font.bitmapScale
         self.embolden = embolden
         self.decorationMetrics = typefaceDecorationMetrics(
             for: font
-        )?.scaled(by: renderScale)
+        )?.scaled(by: self.renderScale)
     }
 
     var lineHeight: CGFloat { font.height * renderScale }
@@ -339,10 +344,11 @@ struct TextureTypeface: VVDFontBackedTypeface {
         renderScale: CGFloat = 1,
         logicalEmbolden: CGFloat = 0
     ) {
-        let layoutMetrics = layoutFont.map {
+        let metricsFont = layoutFont ?? (textureFont.isScalable ? nil : textureFont)
+        let layoutMetrics = metricsFont.map {
             ScaleInvariantTypefaceMetrics(
                 font: $0,
-                renderScale: renderScale,
+                renderScale: layoutFont == nil ? 1 : renderScale,
                 embolden: logicalEmbolden
             )
         }
@@ -390,13 +396,15 @@ struct TextureTypeface: VVDFontBackedTypeface {
 
     func glyph(for c: UnicodeScalar) -> TypefaceGlyph? {
         if let data = textureFont.glyphData(for: c) {
-            return .texture(data)
+            return .texture(data, scale: textureFont.bitmapScale)
         }
         return nil
     }
 
     func glyph(at index: UInt32) -> TypefaceGlyph? {
-        textureFont.glyphData(at: index).map(TypefaceGlyph.texture)
+        textureFont.glyphData(at: index).map {
+            .texture($0, scale: textureFont.bitmapScale)
+        }
     }
 
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
@@ -481,6 +489,57 @@ struct TextureTypeface: VVDFontBackedTypeface {
 
     func purgeResources(reason: ResourcePurgeReason) {
         textureFont.clearCache()
+    }
+}
+
+/// Keeps metrics available before a graphics device is needed for glyph artwork.
+final class DeferredGlyphTypeface: Typeface {
+    private struct State: @unchecked Sendable {
+        var glyphs: Typeface?
+    }
+
+    let metrics: Typeface
+    private let loadGlyphs: () -> Typeface?
+    private let state = Mutex(State())
+
+    init(metrics: Typeface, loadGlyphs: @escaping () -> Typeface?) {
+        self.metrics = metrics
+        self.loadGlyphs = loadGlyphs
+    }
+
+    private var glyphs: Typeface? {
+        state.withLock {
+            if let glyphs = $0.glyphs { return glyphs }
+            let glyphs = loadGlyphs()
+            $0.glyphs = glyphs
+            return glyphs
+        }
+    }
+
+    func glyph(for scalar: UnicodeScalar) -> TypefaceGlyph? { glyphs?.glyph(for: scalar) }
+    func glyph(at index: UInt32) -> TypefaceGlyph? { glyphs?.glyph(at: index) }
+    func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? { metrics.glyphMetrics(for: scalar) }
+    func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? { metrics.glyphMetrics(at: index) }
+    func hasGlyph(for scalar: UnicodeScalar) -> Bool { metrics.hasGlyph(for: scalar) }
+    func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
+        metrics.kernAdvance(left: left, right: right)
+    }
+    func shape(_ text: String, direction: TypefaceShapingDirection?, language: String?,
+               features: [TypefaceShapingFeature]) -> TypefaceShapedText? {
+        metrics.shape(text, direction: direction, language: language, features: features)
+    }
+    var lineHeight: CGFloat { metrics.lineHeight }
+    var ascender: CGFloat { metrics.ascender }
+    var descender: CGFloat { metrics.descender }
+    var decorationMetrics: TypefaceDecorationMetrics? { metrics.decorationMetrics }
+    var resolvedMetrics: ResolvedFontMetrics { metrics.resolvedMetrics }
+    var identifier: String { "deferred-glyphs:\(metrics.identifier)" }
+    var hasColorGlyphs: Bool { metrics.hasColorGlyphs }
+    func isEqual(to other: Typeface) -> Bool { (other as? Self) === self }
+    func hashIdentity(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+    func purgeResources(reason: ResourcePurgeReason) {
+        metrics.purgeResources(reason: reason)
+        state.withLock { $0.glyphs?.purgeResources(reason: reason) }
     }
 }
 

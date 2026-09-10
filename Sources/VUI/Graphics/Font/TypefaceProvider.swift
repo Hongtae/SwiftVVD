@@ -292,6 +292,33 @@ struct BundledFontProvider: TypefaceProvider {
             size,
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
+        if layoutFont.hasColor {
+            let options: Font.RenderingMode.Bitmap
+            switch renderingMode {
+            case .automatic: fatalError("Unresolved font rendering mode")
+            case let .bitmap(value): options = value
+            case let .vector(value): options = .init(outlineThickness: value.outlineThickness)
+            }
+            let metrics = VectorTypeface(
+                font: layoutFont, layoutFont: layoutFont,
+                renderScale: contentScaleFactor, logicalEmbolden: logicalEmbolden
+            )
+            let device = context.graphicsDeviceContext
+            return DeferredGlyphTypeface(metrics: metrics) {
+                guard let device,
+                      let font = VVD.TextureFont(deviceContext: device, data: data,
+                                                 faceIndex: resource.faceIndex),
+                      applyVariations(to: font) else { return nil }
+                font.boldStrength = logicalEmbolden * contentScaleFactor
+                font.outlineThickness = options.outlineThickness * contentScaleFactor
+                font.isBitmapPreferred = options.isBitmapPreferred
+                font.isColorEnabled = options.isColorEnabled
+                font.setPointSize(size, dpi: (dpi, dpi))
+                return TextureTypeface(textureFont: font, layoutFont: layoutFont,
+                                       renderScale: contentScaleFactor,
+                                       logicalEmbolden: logicalEmbolden)
+            }
+        }
         switch renderingMode {
         case .automatic:
             fatalError("Unresolved font rendering mode")

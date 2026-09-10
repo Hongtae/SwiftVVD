@@ -87,6 +87,8 @@ final class TerminalFallbackTypeface: Typeface {
 final class ShapingFeatureTypeface: Typeface {
     let base: Typeface
     let features: [TypefaceShapingFeature]
+    var isEmojiFallback: Bool { base.isEmojiFallback }
+    var hasColorGlyphs: Bool { base.hasColorGlyphs }
 
     init(_ base: Typeface, features: [TypefaceShapingFeature]) {
         precondition(!features.isEmpty)
@@ -174,17 +176,21 @@ final class DeferredTypeface: Typeface {
     private let dpi: UInt32
     private let state = Mutex(State())
     let identifier: String
+    let isEmojiFallback: Bool
+    var hasColorGlyphs: Bool { resolved.hasColorGlyphs }
 
     init(
         font: Font,
         context: SceneResources,
         dpi: UInt32,
-        identifier: String
+        identifier: String,
+        isEmojiFallback: Bool = false
     ) {
         self.font = font
         self.context = context
         self.dpi = dpi
         self.identifier = "deferred:\(identifier)"
+        self.isEmojiFallback = isEmojiFallback
     }
 
     private var resolved: Typeface {
@@ -255,12 +261,14 @@ final class DeferredTypeface: Typeface {
     func isEqual(to other: any Typeface) -> Bool {
         guard let other = other as? DeferredTypeface else { return false }
         return font == other.font &&
+            isEmojiFallback == other.isEmojiFallback &&
             dpi == other.dpi &&
             context === other.context
     }
 
     func hashIdentity(into hasher: inout Hasher) {
         hasher.combine(font)
+        hasher.combine(isEmojiFallback)
         hasher.combine(dpi)
         hasher.combine(ObjectIdentifier(context))
     }

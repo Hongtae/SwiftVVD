@@ -135,6 +135,11 @@ enum FontFallbackConfigurationError: Error, Equatable {
     case emptyLocale(String)
     case duplicateFont(String, BundledFontID)
     case terminalFontInLocale(String)
+    case invalidEmojiPreset(String)
+    case invalidDefaultEmojiPreset(String)
+    case emptyEmojiPreset(String)
+    case duplicateEmojiFont(String, BundledFontID)
+    case terminalFontInEmojiPreset(String)
 }
 
 struct FontFallbackConfiguration: Sendable {
@@ -169,6 +174,12 @@ struct FontFallbackConfiguration: Sendable {
         let defaultLocale: String
         let designs: [String: DesignSource]
         let missingGlyphFont: String
+        let emoji: EmojiSource?
+    }
+
+    private struct EmojiSource: Decodable {
+        let defaultPreset: String
+        let presets: [String: [String]]
     }
 
     let version: Int
@@ -177,6 +188,8 @@ struct FontFallbackConfiguration: Sendable {
     let systemFonts: [Font.Design: BundledFontID]
     let designLocales: [Font.Design: [String: [BundledFontID]]]
     let missingGlyphFont: BundledFontID
+    let defaultEmojiPreset: String?
+    let emojiPresets: [String: [BundledFontID]]
 
     var systemFont: BundledFontID {
         systemFont(for: .default)
@@ -393,12 +406,53 @@ struct FontFallbackConfiguration: Sendable {
             throw FontFallbackConfigurationError.missingDefaultDesign
         }
 
+        var emojiPresets: [String: [BundledFontID]] = [:]
+        if let emoji = source.emoji {
+            for (name, identifiers) in emoji.presets {
+                guard !name.isEmpty else {
+                    throw FontFallbackConfigurationError.invalidEmojiPreset(name)
+                }
+                guard !identifiers.isEmpty else {
+                    throw FontFallbackConfigurationError.emptyEmojiPreset(name)
+                }
+                var unique: Set<BundledFontID> = []
+                var fonts: [BundledFontID] = []
+                for identifier in identifiers {
+                    let font = BundledFontID(identifier)
+                    guard fontDescriptors[font] != nil else {
+                        throw FontFallbackConfigurationError.undefinedFont(font)
+                    }
+                    guard font != missingGlyphFont else {
+                        throw FontFallbackConfigurationError.terminalFontInEmojiPreset(name)
+                    }
+                    guard unique.insert(font).inserted else {
+                        throw FontFallbackConfigurationError.duplicateEmojiFont(name, font)
+                    }
+                    fonts.append(font)
+                }
+                emojiPresets[name] = fonts
+            }
+            guard emojiPresets[emoji.defaultPreset] != nil else {
+                throw FontFallbackConfigurationError.invalidDefaultEmojiPreset(emoji.defaultPreset)
+            }
+        }
+
         self.version = source.version
         self.fontDescriptors = fontDescriptors
         self.defaultLocale = defaultLocale
         self.systemFonts = systemFonts
         self.designLocales = designLocales
         self.missingGlyphFont = missingGlyphFont
+        self.defaultEmojiPreset = source.emoji?.defaultPreset
+        self.emojiPresets = emojiPresets
+    }
+
+    func emojiFonts(preset: String?) -> [BundledFontID] {
+        if let preset, let fonts = emojiPresets[preset] {
+            return fonts
+        }
+        guard let defaultEmojiPreset else { return [] }
+        return emojiPresets[defaultEmojiPreset]!
     }
 
     func systemFont(for design: Font.Design) -> BundledFontID {
