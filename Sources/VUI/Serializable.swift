@@ -65,6 +65,37 @@ extension CodableByProxy where CodingProxy: CodableProxy, CodingProxy.Base == Se
     }
 }
 
+extension Optional: Serializable, CodableByProxy where Wrapped: CodableByProxy {
+    var codingProxy: CodableOptional<Wrapped> {
+        CodableOptional(self)
+    }
+}
+
+struct CodableOptional<T: CodableByProxy>: CodableProxy {
+    var base: T?
+
+    init(_ base: T?) {
+        self.base = base
+    }
+
+    private enum CodingKeys: CodingKey {
+        case value
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        base = try container.decodeIfPresent(T.CodingProxy.self, forKey: .value)
+            .map { T.unwrap(codingProxy: $0) }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        if let base {
+            try container.encode(base.codingProxy, forKey: .value)
+        }
+    }
+}
+
 extension RawRepresentable where RawValue: Codable {
     var codingProxy: RawRepresentableProxy<Self> {
         RawRepresentableProxy(base: self)
