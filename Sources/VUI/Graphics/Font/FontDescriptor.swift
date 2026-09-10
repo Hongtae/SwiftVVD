@@ -10,7 +10,7 @@ import Foundation
 /// A retained request. Metadata lookup is deferred until traits or a typeface are needed.
 final class FontDescriptor {
     enum Source {
-        case system(Font.Design, Font.Weight, Bool)
+        case system(Font.Design, Font.Weight, Bool, width: CGFloat? = nil)
         case named(String, Bundle?)
         case family(BundledFontCatalog, String, FontResourceResolver.Traits)
         case selected(BundledFontCatalog, FontResourceResolver.Candidate, FontResourceResolver.Traits?)
@@ -44,8 +44,8 @@ final class FontDescriptor {
 
     func weight(_ weight: Font.Weight) -> FontDescriptor {
         switch source {
-        case let .system(design, _, italic):
-            return FontDescriptor(source: .system(design, weight, italic), pointSize: pointSize,
+        case let .system(design, _, italic, width):
+            return FontDescriptor(source: .system(design, weight, italic, width: width), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures)
         case let .family(catalog, name, current):
             var traits = current
@@ -56,7 +56,7 @@ final class FontDescriptor {
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
                     size: pointSize, weight: weight, design: system.design,
-                    renderingMode: system.renderingMode, isItalic: system.isItalic
+                    renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures)
             }
             if let external = provider as? ExternalFontProvider {
@@ -76,18 +76,46 @@ final class FontDescriptor {
         }
     }
 
+    func width(_ width: CGFloat) -> FontDescriptor {
+        switch source {
+        case let .system(design, weight, italic, _):
+            return FontDescriptor(source: .system(design, weight, italic, width: width), pointSize: pointSize,
+                                  shapingFeatures: shapingFeatures)
+        case let .family(catalog, name, current):
+            var traits = current
+            traits.width = width
+            return FontDescriptor(source: .family(catalog, name, traits), pointSize: pointSize,
+                                  shapingFeatures: shapingFeatures)
+        case let .typeface(provider):
+            guard let system = provider as? SystemFontProvider else { return self }
+            return FontDescriptor(source: .typeface(SystemFontProvider(
+                size: pointSize, weight: system.weight, design: system.design,
+                renderingMode: system.renderingMode, isItalic: system.isItalic, width: Font.Width(width)
+            )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+        default:
+            let resolved = resolve()
+            guard let catalog = resolved.catalog, let candidate = resolved.candidate else { return self }
+            // Replacing an exact face reuses its retained request, not the last selected traits.
+            var traits = retainedTraits ?? candidate.traits
+            traits.width = width
+            return FontDescriptor(source: .family(catalog, candidate.family, traits), pointSize: pointSize,
+                                  shapingFeatures: shapingFeatures)
+        }
+    }
+
     func symbolicTrait(_ trait: UInt32, active: Bool) -> FontDescriptor {
         switch source {
-        case let .system(design, weight, italic):
+        case let .system(design, weight, italic, width):
             let nextWeight = trait == 2 ? symbolicWeight(weight, active: active) : weight
-            return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic),
+            return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic, width: width),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
             let nextWeight = trait == 2 ? symbolicWeight(system.weight, active: active) : system.weight
             return FontDescriptor(source: .typeface(SystemFontProvider(
                 size: pointSize, weight: nextWeight, design: system.design,
-                renderingMode: system.renderingMode, isItalic: trait == 1 ? active : system.isItalic
+                renderingMode: system.renderingMode, isItalic: trait == 1 ? active : system.isItalic,
+                width: system.width
             )), pointSize: pointSize, shapingFeatures: shapingFeatures)
         default:
             let resolved = resolve()
@@ -107,15 +135,15 @@ final class FontDescriptor {
     func monospaced(_ active: Bool) -> FontDescriptor {
         guard active else { return self }
         switch source {
-        case let .system(_, weight, italic):
-            return FontDescriptor(source: .system(.monospaced, weight, italic),
+        case let .system(_, weight, italic, width):
+            return FontDescriptor(source: .system(.monospaced, weight, italic, width: width),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
                     size: pointSize, weight: system.weight,
                     design: .monospaced,
-                    renderingMode: system.renderingMode, isItalic: system.isItalic
+                    renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures)
             }
             if let external = provider as? ExternalFontProvider {
@@ -151,8 +179,9 @@ final class FontDescriptor {
         if let resolution { return resolution }
         let resolved: Resolution
         switch source {
-        case let .system(design, weight, italic):
-            let provider = SystemFontProvider(size: pointSize, weight: weight, design: design, isItalic: italic)
+        case let .system(design, weight, italic, width):
+            let provider = SystemFontProvider(size: pointSize, weight: weight, design: design,
+                                               isItalic: italic, width: width.map(Font.Width.init))
             resolved = Resolution(provider: provider, weight: CGFloat(Float(weight.value)), catalog: nil, candidate: nil)
         case let .typeface(provider):
             let weight = (provider as? SystemFontProvider)?.weight.value ??

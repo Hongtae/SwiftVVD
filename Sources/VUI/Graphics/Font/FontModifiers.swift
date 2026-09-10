@@ -147,6 +147,15 @@ extension Font {
         func modify(traits: inout ResolvedTraits) { traits.weight = weight.value }
     }
 
+    struct WidthModifier: FontModifier {
+        var width: CGFloat
+        var tag: DynamicModifierTag { .width }
+        var codingProxy: CGFloat { width }
+        static func unwrap(codingProxy: CGFloat) -> Self { Self(width: codingProxy) }
+        func modify(descriptor: inout FontDescriptor, in context: Context) { descriptor = descriptor.width(width) }
+        func modify(traits: inout ResolvedTraits) { traits.width = width }
+    }
+
     struct BoldModifier: UndoableStaticFontModifier {
         static var undoableTag: UndoableStaticModifierTag { .bold }
         static func modify(descriptor: inout FontDescriptor, in context: Context) { descriptor = descriptor.symbolicTrait(2, active: true) }

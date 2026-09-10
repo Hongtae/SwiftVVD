@@ -76,17 +76,20 @@ struct SystemFontProvider: TypefaceProvider {
     let design: Font.Design
     let renderingMode: Font.RenderingMode
     let isItalic: Bool
+    let width: Font.Width?
 
     init(size: CGFloat,
          weight: Font.Weight,
          design: Font.Design,
          renderingMode: Font.RenderingMode = .automatic,
-         isItalic: Bool = false) {
+         isItalic: Bool = false,
+         width: Font.Width? = nil) {
         self.size = size
         self.weight = weight
         self.design = design
         self.renderingMode = renderingMode
         self.isItalic = isItalic
+        self.width = width
     }
 
     static func embolden(for weight: Font.Weight) -> CGFloat {
@@ -111,7 +114,8 @@ struct SystemFontProvider: TypefaceProvider {
                     weight: weight,
                     design: design,
                     renderingMode: renderingMode,
-                    isItalic: isItalic)
+                    isItalic: isItalic,
+                    width: width)
     }
 
     func isEqual(to: any TypefaceProvider) -> Bool {
@@ -120,7 +124,8 @@ struct SystemFontProvider: TypefaceProvider {
                    self.weight == other.weight &&
                    self.design == other.design &&
                    self.renderingMode == other.renderingMode &&
-                   self.isItalic == other.isItalic
+                   self.isItalic == other.isItalic &&
+                   self.width == other.width
         }
         return false
     }
@@ -131,6 +136,7 @@ struct SystemFontProvider: TypefaceProvider {
         hasher.combine(design)
         hasher.combine(renderingMode)
         hasher.combine(isItalic)
+        hasher.combine(width)
     }
 
     func makeTypeface(
@@ -146,7 +152,8 @@ struct SystemFontProvider: TypefaceProvider {
             weight: weight,
             renderingMode: renderingMode,
             isItalic: isItalic,
-            catalog: catalog
+            catalog: catalog,
+            width: width
         ) else { return nil }
         return provider.makeTypeface(context, dpi: dpi)
     }
@@ -187,7 +194,8 @@ struct BundledFontProvider: TypefaceProvider {
         weight: Font.Weight,
         renderingMode: Font.RenderingMode,
         isItalic: Bool,
-        catalog: BundledFontCatalog
+        catalog: BundledFontCatalog,
+        width: Font.Width? = nil
     ) {
         guard let descriptor = catalog.configuration.fontDescriptors[family],
               let resource = catalog.resource(
@@ -202,7 +210,7 @@ struct BundledFontProvider: TypefaceProvider {
             for: weight.weightClass,
             isItalic: isItalic
         )
-        let variations: [BundledFontVariation]
+        var variations: [BundledFontVariation]
         if let weightAxis = source.weightAxis {
             variations = [BundledFontVariation(
                 tag: weightAxis.tag,
@@ -213,6 +221,17 @@ struct BundledFontProvider: TypefaceProvider {
             )]
         } else {
             variations = []
+        }
+        if let width {
+            let candidates = catalog.resources.resolver.candidates.filter { $0.face.resource == resource }
+            if var traits = candidates.first?.traits {
+                traits.weight = weight.value
+                traits.width = width.value
+                if let candidate = FontResourceResolver.select(candidates, matching: traits) {
+                    // Keep the configured weight policy and use an available width instance.
+                    variations += candidate.variations.filter { $0.tag == 0x7764_7468 }
+                }
+            }
         }
         self.init(
             resource: resource,
