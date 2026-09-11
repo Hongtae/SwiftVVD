@@ -10,7 +10,8 @@ import Foundation
 /// A retained request. Metadata lookup is deferred until traits or a typeface are needed.
 final class FontDescriptor {
     enum Source {
-        case system(Font.Design, Font.Weight, Bool, width: CGFloat? = nil)
+        // A text style remains distinct from a fixed-size request with the same glyph traits.
+        case system(Font.Design, Font.Weight, Bool, width: CGFloat? = nil, textStyle: Font.TextStyle? = nil)
         case named(String, Bundle?)
         case family(BundledFontCatalog, String, FontResourceResolver.Traits)
         case selected(BundledFontCatalog, FontResourceResolver.Candidate, FontResourceResolver.Traits?)
@@ -44,8 +45,8 @@ final class FontDescriptor {
 
     func weight(_ weight: Font.Weight) -> FontDescriptor {
         switch source {
-        case let .system(design, _, italic, width):
-            return FontDescriptor(source: .system(design, weight, italic, width: width), pointSize: pointSize,
+        case let .system(design, _, italic, width, textStyle):
+            return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures)
         case let .family(catalog, name, current):
             var traits = current
@@ -78,8 +79,8 @@ final class FontDescriptor {
 
     func width(_ width: CGFloat) -> FontDescriptor {
         switch source {
-        case let .system(design, weight, italic, _):
-            return FontDescriptor(source: .system(design, weight, italic, width: width), pointSize: pointSize,
+        case let .system(design, weight, italic, _, textStyle):
+            return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures)
         case let .family(catalog, name, current):
             var traits = current
@@ -105,9 +106,10 @@ final class FontDescriptor {
 
     func symbolicTrait(_ trait: UInt32, active: Bool) -> FontDescriptor {
         switch source {
-        case let .system(design, weight, italic, width):
+        case let .system(design, weight, italic, width, textStyle):
             let nextWeight = trait == 2 ? symbolicWeight(weight, active: active) : weight
-            return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic, width: width),
+            return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic,
+                                                  width: width, textStyle: textStyle),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
@@ -135,8 +137,8 @@ final class FontDescriptor {
     func monospaced(_ active: Bool) -> FontDescriptor {
         guard active else { return self }
         switch source {
-        case let .system(_, weight, italic, width):
-            return FontDescriptor(source: .system(.monospaced, weight, italic, width: width),
+        case let .system(_, weight, italic, width, textStyle):
+            return FontDescriptor(source: .system(.monospaced, weight, italic, width: width, textStyle: textStyle),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
@@ -179,7 +181,7 @@ final class FontDescriptor {
         if let resolution { return resolution }
         let resolved: Resolution
         switch source {
-        case let .system(design, weight, italic, width):
+        case let .system(design, weight, italic, width, _):
             let provider = SystemFontProvider(size: pointSize, weight: weight, design: design,
                                                isItalic: italic, width: width.map(Font.Width.init))
             resolved = Resolution(provider: provider, weight: CGFloat(Float(weight.value)), catalog: nil, candidate: nil)
@@ -245,7 +247,8 @@ enum DefaultFontDefinition: FontDefinition {}
 
 extension FontDefinition {
     static func resolveTextStyleFont(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> FontDescriptor {
-        resolveSystemFont(size: Font.pointSize(for: textStyle), design: design, weight: weight ?? Font.weight(for: textStyle), in: context)
+        FontDescriptor(source: .system(design ?? .default, weight ?? Font.weight(for: textStyle), false,
+                                       textStyle: textStyle), pointSize: Font.pointSize(for: textStyle))
     }
 
     static func resolveTextStyleFontInfo(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> Font.ResolvedTraits {
