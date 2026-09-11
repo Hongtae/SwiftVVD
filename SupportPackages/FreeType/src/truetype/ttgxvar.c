@@ -1526,8 +1526,14 @@
                                      value->outerIndex,
                                      value->innerIndex );
 
-      if ( p && delta )
+      /* Keep this local metric correction and the coordinate-reset fixes */
+      /* below until a supported upstream release passes the variable-font */
+      /* restoration regression tests.  Then remove the local patch only. */
+      if ( p )
       {
+        FT_Short  previous = *p;
+
+
         FT_TRACE5(( "value %c%c%c%c (%d unit%s) adjusted by %d unit%s (MVAR)\n",
                     (FT_Char)( value->tag >> 24 ),
                     (FT_Char)( value->tag >> 16 ),
@@ -1541,6 +1547,10 @@
         /* since we handle both signed and unsigned values as FT_Short, */
         /* ensure proper overflow arithmetic                            */
         *p = (FT_Short)( value->unmodified + (FT_Short)delta );
+
+        /* Face metrics already include the previous variation.  Apply */
+        /* only the change, including restoration when delta is zero. */
+        delta = (FT_Int)*p - previous;
 
         /* Treat hasc, hdsc and hlgp specially, see below. */
         if ( value->tag == MVAR_TAG_HASC )
@@ -2753,8 +2763,6 @@
     FT_MM_Var*  mmvar;
     FT_UInt     i;
 
-    FT_Bool     all_design_coords = FALSE;
-
     FT_Memory   memory = face->root.memory;
 
     enum
@@ -2820,8 +2828,6 @@
       if ( FT_NEW_ARRAY( blend->coords, mmvar->num_axis ) )
         goto Exit;
 
-      /* the first time we have to compute all design coordinates */
-      all_design_coords = TRUE;
     }
 
     if ( !blend->normalizedcoords )
@@ -2909,9 +2915,25 @@
                    coords,
                    num_coords * sizeof ( FT_Fixed ) );
 
+    /* Restore omitted axes before converting the complete coordinate set. */
+    for ( i = num_coords; i < blend->num_axis; i++ )
+    {
+      if ( FT_IS_NAMED_INSTANCE( FT_FACE( face ) ) )
+      {
+        FT_UInt  instance_index = (FT_UInt)face->root.face_index >> 16;
+
+
+        blend->normalizedcoords[i] =
+          blend->normalized_stylecoords[( instance_index - 1 ) *
+                                          mmvar->num_axis + i];
+      }
+      else
+        blend->normalizedcoords[i] = 0;
+    }
+
     if ( set_design_coords )
       ft_var_to_design( face,
-                        all_design_coords ? blend->num_axis : num_coords,
+                        blend->num_axis,
                         blend->normalizedcoords,
                         blend->coords );
 
@@ -3195,7 +3217,7 @@
 
     FT_TRACE5(( "TT_Set_Var_Design:\n" ));
     FT_TRACE5(( "  normalized design coordinates:\n" ));
-    ft_var_to_normalized( ttface, num_coords, blend->coords, normalized );
+    ft_var_to_normalized( ttface, mmvar->num_axis, blend->coords, normalized );
 
     error = tt_set_mm_blend( ttface, mmvar->num_axis, normalized, 0 );
     if ( error )
@@ -3366,11 +3388,17 @@
     }
     else
     {
+      FT_Long  previous_face_index = face->face_index;
+
+
       /* restore non-VF style name */
       FT_FREE( face->style_name );
       if ( FT_STRDUP( face->style_name, ttface->non_var_style_name ) )
         goto Exit;
+      /* Default coordinates must refer to the base face during this reset. */
+      face->face_index &= 0xFFFFL;
       error = TT_Set_Var_Design( face, 0, NULL );
+      face->face_index = previous_face_index;
     }
 
   Exit:

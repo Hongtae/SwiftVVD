@@ -106,6 +106,81 @@ final class FontDesignMetricsTests: XCTestCase {
         XCTAssertEqual(Set([fromMemory, fromFile]).count, 1)
     }
 
+    func testVariationMetricsRestoreAcrossCoordinateHistory() throws {
+        let sources: [(Bool, [Int16], [Int16])] = [
+            (false, [1800, -400, -100], [1600, -600, 50]),
+            (true, [1800, -400, -100], [1600, -600, 50]),
+            (false, [0, 0, 0], [1600, -600, 50]),
+            (false, [0, 0, 0], [0, 0, 0]),
+        ]
+        for (useTypographic, horizontal, typographic) in sources {
+            let data = try Self.fixture(horizontal: horizontal, typographic: typographic,
+                                        useTypographic: useTypographic, variableMetrics: true)
+            let reused = try XCTUnwrap(Font(data: data))
+            let initial = try XCTUnwrap(reused.designMetrics)
+            for weight: CGFloat? in [900, 650, 900, 400, 100, nil, 650, 650, nil, 900, nil] {
+                let coordinates = weight.map { [Self.weightTag: $0] } ?? [:]
+                let fresh = try XCTUnwrap(Font(data: data))
+                XCTAssertTrue(fresh.setVariationCoordinates(coordinates))
+                XCTAssertTrue(reused.setVariationCoordinates(coordinates))
+                XCTAssertEqual(reused.designMetrics, fresh.designMetrics)
+                for size: CGFloat in [13, 24] {
+                    fresh.setPointSize(size, dpi: (72, 144))
+                    reused.setPointSize(size, dpi: (72, 144))
+                    let a = fresh.baseMetrics, b = reused.baseMetrics
+                    XCTAssertEqual([b.ascender, b.descender, b.height],
+                                   [a.ascender, a.descender, a.height])
+                    XCTAssertEqual(reused.designMetrics, fresh.designMetrics)
+                }
+            }
+            XCTAssertEqual(reused.designMetrics, initial)
+        }
+    }
+
+    func testNamedInstanceMetricsRestoreToExplicitCoordinates() throws {
+        let data = try Self.fixture(variableMetrics: true)
+        let metadata = try XCTUnwrap(Font.metadata(data: data))
+        let weightIndex = try XCTUnwrap(metadata.variationAxes.firstIndex { $0.tag == Self.weightTag })
+        let instance = try XCTUnwrap(metadata.variationInstances.first { $0.coordinates[weightIndex] == 900 })
+        let coordinates = Dictionary(uniqueKeysWithValues:
+            zip(metadata.variationAxes.map(\.tag), instance.coordinates))
+        let named = try XCTUnwrap(Font(data: data, faceIndex: instance.index << 16))
+        let explicit = try XCTUnwrap(Font(data: data))
+        XCTAssertTrue(explicit.setVariationCoordinates(coordinates))
+        XCTAssertEqual(named.designMetrics, explicit.designMetrics)
+        for _ in 0..<3 {
+            XCTAssertTrue(named.setVariationCoordinates([Self.weightTag: 650]))
+            XCTAssertTrue(named.setVariationCoordinates(coordinates))
+            XCTAssertEqual(named.designMetrics, explicit.designMetrics)
+            XCTAssertEqual(named.baseMetrics.height, explicit.baseMetrics.height)
+            XCTAssertTrue(named.setVariationCoordinates([Self.weightTag: 650]))
+            XCTAssertTrue(named.setVariationCoordinates([:]))
+            XCTAssertEqual(named.variationCoordinates, coordinates)
+            XCTAssertEqual(named.designMetrics, explicit.designMetrics)
+        }
+    }
+
+    func testConcurrentVariationReadsReturnCompleteSnapshots() throws {
+        let data = try Self.fixture(variableMetrics: true)
+        let weights: [CGFloat] = [400, 650, 900]
+        let expected = try Set(weights.map { weight in
+            let font = try XCTUnwrap(Font(data: data))
+            XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: weight]))
+            return try XCTUnwrap(font.designMetrics)
+        })
+        let font = try XCTUnwrap(Font(data: data))
+        let failures = Mutex(0)
+        DispatchQueue.concurrentPerform(iterations: 128) { index in
+            if index.isMultiple(of: 4) {
+                if let value = font.designMetrics, expected.contains(value) { return }
+            } else if font.setVariationCoordinates([Self.weightTag: weights[index % weights.count]]) {
+                return
+            }
+            failures.withLock { $0 += 1 }
+        }
+        XCTAssertEqual(failures.withLock { $0 }, 0)
+    }
+
     func testColorBitmapAndScalableEmojiHaveDifferentMetricCapabilities() throws {
         let bitmap = try XCTUnwrap(Font(path: Self.resource("NotoColorEmoji/NotoColorEmoji.ttf").path))
         XCTAssertFalse(bitmap.isScalable)
