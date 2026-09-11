@@ -402,6 +402,24 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertEqual(provider.requestedDPIs, [108, 108])
     }
 
+    // ASSERTIONS fontResolvedResourceEqualityObserved
+    @MainActor
+    func testStyleAndFixedRequestsShareGlyphResourcesAfterResolution() throws {
+        let previousAppContext = appContext
+        appContext = TextResolutionTestAppContext()
+        defer { appContext = previousAppContext }
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let body = VUI.Font.system(.body).resolved(in: environment)
+        let fixed = VUI.Font.system(size: 13).resolved(in: environment)
+        XCTAssertNotEqual(body, fixed)
+        let sceneResources = SceneResources()
+        let first = try XCTUnwrap(body.typeface(forContext: sceneResources, dpi: 72))
+        let second = try XCTUnwrap(fixed.typeface(forContext: sceneResources, dpi: 72))
+        XCTAssertTrue(try XCTUnwrap(first as? VectorTypeface) === XCTUnwrap(second as? VectorTypeface))
+        XCTAssertEqual(sceneResources.cachedTypefaces.count, 1)
+    }
+
     // ASSERTIONS textDisplayScaleLayoutMetricsStableObserved
     @MainActor
     func testSystemFontKeepsLogicalMetricsAcrossDisplayScales() throws {

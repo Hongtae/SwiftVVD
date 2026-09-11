@@ -117,8 +117,6 @@ final class AnimationCompletionToken: @unchecked Sendable {
     }
 }
 
-private typealias AtomicBox<Value> = Mutex<Value>
-
 private struct PendingListeners {
     struct WeakListener {
         weak var listener: AnimationListener?
@@ -134,7 +132,7 @@ private struct PendingListeners {
     var next: DispatchTime?
 }
 
-private let pendingListeners = AtomicBox(PendingListeners())
+private let pendingListeners = Mutex(PendingListeners())
 
 extension Transaction {
     static func addPendingListener(_ listener: AnimationListener) {

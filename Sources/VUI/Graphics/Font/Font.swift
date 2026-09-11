@@ -123,11 +123,17 @@ public struct Font: Hashable, Sendable {
     }
 
     var typefaceProvider: (any TypefaceProvider)? {
-        (provider as? FontBox<TypefaceFontProvider>)?.base.base
+        if let resolved = provider as? FontBox<PlatformFontProvider> {
+            return resolved.base.font.provider
+        }
+        return (provider as? FontBox<TypefaceFontProvider>)?.base.base
     }
 
     var typefaceFeatures: [TypefaceShapingFeature] {
-        (provider as? FontBox<TypefaceFontProvider>)?.base.features ?? []
+        if let resolved = provider as? FontBox<PlatformFontProvider> {
+            return resolved.base.font.shapingFeatures
+        }
+        return (provider as? FontBox<TypefaceFontProvider>)?.base.features ?? []
     }
 
     func resolveDescriptor(in context: Context) -> FontDescriptor {
@@ -170,7 +176,7 @@ public struct Font: Hashable, Sendable {
         let provider = font.typefaceProvider!
         if provider.isShareable {
             let key = SceneResources.TypefaceKey(
-                font: font,
+                font: Font(typefaceProvider: provider, features: font.typefaceFeatures),
                 dpi: dpi
             )
             if let typeface = context.cachedTypefaces[key] {
@@ -381,15 +387,12 @@ public struct Font: Hashable, Sendable {
 
     func resolved(in environment: EnvironmentValues) -> Font {
         let context = environment.fontResolutionContext
-        var descriptor = resolveDescriptor(in: context)
-        for modifier in context.fontModifiers where modifier.monospacedValue == nil {
-            modifier.modify(descriptor: &descriptor, in: context)
-        }
+        var modifiers = context.fontModifiers.filter { $0.monospacedValue == nil }
         if context.fontModifiers.monospacedValue == true {
-            MonospacedModifier.modify(descriptor: &descriptor, in: context)
+            modifiers.append(.static(MonospacedModifier.self))
         }
-        return Font(typefaceProvider: descriptor.typefaceProvider(in: environment),
-                    features: descriptor.shapingFeatures)
+        let resource = platformFont(in: context, modifiers: modifiers, overrideContextModifiers: true)
+        return Font(provider: FontBox(PlatformFontProvider(font: resource)))
     }
 
     var pointSizeForSymbolMetrics: CGFloat? {
@@ -405,6 +408,8 @@ public struct Font: Hashable, Sendable {
             return named.textStyle == nil ? named.size : named.size.rounded()
         case let rendering as TypefaceFontProvider:
             return rendering.base.pointSize
+        case let resolved as PlatformFontProvider:
+            return resolved.font.pointSize
         default:
             return nil
         }

@@ -8,7 +8,7 @@
 import Foundation
 
 extension Font {
-    struct Context: Hashable, CustomDebugStringConvertible {
+    struct Context: Hashable, Sendable, CustomDebugStringConvertible {
         var sizeCategory: ContentSizeCategory
         var legibilityWeight: LegibilityWeight?
         var fontDefinition: FontDefinitionType
@@ -18,6 +18,8 @@ extension Font {
         var fontModifiers: [AnyFontModifier]
         // Name lookup follows the consuming environment, independently of the host thread.
         var resourceBundle: Bundle?
+        // Automatic rendering is resolved before shared resource publication.
+        var defaultFontRenderingMode: DefaultRenderingMode = .bitmap()
 
         static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.sizeCategory == rhs.sizeCategory &&
@@ -27,6 +29,7 @@ extension Font {
             lhs.shouldRedactContent == rhs.shouldRedactContent &&
             lhs.effectiveFont == rhs.effectiveFont &&
             lhs.fontModifiers == rhs.fontModifiers &&
+            lhs.defaultFontRenderingMode == rhs.defaultFontRenderingMode &&
             lhs.resourceBundle?.bundleURL.standardizedFileURL ==
                 rhs.resourceBundle?.bundleURL.standardizedFileURL
         }
@@ -39,6 +42,7 @@ extension Font {
             hasher.combine(shouldRedactContent)
             hasher.combine(effectiveFont)
             hasher.combine(fontModifiers)
+            hasher.combine(defaultFontRenderingMode)
             hasher.combine(resourceBundle?.bundleURL.standardizedFileURL)
         }
 
@@ -140,7 +144,8 @@ private enum FontContextKey: DerivedEnvironmentKey {
             shouldRedactContent: environment.shouldRedactContent,
             effectiveFont: environment.effectiveFont,
             fontModifiers: environment.fontModifiers,
-            resourceBundle: environment.resourceBundle
+            resourceBundle: environment.resourceBundle,
+            defaultFontRenderingMode: environment.defaultFontRenderingMode
         )
     }
 }

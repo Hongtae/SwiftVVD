@@ -463,7 +463,7 @@ final class AnimatableAttributeTerminalCompletionTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(afterRetarget, beforeRetarget)
         XCTAssertLessThan(afterRetarget, 2)
 
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        Transaction.dispatchPendingListeners()
         harness.flushCompletionActions()
         XCTAssertEqual(
             completionRecorder.events,

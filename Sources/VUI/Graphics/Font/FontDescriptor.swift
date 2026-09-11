@@ -28,43 +28,50 @@ final class FontDescriptor {
     let source: Source
     let pointSize: CGFloat
     let shapingFeatures: [TypefaceShapingFeature]
+    let renderingMode: Font.DefaultRenderingMode?
     // Each consumer owns its descriptor; only catalog snapshots are shared across threads.
     private var resolution: Resolution?
 
-    init(source: Source, pointSize: CGFloat, shapingFeatures: [TypefaceShapingFeature] = []) {
+    init(source: Source, pointSize: CGFloat, shapingFeatures: [TypefaceShapingFeature] = [],
+         renderingMode: Font.DefaultRenderingMode? = nil) {
         self.source = source
         self.pointSize = pointSize
         self.shapingFeatures = shapingFeatures
+        self.renderingMode = renderingMode
     }
 
     var resolvedWeight: CGFloat { resolve().weight }
 
     func typefaceProvider(in environment: EnvironmentValues) -> any TypefaceProvider {
-        resolve().provider.resolved(in: environment)
+        var environment = environment
+        if let renderingMode {
+            environment.defaultFontRenderingMode = renderingMode
+        }
+        return resolve().provider.resolved(in: environment)
     }
 
     func weight(_ weight: Font.Weight) -> FontDescriptor {
         switch source {
         case let .system(design, _, italic, width, textStyle):
             return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .family(catalog, name, current):
             var traits = current
             traits.weight = weight.value
             return FontDescriptor(source: .family(catalog, name, traits), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
                     size: pointSize, weight: weight, design: system.design,
                     renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
-                )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+                )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
             }
             if let external = provider as? ExternalFontProvider {
                 return FontDescriptor(source: .typeface(ExternalFontProvider(
                     source: external.source, size: pointSize, weight: weight, design: external.design,
                     faceIndex: external.faceIndex, renderingMode: external.renderingMode
-                )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+                )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
             }
             return self
         default:
@@ -73,7 +80,7 @@ final class FontDescriptor {
             var traits = retainedTraits ?? candidate.traits
             traits.weight = weight.value
             return FontDescriptor(source: .family(catalog, candidate.family, traits), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         }
     }
 
@@ -81,18 +88,18 @@ final class FontDescriptor {
         switch source {
         case let .system(design, weight, italic, _, textStyle):
             return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .family(catalog, name, current):
             var traits = current
             traits.width = width
             return FontDescriptor(source: .family(catalog, name, traits), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
             return FontDescriptor(source: .typeface(SystemFontProvider(
                 size: pointSize, weight: system.weight, design: system.design,
                 renderingMode: system.renderingMode, isItalic: system.isItalic, width: Font.Width(width)
-            )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+            )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         default:
             let resolved = resolve()
             guard let catalog = resolved.catalog, let candidate = resolved.candidate else { return self }
@@ -100,7 +107,7 @@ final class FontDescriptor {
             var traits = retainedTraits ?? candidate.traits
             traits.width = width
             return FontDescriptor(source: .family(catalog, candidate.family, traits), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         }
     }
 
@@ -110,7 +117,7 @@ final class FontDescriptor {
             let nextWeight = trait == 2 ? symbolicWeight(weight, active: active) : weight
             return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic,
                                                   width: width, textStyle: textStyle),
-                                  pointSize: pointSize, shapingFeatures: shapingFeatures)
+                                  pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
             let nextWeight = trait == 2 ? symbolicWeight(system.weight, active: active) : system.weight
@@ -118,7 +125,7 @@ final class FontDescriptor {
                 size: pointSize, weight: nextWeight, design: system.design,
                 renderingMode: system.renderingMode, isItalic: trait == 1 ? active : system.isItalic,
                 width: system.width
-            )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+            )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         default:
             let resolved = resolve()
             guard let catalog = resolved.catalog, let candidate = resolved.candidate else { return self }
@@ -130,7 +137,7 @@ final class FontDescriptor {
             }
             guard let selected = FontResourceResolver.select(candidates, matching: requested) else { return self }
             return FontDescriptor(source: .selected(catalog, selected, retainedTraits), pointSize: pointSize,
-                                  shapingFeatures: shapingFeatures)
+                                  shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         }
     }
 
@@ -139,21 +146,21 @@ final class FontDescriptor {
         switch source {
         case let .system(_, weight, italic, width, textStyle):
             return FontDescriptor(source: .system(.monospaced, weight, italic, width: width, textStyle: textStyle),
-                                  pointSize: pointSize, shapingFeatures: shapingFeatures)
+                                  pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
                     size: pointSize, weight: system.weight,
                     design: .monospaced,
                     renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
-                )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+                )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
             }
             if let external = provider as? ExternalFontProvider {
                 return FontDescriptor(source: .typeface(ExternalFontProvider(
                     source: external.source, size: pointSize, weight: external.weight,
                     design: .monospaced,
                     faceIndex: external.faceIndex, renderingMode: external.renderingMode
-                )), pointSize: pointSize, shapingFeatures: shapingFeatures)
+                )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode)
             }
             return self
         default:
@@ -174,7 +181,8 @@ final class FontDescriptor {
     }
 
     func adding(features: [TypefaceShapingFeature]) -> FontDescriptor {
-        FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures + features)
+        FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures + features,
+                       renderingMode: renderingMode)
     }
 
     private func resolve() -> Resolution {
