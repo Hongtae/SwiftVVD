@@ -1711,6 +1711,34 @@ public class Font: @unchecked Sendable {
         return true
     }
 
+    /// Unscaled horizontal metrics selected by the font backend.
+    /// Values use font design units and include the active variation's adjustments.
+    public struct DesignMetrics: Hashable, Sendable {
+        public let unitsPerEM: Int
+        public let ascender: Int
+        public let descender: Int
+        public let height: Int
+
+        /// The signed gap between the descent and the next line's ascent.
+        public var lineGap: Int { height - (ascender - descender) }
+    }
+
+    /// Returns a value snapshot before size scaling and pixel rounding.
+    /// Bitmap-only faces have no scalable design metrics and return nil.
+    /// Divide by unitsPerEM and multiply by the desired em size to scale a value.
+    public var designMetrics: DesignMetrics? {
+        self.state.withLock {
+            let face = $0.face
+            guard FT_IS_SCALABLE(face), face.pointee.units_per_EM > 0 else {
+                return nil
+            }
+            return DesignMetrics(unitsPerEM: Int(face.pointee.units_per_EM),
+                                 ascender: Int(face.pointee.ascender),
+                                 descender: Int(face.pointee.descender),
+                                 height: Int(face.pointee.height))
+        }
+    }
+
     public struct SizeMetrics: Sendable {
         public let xPixelsPerEM: Int
         public let yPixelsPerEM: Int
