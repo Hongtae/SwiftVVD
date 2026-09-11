@@ -386,12 +386,13 @@ public struct Font: Hashable, Sendable {
     }
 
     func resolved(in environment: EnvironmentValues) -> Font {
-        let context = environment.fontResolutionContext
+        var context = environment.fontResolutionContext
         var modifiers = context.fontModifiers.filter { $0.monospacedValue == nil }
         if context.fontModifiers.monospacedValue == true {
             modifiers.append(.static(MonospacedModifier.self))
         }
-        let resource = platformFont(in: context, modifiers: modifiers, overrideContextModifiers: true)
+        context.fontModifiers = modifiers
+        let resource = resolve(in: context).resource
         return Font(provider: FontBox(PlatformFontProvider(font: resource)))
     }
 

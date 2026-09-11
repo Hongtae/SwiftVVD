@@ -8,7 +8,7 @@
 import Foundation
 
 extension Font {
-    struct Context: Hashable, Sendable, CustomDebugStringConvertible {
+    public struct Context: Hashable, Sendable, CustomDebugStringConvertible {
         var sizeCategory: ContentSizeCategory
         var legibilityWeight: LegibilityWeight?
         var fontDefinition: FontDefinitionType
@@ -21,7 +21,7 @@ extension Font {
         // Automatic rendering is resolved before shared resource publication.
         var defaultFontRenderingMode: DefaultRenderingMode = .bitmap()
 
-        static func == (lhs: Self, rhs: Self) -> Bool {
+        public static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.sizeCategory == rhs.sizeCategory &&
             lhs.legibilityWeight == rhs.legibilityWeight &&
             lhs.fontDefinition == rhs.fontDefinition &&
@@ -34,7 +34,7 @@ extension Font {
                 rhs.resourceBundle?.bundleURL.standardizedFileURL
         }
 
-        func hash(into hasher: inout Hasher) {
+        public func hash(into hasher: inout Hasher) {
             hasher.combine(sizeCategory)
             hasher.combine(legibilityWeight)
             hasher.combine(fontDefinition)
@@ -46,7 +46,7 @@ extension Font {
             hasher.combine(resourceBundle?.bundleURL.standardizedFileURL)
         }
 
-        var debugDescription: String {
+        public var debugDescription: String {
             "Font.Context(sizeCategory: \(sizeCategory), font: \(effectiveFont), resourceBundle: \(String(describing: resourceBundle?.bundleURL)))"
         }
     }
@@ -151,7 +151,7 @@ private enum FontContextKey: DerivedEnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var fontResolutionContext: Font.Context { self[FontContextKey.self] }
+    public var fontResolutionContext: Font.Context { self[FontContextKey.self] }
 
     var dynamicTypeSize: DynamicTypeSize {
         get { self[DynamicTypeSizeKey.self] }
