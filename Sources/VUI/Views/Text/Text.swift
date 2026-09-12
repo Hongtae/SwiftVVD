@@ -114,7 +114,9 @@ class AnyTextStorage: CustomDebugStringConvertible {
     }
 
     func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         fatalError("This method should be overridden by subclasses.")
@@ -129,11 +131,13 @@ class AnyTextStorage: CustomDebugStringConvertible {
         resolveText(in: environment)
     }
     func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText? {
-        resolve(typefaces: typefaces, context: context)
+        resolve(style: style, properties: &properties, text: &text, context: context)
     }
     func resolveTransitionText(in environment: EnvironmentValues) -> String? {
         resolveText(in: environment)
@@ -175,6 +179,10 @@ class AnyTextStorage: CustomDebugStringConvertible {
 }
 
 class AnyTextModifier {
+    func modify(style: inout Text.Style) {
+        preconditionFailure("Abstract text modifier")
+    }
+
     func isEqual(to other: AnyTextModifier) -> Bool {
         self === other
     }
@@ -207,7 +215,9 @@ private func _dynamicArchiveStorage(
 private class AnyFormatStyleBox {
     func resolve(
         locale: Locale,
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         fatalError("This method should be overridden by subclasses.")
@@ -234,21 +244,19 @@ where Style: FormatStyle, Style.FormatInput: Equatable {
 
     override func resolve(
         locale: Locale,
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         let output = format.locale(locale).format(input)
         if let string = output as? String {
-            return .init(
-                runs: [.text(typefaces, string)],
-                scaleFactor: context.contentScaleFactor,
-                displayScale: context.displayScale
-            )
+            return style.resolve(string, context: context, properties: &properties, text: &text)
         }
         if let attributed = output as? AttributedString {
             return _resolvedAttributedText(
                 attributed,
-                defaultTypefaces: typefaces,
+                style: style, properties: &properties, text: &text,
                 context: context
             )
         }
@@ -285,12 +293,14 @@ private final class FormatStyleStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         storage.resolve(
             locale: context.environment.locale,
-            typefaces: typefaces,
+            style: style, properties: &properties, text: &text,
             context: context
         )
     }
@@ -319,12 +329,14 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         _resolvedAttributedText(
             AttributedString(localized: resource),
-            defaultTypefaces: typefaces,
+            style: style, properties: &properties, text: &text,
             context: context
         )
     }
@@ -357,14 +369,12 @@ private final class DateTextStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        .init(
-            runs: [.text(typefaces, resolveText(in: context.environment))],
-            scaleFactor: context.contentScaleFactor,
-            displayScale: context.displayScale
-        )
+        style.resolve(resolveText(in: context.environment), context: context, properties: &properties, text: &text)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -508,7 +518,9 @@ private protocol _TimeDataFormat: Equatable {
     ) -> Output
     func resolvedText(
         _ output: Output,
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText?
     func plainText(_ output: Output) -> String
@@ -523,14 +535,12 @@ private protocol _TimeDataFormat: Equatable {
 private extension _TimeDataFormat where Output == String {
     func resolvedText(
         _ output: String,
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        .init(
-            runs: [.text(typefaces, output)],
-            scaleFactor: context.contentScaleFactor,
-            displayScale: context.displayScale
-        )
+        style.resolve(output, context: context, properties: &properties, text: &text)
     }
 
     func plainText(_ output: String) -> String { output }
@@ -731,12 +741,14 @@ where Format: DiscreteFormatStyle, Format.FormatOutput == AttributedString {
 
     func resolvedText(
         _ output: AttributedString,
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         _resolvedAttributedText(
             output,
-            defaultTypefaces: typefaces,
+            style: style, properties: &properties, text: &text,
             context: context
         )
     }
@@ -774,14 +786,18 @@ where Source: _TimeDataFormattingSource,
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        resolve(typefaces: typefaces, context: context, referenceDate: Date())
+        resolve(style: style, properties: &properties, text: &text, context: context, referenceDate: Date())
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText? {
@@ -792,7 +808,7 @@ where Source: _TimeDataFormattingSource,
             referenceDate: referenceDate,
             locale: context.environment.locale
         )
-        return format.resolvedText(output, typefaces: typefaces, context: context)
+        return format.resolvedText(output, style: style, properties: &properties, text: &text, context: context)
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
@@ -899,7 +915,9 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         let segments = resolve(locale: context.environment.locale)
@@ -909,19 +927,17 @@ class LocalizedTextStorage: AnyTextStorage {
             case let .attributedString(value):
                 runs.append(contentsOf: _resolvedAttributedText(
                     value,
-                    defaultTypefaces: typefaces,
+                    style: style, properties: &properties, text: &text,
                     context: context
                 ).runs)
-            case let .text(text):
-                guard let resolved = text._resolve(
-                    context: context,
-                    referenceDate: Date()
+            case let .text(child):
+                guard let resolved = child._resolve(
+                    context: context, referenceDate: Date(),
+                    style: style, properties: &properties, text: &text
                 ) else {
                     return nil
                 }
-                runs.append(contentsOf: resolved.runs.map {
-                    $0.applying(foregroundColor: text.foregroundColor)
-                })
+                runs.append(contentsOf: resolved.runs)
             }
         }
         return .init(
@@ -1027,11 +1043,13 @@ class ConcatenatedTextStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        guard let first = first._resolve(context: context, referenceDate: Date()),
-              let second = second._resolve(context: context, referenceDate: Date()) else {
+        guard let first = first._resolve(context: context, referenceDate: Date(), style: style, properties: &properties, text: &text),
+              let second = second._resolve(context: context, referenceDate: Date(), style: style, properties: &properties, text: &text) else {
             return nil
         }
         return .init(
@@ -1079,12 +1097,22 @@ class AttachmentTextStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        guard let image = context.resolveTextAttachment(self.image) else {
+        var imageContext = context
+        imageContext.environment = context.environment.untrackedCopy()
+        imageContext.environment.font = style.baseFont.resolve(in: context.environment, includeDefaultAttributes: true)
+        imageContext.environment.fontModifiers += style.fontModifiers
+        guard let image = imageContext.resolveTextAttachment(self.image) else {
             return nil
         }
+        let attributes = style.nsAttributes(in: context.environment, properties: &properties)
+        let typefaces = style.typefaces(attributes: attributes, context: context)
+        properties.registerCustomAttachment(at: text.utf16.count)
+        text += "\u{fffc}"
         return .init(
             runs: [.attachment(typefaces, image)],
             scaleFactor: context.contentScaleFactor,
@@ -1556,64 +1584,29 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         context: any TextResolutionContext,
         referenceDate: Date
     ) -> GraphicsContext.ResolvedText? {
-        let (font, fontEnvironment) = _resolvedFont(
-            in: context.environment
-        )
-        var resolutionContext = context
-        resolutionContext.environment = fontEnvironment
-        resolutionContext.environment.font = font
-        let faces = font.typefaceCascade(
-            in: fontEnvironment,
-            forContext: context.sceneResources,
-            contentScaleFactor: context.contentScaleFactor
-        ).runFaces
+        var properties = ResolvedProperties()
+        var string = String()
+        var style = Style()
+        style.typesettingConfiguration = context.environment.typesettingConfiguration
+        guard var resolved = _resolve(context: context, referenceDate: referenceDate,
+                                      style: style, properties: &properties, text: &string) else { return nil }
+        properties.markParagraphBoundary(at: string.utf16.count, in: string, environment: context.environment)
+        resolved.resolvedProperties = properties
+        return resolved
+    }
 
-        if faces.isEmpty == false {
-            var runs: [GraphicsContext.ResolvedText.Run] = []
-            if case let .verbatim(text) = self.storage {
-                runs = [.text(faces, text)]
-                return GraphicsContext.ResolvedText(
-                    runs: runs.map {
-                        $0.applying(customAttributes)
-                            .applying(textModifiers: modifiers)
-                    },
-                    scaleFactor: context.contentScaleFactor,
-                    displayScale: context.displayScale,
-                    drawMissingGlyphs: true
-                )
-            }
-            else if case let .anyTextStorage(text) = self.storage {
-                guard let resolved = text.resolve(
-                    typefaces: faces,
-                    context: resolutionContext,
-                    referenceDate: referenceDate
-                ) else {
-                    return nil
-                }
-                guard !customAttributes.isEmpty || hasResolvedRunModifiers else {
-                    return GraphicsContext.ResolvedText(
-                        runs: resolved.runs,
-                        scaleFactor: resolved.scaleFactor,
-                        displayScale: resolved.displayScale,
-                        drawMissingGlyphs: true
-                    )
-                }
-                return GraphicsContext.ResolvedText(
-                    runs: resolved.runs.map {
-                        $0.applying(customAttributes)
-                            .applying(textModifiers: modifiers)
-                    },
-                    scaleFactor: context.contentScaleFactor,
-                    displayScale: context.displayScale,
-                    drawMissingGlyphs: true
-                )
-            }
+    func _resolve(context: any TextResolutionContext, referenceDate: Date,
+                  style parentStyle: Style, properties: inout ResolvedProperties,
+                  text: inout String) -> GraphicsContext.ResolvedText? {
+        var style = parentStyle
+        for modifier in modifiers.reversed() { modifier.modify(style: &style) }
+        switch storage {
+        case let .verbatim(string):
+            return style.resolve(string, context: context, properties: &properties, text: &text)
+        case let .anyTextStorage(storage):
+            return storage.resolve(style: style, properties: &properties, text: &text,
+                                   context: context, referenceDate: referenceDate)
         }
-        return .init(
-            runs: [],
-            scaleFactor: context.contentScaleFactor,
-            displayScale: context.displayScale
-        )
     }
 
     func _sizeVariantTexts(in environment: EnvironmentValues) -> [(TextSizeVariant, String)]? {
@@ -1680,6 +1673,25 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         hasher.combine(environment.displayScale)
         hasher.combine(environment._contentScaleFactor)
         hasher.combine(environment.fontModifiers)
+        hasher.combine(environment.typesettingConfiguration)
+        hasher.combine(environment.textScale)
+        hasher.combine(environment.textJustification)
+        hasher.combine(environment.paragraphTypesetting.storage)
+        hasher.combine(environment.avoidsOrphans)
+        hasher.combine(environment.textWritingDirection)
+        hasher.combine(environment.textAlignmentStrategy)
+        hasher.combine(environment.writingMode)
+        hasher.combine(environment.layoutDirection)
+        hasher.combine(environment.lineHeight)
+        hasher.combine(environment.lineSpacing)
+        hasher.combine(environment.lineHeightMultiple)
+        hasher.combine(environment.maximumLineHeight)
+        hasher.combine(environment.minimumLineHeight)
+        hasher.combine(environment.hyphenationFactor)
+        hasher.combine(environment.hyphenationDisabled)
+        hasher.combine(environment.allowsTightening)
+        hasher.combine(environment.bodyHeadOutdent)
+        hasher.combine(environment.shouldRedactContent)
         for modifier in modifiers {
             modifier.hashResolution(into: &hasher)
         }
@@ -1735,10 +1747,13 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                     ) ?? storage
                     : storage,
                 layoutProperties: layoutProperties,
+                layoutMargins: source.resolvedProperties?.insets ?? EdgeInsets(),
                 archiveOptions: archiveOptions,
                 features: features
                     .union(resolved.resolvedFeatures)
                     .union(additionalFeatures),
+                styles: source.resolvedProperties?.styles ?? [],
+                transitions: source.resolvedProperties?.transitions ?? [],
                 resolvedText: resolved,
                 version: version,
                 transitionText: transitionText
@@ -1778,60 +1793,21 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             return nil
         }
 
-        let (font, fontEnvironment) = _resolvedFont(
-            in: context.environment
-        )
-        let faces = font.typefaceCascade(
-            in: fontEnvironment,
-            forContext: context.sceneResources,
-            contentScaleFactor: context.contentScaleFactor
-        ).runFaces
-        guard !faces.isEmpty else { return nil }
-
-        return variants.map { variant, string in
-            let runs: [GraphicsContext.ResolvedText.Run] = [.text(faces, string)]
-            let resolved = GraphicsContext.ResolvedText(
-                runs: runs.map {
-                    $0.applying(customAttributes)
-                        .applying(textModifiers: modifiers)
-                },
-                scaleFactor: context.contentScaleFactor,
-                displayScale: context.displayScale,
-                drawMissingGlyphs: true
-            )
+        return variants.compactMap { variant, string in
+            var leaf = self
+            leaf.storage = .verbatim(string)
+            guard let resolved = leaf._resolve(context: context, referenceDate: referenceDate) else { return nil }
             return (variant, resolved)
         }
     }
 
-    private func _resolvedFont(
-        in environment: EnvironmentValues
-    ) -> (Font, EnvironmentValues) {
-        var font = self.font ?? environment.effectiveFont
-        if let fontWeight {
-            font = font.weight(fontWeight)
-        } else if boldValue == true {
-            font = font.bold()
-        }
-        if italicValue == true {
-            font = font.italic()
-        }
-
-        var environment = environment
-        if let monospacedValue {
-            environment.replaceMonospacedFontModifier(
-                with: monospacedValue
-            )
-        }
-        if usesMonospacedDigits {
-            environment.addMonospacedDigitFontModifier()
-        }
-        font = font.resolved(in: environment)
-        environment.font = font
-        return (font, environment)
-    }
 }
 
 final class BoldTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) {
+        if isActive { style.addFontModifier(.static(Font.BoldModifier.self)) }
+        else { style.removeFontModifier(Font.BoldModifier.self) }
+    }
     let isActive: Bool
 
     init(isActive: Bool) {
@@ -1849,6 +1825,10 @@ final class BoldTextModifier: AnyTextModifier {
 }
 
 final class ItalicTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) {
+        if isActive { style.addFontModifier(.static(Font.ItalicModifier.self)) }
+        else { style.removeFontModifier(Font.ItalicModifier.self) }
+    }
     let isActive: Bool
 
     init(isActive: Bool) {
@@ -1866,6 +1846,10 @@ final class ItalicTextModifier: AnyTextModifier {
 }
 
 final class MonospacedTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) {
+        if isActive { style.addFontModifier(.static(Font.MonospacedModifier.self)) }
+        else { style.removeFontModifier(Font.MonospacedModifier.self) }
+    }
     let isActive: Bool
 
     init(isActive: Bool) {
@@ -1883,6 +1867,7 @@ final class MonospacedTextModifier: AnyTextModifier {
 }
 
 final class MonospacedDigitTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) { style.addFontModifier(.static(Font.MonospacedDigitModifier.self)) }
     override func isEqual(to other: AnyTextModifier) -> Bool {
         other is MonospacedDigitTextModifier
     }
@@ -1893,6 +1878,7 @@ final class MonospacedDigitTextModifier: AnyTextModifier {
 }
 
 final class UnderlineTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) { style.underline = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
     let lineStyle: Text.LineStyle?
 
     init(lineStyle: Text.LineStyle?) {
@@ -1910,6 +1896,7 @@ final class UnderlineTextModifier: AnyTextModifier {
 }
 
 final class StrikethroughTextModifier: AnyTextModifier {
+    override func modify(style: inout Text.Style) { style.strikethrough = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
     let lineStyle: Text.LineStyle?
 
     init(lineStyle: Text.LineStyle?) {
@@ -1927,6 +1914,7 @@ final class StrikethroughTextModifier: AnyTextModifier {
 }
 
 class TextAttributeModifierBase: AnyTextModifier {
+    override func modify(style: inout Text.Style) { style.customAttributes.append(self) }
     func apply(to attributes: inout _TextAttributeValues) {}
 }
 
@@ -2159,21 +2147,6 @@ extension Text {
             value.apply(to: &attributes)
         }
         return attributes
-    }
-
-    var hasResolvedRunModifiers: Bool {
-        modifiers.contains { modifier in
-            switch modifier {
-            case .kerning, .tracking, .baseline:
-                return true
-            case let .anyTextModifier(value):
-                return value is UnderlineTextModifier ||
-                    value is StrikethroughTextModifier ||
-                    value is TextAttributeModifierBase
-            default:
-                return false
-            }
-        }
     }
 
     public static func + (lhs: Text, rhs: Text) -> Text {

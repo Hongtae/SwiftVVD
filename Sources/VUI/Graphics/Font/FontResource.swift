@@ -13,6 +13,8 @@ final class FontResource: Hashable, @unchecked Sendable {
     let pointSize: CGFloat
     let shapingFeatures: [TypefaceShapingFeature]
     let textStyle: Font.TextStyle?
+    let language: String?
+    let languageAwareLineHeightRatio: Double?
     private let source: FontDescriptor.Source
     private let renderingMode: Font.DefaultRenderingMode
 
@@ -22,6 +24,8 @@ final class FontResource: Hashable, @unchecked Sendable {
         self.provider = descriptor.typefaceProvider(in: environment)
         self.pointSize = descriptor.pointSize
         self.shapingFeatures = descriptor.shapingFeatures
+        self.language = descriptor.language
+        self.languageAwareLineHeightRatio = descriptor.languageAwareLineHeightRatio
         self.source = descriptor.source
         self.renderingMode = descriptor.renderingMode ?? context.defaultFontRenderingMode
         if case let .system(_, _, _, _, style) = descriptor.source {
@@ -34,16 +38,21 @@ final class FontResource: Hashable, @unchecked Sendable {
     // Every descriptor remains consumer-owned, including its lazy selection state.
     func descriptor() -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
-                       renderingMode: renderingMode)
+                       renderingMode: renderingMode, language: language,
+                       languageAwareLineHeightRatio: languageAwareLineHeightRatio)
     }
 
     static func == (lhs: FontResource, rhs: FontResource) -> Bool {
-        lhs.textStyle == rhs.textStyle &&
+        lhs.language == rhs.language &&
+            lhs.languageAwareLineHeightRatio == rhs.languageAwareLineHeightRatio &&
+            lhs.textStyle == rhs.textStyle &&
             lhs.shapingFeatures == rhs.shapingFeatures &&
             lhs.provider.isEqual(to: rhs.provider)
     }
 
     func hash(into hasher: inout Hasher) {
+        hasher.combine(language)
+        hasher.combine(languageAwareLineHeightRatio)
         hasher.combine(textStyle)
         hasher.combine(shapingFeatures)
         provider.hash(into: &hasher)

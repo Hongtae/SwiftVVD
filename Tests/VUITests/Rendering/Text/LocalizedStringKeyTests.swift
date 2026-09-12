@@ -1097,22 +1097,12 @@ final class LocalizedStringKeyTests: XCTestCase {
         }
         XCTAssertEqual(stored.foregroundColor, VUI.Color.red)
 
-        let plain = GraphicsContext.ResolvedText.Run.text([], "red")
-            .applying(foregroundColor: VUI.Color.red)
-        guard case let .styledText(_, _, _, plainStyle) = plain else {
-            return XCTFail("Embedded foreground should create a styled text run")
-        }
-        XCTAssertEqual(plainStyle.foregroundColor, VUI.Color.red)
-
-        let existing = GraphicsContext.ResolvedText.Run.styledText(
-            [],
-            "blue",
-            _TextAttributeValues(),
-            _ResolvedTextRunAttributes(foregroundColor: VUI.Color.blue)
-        ).applying(foregroundColor: VUI.Color.red)
-        guard case let .styledText(_, _, _, existingStyle) = existing else {
-            return XCTFail("Attributed foreground should remain styled text")
-        }
-        XCTAssertEqual(existingStyle.foregroundColor, VUI.Color.blue)
+        var style = Text.Style()
+        for modifier in embedded.modifiers.reversed() { modifier.modify(style: &style) }
+        var properties = Text.ResolvedProperties()
+        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor, VUI.Color.red)
+        var attributes = _ResolvedTextRunAttributes(foregroundColor: VUI.Color.blue).nsAttributes
+        attributes.transferAttributedStringStyles(to: &style)
+        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor, VUI.Color.blue)
     }
 }

@@ -62,6 +62,8 @@ class AnyFontModifier: Hashable, @unchecked Sendable {
         AnyDynamicFontModifier(modifier)
     }
 
+    var modifierType: ObjectIdentifier { preconditionFailure("Abstract font modifier") }
+
     var monospacedValue: Bool? {
         if self is AnyStaticFontModifier<Font.MonospacedModifier> { return true }
         if self is AnyStaticFontModifier<Font.UndoModifier<Font.MonospacedModifier>> { return false }
@@ -78,6 +80,7 @@ class AnyFontModifier: Hashable, @unchecked Sendable {
 }
 
 final class AnyStaticFontModifier<M: StaticFontModifier>: AnyFontModifier, @unchecked Sendable {
+    override var modifierType: ObjectIdentifier { ObjectIdentifier(M.self) }
     override func modify(descriptor: inout FontDescriptor, in context: Font.Context) { M.modify(descriptor: &descriptor, in: context) }
     override func modify(traits: inout Font.ResolvedTraits) { M.modify(traits: &traits) }
     override func isEqual(to other: AnyFontModifier) -> Bool { other is AnyStaticFontModifier<M> }
@@ -85,6 +88,7 @@ final class AnyStaticFontModifier<M: StaticFontModifier>: AnyFontModifier, @unch
 }
 
 final class AnyDynamicFontModifier<M: FontModifier>: AnyFontModifier, @unchecked Sendable {
+    override var modifierType: ObjectIdentifier { ObjectIdentifier(M.self) }
     let modifier: M
     init(_ modifier: M) { self.modifier = modifier }
     override func modify(descriptor: inout FontDescriptor, in context: Font.Context) { modifier.modify(descriptor: &descriptor, in: context) }
@@ -185,5 +189,27 @@ extension Font {
     struct UndoModifier<Modifier: UndoableStaticFontModifier>: StaticFontModifier {
         static var tag: StaticModifierTag { .undo(Modifier.undoableTag) }
         static func modify(descriptor: inout FontDescriptor, in context: Context) { Modifier.undo(descriptor: &descriptor, in: context) }
+    }
+}
+
+/// Transfers the text language request into the font descriptor.
+struct LanguageFontModifier: FontModifier {
+    var identifier: String
+    var tag: Font.DynamicModifierTag { .language }
+    var codingProxy: String { identifier }
+    static func unwrap(codingProxy: String) -> Self { Self(identifier: codingProxy) }
+    func modify(descriptor: inout FontDescriptor, in context: Font.Context) {
+        descriptor = descriptor.withTypesetting(language: identifier)
+    }
+}
+
+/// Retains the requested typesetting ratio on the font descriptor.
+struct LanguageAwareLineHeightRatioFontModifier: FontModifier {
+    let ratio: Double
+    var tag: Font.DynamicModifierTag { .lineHeightRatio }
+    var codingProxy: Double { ratio }
+    static func unwrap(codingProxy: Double) -> Self { Self(ratio: codingProxy) }
+    func modify(descriptor: inout FontDescriptor, in context: Font.Context) {
+        descriptor = descriptor.withTypesetting(lineHeightRatio: ratio)
     }
 }

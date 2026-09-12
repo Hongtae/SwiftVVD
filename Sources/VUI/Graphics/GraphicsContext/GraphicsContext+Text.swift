@@ -11,6 +11,7 @@ import VVD
 
 extension GraphicsContext {
     public struct ResolvedText {
+        var resolvedProperties: Text.ResolvedProperties?
         enum Run {
             case text([Typeface], String)
             case attachment([Typeface], ImageDrawing)
@@ -23,140 +24,6 @@ extension GraphicsContext {
                 _ResolvedTextRunAttributes
             )
 
-            func applying(_ attributes: _TextAttributeValues) -> Run {
-                guard !attributes.isEmpty else { return self }
-                switch self {
-                case let .text(faces, text):
-                    return .attributedText(faces, text, attributes)
-                case let .attributedText(faces, text, existing):
-                    var merged = existing
-                    merged.merge(attributes)
-                    return .attributedText(faces, text, merged)
-                case let .attachment(faces, image):
-                    return .attributedAttachment(faces, image, attributes)
-                case let .attributedAttachment(faces, image, existing):
-                    var merged = existing
-                    merged.merge(attributes)
-                    return .attributedAttachment(faces, image, merged)
-                case let .styledText(faces, text, existing, style):
-                    var merged = existing
-                    merged.merge(attributes)
-                    return .styledText(faces, text, merged, style)
-                }
-            }
-
-            func applying(foregroundColor: Color?) -> Run {
-                guard let foregroundColor else { return self }
-                switch self {
-                case let .text(faces, text):
-                    return .styledText(
-                        faces,
-                        text,
-                        _TextAttributeValues(),
-                        _ResolvedTextRunAttributes(foregroundColor: foregroundColor)
-                    )
-                case let .attributedText(faces, text, attributes):
-                    return .styledText(
-                        faces,
-                        text,
-                        attributes,
-                        _ResolvedTextRunAttributes(foregroundColor: foregroundColor)
-                    )
-                case let .styledText(faces, text, attributes, existing):
-                    guard existing.foregroundColor == nil else { return self }
-                    var style = existing
-                    style.foregroundColor = foregroundColor
-                    return .styledText(faces, text, attributes, style)
-                case .attachment, .attributedAttachment:
-                    return self
-                }
-            }
-
-            func applying(textModifiers: [Text.Modifier]) -> Run {
-                let faces: [Typeface]
-                let text: String
-                let attributes: _TextAttributeValues
-                var style: _ResolvedTextRunAttributes
-                let hadStyle: Bool
-
-                switch self {
-                case let .text(runFaces, runText):
-                    faces = runFaces
-                    text = runText
-                    attributes = _TextAttributeValues()
-                    style = _ResolvedTextRunAttributes()
-                    hadStyle = false
-                case let .attributedText(runFaces, runText, runAttributes):
-                    faces = runFaces
-                    text = runText
-                    attributes = runAttributes
-                    style = _ResolvedTextRunAttributes()
-                    hadStyle = false
-                case let .styledText(
-                    runFaces,
-                    runText,
-                    runAttributes,
-                    runStyle
-                ):
-                    faces = runFaces
-                    text = runText
-                    attributes = runAttributes
-                    style = runStyle
-                    hadStyle = true
-                case .attachment, .attributedAttachment:
-                    return self
-                }
-
-                if style.tracking == nil {
-                    for modifier in textModifiers {
-                        if case let .tracking(value) = modifier {
-                            style.tracking = value
-                            break
-                        }
-                    }
-                }
-                if style.tracking == nil, style.kern == nil {
-                    for modifier in textModifiers {
-                        if case let .kerning(value) = modifier {
-                            style.kern = value
-                            break
-                        }
-                    }
-                }
-                var resolvedBaseline = style.baselineOffset != nil
-                var resolvedUnderline = style.underlineStyle != nil
-                var resolvedStrikethrough = style.strikethroughStyle != nil
-
-                for modifier in textModifiers {
-                    switch modifier {
-                    case let .baseline(value) where !resolvedBaseline:
-                        style.baselineOffset = value
-                        resolvedBaseline = true
-                    case let .anyTextModifier(value):
-                        if !resolvedUnderline,
-                           let value = value as? UnderlineTextModifier {
-                            resolvedUnderline = true
-                            if let lineStyle = value.lineStyle {
-                                style.underlineStyle = lineStyle
-                            }
-                        } else if !resolvedStrikethrough,
-                                  let value =
-                                    value as? StrikethroughTextModifier {
-                            resolvedStrikethrough = true
-                            if let lineStyle = value.lineStyle {
-                                style.strikethroughStyle = lineStyle
-                            }
-                        }
-                    default:
-                        break
-                    }
-                }
-
-                guard hadStyle || !style.isEmpty else {
-                    return self
-                }
-                return .styledText(faces, text, attributes, style)
-            }
         }
 
         final class Storage: AppLifetimeResource, @unchecked Sendable {

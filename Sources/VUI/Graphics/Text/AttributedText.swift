@@ -20,6 +20,13 @@ extension AttributeScopes {
         public let tracking: TrackingAttribute
         public let baselineOffset: BaselineOffsetAttribute
         public let foundation: AttributeScopes.FoundationAttributes
+        let glyphInfo: TextGlyphInfoAttribute
+        let adaptiveImageGlyph: TextAdaptiveImageGlyphAttribute
+        let textScale: TextScaleAttribute
+        let superscript: TextSuperscriptAttribute
+        let paragraphAlignment: TextParagraphAlignmentAttribute
+        let paragraphWritingDirection: TextParagraphWritingDirectionAttribute
+        let lineHeight: TextLineHeightAttribute
     }
 }
 
@@ -110,7 +117,7 @@ extension AttributedString {
     }
 }
 
-private extension NSAttributedString.Key {
+extension NSAttributedString.Key {
     static let coreFont = Self(AttributeScopes.CoreAttributes.FontAttribute.name)
     static let coreForegroundColor = Self(
         AttributeScopes.CoreAttributes.ForegroundColorAttribute.name
@@ -133,6 +140,7 @@ private extension NSAttributedString.Key {
     )
 }
 
+/// Run values and shared resources produced by text-style and attributed conversion.
 struct _ResolvedTextRunAttributes: Equatable {
     var font: Font?
     var foregroundColor: Color?
@@ -142,6 +150,16 @@ struct _ResolvedTextRunAttributes: Equatable {
     var kern: CGFloat?
     var tracking: CGFloat?
     var baselineOffset: CGFloat?
+    var fontResource: FontResource?
+    var language: String?
+    var paragraphStyle: TextParagraphStyle?
+    var glyphInfo: TextGlyphInfo?
+    var encapsulation: TextEncapsulationResource?
+    var adaptiveImageProvider: TextAdaptiveImageProvider?
+    var textScale: Text.Scale?
+    var superscript: Text.Superscript?
+    var shadow: _ShadowEffect?
+    var transitionIndex: Int?
 
     init(
         font: Font? = nil,
@@ -189,6 +207,15 @@ struct _ResolvedTextRunAttributes: Equatable {
         if let baselineOffset {
             result[.coreBaselineOffset] = baselineOffset
         }
+        if let language { result[NSAttributedString.Key("NSLanguage")] = language }
+        if let paragraphStyle { result[NSAttributedString.Key("VUI.ParagraphStyle")] = paragraphStyle }
+        if let glyphInfo { result[NSAttributedString.Key("VUI.GlyphInfo")] = glyphInfo }
+        if let encapsulation { result[NSAttributedString.Key("VUI.Encapsulation")] = encapsulation }
+        if let adaptiveImageProvider { result[NSAttributedString.Key("VUI.AdaptiveImageProvider")] = adaptiveImageProvider }
+        if let textScale { result[NSAttributedString.Key("VUI.TextScale")] = textScale }
+        if let superscript { result[NSAttributedString.Key("VUI.Superscript")] = superscript }
+        if let shadow { result[NSAttributedString.Key("VUI.TextShadow")] = shadow }
+        if let transitionIndex { result[NSAttributedString.Key("VUI.TextTransition")] = transitionIndex }
         return result
     }
 
@@ -230,61 +257,39 @@ func _attributedStringFromResolvedTextStorage(
 
 private func _resolvedAttributedRuns(
     _ value: AttributedString,
-    defaultTypefaces: [Typeface],
+    style: Text.Style,
+    properties: inout Text.ResolvedProperties,
+    text: inout String,
     context: any TextResolutionContext
 ) -> [GraphicsContext.ResolvedText.Run] {
     var result: [GraphicsContext.ResolvedText.Run] = []
-    let resolveRun: (AttributedString.Runs.Run) -> Void = { run in
-        let text = String(value.characters[run.range])
-        guard !text.isEmpty else { return }
-
+#if os(Windows)
+    let runs = AnySequence(value.runs)
+#else
+    let runs = value.runs
+#endif
+    for run in runs {
+        let string = String(value.characters[run.range])
+        guard !string.isEmpty else { continue }
         var attributes = _ResolvedTextRunAttributes(
-            font: run.font,
-            foregroundColor: run.foregroundColor,
-            backgroundColor: run.backgroundColor,
-            strikethroughStyle: run.strikethroughStyle,
-            underlineStyle: run.underlineStyle,
-            kern: run.kern,
-            tracking: run.tracking,
-            baselineOffset: run.baselineOffset
-        )
-        let typefaces: [Typeface]
-        let presentationIntent = run.inlinePresentationIntent
-        if attributes.font != nil || presentationIntent != nil {
-            var font = attributes.font ?? context.environment.font ?? .system(.body)
-            if presentationIntent?.contains(.stronglyEmphasized) == true {
-                font = font.bold()
-            }
-            if presentationIntent?.contains(.emphasized) == true {
-                font = font.italic()
-            }
-            font = font.resolved(in: context.environment)
-            attributes.font = font
-            typefaces = font.typefaceCascade(
-                in: context.environment,
-                forContext: context.sceneResources,
-                contentScaleFactor: context.contentScaleFactor
-            ).runFaces
-        } else {
-            typefaces = defaultTypefaces
-        }
-        guard !typefaces.isEmpty else { return }
-        if attributes.isEmpty {
-            result.append(.text(typefaces, text))
-        } else {
-            result.append(
-                .styledText(typefaces, text, _TextAttributeValues(), attributes)
-            )
+            font: run.font, foregroundColor: run.foregroundColor, backgroundColor: run.backgroundColor,
+            strikethroughStyle: run.strikethroughStyle, underlineStyle: run.underlineStyle,
+            kern: run.kern, tracking: run.tracking, baselineOffset: run.baselineOffset).nsAttributes
+        if let value = run[TextGlyphInfoAttribute.self] { attributes[.init(TextGlyphInfoAttribute.name)] = value }
+        if let value = run[TextAdaptiveImageGlyphAttribute.self] { attributes[.init(TextAdaptiveImageGlyphAttribute.name)] = value }
+        if let value = run[TextScaleAttribute.self] { attributes[.init(TextScaleAttribute.name)] = value }
+        if let value = run[TextSuperscriptAttribute.self] { attributes[.init(TextSuperscriptAttribute.name)] = value }
+        if let value = run[TextParagraphAlignmentAttribute.self] { attributes[.init(TextParagraphAlignmentAttribute.name)] = value }
+        if let value = run[TextParagraphWritingDirectionAttribute.self] { attributes[.init(TextParagraphWritingDirectionAttribute.name)] = value }
+        if let value = run[TextLineHeightAttribute.self] { attributes[.init(TextLineHeightAttribute.name)] = value }
+        if let intent = run.inlinePresentationIntent { attributes[.init("NSInlinePresentationIntent")] = intent }
+        if let language = run.languageIdentifier { attributes[.init("NSLanguage")] = language }
+        var childStyle = style
+        attributes.transferAttributedStringStyles(to: &childStyle)
+        if let resolved = childStyle.resolveRun(string, context: context, properties: &properties, text: &text) {
+            result.append(resolved)
         }
     }
-
-#if os(Windows)
-    // Type erasure keeps the debug client from materializing an implementation
-    // index type that the Windows Foundation dynamic library does not export.
-    AnySequence(value.runs).forEach(resolveRun)
-#else
-    value.runs.forEach(resolveRun)
-#endif
     return result
 }
 
@@ -296,13 +301,15 @@ final class AttributedStringTextStorage: AnyTextStorage {
     }
 
     override func resolve(
-        typefaces: [Typeface],
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         GraphicsContext.ResolvedText(
             runs: _resolvedAttributedRuns(
                 str,
-                defaultTypefaces: typefaces,
+                style: style, properties: &properties, text: &text,
                 context: context
             ),
             scaleFactor: context.contentScaleFactor,
@@ -335,17 +342,93 @@ final class AttributedStringTextStorage: AnyTextStorage {
 
 func _resolvedAttributedText(
     _ value: AttributedString,
-    defaultTypefaces: [Typeface],
+    style: Text.Style,
+    properties: inout Text.ResolvedProperties,
+    text: inout String,
     context: any TextResolutionContext
 ) -> GraphicsContext.ResolvedText {
     GraphicsContext.ResolvedText(
         runs: _resolvedAttributedRuns(
             value,
-            defaultTypefaces: defaultTypefaces,
+            style: style, properties: &properties, text: &text,
             context: context
         ),
         scaleFactor: context.contentScaleFactor,
         displayScale: context.displayScale,
         drawMissingGlyphs: true
     )
+}
+
+extension Dictionary where Key == NSAttributedString.Key, Value == Any {
+    mutating func transferAttributedStringStyles(to style: inout Text.Style) {
+        if let font = self[.coreFont] as? Font { style.baseFont = .explicit(font); removeValue(forKey: .coreFont) }
+        if let color = self[.coreForegroundColor] as? Color { style.color = .explicit(AnyShapeStyle(color)); removeValue(forKey: .coreForegroundColor) }
+        if let color = self[.coreBackgroundColor] as? Color { style.backgroundColor = color; removeValue(forKey: .coreBackgroundColor) }
+        if let value = self[.coreKern] as? CGFloat { style.kerning = value; removeValue(forKey: .coreKern) }
+        if let value = self[.coreTracking] as? CGFloat { style.tracking = value; removeValue(forKey: .coreTracking) }
+        if let value = self[.coreBaselineOffset] as? CGFloat { style.baselineOffset = value; removeValue(forKey: .coreBaselineOffset) }
+        if let value = self[.coreUnderlineStyle] as? Text.LineStyle { style.underline = .explicit(value); removeValue(forKey: .coreUnderlineStyle) }
+        if let value = self[.coreStrikethroughStyle] as? Text.LineStyle { style.strikethrough = .explicit(value); removeValue(forKey: .coreStrikethroughStyle) }
+        if let language = self[.init("NSLanguage")] as? String, case .automatic = style.typesettingConfiguration.language.storage {
+            style.typesettingConfiguration.language = TypesettingLanguage(storage: .explicit(Locale.Language(identifier: language), .init(rawValue: 0)))
+        }
+        if let value = self[.init(TextGlyphInfoAttribute.name)] as? TextGlyphInfo {
+            style.glyphInfo = value; removeValue(forKey: .init(TextGlyphInfoAttribute.name))
+        }
+        if let value = self[.init(TextAdaptiveImageGlyphAttribute.name)] as? TextAdaptiveImageGlyph {
+            style.adaptiveImageGlyph = value; removeValue(forKey: .init(TextAdaptiveImageGlyphAttribute.name))
+        }
+        if let value = self[.init(TextScaleAttribute.name)] as? Text.Scale {
+            style.scale = value; removeValue(forKey: .init(TextScaleAttribute.name))
+        }
+        if let value = self[.init(TextSuperscriptAttribute.name)] as? Text.Superscript {
+            style.superscript = value; removeValue(forKey: .init(TextSuperscriptAttribute.name))
+        }
+        if let value = self[.init(TextParagraphAlignmentAttribute.name)] as? TextParagraphAlignment {
+            style.alignment = value; removeValue(forKey: .init(TextParagraphAlignmentAttribute.name))
+        }
+        if let value = self[.init(TextParagraphWritingDirectionAttribute.name)] as? AttributedString.WritingDirection {
+            style.writingDirection = value; removeValue(forKey: .init(TextParagraphWritingDirectionAttribute.name))
+        }
+        if let value = self[.init(TextLineHeightAttribute.name)] as? TextLineHeight {
+            style.lineHeight = value; removeValue(forKey: .init(TextLineHeightAttribute.name))
+        }
+        if let intent = self[.init("NSInlinePresentationIntent")] as? InlinePresentationIntent {
+            if intent.contains(.emphasized) { style.addFontModifier(.static(Font.ItalicModifier.self)) }
+            if intent.contains(.stronglyEmphasized) { style.addFontModifier(.static(Font.BoldModifier.self)) }
+            if intent.contains(.code) { style.addFontModifier(.static(Font.MonospacedModifier.self)) }
+            if intent.contains(.strikethrough) { style.strikethrough = .explicit(.single) }
+            removeValue(forKey: .init("NSInlinePresentationIntent"))
+        }
+    }
+}
+
+// Internal keys carry typed backend payloads without exposing platform overlay types.
+enum TextGlyphInfoAttribute: AttributedStringKey {
+    typealias Value = TextGlyphInfo
+    static let name = "VUI.GlyphInfo"
+}
+enum TextAdaptiveImageGlyphAttribute: AttributedStringKey {
+    typealias Value = TextAdaptiveImageGlyph
+    static let name = "VUI.AdaptiveImageGlyph"
+}
+enum TextScaleAttribute: AttributedStringKey {
+    typealias Value = Text.Scale
+    static let name = "VUI.TextScale"
+}
+enum TextSuperscriptAttribute: AttributedStringKey {
+    typealias Value = Text.Superscript
+    static let name = "VUI.Superscript"
+}
+enum TextParagraphAlignmentAttribute: AttributedStringKey {
+    typealias Value = TextParagraphAlignment
+    static let name = "VUI.ParagraphAlignment"
+}
+enum TextParagraphWritingDirectionAttribute: AttributedStringKey {
+    typealias Value = AttributedString.WritingDirection
+    static let name = "VUI.ParagraphWritingDirection"
+}
+enum TextLineHeightAttribute: AttributedStringKey {
+    typealias Value = TextLineHeight
+    static let name = "VUI.LineHeight"
 }

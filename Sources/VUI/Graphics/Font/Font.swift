@@ -201,7 +201,8 @@ public struct Font: Hashable, Sendable {
     func typefaceCascade(
         in environment: EnvironmentValues,
         forContext context: SceneResources,
-        contentScaleFactor: CGFloat
+        contentScaleFactor: CGFloat,
+        applyEnvironmentModifiers: Bool = true
     ) -> TypefaceCascade {
         precondition(
             contentScaleFactor.isFinite && contentScaleFactor > 0,
@@ -215,18 +216,22 @@ public struct Font: Hashable, Sendable {
         return typefaceCascade(
             in: environment,
             forContext: context,
-            dpi: UInt32(max(scaledDPI, 1))
+            dpi: UInt32(max(scaledDPI, 1)),
+            applyEnvironmentModifiers: applyEnvironmentModifiers
         )
     }
 
     func typefaceCascade(
         in environment: EnvironmentValues,
         forContext context: SceneResources,
-        dpi: UInt32
+        dpi: UInt32,
+        applyEnvironmentModifiers: Bool = true
     ) -> TypefaceCascade {
-        let font = resolved(in: environment)
+        let font = !applyEnvironmentModifiers ||
+            (provider is FontBox<PlatformFontProvider> && environment.fontModifiers.isEmpty)
+            ? self : resolved(in: environment)
         var shapingFeatures = font.typefaceFeatures
-        if environment.fontModifiers.usesMonospacedDigits {
+        if applyEnvironmentModifiers && environment.fontModifiers.usesMonospacedDigits {
             shapingFeatures.append(
                 contentsOf: MonospacedDigitModifier.shapingFeatures
             )

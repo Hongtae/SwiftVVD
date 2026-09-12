@@ -68,11 +68,15 @@ final class AttributedTextCoreVisualTests: XCTestCase {
             baselineOffset: 4
         ))
 
-        let resolved = _resolvedAttributedText(
-            value,
-            defaultTypefaces: [face],
-            context: CoreVisualTextResolutionContext()
-        )
+        let oldApp = appContext
+        appContext = StyleTestAppContext()
+        defer { appContext = oldApp }
+        var textStyle = Text.Style()
+        textStyle.baseFont = .explicit(VUI.Font(typefaceProvider: CoreVisualTypefaceProvider(face: face)))
+        var properties = Text.ResolvedProperties()
+        var string = String()
+        let resolved = _resolvedAttributedText(value, style: textStyle, properties: &properties,
+            text: &string, context: CoreVisualTextResolutionContext())
 
         guard case let .styledText(faces, text, _, style) =
             try XCTUnwrap(resolved.runs.first) else {
@@ -120,27 +124,18 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testRunModifiersUseObservedFirstValueAndTrackingPriority() throws {
         let face = CoreVisualTestTypeface()
-        let source = GraphicsContext.ResolvedText.Run.styledText(
-            [face],
-            "AB",
-            _TextAttributeValues(),
-            _ResolvedTextRunAttributes(kern: 2)
-        )
-
-        let modified = source.applying(textModifiers: [
-            .kerning(6),
-            .tracking(4),
-            .tracking(9),
-            .baseline(3),
-            .baseline(7),
+        var textStyle = Text.Style()
+        let modifiers: [Text.Modifier] = [
+            .kerning(6), .tracking(4), .tracking(9), .baseline(3), .baseline(7),
             .anyTextModifier(UnderlineTextModifier(lineStyle: nil)),
-            .anyTextModifier(UnderlineTextModifier(
-                lineStyle: Text.LineStyle(color: .red)
-            )),
-        ])
-        guard case let .styledText(_, _, _, style) = modified else {
-            return XCTFail("expected a styled run")
-        }
+            .anyTextModifier(UnderlineTextModifier(lineStyle: Text.LineStyle(color: .red)))
+        ]
+        for modifier in modifiers.reversed() { modifier.modify(style: &textStyle) }
+        var input = _ResolvedTextRunAttributes(kern: 2).nsAttributes
+        input.transferAttributedStringStyles(to: &textStyle)
+        var properties = Text.ResolvedProperties()
+        let style = textStyle.nsAttributes(in: EnvironmentValues(), properties: &properties)
+        let modified = GraphicsContext.ResolvedText.Run.styledText([face], "AB", _TextAttributeValues(), style)
         XCTAssertEqual(style.kern, 2)
         XCTAssertEqual(style.tracking, 4)
         XCTAssertEqual(style.baselineOffset, 3)
@@ -154,18 +149,13 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         XCTAssertEqual(line.glyphs.map(\.advance.width), [12, 12])
         XCTAssertEqual(line.width, 24)
 
-        let attributedTracking = GraphicsContext.ResolvedText.Run.styledText(
-            [face],
-            "AB",
-            _TextAttributeValues(),
-            _ResolvedTextRunAttributes(tracking: 5)
-        ).applying(textModifiers: [.tracking(4), .kerning(6)])
-        guard case let .styledText(_, _, _, retainedStyle) =
-            attributedTracking else {
-            return XCTFail("expected a styled run")
-        }
+        var parent = Text.Style()
+        for modifier in [Text.Modifier.tracking(4), .kerning(6)].reversed() { modifier.modify(style: &parent) }
+        var tracking = _ResolvedTextRunAttributes(tracking: 5).nsAttributes
+        tracking.transferAttributedStringStyles(to: &parent)
+        let retainedStyle = parent.nsAttributes(in: EnvironmentValues(), properties: &properties)
         XCTAssertEqual(retainedStyle.tracking, 5)
-        XCTAssertNil(retainedStyle.kern)
+        XCTAssertEqual(retainedStyle.kern, 6)
     }
 
     func testSpacingAppliesToEveryGlyphAdvanceIncludingFinalGlyph() throws {
@@ -718,4 +708,12 @@ private final class CoreVisualTestTypeface: Typeface {
     func hashIdentity(into hasher: inout Hasher) {
         hasher.combine(ObjectIdentifier(self))
     }
+}
+
+private struct CoreVisualTypefaceProvider: TypefaceProvider {
+    let face: CoreVisualTestTypeface
+    var pointSize: CGFloat { 10 }
+    func isEqual(to other: any TypefaceProvider) -> Bool { (other as? Self)?.face === face }
+    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(face)) }
+    func makeTypeface(_ context: AppContext, dpi: UInt32) -> (any Typeface)? { face }
 }
