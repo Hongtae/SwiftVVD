@@ -20,6 +20,7 @@ struct TypefaceGlyphMetrics {
     var descender: CGFloat
 }
 
+typealias TypefaceDesignMetrics = VVD.Font.DesignMetrics
 typealias TypefaceShapingDirection = VVD.Font.ShapingDirection
 typealias TypefaceShapingFeature = VVD.Font.ShapingFeature
 
@@ -54,6 +55,8 @@ protocol Typeface {
     var descender: CGFloat { get }
     var decorationMetrics: TypefaceDecorationMetrics? { get }
     var resolvedMetrics: ResolvedFontMetrics { get }
+    /// Unscaled selected-face metrics, separate from rounded layout and glyph metrics.
+    var designMetrics: TypefaceDesignMetrics? { get }
     var identifier: String { get }
     var isEmojiFallback: Bool { get }
     var hasColorGlyphs: Bool { get }
@@ -123,6 +126,7 @@ extension Typeface {
     }
 
     var decorationMetrics: TypefaceDecorationMetrics? { nil }
+    var designMetrics: TypefaceDesignMetrics? { nil }
 
     func purgeResources(reason: ResourcePurgeReason) {}
 }
@@ -360,6 +364,10 @@ struct TextureTypeface: VVDFontBackedTypeface {
 
     var font: VVD.Font { textureFont }
 
+    var designMetrics: TypefaceDesignMetrics? {
+        (layoutMetrics?.font ?? font).designMetrics
+    }
+
     var lineHeight: CGFloat {
         layoutMetrics?.lineHeight ?? font.height
     }
@@ -533,6 +541,7 @@ final class DeferredGlyphTypeface: Typeface {
     var descender: CGFloat { metrics.descender }
     var decorationMetrics: TypefaceDecorationMetrics? { metrics.decorationMetrics }
     var resolvedMetrics: ResolvedFontMetrics { metrics.resolvedMetrics }
+    var designMetrics: TypefaceDesignMetrics? { metrics.designMetrics }
     var identifier: String { "deferred-glyphs:\(metrics.identifier)" }
     var hasColorGlyphs: Bool { metrics.hasColorGlyphs }
     func isEqual(to other: Typeface) -> Bool { (other as? Self) === self }
@@ -581,6 +590,10 @@ final class VectorTypeface: VVDFontBackedTypeface {
         self.layoutMetrics = layoutMetrics
         self.decorationMetrics = layoutMetrics?.decorationMetrics ??
             typefaceDecorationMetrics(for: font)
+    }
+
+    var designMetrics: TypefaceDesignMetrics? {
+        (layoutMetrics?.font ?? font).designMetrics
     }
 
     var lineHeight: CGFloat {

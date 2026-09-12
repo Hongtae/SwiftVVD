@@ -281,6 +281,76 @@ final class TextStyleConsumerTests {
         #expect(resource == original)
     }
 
+    // ASSERTIONS fontResolvedRetainedContextObserved
+    // ASSERTIONS fontTextStyleDescriptorCopiesObserved
+    // ASSERTIONS textTypesettingRatioFontInputsObserved
+    @Test
+    func testGlyphsRetainDistinctStyleRequestsWhileSharingTheSameTypeface() throws {
+        let text = concatenating(Text(verbatim: "A").font(.system(.body)),
+                                 Text(verbatim: "B").font(.system(size: 13)))
+        let result = try resolve(text, environment: typesettingEnvironment())
+        let resources = try attributes(result).map { try #require($0.fontResource) }
+        try #require(resources.count == 2)
+        #expect(resources[0] !== resources[1])
+        #expect(resources[0].textStyle == .body)
+        #expect(resources[1].textStyle == nil)
+        let glyphs = result.makeGlyphs().flatMap(\.glyphs)
+        try #require(glyphs.count == 2)
+        #expect(glyphs[0].face.isEqual(to: glyphs[1].face))
+        for index in glyphs.indices {
+            #expect(glyphs[index].style.fontResource === resources[index])
+            #expect(glyphs[index].style.fontResource?.language == "ja-Jpan-JP")
+            #expect(glyphs[index].style.fontResource?.languageAwareLineHeightRatio == 0.33)
+            #expect(glyphs[index].face.designMetrics?.unitsPerEM == 2048)
+        }
+    }
+
+    // ASSERTIONS fontLeadingNativeMetricConsumerObserved
+    // ASSERTIONS fontResolvedRetainedContextObserved
+    @Test
+    func testFallbackGlyphKeepsItsDesignMetricsAndTheOriginalFontRequest() throws {
+        let result = try resolve(Text(verbatim: "A한").font(.system(.body)),
+                                 environment: typesettingEnvironment())
+        let resource = try #require(attributes(result).first?.fontResource)
+        let glyphs = result.makeGlyphs().flatMap(\.glyphs)
+        try #require(glyphs.count == 2)
+        #expect(glyphs[0].style.fontResource === resource)
+        #expect(glyphs[1].style.fontResource === resource)
+        #expect(resource.textStyle == .body)
+        #expect(!glyphs[0].face.isEqual(to: glyphs[1].face))
+        #expect(glyphs[0].face.designMetrics?.unitsPerEM == 2048)
+        #expect(glyphs[1].face.designMetrics?.unitsPerEM == 1000)
+        #expect(glyphs[0].lineBoxAscender == glyphs[1].lineBoxAscender)
+        #expect(glyphs[0].lineBoxDescender == glyphs[1].lineBoxDescender)
+    }
+
+    // ASSERTIONS fontResolvedRetainedContextObserved
+    // ASSERTIONS fontLeadingExtraDataOwnershipObserved
+    @Test
+    func testWrappingAndTruncationRetainFontRequestsAndDesignInputs() throws {
+        let result = try resolve(Text(verbatim: "ABCDE FGHIJ KLMNO").font(.system(.body)),
+                                 environment: typesettingEnvironment())
+        let resource = try #require(attributes(result).first?.fontResource)
+        let wrapped = result.makeGlyphs(maxWidth: 40)
+        try #require(wrapped.count > 1)
+        for glyph in wrapped.flatMap(\.glyphs) {
+            #expect(glyph.style.fontResource === resource)
+            #expect(glyph.face.designMetrics?.unitsPerEM == 2048)
+        }
+        for mode: Text.TruncationMode in [.head, .middle, .tail] {
+            let lines = result.makeGlyphs(maxWidth: 40, lineLimit: 1, truncationMode: mode)
+            let line = try #require(lines.first)
+            #expect(lines.count == 1)
+            #expect(line.isTruncated)
+            #expect(line.glyphs.filter(\.isTruncationToken).count == 1)
+            for glyph in line.glyphs {
+                #expect(glyph.style.fontResource === resource)
+                #expect(glyph.face.designMetrics?.unitsPerEM == 2048)
+                #expect(glyph.face.designMetrics?.lineGap == 0)
+            }
+        }
+    }
+
     // ASSERTIONS textStyleInitializationAndNestedOwnersObserved
     // ASSERTIONS textFontModifierTraversalOrderObserved
     @Test
