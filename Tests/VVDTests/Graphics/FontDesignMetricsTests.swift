@@ -50,6 +50,32 @@ final class FontDesignMetricsTests: XCTestCase {
         }
     }
 
+    func testOutlineFormatUsesSelectedFileAndMemoryFace() throws {
+        let cases: [(String, Int, Font.OutlineFormat, Int)] = [
+            (Self.roboto, 0, .trueType, 2048),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 0, .trueType, 1000),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 0, .compactFontFormat, 1000),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 3, .compactFontFormat, 1000),
+            ("NotoSansMonoCJK/NotoSansMonoCJK-VF.otf.ttc", 1, .compactFontFormat, 1000)
+        ]
+        for (name, index, expected, units) in cases {
+            let url = Self.resource(name)
+            let file = try XCTUnwrap(Font(path: url.path, faceIndex: index))
+            let data = try Data(contentsOf: url)
+            let memory = try XCTUnwrap(Font(data: data, faceIndex: index))
+            let original = try XCTUnwrap(file.designMetrics)
+            XCTAssertEqual(original.outlineFormat, expected)
+            XCTAssertEqual(original.unitsPerEM, units)
+            for font in [file, memory] {
+                XCTAssertEqual(font.designMetrics, original)
+                for size: CGFloat in [13, 15.625] {
+                    font.setPointSize(size, dpi: (144, 96))
+                    XCTAssertEqual(font.designMetrics, original)
+                }
+            }
+        }
+    }
+
     func testBackendMetricSelectionAndSignedGap() throws {
         // Deliberately distinct tables prove which metrics the backend selects.
         let cases: [(Bool, [Int16], [Int16], [Int])] = [

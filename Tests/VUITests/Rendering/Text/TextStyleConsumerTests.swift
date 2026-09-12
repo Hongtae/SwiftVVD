@@ -307,6 +307,7 @@ final class TextStyleConsumerTests {
 
     // ASSERTIONS fontLeadingNativeMetricConsumerObserved
     // ASSERTIONS fontResolvedRetainedContextObserved
+    // ASSERTIONS fontRawMetricFormatQuantizationObserved
     @Test
     func testFallbackGlyphKeepsItsDesignMetricsAndTheOriginalFontRequest() throws {
         let result = try resolve(Text(verbatim: "A한").font(.system(.body)),
@@ -320,12 +321,15 @@ final class TextStyleConsumerTests {
         #expect(!glyphs[0].face.isEqual(to: glyphs[1].face))
         #expect(glyphs[0].face.designMetrics?.unitsPerEM == 2048)
         #expect(glyphs[1].face.designMetrics?.unitsPerEM == 1000)
+        #expect(glyphs[0].face.designMetrics?.outlineFormat == .trueType)
+        #expect(glyphs[1].face.designMetrics?.outlineFormat == .compactFontFormat)
         #expect(glyphs[0].lineBoxAscender == glyphs[1].lineBoxAscender)
         #expect(glyphs[0].lineBoxDescender == glyphs[1].lineBoxDescender)
     }
 
     // ASSERTIONS fontResolvedRetainedContextObserved
     // ASSERTIONS fontLeadingExtraDataOwnershipObserved
+    // ASSERTIONS fontRawMetricFormatQuantizationObserved
     @Test
     func testWrappingAndTruncationRetainFontRequestsAndDesignInputs() throws {
         let result = try resolve(Text(verbatim: "ABCDE FGHIJ KLMNO").font(.system(.body)),
@@ -336,6 +340,7 @@ final class TextStyleConsumerTests {
         for glyph in wrapped.flatMap(\.glyphs) {
             #expect(glyph.style.fontResource === resource)
             #expect(glyph.face.designMetrics?.unitsPerEM == 2048)
+            #expect(glyph.face.designMetrics?.outlineFormat == .trueType)
         }
         for mode: Text.TruncationMode in [.head, .middle, .tail] {
             let lines = result.makeGlyphs(maxWidth: 40, lineLimit: 1, truncationMode: mode)
@@ -347,6 +352,7 @@ final class TextStyleConsumerTests {
                 #expect(glyph.style.fontResource === resource)
                 #expect(glyph.face.designMetrics?.unitsPerEM == 2048)
                 #expect(glyph.face.designMetrics?.lineGap == 0)
+                #expect(glyph.face.designMetrics?.outlineFormat == .trueType)
             }
         }
     }

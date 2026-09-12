@@ -1711,9 +1711,17 @@ public class Font: @unchecked Sendable {
         return true
     }
 
+    /// The outline representation reported by the selected font driver.
+    public enum OutlineFormat: Hashable, Sendable {
+        case trueType
+        case compactFontFormat
+        case other
+    }
+
     /// Unscaled horizontal metrics selected by the font backend.
     /// Values use font design units and include the active variation's adjustments.
     public struct DesignMetrics: Hashable, Sendable {
+        public let outlineFormat: OutlineFormat
         public let unitsPerEM: Int
         public let ascender: Int
         public let descender: Int
@@ -1732,7 +1740,14 @@ public class Font: @unchecked Sendable {
             guard FT_IS_SCALABLE(face), face.pointee.units_per_EM > 0 else {
                 return nil
             }
-            return DesignMetrics(unitsPerEM: Int(face.pointee.units_per_EM),
+            let outlineFormat: OutlineFormat
+            switch FT_Get_Font_Format(face).map({ String(cString: $0) }) {
+            case "TrueType": outlineFormat = .trueType
+            case "CFF": outlineFormat = .compactFontFormat
+            default: outlineFormat = .other
+            }
+            return DesignMetrics(outlineFormat: outlineFormat,
+                                 unitsPerEM: Int(face.pointee.units_per_EM),
                                  ascender: Int(face.pointee.ascender),
                                  descender: Int(face.pointee.descender),
                                  height: Int(face.pointee.height))

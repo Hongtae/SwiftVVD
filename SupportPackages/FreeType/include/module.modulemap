@@ -7,4 +7,5 @@ module FreeType {
     header "freetype/ftmm.h"
     header "freetype/tttables.h"
     header "freetype/ftsnames.h"
+    header "freetype/ftfntfmt.h"
 }

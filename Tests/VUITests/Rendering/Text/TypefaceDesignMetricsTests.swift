@@ -91,6 +91,42 @@ struct TypefaceDesignMetricsTests {
         #expect(rasterFont.designMetrics?.lineGap == 0)
     }
 
+    // ASSERTIONS fontRawMetricFormatQuantizationObserved
+    @Test
+    func testOutlineFormatFollowsLogicalFaceThroughDeferredFallback() throws {
+        let rasterFont = try makeFont()
+        #expect(rasterFont.designMetrics?.outlineFormat == .trueType)
+        let cases: [(String, VVD.Font.OutlineFormat)] = [
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", .compactFontFormat),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", .trueType)
+        ]
+        for (name, format) in cases {
+            let url = resource(name)
+            let fileCandidate = VVD.Font(path: url.path)
+            let memoryCandidate = VVD.Font(data: try Data(contentsOf: url))
+            let file = try #require(fileCandidate)
+            let memory = try #require(memoryCandidate)
+            let expected = try #require(file.designMetrics)
+            #expect(expected.outlineFormat == format)
+            #expect(expected.unitsPerEM == 1000)
+            for layoutFont in [file, memory] {
+                for scale: CGFloat in [1, 2] {
+                    let base: Typeface = VectorTypeface(font: rasterFont, layoutFont: layoutFont, renderScale: scale)
+                    let deferred = DeferredGlyphTypeface(metrics: base) {
+                        Issue.record("Metric format must not load glyph artwork")
+                        return nil
+                    }
+                    let cascade = TypefaceCascade(ordinaryFaces: [deferred], missingGlyphFace: base,
+                        shapingFeatures: VUI.Font.MonospacedDigitModifier.shapingFeatures)
+                    for face in cascade.runFaces {
+                        #expect(face.designMetrics == expected)
+                        #expect(face.designMetrics?.outlineFormat == format)
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS fontLeadingBaseHeightProducerObserved
     @Test
     func testBitmapOnlyFaceRetainsAbsentDesignMetricsThroughDeferredArtwork() throws {
