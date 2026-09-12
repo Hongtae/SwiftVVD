@@ -21,6 +21,7 @@ struct TypefaceDesignMetricsTests {
 
     // ASSERTIONS fontLeadingBaseHeightProducerObserved
     // ASSERTIONS fontLeadingStyleGapDerivationObserved
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
     @Test
     func testDesignUnitsSurviveTypefaceScaleWithoutChangingRasterMetrics() throws {
         let layoutFont = try makeFont()
@@ -33,6 +34,9 @@ struct TypefaceDesignMetricsTests {
                 let rounded = face.resolvedMetrics
                 let glyph = try #require(face.glyphMetrics(for: "A"))
                 let metrics = try #require(face.designMetrics)
+                let clipping = try #require(metrics.clipping)
+                #expect(clipping.ascent == 1946)
+                #expect(clipping.descent == 512)
                 #expect(metrics.unitsPerEM == 2048)
                 let components = [metrics.ascender, metrics.descender, metrics.height, metrics.lineGap]
                 #expect(components == [1900, -500, 2400, 0])
@@ -43,6 +47,8 @@ struct TypefaceDesignMetricsTests {
                 if size == 13 {
                     #expect(CGFloat(metrics.ascender) * size / CGFloat(metrics.unitsPerEM) == 12.060546875)
                     #expect(CGFloat(metrics.descender) * size / CGFloat(metrics.unitsPerEM) == -3.173828125)
+                    #expect(CGFloat(clipping.ascent) * size / CGFloat(metrics.unitsPerEM) == 12.3525390625)
+                    #expect(CGFloat(clipping.descent) * size / CGFloat(metrics.unitsPerEM) == 3.25)
                     #expect(rounded.ascender == 13 * scale)
                     #expect(rounded.descender == -4 * scale)
                 }
@@ -52,6 +58,7 @@ struct TypefaceDesignMetricsTests {
 
     // ASSERTIONS fontLeadingStyleGapDerivationObserved
     // ASSERTIONS fontLeadingExtraDataOwnershipObserved
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
     @Test
     func testSignedDesignGapPassesThroughFallbackWithoutLoadingGlyphArtwork() throws {
         let font = try makeFont(data: signedGapFixture())
@@ -68,6 +75,8 @@ struct TypefaceDesignMetricsTests {
         try #require(faces.count == 2)
         for face in faces {
             let metrics = try #require(face.designMetrics)
+            #expect(metrics.clipping?.ascent == 2200)
+            #expect(metrics.clipping?.descent == 710)
             #expect(metrics.unitsPerEM == 2048)
             let components = [metrics.ascender, metrics.descender, metrics.height, metrics.lineGap]
             #expect(components == [1900, -500, 2300, -100])
@@ -82,6 +91,7 @@ struct TypefaceDesignMetricsTests {
     }
 
     // ASSERTIONS fontLeadingExtraDataOwnershipObserved
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
     @Test
     func testLayoutFaceOwnsDesignMetricsWhenArtworkUsesAnotherFace() throws {
         let layoutFont = try makeFont(data: signedGapFixture())
@@ -89,9 +99,14 @@ struct TypefaceDesignMetricsTests {
         let face: Typeface = VectorTypeface(font: rasterFont, layoutFont: layoutFont, renderScale: 2)
         #expect(face.designMetrics?.lineGap == -100)
         #expect(rasterFont.designMetrics?.lineGap == 0)
+        #expect(face.designMetrics?.clipping?.ascent == 2200)
+        #expect(face.designMetrics?.clipping?.descent == 710)
+        #expect(rasterFont.designMetrics?.clipping?.ascent == 1946)
+        #expect(rasterFont.designMetrics?.clipping?.descent == 512)
     }
 
     // ASSERTIONS fontRawMetricFormatQuantizationObserved
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
     @Test
     func testOutlineFormatFollowsLogicalFaceThroughDeferredFallback() throws {
         let rasterFont = try makeFont()
@@ -109,6 +124,8 @@ struct TypefaceDesignMetricsTests {
             let expected = try #require(file.designMetrics)
             #expect(expected.outlineFormat == format)
             #expect(expected.unitsPerEM == 1000)
+            #expect(expected.clipping?.ascent == (format == .trueType ? 850 : 1160))
+            #expect(expected.clipping?.descent == (format == .trueType ? 255 : 288))
             for layoutFont in [file, memory] {
                 for scale: CGFloat in [1, 2] {
                     let base: Typeface = VectorTypeface(font: rasterFont, layoutFont: layoutFont, renderScale: scale)
@@ -124,6 +141,27 @@ struct TypefaceDesignMetricsTests {
                     }
                 }
             }
+        }
+    }
+
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
+    @Test
+    func testAbsentClippingDoesNotBorrowArtworkMetricsOrDropNaturalMetrics() throws {
+        let layoutFont = try makeFont(data: signedGapFixture(removeOS2: true))
+        let rasterFont = try makeFont()
+        let expected = try #require(layoutFont.designMetrics)
+        #expect(expected.clipping == nil)
+        #expect(rasterFont.designMetrics?.clipping != nil)
+        let base: Typeface = VectorTypeface(font: rasterFont, layoutFont: layoutFont, renderScale: 2)
+        let deferred = DeferredGlyphTypeface(metrics: base) {
+            Issue.record("Absent clipping must not load glyph artwork")
+            return nil
+        }
+        let cascade = TypefaceCascade(ordinaryFaces: [deferred], missingGlyphFace: base,
+            shapingFeatures: VUI.Font.MonospacedDigitModifier.shapingFeatures)
+        for face in cascade.runFaces {
+            #expect(face.designMetrics == expected)
+            #expect(face.designMetrics?.lineGap == -100)
         }
     }
 
@@ -143,7 +181,7 @@ struct TypefaceDesignMetricsTests {
         #expect(terminal.resolvedMetrics == face.resolvedMetrics)
     }
 
-    private func signedGapFixture() throws -> Data {
+    private func signedGapFixture(removeOS2: Bool = false) throws -> Data {
         var data = try Data(contentsOf: resource("Roboto/Roboto-VariableFont_wdth,wght.ttf"))
         func read16(_ offset: Int) -> UInt16 {
             UInt16(data[offset]) << 8 | UInt16(data[offset + 1])
@@ -157,11 +195,16 @@ struct TypefaceDesignMetricsTests {
             let record = 12 + index * 16
             let tag = String(decoding: data[record..<record + 4], as: UTF8.self)
             offsets[tag] = read32(record + 8)
+            if removeOS2 && tag == "OS/2" {
+                // Keep the bytes but remove the table's recognized directory entry.
+                data.replaceSubrange(record..<record + 4, with: "ZZZZ".utf8)
+            }
         }
         let hhea = try #require(offsets["hhea"])
         let os2 = try #require(offsets["OS/2"])
         let selection = read16(os2 + 62) & ~UInt16(128)
-        for (offset, value) in [(hhea + 8, UInt16(bitPattern: Int16(-100))), (os2 + 62, selection)] {
+        for (offset, value) in [(hhea + 8, UInt16(bitPattern: Int16(-100))), (os2 + 62, selection),
+                               (os2 + 74, UInt16(2200)), (os2 + 76, UInt16(710))] {
             data[offset] = UInt8(truncatingIfNeeded: value >> 8)
             data[offset + 1] = UInt8(truncatingIfNeeded: value)
         }

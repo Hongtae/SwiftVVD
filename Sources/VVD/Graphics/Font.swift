@@ -1718,6 +1718,12 @@ public class Font: @unchecked Sendable {
         case other
     }
 
+    /// Nonnegative distances above and below the baseline in font design units.
+    public struct ClippingMetrics: Hashable, Sendable {
+        public let ascent: Int
+        public let descent: Int
+    }
+
     /// Unscaled horizontal metrics selected by the font backend.
     /// Values use font design units and include the active variation's adjustments.
     public struct DesignMetrics: Hashable, Sendable {
@@ -1726,6 +1732,10 @@ public class Font: @unchecked Sendable {
         public let ascender: Int
         public let descender: Int
         public let height: Int
+
+        /// Independent clipping distances, when the selected face provides them.
+        /// These use unitsPerEM and retain the backend's variation quantization.
+        public let clipping: ClippingMetrics?
 
         /// The signed gap between the descent and the next line's ascent.
         public var lineGap: Int { height - (ascender - descender) }
@@ -1746,11 +1756,20 @@ public class Font: @unchecked Sendable {
             case "CFF": outlineFormat = .compactFontFormat
             default: outlineFormat = .other
             }
+            let clipping: ClippingMetrics?
+            if let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?.assumingMemoryBound(to: TT_OS2.self),
+               os2.pointee.version != 0xffff {
+                clipping = ClippingMetrics(ascent: Int(os2.pointee.usWinAscent),
+                                           descent: Int(os2.pointee.usWinDescent))
+            } else {
+                clipping = nil
+            }
             return DesignMetrics(outlineFormat: outlineFormat,
                                  unitsPerEM: Int(face.pointee.units_per_EM),
                                  ascender: Int(face.pointee.ascender),
                                  descender: Int(face.pointee.descender),
-                                 height: Int(face.pointee.height))
+                                 height: Int(face.pointee.height),
+                                 clipping: clipping)
         }
     }
 

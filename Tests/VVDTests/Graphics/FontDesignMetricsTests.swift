@@ -22,6 +22,8 @@ final class FontDesignMetricsTests: XCTestCase {
         let glyph = try XCTUnwrap(font.glyphMetrics(for: "A"))
         let metrics = try XCTUnwrap(font.designMetrics)
         XCTAssertEqual(metrics.unitsPerEM, 2048)
+        let clipping = try XCTUnwrap(metrics.clipping)
+        XCTAssertEqual([clipping.ascent, clipping.descent], [1946, 512])
         XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height, metrics.lineGap],
                        [1900, -500, 2400, 0])
         let scale = CGFloat(13) / CGFloat(metrics.unitsPerEM)
@@ -51,14 +53,14 @@ final class FontDesignMetricsTests: XCTestCase {
     }
 
     func testOutlineFormatUsesSelectedFileAndMemoryFace() throws {
-        let cases: [(String, Int, Font.OutlineFormat, Int)] = [
-            (Self.roboto, 0, .trueType, 2048),
-            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 0, .trueType, 1000),
-            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 0, .compactFontFormat, 1000),
-            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 3, .compactFontFormat, 1000),
-            ("NotoSansMonoCJK/NotoSansMonoCJK-VF.otf.ttc", 1, .compactFontFormat, 1000)
+        let cases: [(String, Int, Font.OutlineFormat, Int, [Int])] = [
+            (Self.roboto, 0, .trueType, 2048, [1946, 512]),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 0, .trueType, 1000, [850, 255]),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 0, .compactFontFormat, 1000, [1160, 288]),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 3, .compactFontFormat, 1000, [1160, 288]),
+            ("NotoSansMonoCJK/NotoSansMonoCJK-VF.otf.ttc", 1, .compactFontFormat, 1000, [1160, 288])
         ]
-        for (name, index, expected, units) in cases {
+        for (name, index, expected, units, expectedClipping) in cases {
             let url = Self.resource(name)
             let file = try XCTUnwrap(Font(path: url.path, faceIndex: index))
             let data = try Data(contentsOf: url)
@@ -66,6 +68,8 @@ final class FontDesignMetricsTests: XCTestCase {
             let original = try XCTUnwrap(file.designMetrics)
             XCTAssertEqual(original.outlineFormat, expected)
             XCTAssertEqual(original.unitsPerEM, units)
+            let clipping = try XCTUnwrap(original.clipping)
+            XCTAssertEqual([clipping.ascent, clipping.descent], expectedClipping)
             for font in [file, memory] {
                 XCTAssertEqual(font.designMetrics, original)
                 for size: CGFloat in [13, 15.625] {
@@ -90,12 +94,48 @@ final class FontDesignMetricsTests: XCTestCase {
             let font = try XCTUnwrap(Font(data: data))
             let metrics = try XCTUnwrap(font.designMetrics)
             XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height, metrics.lineGap], expected)
+            let clipping = try XCTUnwrap(metrics.clipping)
+            XCTAssertEqual([clipping.ascent, clipping.descent], [2100, 700])
         }
         let data = try Self.fixture(removeOS2: true)
         let font = try XCTUnwrap(Font(data: data))
         let metrics = try XCTUnwrap(font.designMetrics)
         XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height, metrics.lineGap],
                        [1800, -400, 2100, -100])
+        XCTAssertNil(metrics.clipping)
+    }
+
+    func testClippingDistancesPreserveZeroUnsignedValuesAndValueIdentity() throws {
+        let snapshots = try [[UInt16(0), 0], [2100, 700], [40000, 50000]].map { distances in
+            let font = try XCTUnwrap(Font(data: Self.fixture(clipping: distances)))
+            let metrics = try XCTUnwrap(font.designMetrics)
+            let clipping = try XCTUnwrap(metrics.clipping)
+            XCTAssertEqual([clipping.ascent, clipping.descent], distances.map(Int.init))
+            XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height], [1800, -400, 2100])
+            return metrics
+        }
+        XCTAssertEqual(Set(snapshots).count, 3)
+        XCTAssertEqual(Set(snapshots.compactMap(\.clipping)).count, 3)
+    }
+
+    func testClippingVariationRetainsBackendQuantizationAndEarlierSnapshots() throws {
+        let data = try Self.fixture(variableMetrics: true)
+        let font = try XCTUnwrap(Font(data: data))
+        let original = try XCTUnwrap(font.designMetrics)
+        let initial = try XCTUnwrap(original.clipping)
+        for (weight, expected): (CGFloat, [Int]) in [
+            (900, [2201, 649]), (650, [2151, 675]), (525, [2125, 687]),
+            (400, [2100, 700]), (100, [2100, 700]), (650, [2151, 675]),
+        ] {
+            XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: weight]))
+            let metrics = try XCTUnwrap(font.designMetrics)
+            let clipping = try XCTUnwrap(metrics.clipping)
+            XCTAssertEqual([clipping.ascent, clipping.descent], expected)
+            XCTAssertEqual(original.clipping, initial)
+            XCTAssertEqual([initial.ascent, initial.descent], [2100, 700])
+        }
+        XCTAssertTrue(font.setVariationCoordinates([:]))
+        XCTAssertEqual(font.designMetrics, original)
     }
 
     func testFreshVariationAdjustmentIsReflectedWithoutChangingEarlierSnapshot() throws {
@@ -240,6 +280,7 @@ final class FontDesignMetricsTests: XCTestCase {
 
     private static func fixture(horizontal: [Int16] = [1800, -400, -100],
                                 typographic: [Int16] = [1600, -600, 50],
+                                clipping: [UInt16] = [2100, 700],
                                 useTypographic: Bool = false,
                                 removeOS2: Bool = false,
                                 variableMetrics: Bool = false) throws -> Data {
@@ -258,19 +299,20 @@ final class FontDesignMetricsTests: XCTestCase {
         }
         let flags = read16(tables["OS/2"]!, 62) & ~UInt16(128)
         write16(flags | (useTypographic ? 128 : 0), &tables["OS/2"]!, 62)
-        write16(2100, &tables["OS/2"]!, 74)
-        write16(700, &tables["OS/2"]!, 76)
+        write16(clipping[0], &tables["OS/2"]!, 74)
+        write16(clipping[1], &tables["OS/2"]!, 76)
         if removeOS2 { tables.removeValue(forKey: "OS/2") }
         if variableMetrics {
-            // MVAR: three records, one two-axis region, one item-variation data block.
-            var mvar = words([1, 0, 0, 8, 3, 36])
-            for (index, tag) in ["hasc", "hdsc", "hlgp"].enumerated() {
+            // MVAR: five records, one two-axis region, one item-variation data block.
+            var mvar = words([1, 0, 0, 8, 5, 52])
+            for (index, tag) in ["hasc", "hcla", "hcld", "hdsc", "hlgp"].enumerated() {
                 mvar.append(contentsOf: tag.utf8)
                 mvar.append(words([0, UInt16(index)]))
             }
             mvar.append(words([1, 0, 12, 1, 0, 28]))
             mvar.append(words([2, 1, 0, 0x4000, 0x4000, 0, 0, 0]))
-            mvar.append(words([3, 1, 1, 0, 100, UInt16(bitPattern: -50), UInt16(bitPattern: -30)]))
+            mvar.append(words([5, 1, 1, 0, 100, 101, UInt16(bitPattern: -51),
+                               UInt16(bitPattern: -50), UInt16(bitPattern: -30)]))
             tables["MVAR"] = mvar
             tables.removeValue(forKey: "avar")
         }
