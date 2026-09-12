@@ -507,9 +507,7 @@ extension GraphicsContext.ResolvedText {
         isTruncated: Bool = false
     ) -> Text.Layout {
         let scale = 1 / scaleFactor
-        var baseline = CGFloat.zero
         let lines = lineGlyphs.map { line -> _TextLayoutLineStorage in
-            baseline += line.ascender * scale
             var runs: [_TextLayoutRunStorage] = []
             for glyphIndex in line.glyphs.indices {
                 let glyph = line.glyphs[glyphIndex]
@@ -548,12 +546,11 @@ extension GraphicsContext.ResolvedText {
             let result = _TextLayoutLineStorage(
                 glyphs: line.glyphs,
                 runs: runs,
-                origin: CGPoint(x: 0, y: baseline),
+                origin: CGPoint(x: 0, y: line.baseline * scale),
                 width: line.width * scale,
                 ascent: line.ascender * scale,
                 descent: -line.descender * scale
             )
-            baseline += -line.descender * scale
             return result
         }
         return Text.Layout(storage: _TextLayoutStorage(

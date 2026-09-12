@@ -351,6 +351,186 @@ final class TextStyleConsumerTests {
         }
     }
 
+    // ASSERTIONS textLineSpacingPlacementObserved
+    // ASSERTIONS textLineSpacingMeasurementAndLimitObserved
+    @Test
+    func testLineSpacingMovesLayoutBaselinesAndMeasurementTogether() throws {
+        let proposal = CGSize(width: 90, height: 1000)
+        let scales: [(CGFloat, CGFloat)] = [(1, 1), (1, 2), (2, 1), (2, 2)]
+        for (scale, displayScale) in scales {
+            var environment = self.environment()
+            environment.font = .system(size: 13)
+            environment._contentScaleFactor = scale
+            environment.displayScale = displayScale
+            for string in ["Hg", "Hg\nHg", "Hg\nHg\nHg", "Hg Hg Hg Hg Hg Hg Hg Hg Hg Hg Hg Hg"] {
+                environment.lineSpacing = 0
+                let original = try resolve(Text(verbatim: string), environment: environment)
+                let originalLayout = original.makeLayout(in: proposal, layoutDirection: .leftToRight)
+                let originalSize = original.measure(in: proposal)
+                try #require(!originalLayout.isEmpty)
+                for spacing: CGFloat in [-7, 2.5, 7] {
+                    environment.lineSpacing = spacing
+                    let resolved = try resolve(Text(verbatim: string), environment: environment)
+                    let layout = resolved.makeLayout(in: proposal, layoutDirection: .leftToRight)
+                    let gap = max(spacing, 0)
+                    try #require(layout.count == originalLayout.count)
+                    let expectedHeight = ceil((originalSize.height + CGFloat(layout.count - 1) * gap) * displayScale) / displayScale
+                    #expect(resolved.measure(in: proposal).height == expectedHeight)
+                    #expect(resolved.measure(maxWidth: proposal.width) == resolved.measure(in: proposal))
+                    #expect(TextProxy(resolved).sizeThatFits(.init(width: proposal.width)) == resolved.measure(in: proposal))
+                    for index in layout.indices {
+                        #expect(layout[index].origin.y == originalLayout[index].origin.y + CGFloat(index) * gap)
+                        #expect(layout[index].typographicBounds.ascent == originalLayout[index].typographicBounds.ascent)
+                        #expect(layout[index].typographicBounds.descent == originalLayout[index].typographicBounds.descent)
+                        #expect(layout[index].typographicBounds.leading == 0)
+                        for (run, baseRun) in zip(layout[index], originalLayout[index]) {
+                            #expect(run.typographicBounds.ascent == baseRun.typographicBounds.ascent)
+                            #expect(run.typographicBounds.descent == baseRun.typographicBounds.descent)
+                            #expect(run.typographicBounds.leading == baseRun.typographicBounds.leading)
+                        }
+                    }
+                    #expect(resolved.firstBaseline(in: proposal) == layout.first?.origin.y)
+                    #expect(resolved.lastBaseline(in: proposal) == layout.last?.origin.y)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textEmptyParagraphSpacingBoundsObserved
+    // ASSERTIONS textLineSpacingMeasurementAndLimitObserved
+    @Test
+    func testEmptyParagraphSpacingAndTrailingLineAreRetained() throws {
+        let proposal = CGSize(width: 90, height: 1000)
+        for string in ["\n", "\n\n"] {
+            var environment = self.environment()
+            let base = try resolve(Text(verbatim: string), environment: environment)
+            environment.lineSpacing = 7
+            let spaced = try resolve(Text(verbatim: string), environment: environment)
+            #expect(spaced.measure(in: proposal) == base.measure(in: proposal))
+            #expect(spaced.lastBaseline(in: proposal) == base.lastBaseline(in: proposal))
+        }
+        let cases: [(String, Int, Set<Int>)] = [("Hg\n", 2, []),
+            ("Hg\n\nHg", 3, [1]), ("\nHg\nHg", 3, []), ("Hg\n\n\nHg", 4, [1, 2])]
+        for scale: CGFloat in [1, 2] {
+            var environment = self.environment()
+            environment.font = .system(size: 13)
+            environment._contentScaleFactor = scale
+            environment.displayScale = scale
+            for (string, count, expandedDescents) in cases {
+                environment.lineSpacing = 0
+                let original = try resolve(Text(verbatim: string), environment: environment)
+                let base = original.makeLayout(in: proposal, layoutDirection: .leftToRight)
+                try #require(base.count == count)
+                for spacing: CGFloat in [2.5, 7] {
+                    environment.lineSpacing = spacing
+                    let resolved = try resolve(Text(verbatim: string), environment: environment)
+                    let layout = resolved.makeLayout(in: proposal, layoutDirection: .leftToRight)
+                    try #require(layout.count == count)
+                    let expectedHeight = ceil((original.measure(in: proposal).height + CGFloat(count - 1) * spacing) * scale) / scale
+                    #expect(resolved.measure(in: proposal).height == expectedHeight)
+                    for index in layout.indices {
+                        let hasIncomingEmptyGap = expandedDescents.contains(index)
+                        let shift = CGFloat(index - (hasIncomingEmptyGap ? 1 : 0)) * spacing
+                        #expect(layout[index].origin.y == base[index].origin.y + shift)
+                        #expect(layout[index].typographicBounds.ascent == base[index].typographicBounds.ascent)
+                        #expect(layout[index].typographicBounds.descent == base[index].typographicBounds.descent + (hasIncomingEmptyGap ? spacing : 0))
+                    }
+                    #expect(resolved.lastBaseline(in: proposal) == layout.last?.origin.y)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textLineSpacingMeasurementAndLimitObserved
+    @Test
+    func testLineSpacingParticipatesInHeightLimitsAndTruncation() throws {
+        var environment = self.environment()
+        environment.font = .system(size: 13)
+        environment.lineSpacing = 7
+        environment._contentScaleFactor = 1
+        let resolved = try resolve(Text(verbatim: "Hg\nHg\nHg"), environment: environment)
+        let line = try #require(resolved.makeGlyphs().first)
+        let twoLineHeight = line.height * 2 + 7
+        #expect(resolved.makeGlyphs(maxHeight: Int(twoLineHeight)).count == 2)
+        #expect(resolved.makeGlyphs(maxHeight: Int(twoLineHeight - 1)).count == 1)
+        #expect(resolved.measure(maxHeight: twoLineHeight).height == twoLineHeight)
+        for mode: Text.TruncationMode in [.head, .middle, .tail] {
+            var properties = TextLayoutProperties(from: environment)
+            properties.lineLimit = 2
+            properties.truncationMode = mode
+            let size = CGSize(width: 90, height: 1000)
+            let metrics = resolved.layoutMetrics(in: size, layoutProperties: properties)
+            let layout = resolved.makeLayout(in: size, layoutDirection: .leftToRight, layoutProperties: properties)
+            #expect(metrics.size.height == twoLineHeight)
+            #expect(layout.count == 2)
+            #expect(metrics.lastBaseline == layout.last?.origin.y)
+        }
+        let empty = try resolve(Text(verbatim: "Hg\n\nHg"), environment: environment)
+        let lines = empty.makeGlyphs(lineLimit: 2)
+        try #require(lines.count == 2)
+        #expect(lines[1].glyphs.isEmpty)
+        #expect(lines[1].height == line.height + 7)
+    }
+
+    // ASSERTIONS textLineSpacingPlacementObserved
+    // ASSERTIONS fontLeadingLineBoundsStorageObserved
+    @Test
+    func testLineSpacingDrivesPreparedDrawingAndGlyphAtoms() throws {
+        var string = AttributedString("A\nB\nC")
+        string._setCoreAttributes(_ResolvedTextRunAttributes(backgroundColor: .yellow, underlineStyle: .init()))
+        for (letter, color) in [("A", VUI.Color.red), ("B", .green), ("C", .blue)] {
+            if let range = string.range(of: letter) { string[range].foregroundColor = color }
+        }
+        let text = Text(string)
+        let size = CGSize(width: 200, height: 1000)
+        for scale: CGFloat in [1, 2] {
+            var environment = self.environment()
+            environment._contentScaleFactor = scale
+            environment.displayScale = scale
+            let original = try resolve(text, environment: environment)
+            let baseDrawing = original.makeDrawing(in: size)
+            let baseAtoms = original.glyphAtoms(in: size)
+            environment.lineSpacing = 7
+            let resolved = try resolve(text, environment: environment)
+            let drawing = resolved.makeDrawing(in: size)
+            let atoms = resolved.glyphAtoms(in: size)
+            try #require(baseDrawing.vectorBatches.count == 3 && drawing.vectorBatches.count == 3)
+            try #require(baseDrawing.decorations.count == 3 && drawing.decorations.count == 3)
+            try #require(baseDrawing.backgrounds.count == 3 && drawing.backgrounds.count == 3)
+            try #require(baseAtoms.count == 3 && atoms.count == 3)
+            for index in 0..<3 {
+                let delta = CGFloat(index) * 7
+                #expect(drawing.vectorBatches[index].path.boundingRect.minY == baseDrawing.vectorBatches[index].path.boundingRect.minY + delta * scale)
+                #expect(drawing.decorations[index].start.y == baseDrawing.decorations[index].start.y + delta * scale)
+                #expect(drawing.backgrounds[index].frame.minY == baseDrawing.backgrounds[index].frame.minY + delta * scale)
+                #expect(atoms[index].bounds.minY == baseAtoms[index].bounds.minY + delta)
+                #expect(atoms[index].bounds.height == baseAtoms[index].bounds.height)
+            }
+        }
+    }
+
+    // ASSERTIONS textLineSpacingPlacementObserved
+    @Test
+    func testMixedFontAndBaselineOffsetKeepLineSpacingIndependent() throws {
+        let text = concatenating(Text(verbatim: "Hg\n").font(.system(size: 13)),
+            concatenating(Text(verbatim: "Xg\n").font(.system(size: 23)).baselineOffset(4),
+                Text(verbatim: "Hg").font(.system(size: 13))))
+        let size = CGSize(width: 90, height: 1000)
+        var environment = self.environment()
+        let original = try resolve(text, environment: environment)
+        let base = original.makeLayout(in: size, layoutDirection: .leftToRight)
+        environment.lineSpacing = 7
+        let resolved = try resolve(text, environment: environment)
+        let layout = resolved.makeLayout(in: size, layoutDirection: .leftToRight)
+        try #require(base.count == 3 && layout.count == 3)
+        #expect(resolved.measure(in: size).height == original.measure(in: size).height + 14)
+        for index in layout.indices {
+            #expect(layout[index].origin.y == base[index].origin.y + CGFloat(index) * 7)
+            #expect(layout[index].typographicBounds.ascent == base[index].typographicBounds.ascent)
+            #expect(layout[index].typographicBounds.descent == base[index].typographicBounds.descent)
+        }
+    }
+
     // ASSERTIONS textStyleInitializationAndNestedOwnersObserved
     // ASSERTIONS textFontModifierTraversalOrderObserved
     @Test
