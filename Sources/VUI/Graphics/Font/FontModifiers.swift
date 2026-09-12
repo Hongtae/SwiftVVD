@@ -192,13 +192,14 @@ extension Font {
     }
 }
 
-/// Transfers the text language request into the font descriptor.
+/// Supplies a text language when the font descriptor has none.
 struct LanguageFontModifier: FontModifier {
     var identifier: String
     var tag: Font.DynamicModifierTag { .language }
     var codingProxy: String { identifier }
     static func unwrap(codingProxy: String) -> Self { Self(identifier: codingProxy) }
     func modify(descriptor: inout FontDescriptor, in context: Font.Context) {
+        guard descriptor.language == nil else { return }
         descriptor = descriptor.withTypesetting(language: identifier)
     }
 }

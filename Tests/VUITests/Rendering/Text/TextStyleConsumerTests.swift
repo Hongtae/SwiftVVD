@@ -1037,6 +1037,86 @@ final class TextStyleConsumerTests {
         }
     }
 
+    // ASSERTIONS textComponentFontLanguageAndRatioObserved
+    @Test
+    func testLanguageModifierPreservesExistingDescriptorLanguage() {
+        let context = environment().fontResolutionContext
+        for initial: String? in [nil, "en-Latn-US", ""] {
+            var descriptor = FontDescriptor(source: .system(.default, .regular, false), pointSize: 23,
+                language: initial, languageAwareLineHeightRatio: 0.5)
+            for request in ["ur-Aran-PK", "ja-Jpan-JP"] {
+                let previous = descriptor
+                LanguageFontModifier(identifier: request).modify(descriptor: &descriptor, in: context)
+                #expect(descriptor.language == (initial ?? "ur-Aran-PK"))
+                #expect(descriptor.languageAwareLineHeightRatio == 0.5)
+                if previous.language != nil { #expect(descriptor === previous) }
+            }
+            LanguageAwareLineHeightRatioFontModifier(ratio: 0).modify(descriptor: &descriptor, in: context)
+            #expect(descriptor.language == (initial ?? "ur-Aran-PK"))
+            #expect(descriptor.languageAwareLineHeightRatio == 0)
+        }
+    }
+
+    // ASSERTIONS textComponentFontLanguageAndRatioObserved
+    @Test
+    func testCachedFontRequestsPreserveTheFirstLanguageAndReplaceTheRatio() throws {
+        let context = environment().fontResolutionContext
+        let base = Font.system(size: 23)
+        let first = base.platformFont(in: context, modifiers: [
+            .dynamic(LanguageFontModifier(identifier: "en-Latn-US")),
+            .dynamic(LanguageFontModifier(identifier: "ur-Aran-PK")),
+            .dynamic(LanguageAwareLineHeightRatioFontModifier(ratio: 0.33)),
+            .dynamic(LanguageAwareLineHeightRatioFontModifier(ratio: 0.5))])
+        #expect(first.language == "en-Latn-US")
+        #expect(first.languageAwareLineHeightRatio == 0.5)
+        let resolved = Font(provider: FontBox(Font.PlatformFontProvider(font: first)))
+        let second = resolved.platformFont(in: context, modifiers: [
+            .dynamic(LanguageFontModifier(identifier: "ja-Jpan-JP")),
+            .dynamic(LanguageAwareLineHeightRatioFontModifier(ratio: 0))])
+        #expect(second.language == "en-Latn-US")
+        #expect(second.languageAwareLineHeightRatio == 0)
+        #expect(first.languageAwareLineHeightRatio == 0.5)
+        #expect(second !== first)
+    }
+
+    // ASSERTIONS textComponentFontLanguageAndRatioObserved
+    @Test
+    func testResourceFontsDoNotAcquireComponentMetricsFromTypesettingRequests() throws {
+        let url = fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        for font in [Font.file(url, size: 23), .system(size: 23), .body] {
+            var env = environment()
+            env.font = font
+            let text = Text(verbatim: "Ågj\nÅgj")
+            let baseline = try resolve(text, environment: env)
+            let metrics = try #require(baseline.maximumFontMetrics)
+            let size = baseline.measure()
+            let styled = ResolvedStyledText(resolvedText: baseline)
+            for language: String? in [nil, "en", "ur", "ja"] {
+                for (ratio, retained): (TypesettingLanguageAwareLineHeightRatio, Double?) in [
+                    (.automatic, nil), (.disable, 0), (.legacy, 0.33), (.custom(0.5), 0.5), (.custom(1), 1)
+                ] {
+                    env.typesettingConfiguration.language = language.map { .explicit(Locale.Language(identifier: $0)) } ?? .automatic
+                    env.typesettingConfiguration.languageAwareLineHeightRatio = ratio
+                    let result = try resolve(text, environment: env)
+                    let actual = try #require(result.maximumFontMetrics)
+                    #expect(actual.ascender == metrics.ascender)
+                    #expect(actual.descender == metrics.descender)
+                    #expect(actual.leading == metrics.leading)
+                    #expect(actual.outsets == metrics.outsets)
+                    #expect(result.measure() == size)
+                    #expect(result.firstBaseline(in: size) == baseline.firstBaseline(in: size))
+                    let actualStyled = ResolvedStyledText(resolvedText: result)
+                    #expect(actualStyled.drawingMargins == styled.drawingMargins)
+                    #expect(actualStyled.frame(in: size, renderer: nil) == styled.frame(in: size, renderer: nil))
+                    for run in attributes(result) {
+                        #expect(run.fontResource?.language == language.map { Locale.Language(identifier: $0).maximalIdentifier })
+                        #expect(run.fontResource?.languageAwareLineHeightRatio == retained)
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textParagraphStyleCacheReuseObserved
     // ASSERTIONS textParagraphBoundaryCacheFinalizationObserved
     // ASSERTIONS textParagraphAlignmentAggregationObserved
