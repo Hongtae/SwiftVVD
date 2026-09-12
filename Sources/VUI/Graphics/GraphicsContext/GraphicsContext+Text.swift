@@ -174,16 +174,21 @@ extension GraphicsContext {
             var result: ResolvedFontMetrics?
             for run in runs {
                 let faces: [Typeface]
+                let resource: FontResource?
                 switch run {
                 case let .text(runFaces, _),
                      let .attachment(runFaces, _),
                      let .attributedText(runFaces, _, _),
-                     let .attributedAttachment(runFaces, _, _),
-                     let .styledText(runFaces, _, _, _):
+                     let .attributedAttachment(runFaces, _, _):
                     faces = runFaces
+                    resource = nil
+                case let .styledText(runFaces, _, _, style):
+                    faces = runFaces
+                    resource = style.fontResource
                 }
                 guard let face = faces.first else { continue }
-                let metrics = face.resolvedMetrics.scaled(by: scaleFactor)
+                let metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
+                    ?? face.resolvedMetrics.scaled(by: scaleFactor)
                 if result == nil {
                     result = metrics
                 } else {
@@ -311,6 +316,7 @@ extension GraphicsContext {
             // The selected face owns glyph/run metrics and artwork.
             var ascender: CGFloat = .zero
             var descender: CGFloat = .zero
+            var leading: CGFloat = .zero
             // The explicit run's primary face owns line measurement.
             var lineBoxAscender: CGFloat = .zero
             var lineBoxDescender: CGFloat = .zero
@@ -577,7 +583,9 @@ extension GraphicsContext {
                              with faces: [Typeface],
                              drawMissingGlyphs: Bool,
                              prevFace: Typeface?,
-                             prevChar: UnicodeScalar) -> Self {
+                             prevChar: UnicodeScalar,
+                             fontResource: FontResource? = nil,
+                             scaleFactor: CGFloat = 1) -> Self {
                 assert(faces.isEmpty == false)
                 let scalars = Array(unicodeScalars)
                 var glyphs: [Glyph] = []
@@ -586,8 +594,16 @@ extension GraphicsContext {
                 var width: CGFloat = .zero
                 var face1 = prevFace
                 var char1 = prevChar
-                let lineBoxAscender = faces[0].ascender
-                let lineBoxDescender = faces[0].descender
+                let primaryMetrics = fontResource?.resolvedMetrics(for: faces[0], scaleFactor: scaleFactor)
+                // Ordinary line inputs round in points before applying the render scale.
+                // Natural font leading remains a separate run metric.
+                let lineBoxAscender = primaryMetrics.map { floor($0.ascender + 0.5) * scaleFactor }
+                    ?? faces[0].ascender
+                let lineBoxDescender = primaryMetrics.map { metrics in
+                    let ascent = floor(metrics.ascender + 0.5)
+                    let height = ascent + floor(-metrics.descender + 0.5)
+                    return (ascent - (height > 0 ? height : 0.0001)) * scaleFactor
+                } ?? faces[0].descender
 
                 var spans: [SourceSpan] = []
                 func appendSpan(
@@ -686,6 +702,8 @@ extension GraphicsContext {
                 }
 
                 func appendScalarGlyphs(_ span: SourceSpan) {
+                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor)
+                    let leading = rawMetrics.map { $0.leading * scaleFactor } ?? span.face.resolvedMetrics.leading
                     for index in span.range {
                         let scalar = scalars[index]
                         var glyph = Glyph(scalar: scalar, face: span.face)
@@ -708,6 +726,11 @@ extension GraphicsContext {
                             glyph.ascender = span.face.ascender
                             glyph.descender = span.face.descender
                         }
+                        if let rawMetrics {
+                            glyph.ascender = rawMetrics.ascender * scaleFactor
+                            glyph.descender = rawMetrics.descender * scaleFactor
+                        }
+                        glyph.leading = leading
                         append(glyph)
                         char1 = scalar
                         face1 = span.face
@@ -741,6 +764,8 @@ extension GraphicsContext {
                         continue
                     }
 
+                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor)
+                    let leading = rawMetrics.map { $0.leading * scaleFactor } ?? span.face.resolvedMetrics.leading
                     for (index, shapedGlyph) in shaped.glyphs.enumerated() {
                         let sourceRange = (
                             span.range.lowerBound +
@@ -767,6 +792,11 @@ extension GraphicsContext {
                             glyph.ascender = span.face.ascender
                             glyph.descender = span.face.descender
                         }
+                        if let rawMetrics {
+                            glyph.ascender = rawMetrics.ascender * scaleFactor
+                            glyph.descender = rawMetrics.descender * scaleFactor
+                        }
+                        glyph.leading = leading
                         if index == 0,
                            let face1,
                            face1.isEqual(to: span.face) {
@@ -1385,7 +1415,9 @@ extension GraphicsContext {
                     with: [source.face],
                     drawMissingGlyphs: false,
                     prevFace: previous?.face,
-                    prevChar: previous?.scalar ?? UnicodeScalar(UInt8(0))
+                    prevChar: previous?.scalar ?? UnicodeScalar(UInt8(0)),
+                    fontResource: source.style.fontResource,
+                    scaleFactor: scaleFactor
                 )
                 guard var glyph = generated.glyphs.first else {
                     return nil
@@ -1680,7 +1712,9 @@ extension GraphicsContext {
                                                          with: faces,
                                                          drawMissingGlyphs: drawMissingGlyphs,
                                                          prevFace: face1,
-                                                         prevChar: char1)
+                                                         prevChar: char1,
+                                                         fontResource: style?.fontResource,
+                                                         scaleFactor: scaleFactor)
                         face1 = textGlyphs.lastFace
                         char1 = textGlyphs.lastCharacter
 

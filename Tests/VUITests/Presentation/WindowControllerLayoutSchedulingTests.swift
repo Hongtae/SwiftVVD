@@ -4590,8 +4590,9 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             withGC
         )
         let list = try displayList(in: controller)
+        // Exclude the fixed transition preview; button height follows its text metrics.
         let buttonBorders = shapeStrokeBounds(in: list)
-            .filter { abs($0.height - 25) <= 0.5 }
+            .filter { $0.size != CGSize(width: 430, height: 125) }
             .sorted {
                 abs($0.minY - $1.minY) > 0.5
                     ? $0.minY < $1.minY

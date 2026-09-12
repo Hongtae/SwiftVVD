@@ -39,6 +39,38 @@ final class TextStyleConsumerTests {
         resolved.runs.compactMap { if case let .styledText(_, _, _, attributes) = $0 { attributes } else { nil } }
     }
 
+    private func fontURL(_ name: String) -> URL {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("Sources/VUI/Resources/Fonts").appendingPathComponent(name)
+    }
+
+    private func metricFontData(units: UInt16, ascent: Int16, descent: Int16, gap: Int16) throws -> Data {
+        var data = try Data(contentsOf: fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf"))
+        func read16(_ offset: Int) -> UInt16 { UInt16(data[offset]) << 8 | UInt16(data[offset + 1]) }
+        func read32(_ offset: Int) -> Int {
+            Int(data[offset]) << 24 | Int(data[offset + 1]) << 16 | Int(data[offset + 2]) << 8 | Int(data[offset + 3])
+        }
+        func write16(_ offset: Int, _ value: UInt16) {
+            data[offset] = UInt8(truncatingIfNeeded: value >> 8)
+            data[offset + 1] = UInt8(truncatingIfNeeded: value)
+        }
+        var tables: [String: Int] = [:]
+        for index in 0..<Int(read16(4)) {
+            let record = 12 + index * 16
+            tables[String(decoding: data[record..<record + 4], as: UTF8.self)] = read32(record + 8)
+        }
+        let head = try #require(tables["head"])
+        let hhea = try #require(tables["hhea"])
+        let os2 = try #require(tables["OS/2"])
+        write16(head + 18, units)
+        write16(os2 + 62, read16(os2 + 62) & ~128)
+        for (index, value) in [ascent, descent, gap].enumerated() {
+            write16(hhea + 4 + index * 2, UInt16(bitPattern: value))
+        }
+        return data
+    }
+
     private func localizationBundle(_ languages: [String], development: String) throws -> Bundle {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bundle")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -325,6 +357,11 @@ final class TextStyleConsumerTests {
         #expect(glyphs[1].face.designMetrics?.outlineFormat == .compactFontFormat)
         #expect(glyphs[0].lineBoxAscender == glyphs[1].lineBoxAscender)
         #expect(glyphs[0].lineBoxDescender == glyphs[1].lineBoxDescender)
+        #expect(glyphs[0].lineBoxAscender == 12)
+        #expect(glyphs[0].lineBoxDescender == -3)
+        #expect(glyphs[0].ascender == 12.060546875)
+        #expect(abs(glyphs[1].ascender - 15.08003056049347) < 1e-9)
+        #expect(abs(glyphs[1].descender + 3.7440075874328613) < 1e-9)
     }
 
     // ASSERTIONS fontResolvedRetainedContextObserved
@@ -355,6 +392,208 @@ final class TextStyleConsumerTests {
                 #expect(glyph.face.designMetrics?.outlineFormat == .trueType)
             }
         }
+    }
+
+    // ASSERTIONS fontRawMetricFormatQuantizationObserved
+    // ASSERTIONS fontLeadingBaseHeightConsumerObserved
+    // ASSERTIONS fontLeadingLineBoundsStorageObserved
+    @Test
+    func testNaturalFontMetricsReachRunBoundsAndSeparateHostLineBounds() throws {
+        let cases: [(String, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            ("Roboto/Roboto-VariableFont_wdth,wght.ttf", 13, 12.060546875, 3.173828125, 12, 3),
+            ("Roboto/Roboto-VariableFont_wdth,wght.ttf", 15.625, 14.495849609375, 3.814697265625, 14, 4),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 13, 11.050079345703125, 3.3150634765625, 11, 3),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 15.625, 13.28134536743164, 3.9844512939453125, 13, 4),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 13, 15.08003056049347, 3.7440075874328613, 15, 4),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 15.625, 18.125036731362343, 4.500009119510651, 18, 5)
+        ]
+        let proposal = CGSize(width: 300, height: 1000)
+        for (name, pointSize, rawA, rawD, lineA, lineD) in cases {
+            let url = fontURL(name)
+            let data = try Data(contentsOf: url)
+            for font in [VUI.Font.file(url, size: pointSize), .data(data, size: pointSize)] {
+                for scale: CGFloat in [1, 1.5, 2] {
+                    var environment = self.environment()
+                    environment._contentScaleFactor = scale
+                    environment.displayScale = 2
+                    let resolved = try resolve(Text(verbatim: "Hg\nHg\nHg").font(font), environment: environment)
+                    let layout = resolved.makeLayout(in: proposal, layoutDirection: .leftToRight)
+                    try #require(layout.count == 3)
+                    #expect(resolved.measure(in: proposal).height == (lineA + lineD) * 3)
+                    #expect(TextProxy(resolved).sizeThatFits(.init(width: proposal.width)).height == (lineA + lineD) * 3)
+                    let maximum = try #require(resolved.maximumFontMetrics)
+                    #expect(abs(maximum.ascender - rawA) < 1e-9)
+                    #expect(abs(maximum.descender + rawD) < 1e-9)
+                    for (index, line) in layout.enumerated() {
+                        #expect(line.typographicBounds.ascent == lineA)
+                        #expect(line.typographicBounds.descent == lineD)
+                        #expect(line.typographicBounds.leading == 0)
+                        #expect(line.origin.y - layout[0].origin.y == CGFloat(index) * (lineA + lineD))
+                        try #require(line.count == 1)
+                        #expect(abs(line[0].typographicBounds.ascent - rawA) < 1e-9)
+                        #expect(abs(line[0].typographicBounds.descent - rawD) < 1e-9)
+                        #expect(line[0].typographicBounds.leading == 0)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontRawMetricRoundingBoundaryObserved
+    // ASSERTIONS fontLeadingNativeMetricConsumerObserved
+    @Test
+    func testQuantizedDescentSelectsTheHostHeightBeforeRenderScaling() throws {
+        let data = try metricFontData(units: 1000, ascent: 712, descent: -288, gap: 200)
+        let font = VUI.Font.data(data, size: 15.625)
+        for scale: CGFloat in [1, 1.5, 2] {
+            var environment = self.environment()
+            environment._contentScaleFactor = scale
+            environment.displayScale = 2
+            let resolved = try resolve(Text(verbatim: "Hg\nHg\nHg").font(font), environment: environment)
+            let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
+            try #require(layout.count == 3)
+            #expect(resolved.measure().height == 45)
+            for line in layout {
+                #expect(line.typographicBounds.ascent == 11)
+                #expect(line.typographicBounds.descent == 4)
+                #expect(line.typographicBounds.leading == 0)
+                #expect(abs(line[0].typographicBounds.descent - 4.499912261962891) < 1e-9)
+                #expect(abs(line[0].typographicBounds.leading - 3.1249523162841797) < 1e-9)
+            }
+            #expect(resolved.makeGlyphs(maxHeight: Int(30 * scale)).count == 2)
+            #expect(resolved.makeGlyphs(maxHeight: Int(30 * scale) - 1).count == 1)
+            let long = try resolve(Text(verbatim: "ABCDE FGHIJ KLMNO").font(font), environment: environment)
+            for mode: Text.TruncationMode in [.head, .middle, .tail] {
+                let lines = long.makeGlyphs(maxWidth: Int(40 * scale), lineLimit: 1, truncationMode: mode)
+                let tokenCandidate = lines.first?.glyphs.first(where: \.isTruncationToken)
+                let token = try #require(tokenCandidate)
+                #expect(abs(token.leading / scale - 3.1249523162841797) < 1e-9)
+                #expect(abs(token.descender / scale + 4.499912261962891) < 1e-9)
+            }
+        }
+    }
+
+    // ASSERTIONS fontRawMetricSignedConsumerObserved
+    // ASSERTIONS fontLeadingSignedMetricsAndMultilineObserved
+    @Test
+    func testNegativeNaturalLeadingSurvivesRunBoundsWithoutExpandingHostLines() throws {
+        for (units, ascent, descent, leading, height): (UInt16, Int16, Int16, CGFloat, CGFloat) in [
+            (2048, 1900, -500, -0.634765625, 15),
+            (1000, 712, -288, -1.300079345703125, 13)
+        ] {
+            let data = try metricFontData(units: units, ascent: ascent, descent: descent, gap: -100)
+            for scale: CGFloat in [1, 2] {
+                var environment = self.environment()
+                environment._contentScaleFactor = scale
+                let text = Text(verbatim: "Hg\nHg\nHg").font(.data(data, size: 13))
+                let resolved = try resolve(text, environment: environment)
+                let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
+                try #require(layout.count == 3)
+                #expect(resolved.measure().height == height * 3)
+                #expect(abs(try #require(resolved.maximumFontMetrics).leading - leading) < 1e-9)
+                for line in layout {
+                    #expect(line.typographicBounds.leading == 0)
+                    #expect(abs(line[0].typographicBounds.leading - leading) < 1e-9)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontLeadingMixedRunAggregationObserved
+    // ASSERTIONS fontLeadingLineBoundsStorageObserved
+    @Test
+    func testOrdinaryMixedMetricsPreserveUnshiftedExtentsAndRawRunValues() throws {
+        let first = VUI.Font.file(fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 13)
+        let second = VUI.Font.file(fontURL("NanumSquareNeo/NanumSquareNeo-Variable.ttf"), size: 13)
+        for (offset, ascent, descent): (CGFloat, CGFloat, CGFloat) in [(0, 12, 3), (4, 15, 3), (-4, 12, 7)] {
+            let text = concatenating(Text(verbatim: "Hg").font(first), Text(verbatim: "Xg").font(second).baselineOffset(offset))
+            let resolved = try resolve(text)
+            let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
+            let line = try #require(layout.first)
+            #expect(resolved.measure().height == ascent + descent)
+            #expect(line.typographicBounds.ascent == ascent)
+            #expect(line.typographicBounds.descent == descent)
+            try #require(line.count == 2)
+            #expect(line[0].typographicBounds.ascent == 12.060546875)
+            #expect(abs(line[1].typographicBounds.ascent - 11.050079345703125) < 1e-9)
+            #expect(line[1].typographicBounds.origin.y == line.origin.y - offset)
+        }
+    }
+
+    // ASSERTIONS fontMinimumLineHeightObserved
+    @Test
+    func testSmallFontHeightRemainsPositiveBeforeBaselineOffsetAndScale() throws {
+        let data = try metricFontData(units: 1000, ascent: 712, descent: -288, gap: 200)
+        for scale: CGFloat in [1, 1.5, 2] {
+            for offset: CGFloat in [0, 4] {
+                var environment = self.environment()
+                environment._contentScaleFactor = scale
+                environment.displayScale = 2
+                let text = Text(verbatim: "Hg\nHg\nHg").font(.data(data, size: 0.1)).baselineOffset(offset)
+                let resolved = try resolve(text, environment: environment)
+                let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
+                try #require(layout.count == 3)
+                #expect(resolved.measure().height == (offset == 0 ? 0.5 : 12.5))
+                for line in layout {
+                    #expect(line.typographicBounds.ascent == offset)
+                    #expect(abs(line.typographicBounds.descent - 0.0001) < 1e-12)
+                    #expect(abs(line[0].typographicBounds.ascent - 0.0712005615234375) < 1e-12)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontLeadingLineBoundsStorageObserved
+    // ASSERTIONS fontRawMetricFormatQuantizationObserved
+    @Test
+    func testResolvedMetricsDrivePreparedGeometryAndTruncation() throws {
+        var string = AttributedString("H\nH\nH")
+        string._setCoreAttributes(_ResolvedTextRunAttributes(backgroundColor: .yellow, underlineStyle: .init()))
+        for scale: CGFloat in [1, 2] {
+            var environment = self.environment()
+            environment.font = .system(size: 13)
+            environment._contentScaleFactor = scale
+            environment.displayScale = 2
+            let resolved = try resolve(Text(string), environment: environment)
+            let size = CGSize(width: 300, height: 1000)
+            let drawing = resolved.makeDrawing(in: size)
+            let atoms = resolved.glyphAtoms(in: size)
+            let lines = resolved.makeGlyphs()
+            try #require(lines.count == 3 && drawing.backgrounds.count == 3 && atoms.count == 3)
+            #expect(resolved.measure(in: size).height == 45)
+            for index in 0..<3 {
+                let baseline = CGFloat(12 + 15 * index)
+                #expect(lines[index].baseline == baseline * scale)
+                #expect(abs(drawing.backgrounds[index].frame.minY / scale - (baseline - 12.060546875)) < 1e-9)
+                #expect(abs(drawing.backgrounds[index].frame.height / scale - 15.234375) < 1e-9)
+                #expect(atoms[index].bounds.height == 15)
+                #expect(atoms[index].bounds.minY == CGFloat(index * 15))
+            }
+            for mode: Text.TruncationMode in [.head, .middle, .tail] {
+                let long = try resolve(Text(verbatim: "ABCDE FGHIJ KLMNO"), environment: environment)
+                let truncated = long.makeGlyphs(maxWidth: Int(40 * scale), lineLimit: 1, truncationMode: mode)
+                let line = try #require(truncated.first)
+                let tokenCandidate = line.glyphs.first(where: \.isTruncationToken)
+                let token = try #require(tokenCandidate)
+                #expect(line.height == 15 * scale)
+                #expect(token.ascender == 12.060546875 * scale)
+                #expect(token.descender == -3.173828125 * scale)
+                #expect(token.leading == 0)
+            }
+        }
+    }
+
+    @Test
+    func testSuppliedTypefaceKeepsItsMetricsWithoutAnIndependentPointSize() throws {
+        let candidate = VVD.Font(path: fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf").path)
+        let font = try #require(candidate)
+        font.setPointSize(13, dpi: (72, 72))
+        let text = Text(verbatim: "Hg").font(VUI.Font(vector: font))
+        let resolved = try resolve(text)
+        let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
+        #expect(resolved.measure().height == 17)
+        #expect(layout[0][0].typographicBounds.ascent == 13)
+        #expect(layout[0][0].typographicBounds.descent == 4)
     }
 
     // ASSERTIONS textLineSpacingPlacementObserved

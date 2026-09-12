@@ -42,6 +42,40 @@ final class FontResource: Hashable, @unchecked Sendable {
                        languageAwareLineHeightRatio: languageAwareLineHeightRatio)
     }
 
+    /// Resolves natural horizontal metrics in points without raster rounding.
+    func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat) -> ResolvedFontMetrics? {
+        // A supplied face has no independent requested point size to resolve.
+        if case let .typeface(provider) = source, provider is FixedFontProvider {
+            return nil
+        }
+        guard pointSize.isFinite, pointSize > 0,
+              let design = face.designMetrics else { return nil }
+        let units = Double(design.unitsPerEM)
+        let convert: (Int) -> Double
+        if design.unitsPerEM == 2048 {
+            convert = { Double($0) }
+        } else {
+            switch design.outlineFormat {
+            case .trueType:
+                let normalize = 65536 / units
+                let restore = units / 65536
+                convert = { (Double($0) * normalize).rounded(.toNearestOrAwayFromZero) * restore }
+            case .compactFontFormat:
+                let reciprocal = ceil(134217728 / units)
+                convert = { Double($0) * reciprocal / 65536 * (units / 2048) }
+            case .other:
+                return nil
+            }
+        }
+        // Cap height and outsets retain their independent backend inputs.
+        var result = face.resolvedMetrics.scaled(by: scaleFactor)
+        let size = Double(pointSize) / units
+        result.ascender = CGFloat(convert(design.ascender) * size)
+        result.descender = -CGFloat(abs(convert(design.descender)) * size)
+        result.leading = CGFloat(convert(design.lineGap) * size)
+        return result
+    }
+
     static func == (lhs: FontResource, rhs: FontResource) -> Bool {
         lhs.language == rhs.language &&
             lhs.languageAwareLineHeightRatio == rhs.languageAwareLineHeightRatio &&

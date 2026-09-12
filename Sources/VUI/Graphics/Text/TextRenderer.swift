@@ -144,9 +144,8 @@ fileprivate final class _TextLayoutStorage {
         let glyphs = line.glyphs[glyphRange]
         let ascent = glyphs.reduce(CGFloat.zero) { max($0, $1.ascender) } * scale
         let descent = -glyphs.reduce(CGFloat.zero) { min($0, $1.descender) } * scale
-        let leading = glyphs.reduce(CGFloat.zero) {
-            max($0, $1.face.resolvedMetrics.leading)
-        } * scale
+        // Run construction keeps one selected face and font request per range.
+        let leading = (glyphs.first?.leading ?? 0) * scale
         let baselineOffset = glyphs.first?.baselineOffset ?? 0
         return Text.Layout.TypographicBounds(
             origin: CGPoint(
