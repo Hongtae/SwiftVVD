@@ -21,6 +21,8 @@ struct LocalizationResolver {
     struct LocalizedPattern {
         let value: String
         let formatsWholeReplacement: Bool
+        /// Language metadata for the template, before retained rich arguments are substituted.
+        var languageIdentifier: String? = nil
     }
 
     /// Distinguishes an absent strings-dictionary entry from an entry whose
@@ -45,6 +47,7 @@ struct LocalizationResolver {
         }
 
         private(set) var runs: [Run] = []
+        let languageIdentifier: String?
 
         var string: String {
             runs.reduce(into: String()) { $0.append($1.text) }
@@ -78,6 +81,7 @@ struct LocalizationResolver {
                 var segment = AttributedString(run.text)
                 guard !segment.characters.isEmpty else { continue }
                 let range = segment.startIndex..<segment.endIndex
+                segment[range].languageIdentifier = languageIdentifier
                 if let replacementIndex = run.replacementIndex {
                     segment[range].replacementIndex = replacementIndex
                 }
@@ -103,7 +107,7 @@ struct LocalizationResolver {
         locale: Locale,
         applyReplacementIndexAttribute: Bool
     ) -> Result {
-        var result = Result()
+        var result = Result(languageIdentifier: pattern.languageIdentifier)
         let value = pattern.value
 
         // A value constructed without interpolation treats percent signs as
@@ -216,43 +220,47 @@ struct LocalizationResolver {
             from: bundle.localizations,
             for: locale
         )
+        let lookupBundle: Bundle
+        if let localization = candidates.first,
+           let path = bundle.path(forResource: localization, ofType: "lproj"),
+           let localizedBundle = Bundle(path: path) {
+            lookupBundle = localizedBundle
+        } else {
+            lookupBundle = bundle
+        }
+        let tableName = table ?? "Localizable"
+        let hasTable = lookupBundle.url(forResource: tableName, withExtension: "strings") != nil
+            || lookupBundle.url(forResource: tableName, withExtension: "stringsdict") != nil
+        let languageIdentifier = hasTable ? candidates.first : bundle.developmentLocalization
 
 #if !canImport(Darwin)
         switch stringsDictionaryLookup(
             forKey: key,
             table: table,
-            bundle: bundle,
-            localization: candidates.first,
+            bundle: lookupBundle,
+            localization: nil,
             locale: locale,
             replacements: replacements
         ) {
-        case let .resolved(pattern):
+        case var .resolved(pattern):
+            pattern.languageIdentifier = languageIdentifier
             return pattern
         case .unsupported:
             return LocalizedPattern(
                 value: key,
-                formatsWholeReplacement: false
+                formatsWholeReplacement: false,
+                languageIdentifier: languageIdentifier
             )
         case .missing:
             break
         }
 #endif
 
-        if let localization = candidates.first,
-           let path = bundle.path(forResource: localization, ofType: "lproj"),
-           let localizedBundle = Bundle(path: path) {
-            let value = localizedBundle.localizedString(
-                forKey: key, value: key, table: table
-            )
-            return LocalizedPattern(
-                value: value,
-                formatsWholeReplacement: value.contains("%#@")
-            )
-        }
-        let value = bundle.localizedString(forKey: key, value: key, table: table)
+        let value = lookupBundle.localizedString(forKey: key, value: key, table: table)
         return LocalizedPattern(
             value: value,
-            formatsWholeReplacement: value.contains("%#@")
+            formatsWholeReplacement: value.contains("%#@"),
+            languageIdentifier: languageIdentifier
         )
     }
 

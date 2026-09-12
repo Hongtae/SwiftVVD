@@ -176,6 +176,10 @@ class AnyTextStorage: CustomDebugStringConvertible {
     func isStyled(options: Text.ResolveOptions) -> Bool {
         fatalError("This method should be overridden by subclasses.")
     }
+    /// Whether root resolution may inherit the environment's typesetting language.
+    func allowsTypesettingLanguage() -> Bool {
+        false
+    }
 }
 
 class AnyTextModifier {
@@ -335,14 +339,14 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
         _resolvedAttributedText(
-            AttributedString(localized: resource),
+            resource.resolve(in: context.environment),
             style: style, properties: &properties, text: &text,
             context: context
         )
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        String(localized: resource)
+        String(resource.resolve(in: environment).characters)
     }
 
     override func isEqual(to other: AnyTextStorage) -> Bool {
@@ -920,7 +924,7 @@ class LocalizedTextStorage: AnyTextStorage {
         text: inout String,
         context: any TextResolutionContext
     ) -> GraphicsContext.ResolvedText? {
-        let segments = resolve(locale: context.environment.locale)
+        let segments = resolve(in: context.environment)
         var runs: [GraphicsContext.ResolvedText.Run] = []
         for segment in segments {
             switch segment {
@@ -948,7 +952,7 @@ class LocalizedTextStorage: AnyTextStorage {
     }
 
     override func resolveText(in environment: EnvironmentValues) -> String {
-        resolve(locale: environment.locale).reduce(into: String()) { result, segment in
+        resolve(in: environment).reduce(into: String()) { result, segment in
             switch segment {
             case let .attributedString(value):
                 result.append(contentsOf: value.characters)
@@ -961,64 +965,45 @@ class LocalizedTextStorage: AnyTextStorage {
     override func requiresBackendResolution(
         in environment: EnvironmentValues
     ) -> Bool {
-        resolve(locale: environment.locale).contains { segment in
+        resolve(in: environment).contains { segment in
             guard case let .text(text) = segment else { return false }
             return text._requiresBackendResolution(in: environment)
         }
     }
 
-    private func resolve(locale: Locale) -> [LocalizedStringKey.ResolvedSegment] {
-        key.resolve(
+    private func resolve(in environment: EnvironmentValues) -> [LocalizedStringKey.ResolvedSegment] {
+        let selection = localizedBundle(for: environment.locale)
+        return key.resolve(
             table: table,
-            bundle: localizedBundle(for: locale),
-            locale: locale
+            bundle: selection.bundle,
+            environment: environment,
+            fallbackLanguageIdentifier: selection.fallbackLanguageIdentifier
         )
     }
 
-    private func localizedBundle(for locale: Locale) -> Bundle {
+    private func localizedBundle(for locale: Locale) -> (bundle: Bundle, fallbackLanguageIdentifier: String?) {
         let rootBundle = bundle ?? .main
 #if !canImport(Darwin)
-        // The compatibility resolver owns explicit locale selection and
-        // strings-dictionary loading on ports without localized initializers.
-        return rootBundle
+        // The compatibility resolver owns locale selection and language metadata.
+        return (rootBundle, nil)
 #else
-        let availableLocalizations = rootBundle.localizations
-        guard !availableLocalizations.isEmpty else {
-            return rootBundle
+        let localization = LocalizationResolver.localizationCandidates(
+            from: rootBundle.localizations, for: locale
+        ).first
+        let selectedBundle: Bundle
+        if let localization,
+           let path = rootBundle.path(forResource: localization, ofType: "lproj"),
+           let localizedBundle = Bundle(path: path) {
+            selectedBundle = localizedBundle
+        } else {
+            selectedBundle = rootBundle
         }
-
-        var candidates = LocalizationResolver.localizationCandidates(
-            from: availableLocalizations,
-            for: locale
-        )
-        if let developmentLocalization = rootBundle.developmentLocalization,
-           !candidates.contains(developmentLocalization) {
-            candidates.append(developmentLocalization)
-        }
-        for localization in Bundle.preferredLocalizations(from: availableLocalizations)
-        where !candidates.contains(localization) {
-            candidates.append(localization)
-        }
-
+        // Select the localization before looking for a table. A missing table
+        // must not switch the text to another language's translated value.
         let tableName = table ?? "Localizable"
-        for localization in candidates {
-            let tableURL = rootBundle.url(
-                forResource: tableName,
-                withExtension: "strings",
-                subdirectory: nil,
-                localization: localization
-            ) ?? rootBundle.url(
-                forResource: tableName,
-                withExtension: "stringsdict",
-                subdirectory: nil,
-                localization: localization
-            )
-            if let tableURL,
-               let localizedBundle = Bundle(url: tableURL.deletingLastPathComponent()) {
-                return localizedBundle
-            }
-        }
-        return rootBundle
+        let hasTable = selectedBundle.url(forResource: tableName, withExtension: "strings") != nil
+            || selectedBundle.url(forResource: tableName, withExtension: "stringsdict") != nil
+        return (selectedBundle, hasTable ? nil : rootBundle.developmentLocalization)
 #endif
     }
 
@@ -1087,6 +1072,10 @@ class ConcatenatedTextStorage: AnyTextStorage {
 
     override func isStyled(options: Text.ResolveOptions) -> Bool {
         first.isStyled(options: options) || second.isStyled(options: options)
+    }
+
+    override func allowsTypesettingLanguage() -> Bool {
+        first.allowsTypesettingLanguage() && second.allowsTypesettingLanguage()
     }
 }
 
@@ -1164,6 +1153,13 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         func isStyled(options: ResolveOptions) -> Bool {
             guard case let .anyTextStorage(storage) = self else { return false }
             return storage.isStyled(options: options)
+        }
+
+        func allowsTypesettingLanguage() -> Bool {
+            switch self {
+            case .verbatim: true
+            case let .anyTextStorage(storage): storage.allowsTypesettingLanguage()
+            }
         }
     }
 
@@ -1351,6 +1347,10 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         storage.isStyled(options: options) || modifiers.contains {
             $0.isStyled(options: options)
         }
+    }
+
+    func allowsTypesettingLanguage() -> Bool {
+        storage.allowsTypesettingLanguage()
     }
 
     func assertUnstyled(
@@ -1588,6 +1588,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         var string = String()
         var style = Style()
         style.typesettingConfiguration = context.environment.typesettingConfiguration
+        if !allowsTypesettingLanguage() {
+            // Localized runs supply their own fallback language. Keep the
+            // environment's line-height ratio across this root-only reset.
+            style.typesettingConfiguration.language = .automatic
+        }
         guard var resolved = _resolve(context: context, referenceDate: referenceDate,
                                       style: style, properties: &properties, text: &string) else { return nil }
         properties.markParagraphBoundary(at: string.utf16.count, in: string, environment: context.environment)

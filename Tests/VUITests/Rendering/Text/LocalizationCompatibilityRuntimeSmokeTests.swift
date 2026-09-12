@@ -58,6 +58,16 @@ func portableLocalizationCompatibilityRuntimeSmoke() throws {
         ) == "안녕하세요"
     )
 
+    for (language, expected) in [("en", "Hello"), ("ko", "안녕하세요")] {
+        // ASSERTIONS textLocalizedBundleLanguageFallbackObserved
+        let localized = _StringLocalizationValue("greeting").resolvedLocalization(
+            bundle: .module, locale: Locale(identifier: language)
+        )
+        #expect(localized.string == expected)
+        #expect(localized.languageIdentifier == language)
+        #expect(AnySequence(localized.attributedString().runs).map(\.languageIdentifier) == [language])
+    }
+
     #if !canImport(Darwin)
     let aliasedValue: String.LocalizationValue = "plain"
     #expect(aliasedValue == _StringLocalizationValue("plain"))
@@ -96,8 +106,11 @@ func portableLocalizationPluralRuntimeSmoke() {
         locale: Locale(identifier: "en")
     )
     #expect(englishOther.string == "2 apples")
+    // ASSERTIONS textLocalizedBundleLanguageFallbackObserved
+    #expect(englishOther.languageIdentifier == "en")
     #expect(englishOther.runs.count == 1)
     #expect(englishOther.runs.first?.replacementIndex == 1)
+    #expect(AnySequence(englishOther.attributedString().runs).map(\.languageIdentifier) == ["en"])
 
     let koreanOther = plural.resolvedLocalization(
         replacements: [Int64(2)],
@@ -110,4 +123,6 @@ func portableLocalizationPluralRuntimeSmoke() {
     )
     #expect(koreanOther.runs.count == 1)
     #expect(koreanOther.runs.first?.replacementIndex == 1)
+    #expect(koreanOther.languageIdentifier == "ko")
+    #expect(AnySequence(koreanOther.attributedString().runs).map(\.languageIdentifier) == ["ko"])
 }

@@ -79,29 +79,36 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
     func resolve(
         table: String?,
         bundle: Bundle,
-        locale: Locale
+        environment: EnvironmentValues,
+        fallbackLanguageIdentifier: String? = nil
     ) -> [ResolvedSegment] {
+        let locale = environment.locale
 #if canImport(Darwin)
         guard hasFormatting else {
-            return [.attributedString(AttributedString(
+            var resolved = AttributedString(
                 localized: String.LocalizationValue(key),
                 table: table,
                 bundle: bundle,
                 locale: locale
-            ))]
+            )
+            if let fallbackLanguageIdentifier { resolved.languageIdentifier = fallbackLanguageIdentifier }
+            return [.attributedString(resolved)]
         }
 
         let localizationValue = foundationLocalizationValue()
         var options = AttributedString.LocalizationOptions()
         options.replacements = arguments.map(\.replacement)
         options.applyReplacementIndexAttribute = true
-        let resolved = AttributedString(
+        var resolved = AttributedString(
             localized: localizationValue,
             options: options,
             table: table,
             bundle: bundle,
             locale: locale
         )
+        // A missing table can return key text without preserving the bundle's
+        // selected language. Attach that fallback before substituting rich arguments.
+        if let fallbackLanguageIdentifier { resolved.languageIdentifier = fallbackLanguageIdentifier }
 
         var segments: [ResolvedSegment] = []
         for run in resolved.runs {
@@ -120,7 +127,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
                     ), to: &segments)
                     continue
                 case let .localizedStringResource(resource):
-                    append(AttributedString(localized: resource), to: &segments)
+                    append(resource.resolve(in: environment), to: &segments)
                     continue
                 case .value:
                     break
@@ -166,12 +173,14 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
                     break
                 }
             }
+            var value = AttributedString(run.text)
+            value.languageIdentifier = resolved.languageIdentifier
             if let intent = run.presentationIntent {
                 segments.append(.text(
-                    Text(verbatim: run.text).applyingPlaceholderIntent(intent)
+                    Text(value).applyingPlaceholderIntent(intent)
                 ))
             } else {
-                append(AttributedString(run.text), to: &segments)
+                append(value, to: &segments)
             }
         }
         return segments
@@ -181,7 +190,7 @@ public struct LocalizedStringKey: Equatable, ExpressibleByStringInterpolation {
     var isStyled: Bool {
         // Reuse localized rich-segment reconstruction so Markdown and retained
         // Text arguments follow the same style classification as rendering.
-        resolve(table: nil, bundle: .main, locale: .current).contains { segment in
+        resolve(table: nil, bundle: .main, environment: EnvironmentValues()).contains { segment in
             switch segment {
             case let .attributedString(value):
                 value.isStyled

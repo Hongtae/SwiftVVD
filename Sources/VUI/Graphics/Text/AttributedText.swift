@@ -338,6 +338,10 @@ final class AttributedStringTextStorage: AnyTextStorage {
     override func isStyled(options: Text.ResolveOptions) -> Bool {
         str.isStyled
     }
+
+    override func allowsTypesettingLanguage() -> Bool {
+        true
+    }
 }
 
 func _resolvedAttributedText(

@@ -25,3 +25,16 @@ public struct _LocalizedStringResource: Equatable {
         self.value = value
     }
 }
+
+extension LocalizedStringResource {
+    /// Resolves a stored resource using the current text environment's locale.
+    func resolve(in environment: EnvironmentValues) -> AttributedString {
+#if canImport(Darwin)
+        var resource = self
+        resource.locale = environment.locale
+        return AttributedString(localized: resource)
+#else
+        return value.resolvedAttributedString(locale: environment.locale)
+#endif
+    }
+}

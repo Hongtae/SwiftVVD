@@ -201,7 +201,10 @@ enum TextLineHeight: Hashable, Codable {
 final class LanguageTextModifier: AnyTextModifier {
     let language: TypesettingLanguage
     init(_ language: TypesettingLanguage) { self.language = language }
-    override func modify(style: inout Text.Style) { style.typesettingConfiguration.language = language }
+    override func modify(style: inout Text.Style) {
+        style.typesettingConfiguration.language = language
+        style.typesettingConfiguration.languageAwareLineHeightRatio = .automatic
+    }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.language == language }
 }
 /// Sets the typesetting ratio request used to construct the font cache key.

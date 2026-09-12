@@ -184,10 +184,12 @@ final class LocalizedStringKeyTests: XCTestCase {
 
     func testLocalizedPlaceholderPresentationIntentUsesArgumentPrecedence() {
         func resolvedTextArgument(_ key: LocalizedStringKey) -> Text {
+            var environment = EnvironmentValues()
+            environment.locale = Locale(identifier: "en_US")
             let segments = key.resolve(
                 table: nil,
                 bundle: .module,
-                locale: Locale(identifier: "en_US")
+                environment: environment
             )
             guard case let .text(text)? = segments.first else {
                 XCTFail("Expected a localized Text argument")
@@ -200,10 +202,12 @@ final class LocalizedStringKeyTests: XCTestCase {
         func resolvedAttributedArgument(
             _ key: LocalizedStringKey
         ) -> AttributedString {
+            var environment = EnvironmentValues()
+            environment.locale = Locale(identifier: "en_US")
             let segments = key.resolve(
                 table: nil,
                 bundle: .module,
-                locale: Locale(identifier: "en_US")
+                environment: environment
             )
             guard case let .attributedString(value)? = segments.first else {
                 XCTFail("Expected a localized AttributedString argument")
@@ -445,7 +449,7 @@ final class LocalizedStringKeyTests: XCTestCase {
             "styled | 7 | first | styled"
         )
 
-        let segments = key.resolve(table: nil, bundle: .module, locale: environment.locale)
+        let segments = key.resolve(table: nil, bundle: .module, environment: environment)
         let textSegments = segments.compactMap { segment -> Text? in
             guard case let .text(text) = segment else { return nil }
             return text
