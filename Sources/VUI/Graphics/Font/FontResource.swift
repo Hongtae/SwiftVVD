@@ -11,6 +11,8 @@ import Foundation
 final class FontResource: Hashable, @unchecked Sendable {
     let provider: any TypefaceProvider
     let pointSize: CGFloat
+    /// Selected logical weight, independent of the shared physical glyph resource.
+    let selectedWeight: CGFloat?
     let shapingFeatures: [TypefaceShapingFeature]
     let textStyle: Font.TextStyle?
     let language: String?
@@ -23,6 +25,7 @@ final class FontResource: Hashable, @unchecked Sendable {
         environment.defaultFontRenderingMode = context.defaultFontRenderingMode
         self.provider = descriptor.typefaceProvider(in: environment)
         self.pointSize = descriptor.pointSize
+        self.selectedWeight = descriptor.selectedWeight
         self.shapingFeatures = descriptor.shapingFeatures
         self.language = descriptor.language
         self.languageAwareLineHeightRatio = descriptor.languageAwareLineHeightRatio
@@ -88,7 +91,8 @@ final class FontResource: Hashable, @unchecked Sendable {
     }
 
     static func == (lhs: FontResource, rhs: FontResource) -> Bool {
-        lhs.language == rhs.language &&
+        lhs.selectedWeight == rhs.selectedWeight &&
+            lhs.language == rhs.language &&
             lhs.languageAwareLineHeightRatio == rhs.languageAwareLineHeightRatio &&
             lhs.textStyle == rhs.textStyle &&
             lhs.shapingFeatures == rhs.shapingFeatures &&
@@ -96,6 +100,7 @@ final class FontResource: Hashable, @unchecked Sendable {
     }
 
     func hash(into hasher: inout Hasher) {
+        hasher.combine(selectedWeight)
         hasher.combine(language)
         hasher.combine(languageAwareLineHeightRatio)
         hasher.combine(textStyle)

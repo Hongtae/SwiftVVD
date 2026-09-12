@@ -45,6 +45,157 @@ final class TextStyleConsumerTests {
         return root.appendingPathComponent("Sources/VUI/Resources/Fonts").appendingPathComponent(name)
     }
 
+    // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
+    // ASSERTIONS fontSelectedWeightCopiesObserved
+    @Test func namedFontSelectionSurvivesResolvedCopiesAndReachesDrawingMargins() throws {
+        var env = environment()
+        env.displayScale = 2
+        let font = Font.custom("NanumSquareNeo-Variable", fixedSize: 23)
+        let resolvedFont = font.resolved(in: env)
+        for request in [font, resolvedFont, resolvedFont.resolved(in: env), resolvedFont.monospacedDigit()] {
+            let source = try resolve(Text(verbatim: "Ågj").font(request), environment: env)
+            let resource = try #require(attributes(source).first?.fontResource)
+            #expect(resource.descriptor().resolvedWeight == 0)
+            for (language, edges): (String, [CGFloat]) in [
+                ("en", [4.290052, 3.279317, 2.576023, 6.487472]),
+                ("ur", [0.831082, 4.756745, 2.576023, 7.574843])
+            ] {
+                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                    displayScale: 2, preferredLanguages: [language])
+                let metrics = try #require(text.maximumFontMetrics)
+                let observed = [metrics.outsets.leading, metrics.outsets.top, metrics.outsets.trailing, metrics.outsets.bottom]
+                for (actual, expected) in zip(observed, edges) { #expect(abs(actual - expected) < 1e-10) }
+                #expect(abs(metrics.ascender - 19.550140380859375) < 1e-10)
+                #expect(abs(metrics.descender + 5.8651123046875) < 1e-10)
+                let styled = ResolvedStyledText(resolvedText: text)
+                let margins = styled.drawingMargins
+                #expect(margins.leading == (language == "en" ? 4.5 : 1))
+                #expect(margins.trailing == 3)
+                let frame = styled.frame(in: text.measure(), renderer: nil)
+                #expect(frame.minX == -margins.leading)
+                #expect(frame.minY == -margins.top)
+                let layout = text.makeLayout(in: .init(width: 300, height: 100), layoutDirection: .leftToRight,
+                    origin: .init(x: margins.leading, y: margins.top))
+                #expect(layout.count == 1)
+                let line = try #require(layout.first)
+                #expect(line.typographicBounds.ascent == 20)
+                #expect(line.typographicBounds.descent == 6)
+                #expect(line.origin.x == margins.leading)
+                #expect(line.origin.y == 20 + margins.top)
+            }
+        }
+    }
+
+    // ASSERTIONS fontSelectedWeightCopiesObserved
+    @Test func namedFontModifiersUseSelectedWeightsForOutsetRows() throws {
+        let nanum = Font.custom("NanumSquareNeo-Variable", fixedSize: 23)
+        let roboto = Font.custom("Roboto-Regular", fixedSize: 23)
+        let cases: [(VUI.Font, Float, [CGFloat])] = [
+            (nanum.weight(.regular), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
+            (.custom("NanumSquareNeo-Variable_Regular", fixedSize: 23), -0.23,
+                [4.166542, 3.144560, 2.415023, 6.395449]),
+            (nanum.weight(.heavy), 0.4, [4.709319, 3.279317, 3.289023, 6.809472]),
+            (.custom("NanumSquareNeo-Variable_Heavy", fixedSize: 23), 0.8,
+                [5.098663, 3.316692, 3.542023, 7.062472]),
+            (roboto.weight(.heavy), 0.6, [4.888995, 3.523692, 3.657023, 7.177472]),
+            (roboto.weight(.heavy).italic(), 0.6, [4.888995, 3.523692, 3.657023, 7.177472]),
+            (roboto.weight(.light).italic().weight(.heavy), 0.6,
+                [4.888995, 3.523692, 3.657023, 7.177472]),
+            (roboto.italic().weight(.light).weight(.heavy), 0.6,
+                [4.888995, 3.523692, 3.657023, 7.177472])
+        ]
+        for (font, weight, expected) in cases {
+            for copy in [font, font.resolved(in: environment()).monospacedDigit()] {
+                let source = try resolve(Text(verbatim: "Ågj").font(copy))
+                let resource = try #require(attributes(source).first?.fontResource)
+                #expect(resource.selectedWeight == CGFloat(weight))
+                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                    preferredLanguages: ["en"])
+                let edges = try #require(text.maximumFontMetrics).outsets
+                let actual = [edges.leading, edges.top, edges.trailing, edges.bottom]
+                for (value, target) in zip(actual, expected) { #expect(abs(value - target) < 1e-10) }
+            }
+        }
+    }
+
+    // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
+    @Test func suppliedFontWeightsRetainTheirPhysicalOutsetFallback() throws {
+        let url = fontURL("NanumSquareNeo/NanumSquareNeo-Variable.ttf")
+        let bytes = try Data(contentsOf: url)
+        let fixedCandidate = VVD.Font(path: url.path)
+        let fixed = try #require(fixedCandidate)
+        fixed.setPointSize(23, dpi: (72, 72))
+        let cases: [(VUI.Font, Float, [CGFloat])] = [
+            (.file(url, size: 23), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
+            (.data(bytes, size: 23), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
+            (.file(url, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.326472]),
+            (.data(bytes, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.326472]),
+            (.init(vector: fixed), -0.6, [4.009291, 3.144560, 2.392023, 6.326472])
+        ]
+        for (font, weight, expected) in cases {
+            for copy in [font, font.resolved(in: environment()).monospacedDigit()] {
+                let source = try resolve(Text(verbatim: "Ågj").font(copy))
+                let resource = try #require(attributes(source).first?.fontResource)
+                #expect(resource.selectedWeight == nil)
+                guard case let .styledText(faces, _, _, _) = source.runs.first else {
+                    Issue.record("Expected a styled text run")
+                    continue
+                }
+                #expect(faces.first?.outsetAttributes?.weight == CGFloat(weight))
+                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                    preferredLanguages: ["en"])
+                let edges = try #require(text.maximumFontMetrics).outsets
+                let actual = [edges.leading, edges.top, edges.trailing, edges.bottom]
+                for (value, target) in zip(actual, expected) { #expect(abs(value - target) < 1e-10) }
+            }
+        }
+    }
+
+    // ASSERTIONS fontSelectedWeightCopiesObserved
+    // ASSERTIONS fontResolvedResourceEqualityObserved
+    // ASSERTIONS fontResolvedLazyCacheBoundaryObserved
+    @Test func selectedFontCopiesShareGlyphResourcesWithoutChangingFaceTraits() throws {
+        let env = environment()
+        let font = Font.custom("NanumSquareNeo-Variable", fixedSize: 23)
+        let resource = font.platformFont(in: env.fontResolutionContext)
+        let scene = SceneResources()
+        let context = GraphTextResolutionContext(environment: env, sceneResources: scene)
+        var firstFace: VectorTypeface?
+        var firstShape: TypefaceShapedText?
+        let resolved = font.resolved(in: env)
+        for request in [font, resolved, resolved.resolved(in: env)] {
+            let text = try #require(Text(verbatim: "Hg한글").font(request)._resolve(context: context,
+                referenceDate: Date(timeIntervalSince1970: 0)))
+            guard case let .styledText(faces, _, _, style) = text.runs.first else {
+                Issue.record("Expected a styled text run")
+                continue
+            }
+            let face = try #require(faces.first as? VectorTypeface)
+            let shape = try #require(face.shape("Hg한글", direction: .leftToRight, language: nil, features: []))
+            #expect(style.fontResource?.selectedWeight == 0)
+            #expect(face.outsetAttributes?.weight == CGFloat(Float(-0.6)))
+            if let firstFace, let firstShape {
+                #expect(face === firstFace)
+                #expect(shape.glyphs.map(\.index) == firstShape.glyphs.map(\.index))
+                #expect(shape.glyphs.map(\.advance) == firstShape.glyphs.map(\.advance))
+                #expect(shape.glyphs.map(\.offset) == firstShape.glyphs.map(\.offset))
+            } else {
+                firstFace = face
+                firstShape = shape
+            }
+            _ = text.maximumFontMetrics
+            #expect(face.outsetAttributes?.weight == CGFloat(Float(-0.6)))
+        }
+        #expect(resource === font.platformFont(in: env.fontResolutionContext))
+        let copy = font.resolved(in: env).platformFont(in: env.fontResolutionContext)
+        #expect(resource == copy)
+        #expect(resource.hashValue == copy.hashValue)
+        let changed = copy.descriptor().weight(.heavy)
+        #expect(changed.selectedWeight == CGFloat(Float(0.4)))
+        #expect(resource.selectedWeight == 0)
+        #expect(resource.descriptor().resolvedWeight == 0)
+    }
+
     private func metricFontData(units: UInt16, ascent: Int16, descent: Int16, gap: Int16,
                                 clipping: (UInt16, UInt16)? = nil, removeOS2: Bool = false) throws -> Data {
         var data = try Data(contentsOf: fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf"))

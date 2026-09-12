@@ -117,6 +117,48 @@ final class TextDrawingMarginTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
+    // ASSERTIONS textDrawingFrameCompensationObserved
+    func testSelectedNamedWeightPreservesBitmapAndVectorDrawingOnGPU() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for renderScale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.font = .custom("NanumSquareNeo-Variable", fixedSize: 23)
+                environment.defaultFontRenderingMode = mode
+                environment.displayScale = 2
+                environment._contentScaleFactor = renderScale
+                let source = try resolve(Text(verbatim: "Ågj"), environment: environment)
+                for language in ["en", "ur"] {
+                    let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                        displayScale: 2, preferredLanguages: [language])
+                    let styled = ResolvedStyledText(resolvedText: text)
+                    XCTAssertEqual(styled.drawingMargins.leading, language == "en" ? 4.5 : 1)
+                    XCTAssertEqual(styled.drawingMargins.trailing, 3)
+                    let plain = try value(styled)
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(text, in: CGRect(origin: .zero, size: plain.size))
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    let prepared = try XCTUnwrap(plain.makeDrawing())
+                    let renderer = MarginRenderer(environment: environment, operation: .line)
+                    let item = try value(styled, renderer: renderer)
+                    let immediate = try render(device: device, environment: environment) { plain.draw(in: $0) }
+                    let cached = try render(device: device, environment: environment) { plain.draw(prepared, in: $0) }
+                    let custom = try render(device: device, environment: environment) { item.draw(in: $0) }
+                    XCTAssertTrue(immediate == expected)
+                    XCTAssertTrue(cached == expected)
+                    XCTAssertTrue(custom == expected)
+                    XCTAssertEqual(renderer.origin?.x, styled.drawingMargins.leading)
+                    XCTAssertEqual(renderer.origin?.y, text.firstBaseline(in: plain.size) + styled.drawingMargins.top)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textDrawingFrameCompensationObserved
     // ASSERTIONS textDrawingRendererLocalContextObserved
     func testRendererShapesAndRecordedReplayUseTheExpandedFrameOnGPU() throws {

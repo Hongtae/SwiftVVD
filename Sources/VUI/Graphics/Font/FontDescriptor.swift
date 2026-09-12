@@ -47,6 +47,9 @@ final class FontDescriptor {
 
     var resolvedWeight: CGFloat { resolve().weight }
 
+    /// Catalog-selected weight; physical-only providers retain their own metric traits.
+    var selectedWeight: CGFloat? { resolve().candidate?.traits.weight }
+
     func typefaceProvider(in environment: EnvironmentValues) -> any TypefaceProvider {
         var environment = environment
         if let renderingMode {

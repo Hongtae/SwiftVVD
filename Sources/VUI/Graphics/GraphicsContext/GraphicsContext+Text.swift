@@ -210,8 +210,13 @@ extension GraphicsContext {
                 guard let face = faces.first else { continue }
                 var metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
                     ?? face.resolvedMetrics.scaled(by: scaleFactor)
+                var outsetAttributes = face.outsetAttributes
+                // A selected catalog trait can differ from the physical variation coordinate.
+                if let weight = resource?.selectedWeight {
+                    outsetAttributes?.weight = weight
+                }
                 // One scalar decision applies to every attribute font in the complete text.
-                if let attributes = face.outsetAttributes,
+                if let attributes = outsetAttributes,
                    storage.hasOversizedScalars || attributes.needsOutsets,
                    let outsets = storage.outsetData?.outsets(
                        for: attributes,
