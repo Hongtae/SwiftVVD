@@ -616,6 +616,18 @@ final class ResolvedStyledText: InterpolatableContent {
         metricsCache.count
     }
 
+    /// Drawing padding is independent of typographic height and baselines.
+    var drawingMargins: EdgeInsets {
+        let outsets = maxFontMetrics?.outsets ?? EdgeInsets()
+        let scale = resolvedText?.displayScale ?? 1
+        return EdgeInsets(
+            top: ceil((outsets.top + stylePadding.top) * scale) / scale,
+            leading: ceil((outsets.leading + stylePadding.leading) * scale) / scale,
+            bottom: ceil((outsets.bottom + stylePadding.bottom) * scale) / scale,
+            trailing: ceil((outsets.trailing + stylePadding.trailing) * scale) / scale
+        )
+    }
+
     var needsStyledRendering: Bool {
         if features.contains(.keyColor) {
             return true
@@ -645,6 +657,15 @@ final class ResolvedStyledText: InterpolatableContent {
         if measured.height < size.height {
             frame.origin.y = (size.height - measured.height) * 0.5
         }
+        let margins = drawingMargins
+        let top = layoutMargins.top - margins.top
+        let leading = layoutMargins.leading - margins.leading
+        let bottom = layoutMargins.bottom - margins.bottom
+        let trailing = layoutMargins.trailing - margins.trailing
+        frame.origin.x += leading
+        frame.origin.y += top
+        frame.size.width -= leading + trailing
+        frame.size.height -= top + bottom
         return frame
     }
 

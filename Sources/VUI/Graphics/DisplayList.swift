@@ -1262,9 +1262,11 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
             func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
                 guard view.renderer == nil else { return nil }
+                let margins = view.text.drawingMargins
                 return view.text.resolvedText?.makeDrawing(
                     in: size,
-                    layoutProperties: view.text.layoutProperties
+                    layoutProperties: view.text.layoutProperties,
+                    origin: CGPoint(x: margins.leading, y: margins.top)
                 )
             }
 
@@ -1273,13 +1275,15 @@ struct DisplayList: Equatable, CustomStringConvertible {
                       let resolvedText = view.text.resolvedText else {
                     return nil
                 }
+                let margins = view.text.drawingMargins
                 return resolvedText.glyphAtoms(
                     in: size,
                     layoutProperties: view.text.layoutProperties
                 ).map { atom in
                     var atom = atom
                     atom.bounds = atom.bounds
-                        .offsetBy(dx: frame.minX, dy: frame.minY)
+                        .offsetBy(dx: frame.minX + margins.leading,
+                                  dy: frame.minY + margins.top)
                         .applying(transform)
                         .standardized
                     return atom
@@ -1294,24 +1298,31 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 }
                 if let renderer = view.renderer {
                     context.translateBy(x: frame.minX, y: frame.minY)
-                    context.copyOnWrite()
-                    context.environment = renderer.environment
+                    // Renderer commands use their own local coordinate space;
+                    // the enclosing frame applies drawing margins on replay.
+                    var local = context.recordingContext(size: frame.size)
+                    // Renderer commands start with an unbounded local clip.
+                    let clipExtent = CGFloat(Float.greatestFiniteMagnitude)
+                    local.clipBoundingRect = CGRect(
+                        x: -clipExtent / 2, y: -clipExtent / 2,
+                        width: clipExtent, height: clipExtent
+                    )
+                    local.environment = renderer.environment
                     var source = resolvedText
                     source.shading = shading
                     let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(source))
+                    let margins = view.text.drawingMargins
                     let layout = source.makeLayout(
                         in: bounds.size,
-                        layoutDirection: context.environment.layoutDirection,
-                        layoutProperties: view.text.layoutProperties
+                        layoutDirection: local.environment.layoutDirection,
+                        layoutProperties: view.text.layoutProperties,
+                        origin: CGPoint(x: bounds.minX + margins.leading,
+                                        y: bounds.minY + margins.top)
                     )
-                    renderer.draw(layout: layout, in: &context)
-                } else {
-                    context.draw(
-                        resolvedText,
-                        in: frame,
-                        shading: shading,
-                        layoutProperties: view.text.layoutProperties
-                    )
+                    renderer.draw(layout: layout, in: &local)
+                    local.recording!.draw(in: context)
+                } else if let drawing = makeDrawing() {
+                    context.draw(drawing, in: frame, shading: shading)
                 }
             }
 

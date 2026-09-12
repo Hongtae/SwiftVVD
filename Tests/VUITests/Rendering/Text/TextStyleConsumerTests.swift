@@ -45,7 +45,8 @@ final class TextStyleConsumerTests {
         return root.appendingPathComponent("Sources/VUI/Resources/Fonts").appendingPathComponent(name)
     }
 
-    private func metricFontData(units: UInt16, ascent: Int16, descent: Int16, gap: Int16) throws -> Data {
+    private func metricFontData(units: UInt16, ascent: Int16, descent: Int16, gap: Int16,
+                                clipping: (UInt16, UInt16)? = nil, removeOS2: Bool = false) throws -> Data {
         var data = try Data(contentsOf: fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf"))
         func read16(_ offset: Int) -> UInt16 { UInt16(data[offset]) << 8 | UInt16(data[offset + 1]) }
         func read32(_ offset: Int) -> Int {
@@ -59,12 +60,19 @@ final class TextStyleConsumerTests {
         for index in 0..<Int(read16(4)) {
             let record = 12 + index * 16
             tables[String(decoding: data[record..<record + 4], as: UTF8.self)] = read32(record + 8)
+            if removeOS2, String(decoding: data[record..<record + 4], as: UTF8.self) == "OS/2" {
+                data.replaceSubrange(record..<record + 4, with: "ZZZZ".utf8)
+            }
         }
         let head = try #require(tables["head"])
         let hhea = try #require(tables["hhea"])
         let os2 = try #require(tables["OS/2"])
         write16(head + 18, units)
         write16(os2 + 62, read16(os2 + 62) & ~128)
+        if let clipping {
+            write16(os2 + 74, clipping.0)
+            write16(os2 + 76, clipping.1)
+        }
         for (index, value) in [ascent, descent, gap].enumerated() {
             write16(hhea + 4 + index * 2, UInt16(bitPattern: value))
         }
@@ -594,6 +602,109 @@ final class TextStyleConsumerTests {
         #expect(resolved.measure().height == 17)
         #expect(layout[0][0].typographicBounds.ascent == 13)
         #expect(layout[0][0].typographicBounds.descent == 4)
+    }
+
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
+    // ASSERTIONS textDrawingFrameCompensationObserved
+    @Test
+    func testClippingMarginsExpandDrawingFramesWithoutChangingTypographicMetrics() throws {
+        let names = ["Roboto/Roboto-VariableFont_wdth,wght.ttf",
+                     "NanumSquareNeo/NanumSquareNeo-Variable.ttf",
+                     "NotoSansCJK/NotoSansCJK-VF.otf.ttc"]
+        for (fontIndex, name) in names.enumerated() {
+            for pointSize: CGFloat in [13, 15.625, 23] {
+                for displayScale: CGFloat in [1, 2] {
+                    for renderScale: CGFloat in [1, 2] {
+                        var environment = self.environment()
+                        environment.displayScale = displayScale
+                        environment._contentScaleFactor = renderScale
+                        let source = try resolve(Text(verbatim: "Hg\nHg").font(.file(fontURL(name), size: pointSize)),
+                                                 environment: environment)
+                        let metrics = try #require(source.maximumFontMetrics)
+                        let styled = ResolvedStyledText(resolvedText: source)
+                        let measured = source.measure()
+                        let baseline = source.firstBaseline(in: measured)
+                        let rawTop = fontIndex == 0 ? 46 * pointSize / 2048 : 0
+                        let rawBottom = fontIndex == 0 ? 12 * pointSize / 2048 : 0
+                        #expect(abs(metrics.outsets.top - rawTop) < 1e-12)
+                        #expect(abs(metrics.outsets.bottom - rawBottom) < 1e-12)
+                        let top: CGFloat = fontIndex != 0 ? 0 : (displayScale == 1 || pointSize == 23 ? 1 : 0.5)
+                        let bottom: CGFloat = fontIndex != 0 ? 0 : 1 / displayScale
+                        #expect(styled.drawingMargins == EdgeInsets(top: top, leading: 0, bottom: bottom, trailing: 0))
+                        let frame = styled.frame(in: measured, renderer: nil)
+                        #expect(frame == CGRect(x: 0, y: -top, width: measured.width, height: measured.height + top + bottom))
+                        let layout = source.makeLayout(in: measured, layoutDirection: .leftToRight,
+                                                       origin: CGPoint(x: 0, y: top))
+                        #expect(layout[0].origin.y == baseline + top)
+                        #expect(layout[0].origin.y + frame.minY == baseline)
+                        #expect(styled.sizeThatFits(_ProposedSize(measured)) == measured)
+                        #expect(styled.firstBaseline(in: measured) == baseline)
+                        #expect(layout[0][0].typographicBounds.ascent == metrics.ascender)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textDrawingMarginClippingOutsetsObserved
+    // ASSERTIONS fontClippingVariationMetricsObserved
+    @Test
+    func testAbsentZeroAndQuantizedClippingInputsRemainDistinct() throws {
+        for remove in [false, true] {
+            let data = try metricFontData(units: 2048, ascent: 1900, descent: -500, gap: 0,
+                                          clipping: (0, 0), removeOS2: remove)
+            let source = try resolve(Text(verbatim: "Hg").font(.data(data, size: 13)))
+            let metrics = try #require(source.maximumFontMetrics)
+            #expect(metrics.ascender == 12.060546875)
+            #expect(metrics.descender == -3.173828125)
+            #expect(metrics.outsets == EdgeInsets())
+            #expect(ResolvedStyledText(resolvedText: source).drawingMargins == EdgeInsets())
+        }
+        // A half-design-unit difference can cross a half-point ceiling. Retain
+        // the integer snapshot's actual result instead of hiding that boundary.
+        let data = try metricFontData(units: 2048, ascent: 1800, descent: -400, gap: -100,
+                                      clipping: (2151, 675))
+        var environment = self.environment()
+        environment.displayScale = 2
+        let size: CGFloat = 1024 / 350.5
+        let source = try resolve(Text(verbatim: "Hg").font(.data(data, size: size)), environment: environment)
+        let metrics = try #require(source.maximumFontMetrics)
+        #expect(metrics.outsets.top > 0.5 && metrics.outsets.top < 0.501)
+        #expect(ResolvedStyledText(resolvedText: source).drawingMargins.top == 1)
+        #expect(350.5 * size / 2048 == 0.5)
+    }
+
+    // ASSERTIONS textDrawingFrameCompensationObserved
+    @Test
+    func testDrawingOriginPreservesSelectionBackgroundAndDecorationPlacement() throws {
+        var string = AttributedString("Hg\nHg")
+        string._setCoreAttributes(_ResolvedTextRunAttributes(backgroundColor: .yellow, strikethroughStyle: .init(),
+                                                             underlineStyle: .init()))
+        for scale: CGFloat in [1, 2] {
+            var environment = self.environment()
+            environment.font = .system(size: 13)
+            environment.displayScale = 2
+            environment._contentScaleFactor = scale
+            let source = try resolve(Text(string), environment: environment)
+            let styled = ResolvedStyledText(stylePadding: EdgeInsets(top: 0.3, leading: 1.2, bottom: 0.6, trailing: 0.2),
+                                             resolvedText: source)
+            #expect(styled.drawingMargins == EdgeInsets(top: 1, leading: 1.5, bottom: 1, trailing: 0.5))
+            let size = source.measure()
+            let frame = styled.frame(in: size, renderer: nil)
+            let value = DisplayList.Content.TextValue(
+                view: StyledTextContentView(text: styled, renderer: nil), size: size, frame: frame,
+                shading: .color(.black), transform: .identity, command: .closure(bounds: nil))
+            let drawing = try #require(value.makeDrawing())
+            #expect(drawing.origin == CGPoint(x: 1.5, y: 1))
+            #expect(frame.origin + drawing.origin == .zero)
+            let atoms = try #require(value.glyphAtoms())
+            #expect(atoms.map(\.bounds) == source.glyphAtoms(in: size).map(\.bounds))
+            let original = source.makeDrawing(in: size)
+            #expect(drawing.backgrounds.map(\.frame) == original.backgrounds.map(\.frame))
+            #expect(drawing.decorations.map(\.start) == original.decorations.map(\.start))
+            #expect(drawing.vectorBatches.map { $0.path.boundingRect } == original.vectorBatches.map { $0.path.boundingRect })
+            #expect(drawing.backgrounds.count == 2 && drawing.decorations.count == 4)
+        }
     }
 
     // ASSERTIONS textLineSpacingPlacementObserved

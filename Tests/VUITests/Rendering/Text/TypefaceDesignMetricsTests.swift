@@ -72,6 +72,8 @@ struct TypefaceDesignMetricsTests {
         let cascade = TypefaceCascade(ordinaryFaces: [deferred], missingGlyphFace: raw,
             shapingFeatures: VUI.Font.MonospacedDigitModifier.shapingFeatures)
         let faces = cascade.runFaces
+        let fontResource = VUI.Font.file(resource("Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 13)
+            .platformFont(in: EnvironmentValues().fontResolutionContext)
         try #require(faces.count == 2)
         for face in faces {
             let metrics = try #require(face.designMetrics)
@@ -81,6 +83,9 @@ struct TypefaceDesignMetricsTests {
             let components = [metrics.ascender, metrics.descender, metrics.height, metrics.lineGap]
             #expect(components == [1900, -500, 2300, -100])
             #expect(face.resolvedMetrics.leading == 0)
+            let resolved = try #require(fontResource.resolvedMetrics(for: face, scaleFactor: 1))
+            #expect(resolved.outsets.top == 1.904296875)
+            #expect(resolved.outsets.bottom == 1.3330078125)
         }
         #expect(artworkLoads == 0)
         #expect(!faces[1].hasGlyph(for: "A"))
@@ -159,9 +164,15 @@ struct TypefaceDesignMetricsTests {
         }
         let cascade = TypefaceCascade(ordinaryFaces: [deferred], missingGlyphFace: base,
             shapingFeatures: VUI.Font.MonospacedDigitModifier.shapingFeatures)
+        let fontResource = VUI.Font.file(resource("Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 13)
+            .platformFont(in: EnvironmentValues().fontResolutionContext)
         for face in cascade.runFaces {
             #expect(face.designMetrics == expected)
             #expect(face.designMetrics?.lineGap == -100)
+            let resolved = try #require(fontResource.resolvedMetrics(for: face, scaleFactor: 2))
+            #expect(resolved.ascender == 12.060546875)
+            #expect(resolved.descender == -3.173828125)
+            #expect(resolved.outsets == EdgeInsets())
         }
     }
 

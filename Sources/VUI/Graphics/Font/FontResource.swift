@@ -42,7 +42,7 @@ final class FontResource: Hashable, @unchecked Sendable {
                        languageAwareLineHeightRatio: languageAwareLineHeightRatio)
     }
 
-    /// Resolves natural horizontal metrics in points without raster rounding.
+    /// Resolves natural metrics and independent clipping outsets in points.
     func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat) -> ResolvedFontMetrics? {
         // A supplied face has no independent requested point size to resolve.
         if case let .typeface(provider) = source, provider is FixedFontProvider {
@@ -67,12 +67,18 @@ final class FontResource: Hashable, @unchecked Sendable {
                 return nil
             }
         }
-        // Cap height and outsets retain their independent backend inputs.
+        // Cap height retains its independent backend input.
         var result = face.resolvedMetrics.scaled(by: scaleFactor)
         let size = Double(pointSize) / units
         result.ascender = CGFloat(convert(design.ascender) * size)
         result.descender = -CGFloat(abs(convert(design.descender)) * size)
         result.leading = CGFloat(convert(design.lineGap) * size)
+        if let clipping = design.clipping {
+            // Clipping uses the requested point size directly, independently
+            // of outline-format quantization of the natural metrics.
+            result.outsets.top = max(0, CGFloat(clipping.ascent) * pointSize / CGFloat(units) - result.ascender)
+            result.outsets.bottom = max(0, CGFloat(clipping.descent) * pointSize / CGFloat(units) + result.descender)
+        }
         return result
     }
 

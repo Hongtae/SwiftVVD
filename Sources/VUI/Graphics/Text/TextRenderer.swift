@@ -478,7 +478,8 @@ extension GraphicsContext.ResolvedText {
     func makeLayout(
         in size: CGSize,
         layoutDirection: LayoutDirection,
-        layoutProperties: TextLayoutProperties? = nil
+        layoutProperties: TextLayoutProperties? = nil,
+        origin: CGPoint = .zero
     ) -> Text.Layout {
         let width = max(size.width, 0) * scaleFactor
         let height = max(size.height, 0) * scaleFactor
@@ -496,14 +497,16 @@ extension GraphicsContext.ResolvedText {
         return makeLayout(
             lineGlyphs: lineGlyphs,
             layoutDirection: layoutDirection,
-            isTruncated: isTruncated
+            isTruncated: isTruncated,
+            origin: origin
         )
     }
 
     func makeLayout(
         lineGlyphs: [LineGlyphs],
         layoutDirection: LayoutDirection,
-        isTruncated: Bool = false
+        isTruncated: Bool = false,
+        origin: CGPoint = .zero
     ) -> Text.Layout {
         let scale = 1 / scaleFactor
         let lines = lineGlyphs.map { line -> _TextLayoutLineStorage in
@@ -545,7 +548,7 @@ extension GraphicsContext.ResolvedText {
             let result = _TextLayoutLineStorage(
                 glyphs: line.glyphs,
                 runs: runs,
-                origin: CGPoint(x: 0, y: line.baseline * scale),
+                origin: CGPoint(x: origin.x, y: origin.y + line.baseline * scale),
                 width: line.width * scale,
                 ascent: line.ascender * scale,
                 descent: -line.descender * scale
@@ -604,7 +607,11 @@ extension GraphicsContext {
                 )
             ),
             shading: run.layoutRenderer.source.shading,
-            snapOrigin: !run.baseDrawingOptions.union(options).contains(.disablesSubpixelQuantization)
+            snapOrigin: !run.baseDrawingOptions.union(options).contains(.disablesSubpixelQuantization),
+            // Slices keep glyph positions relative to the shared line origin.
+            // Quantizing each slice independently changes inter-glyph spacing.
+            snappingOrigin: CGPoint(x: run.lineOrigin.x,
+                                    y: run.lineOrigin.y - sourceLine.ascent)
         )
     }
 }

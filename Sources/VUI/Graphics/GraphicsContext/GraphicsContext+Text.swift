@@ -527,6 +527,8 @@ extension GraphicsContext {
             }
 
             fileprivate var source: ResolvedText
+            // Point-space placement inside the expanded text drawing frame.
+            let origin: CGPoint
             fileprivate var lineGlyphs: [LineGlyphs]
             fileprivate var batches: [Batch]
             var vectorBatches: [VectorBatch]
@@ -536,6 +538,7 @@ extension GraphicsContext {
 
             fileprivate init(
                 source: ResolvedText,
+                origin: CGPoint,
                 lineGlyphs: [LineGlyphs],
                 batches: [Batch],
                 vectorBatches: [VectorBatch],
@@ -544,6 +547,7 @@ extension GraphicsContext {
                 decorations: [Decoration]
             ) {
                 self.source = source
+                self.origin = origin
                 self.lineGlyphs = lineGlyphs
                 self.batches = batches
                 self.vectorBatches = vectorBatches
@@ -866,7 +870,8 @@ extension GraphicsContext {
 
         func makeDrawing(
             in size: CGSize,
-            layoutProperties: TextLayoutProperties? = nil
+            layoutProperties: TextLayoutProperties? = nil,
+            origin: CGPoint = .zero
         ) -> Drawing {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
@@ -878,10 +883,10 @@ extension GraphicsContext {
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
-            return makeDrawing(lineGlyphs: lineGlyphs)
+            return makeDrawing(lineGlyphs: lineGlyphs, origin: origin)
         }
 
-        func makeDrawing(lineGlyphs: [LineGlyphs]) -> Drawing {
+        func makeDrawing(lineGlyphs: [LineGlyphs], origin: CGPoint = .zero) -> Drawing {
 
             struct Quad {
                 var vertices: [Drawing.Vertex]
@@ -1186,6 +1191,7 @@ extension GraphicsContext {
 
             return Drawing(
                 source: self,
+                origin: origin,
                 lineGlyphs: lineGlyphs,
                 batches: batches,
                 vectorBatches: vectorBatches,
@@ -1908,7 +1914,8 @@ extension GraphicsContext {
         _ drawing: ResolvedText.Drawing,
         in rect: CGRect,
         shading: Shading,
-        snapOrigin: Bool = true
+        snapOrigin: Bool = true,
+        snappingOrigin: CGPoint? = nil
     ) {
         var rect = rect.standardized
         if rect.isEmpty { return }
@@ -1919,7 +1926,8 @@ extension GraphicsContext {
         }
         if drawing.isEmpty { return }
         if recording != nil, record(bounds: rect, {
-            $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin)
+            $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
+                    snappingOrigin: snappingOrigin)
         }) { return }
 
         var scissorRect: ScissorRect? = nil
@@ -1934,10 +1942,12 @@ extension GraphicsContext {
                     y: self.contentScaleFactor))
 
             if snapOrigin {
-                var origin = rect.origin.applying(transform)
+                let anchor = snappingOrigin ?? (rect.origin + drawing.origin)
+                let relativeOffset = rect.origin + drawing.origin - anchor
+                var origin = anchor.applying(transform)
                 origin.x.round()
                 origin.y.round()
-                rect.origin = origin.applying(transform.inverted())
+                rect.origin = origin.applying(transform.inverted()) + relativeOffset - drawing.origin
             }
             if clipBounds {
                 let tl = CGPoint(x: rect.minX, y: rect.minY).applying(transform)
@@ -1966,7 +1976,7 @@ extension GraphicsContext {
         }
 
         let scale = 1.0 / drawing.source.scaleFactor
-        let offset = rect.origin
+        let offset = rect.origin + drawing.origin
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
 
