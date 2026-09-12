@@ -42,6 +42,11 @@ final class FontResource: Hashable, @unchecked Sendable {
                        languageAwareLineHeightRatio: languageAwareLineHeightRatio)
     }
 
+    var requestedPointSize: CGFloat? {
+        if case let .typeface(provider) = source, provider is FixedFontProvider { return nil }
+        return pointSize
+    }
+
     /// Resolves natural metrics and independent clipping outsets in points.
     func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat) -> ResolvedFontMetrics? {
         // A supplied face has no independent requested point size to resolve.

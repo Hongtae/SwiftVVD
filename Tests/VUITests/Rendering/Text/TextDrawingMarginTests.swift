@@ -42,6 +42,8 @@ final class TextDrawingMarginTests: XCTestCase {
 
     // ASSERTIONS textDrawingFrameCompensationObserved
     // ASSERTIONS textDrawingRendererLocalContextObserved
+    // ASSERTIONS textDrawingOutsetSelectionGatesObserved
+    // ASSERTIONS textLanguageAwareOutsetBackendObserved
     func testBitmapAndVectorOriginsPreserveCanvasAndRendererPixelsOnGPU() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
@@ -55,39 +57,59 @@ final class TextDrawingMarginTests: XCTestCase {
                     environment.defaultFontRenderingMode = mode
                     environment.displayScale = displayScale
                     environment._contentScaleFactor = renderScale
-                    let source = try resolve(Text(verbatim: "Hg\nHg"), environment: environment)
-                    let styled = ResolvedStyledText(resolvedText: source)
-                    let plain = try value(styled)
-                    let expected = try render(device: device, environment: environment) {
-                        $0.draw(source, in: CGRect(origin: .zero, size: plain.size))
-                    }
-                    XCTAssertTrue(expected.contains { $0 != 0 })
-                    let prepared = try XCTUnwrap(plain.makeDrawing())
-                    for cached in [false, true] {
-                        let actual = try render(device: device, environment: environment) {
-                            if cached { plain.draw(prepared, in: $0) } else { plain.draw(in: $0) }
+                    for string in ["Hg\nHg", "Ågj\nHg"] {
+                        let source = try resolve(Text(verbatim: string), environment: environment)
+                        let styled = ResolvedStyledText(resolvedText: source)
+                        let plain = try value(styled)
+                        let expected = try render(device: device, environment: environment) {
+                            $0.draw(source, in: CGRect(origin: .zero, size: plain.size))
                         }
-                        XCTAssertTrue(actual == expected, "Prepared text moved at size \(pointSize), display \(displayScale), render \(renderScale)")
-                    }
-                    var shifted: [UInt8]?
-                    for operation in MarginRenderer.Operation.allCases {
-                        let renderer = MarginRenderer(environment: environment, operation: operation)
-                        let item = try value(styled, renderer: renderer)
-                        let actual = try render(device: device, environment: environment) { context in
-                            let original = context.transform
-                            item.draw(in: context)
-                            XCTAssertEqual(context.transform, original)
+                        XCTAssertTrue(expected.contains { $0 != 0 })
+                        let prepared = try XCTUnwrap(plain.makeDrawing())
+                        for cached in [false, true] {
+                            let actual = try render(device: device, environment: environment) {
+                                if cached { plain.draw(prepared, in: $0) } else { plain.draw(in: $0) }
+                            }
+                            XCTAssertTrue(actual == expected, "Prepared text moved at size \(pointSize), display \(displayScale), render \(renderScale)")
                         }
-                        XCTAssertEqual(renderer.transform, .identity)
-                        let extent = CGFloat(Float.greatestFiniteMagnitude)
-                        XCTAssertEqual(renderer.clipBounds, CGRect(x: -extent / 2, y: -extent / 2, width: extent, height: extent))
-                        XCTAssertEqual(renderer.opacity, 1)
-                        XCTAssertEqual(renderer.origin?.y, source.firstBaseline(in: plain.size) + styled.drawingMargins.top)
-                        switch operation {
-                        case .line, .run, .slice:
-                            XCTAssertTrue(actual == expected, "Renderer \(operation) moved text at size \(pointSize), display \(displayScale), render \(renderScale)")
-                        case .shift: shifted = actual
-                        case .translate: XCTAssertTrue(actual == shifted)
+                        var shifted: [UInt8]?
+                        for operation in MarginRenderer.Operation.allCases {
+                            let renderer = MarginRenderer(environment: environment, operation: operation)
+                            let item = try value(styled, renderer: renderer)
+                            let actual = try render(device: device, environment: environment) { context in
+                                let original = context.transform
+                                item.draw(in: context)
+                                XCTAssertEqual(context.transform, original)
+                            }
+                            XCTAssertEqual(renderer.transform, .identity)
+                            let extent = CGFloat(Float.greatestFiniteMagnitude)
+                            XCTAssertEqual(renderer.clipBounds, CGRect(x: -extent / 2, y: -extent / 2, width: extent, height: extent))
+                            XCTAssertEqual(renderer.opacity, 1)
+                            XCTAssertEqual(renderer.origin?.y, source.firstBaseline(in: plain.size) + styled.drawingMargins.top)
+                            switch operation {
+                            case .line, .run, .slice:
+                                let differences = actual.indices.filter { actual[$0] != expected[$0] }
+                                if case .bitmap = mode, operation == .slice, !differences.isEmpty {
+                                    // Separate masks quantize coverage before compositing. Restrict
+                                    // the resulting error to overlapping, nonzero alpha samples.
+                                    XCTAssertTrue(differences.allSatisfy { $0 % 4 == 3 && abs(Int(actual[$0]) - Int(expected[$0])) <= 2 })
+                                    XCTAssertTrue(actual.indices.allSatisfy { (actual[$0] == 0) == (expected[$0] == 0) })
+                                    var overlapping = Array(repeating: 0, count: differences.count)
+                                    let glyphCount = source.makeGlyphs(maxWidth: .max, maxHeight: .max).reduce(0) { $0 + $1.glyphs.count }
+                                    for ordinal in 0..<glyphCount {
+                                        let isolated = MarginRenderer(environment: environment, operation: .slice)
+                                        isolated.onlyGlyph = ordinal
+                                        let selected = try value(styled, renderer: isolated)
+                                        let pixels = try render(device: device, environment: environment) { selected.draw(in: $0) }
+                                        for index in differences.indices where pixels[differences[index]] > 0 { overlapping[index] += 1 }
+                                    }
+                                    XCTAssertTrue(overlapping.allSatisfy { $0 >= 2 })
+                                } else {
+                                    XCTAssertTrue(differences.isEmpty, "Renderer \(operation), \(mode), \(string.debugDescription), size \(pointSize), display \(displayScale), render \(renderScale): \(differences.count) changed bytes")
+                                }
+                            case .shift: shifted = actual
+                            case .translate: XCTAssertTrue(actual == shifted)
+                            }
                         }
                     }
                 }
@@ -164,6 +186,7 @@ private final class MarginRenderer: TextRendererBoxBase {
     var clipBounds: CGRect?
     var opacity: Double?
     var drawMarker = false
+    var onlyGlyph: Int?
     init(environment: EnvironmentValues, operation: Operation) { values = environment; self.operation = operation }
     override var environment: EnvironmentValues { values }
     override var displayPadding: EdgeInsets { EdgeInsets() }
@@ -179,12 +202,16 @@ private final class MarginRenderer: TextRendererBoxBase {
             return
         }
         if operation == .translate { context.translateBy(x: 3, y: 5) }
+        var ordinal = 0
         for var line in layout {
             if operation == .shift { line.origin.x += 3; line.origin.y += 5 }
             switch operation {
             case .line, .shift, .translate: context.draw(line)
             case .run: for run in line { context.draw(run) }
-            case .slice: for run in line { for slice in run { context.draw(slice) } }
+            case .slice: for run in line { for slice in run {
+                if onlyGlyph == nil || onlyGlyph == ordinal { context.draw(slice) }
+                ordinal += 1
+            } }
             }
         }
     }

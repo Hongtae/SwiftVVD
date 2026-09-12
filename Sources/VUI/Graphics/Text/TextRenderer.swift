@@ -611,7 +611,9 @@ extension GraphicsContext {
             // Slices keep glyph positions relative to the shared line origin.
             // Quantizing each slice independently changes inter-glyph spacing.
             snappingOrigin: CGPoint(x: run.lineOrigin.x,
-                                    y: run.lineOrigin.y - sourceLine.ascent)
+                                    y: run.lineOrigin.y - sourceLine.ascent),
+            // Typographic slice bounds do not clip the glyph's ink.
+            clipBounds: false
         )
     }
 }

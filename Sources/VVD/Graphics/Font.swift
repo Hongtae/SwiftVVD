@@ -387,6 +387,30 @@ public class Font: @unchecked Sendable {
         return readMetadata(face: face, library: handle)
     }
 
+    private static func readSFNTStyle(face: FT_Face) -> SFNTStyleMetadata {
+        let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?
+            .assumingMemoryBound(to: TT_OS2.self).pointee
+        let head = FT_Get_Sfnt_Table(face, FT_SFNT_HEAD)?
+            .assumingMemoryBound(to: TT_Header.self).pointee
+        var post: TT_Postscript?
+        var postLength: FT_ULong = 0
+        // The parsed post struct can exist even if the source table is missing.
+        if FT_Load_Sfnt_Table(face, 0x706f_7374, 0, nil, &postLength) == 0,
+           postLength >= 32 {
+            post = FT_Get_Sfnt_Table(face, FT_SFNT_POST)?
+                .assumingMemoryBound(to: TT_Postscript.self).pointee
+        }
+        return SFNTStyleMetadata(
+            weightClass: os2?.usWeightClass,
+            widthClass: os2?.usWidthClass,
+            familyClass: os2?.sFamilyClass,
+            selection: os2?.fsSelection,
+            macStyle: head?.Mac_Style,
+            italicAngle: post.map { ft16d16ToFloat($0.italicAngle) },
+            fixedPitch: post.flatMap { UInt32(exactly: $0.isFixedPitch) }
+        )
+    }
+
     private static func readMetadata(face: FT_Face, library: FT_Library) -> FaceMetadata? {
         // Instance selection can change names and metrics, so copy the base first.
         let faceIndex = Int(face.pointee.face_index)
@@ -413,27 +437,7 @@ public class Font: @unchecked Sendable {
                 data: bytes
             ))
         }
-        let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?
-            .assumingMemoryBound(to: TT_OS2.self).pointee
-        let head = FT_Get_Sfnt_Table(face, FT_SFNT_HEAD)?
-            .assumingMemoryBound(to: TT_Header.self).pointee
-        var post: TT_Postscript?
-        var postLength: FT_ULong = 0
-        // The parsed post struct can exist even if the source table is missing.
-        if FT_Load_Sfnt_Table(face, 0x706f_7374, 0, nil, &postLength) == 0,
-           postLength >= 32 {
-            post = FT_Get_Sfnt_Table(face, FT_SFNT_POST)?
-                .assumingMemoryBound(to: TT_Postscript.self).pointee
-        }
-        let sfntStyle = SFNTStyleMetadata(
-            weightClass: os2?.usWeightClass,
-            widthClass: os2?.usWidthClass,
-            familyClass: os2?.sFamilyClass,
-            selection: os2?.fsSelection,
-            macStyle: head?.Mac_Style,
-            italicAngle: post.map { ft16d16ToFloat($0.italicAngle) },
-            fixedPitch: post.flatMap { UInt32(exactly: $0.isFixedPitch) }
-        )
+        let sfntStyle = readSFNTStyle(face: face)
 
         var axes: [VariationAxis] = []
         var instances: [VariationInstance] = []
@@ -804,40 +808,63 @@ public class Font: @unchecked Sendable {
     }
 
     public var variationCoordinates: [UInt32: CGFloat] {
-        self.state.withLock { state in
-            var descriptor: UnsafeMutablePointer<FT_MM_Var>?
-            guard FT_Get_MM_Var(state.face, &descriptor) == 0,
-                  let descriptor else {
-                return [:]
-            }
-            defer {
-                _ = FT_Done_MM_Var(library.library, descriptor)
-            }
+        state.withLock { state in variationCoordinates(face: state.face) }
+    }
 
-            let value = descriptor.pointee
-            guard value.num_axis > 0, let axes = value.axis else {
-                return [:]
-            }
-            var coordinates = [FT_Fixed](
-                repeating: 0,
-                count: Int(value.num_axis)
+    private func variationCoordinates(face: FT_Face) -> [UInt32: CGFloat] {
+        var descriptor: UnsafeMutablePointer<FT_MM_Var>?
+        guard FT_Get_MM_Var(face, &descriptor) == 0,
+              let descriptor else {
+            return [:]
+        }
+        defer {
+            _ = FT_Done_MM_Var(library.library, descriptor)
+        }
+
+        let value = descriptor.pointee
+        guard value.num_axis > 0, let axes = value.axis else {
+            return [:]
+        }
+        var coordinates = [FT_Fixed](
+            repeating: 0,
+            count: Int(value.num_axis)
+        )
+        let result = coordinates.withUnsafeMutableBufferPointer {
+            FT_Get_Var_Design_Coordinates(
+                face,
+                value.num_axis,
+                $0.baseAddress
             )
-            let result = coordinates.withUnsafeMutableBufferPointer {
-                FT_Get_Var_Design_Coordinates(
-                    state.face,
-                    value.num_axis,
-                    $0.baseAddress
-                )
-            }
-            guard result == 0 else { return [:] }
+        }
+        guard result == 0 else { return [:] }
 
-            var resolved: [UInt32: CGFloat] = [:]
-            for index in coordinates.indices {
-                if let tag = UInt32(exactly: axes[index].tag) {
-                    resolved[tag] = ft16d16ToFloat(coordinates[index])
-                }
+        var resolved: [UInt32: CGFloat] = [:]
+        for index in coordinates.indices {
+            if let tag = UInt32(exactly: axes[index].tag) {
+                resolved[tag] = ft16d16ToFloat(coordinates[index])
             }
-            return resolved
+        }
+        return resolved
+    }
+
+    /// Active style inputs copied atomically with the current size.
+    public struct FaceTraits: Hashable, Sendable {
+        /// Requested vertical size in pixels, independent of bitmap strike selection.
+        public let pixelSize: CGFloat
+        public let variationCoordinates: [UInt32: CGFloat]
+        public let sfntStyle: SFNTStyleMetadata
+        public let isItalic: Bool
+    }
+
+    public var faceTraits: FaceTraits {
+        state.withLock { state in
+            let face = state.face
+            return FaceTraits(
+                pixelSize: CGFloat(state.size26d6) / 64 * CGFloat(state.dpi.y) / 72,
+                variationCoordinates: variationCoordinates(face: face),
+                sfntStyle: Self.readSFNTStyle(face: face),
+                isItalic: face.pointee.style_flags & FT_Long(FT_STYLE_FLAG_ITALIC) != 0
+            )
         }
     }
 

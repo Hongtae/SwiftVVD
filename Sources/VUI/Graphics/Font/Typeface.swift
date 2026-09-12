@@ -21,6 +21,7 @@ struct TypefaceGlyphMetrics {
 }
 
 typealias TypefaceDesignMetrics = VVD.Font.DesignMetrics
+typealias TypefaceFaceTraits = VVD.Font.FaceTraits
 typealias TypefaceShapingDirection = VVD.Font.ShapingDirection
 typealias TypefaceShapingFeature = VVD.Font.ShapingFeature
 
@@ -57,6 +58,7 @@ protocol Typeface {
     var resolvedMetrics: ResolvedFontMetrics { get }
     /// Unscaled selected-face metrics, separate from rounded layout and glyph metrics.
     var designMetrics: TypefaceDesignMetrics? { get }
+    var outsetAttributes: FontOutsetAttributes? { get }
     var identifier: String { get }
     var isEmojiFallback: Bool { get }
     var hasColorGlyphs: Bool { get }
@@ -127,6 +129,7 @@ extension Typeface {
 
     var decorationMetrics: TypefaceDecorationMetrics? { nil }
     var designMetrics: TypefaceDesignMetrics? { nil }
+    var outsetAttributes: FontOutsetAttributes? { nil }
 
     func purgeResources(reason: ResourcePurgeReason) {}
 }
@@ -368,6 +371,12 @@ struct TextureTypeface: VVDFontBackedTypeface {
         (layoutMetrics?.font ?? font).designMetrics
     }
 
+    var outsetAttributes: FontOutsetAttributes? {
+        let selected = layoutMetrics?.font ?? font
+        let scale = layoutMetrics.map { $0.renderScale / selected.bitmapScale } ?? 1
+        return FontOutsetAttributes(face: selected.faceTraits, scale: scale)
+    }
+
     var lineHeight: CGFloat {
         layoutMetrics?.lineHeight ?? font.height
     }
@@ -542,6 +551,7 @@ final class DeferredGlyphTypeface: Typeface {
     var decorationMetrics: TypefaceDecorationMetrics? { metrics.decorationMetrics }
     var resolvedMetrics: ResolvedFontMetrics { metrics.resolvedMetrics }
     var designMetrics: TypefaceDesignMetrics? { metrics.designMetrics }
+    var outsetAttributes: FontOutsetAttributes? { metrics.outsetAttributes }
     var identifier: String { "deferred-glyphs:\(metrics.identifier)" }
     var hasColorGlyphs: Bool { metrics.hasColorGlyphs }
     func isEqual(to other: Typeface) -> Bool { (other as? Self) === self }
@@ -594,6 +604,12 @@ final class VectorTypeface: VVDFontBackedTypeface {
 
     var designMetrics: TypefaceDesignMetrics? {
         (layoutMetrics?.font ?? font).designMetrics
+    }
+
+    var outsetAttributes: FontOutsetAttributes? {
+        let selected = layoutMetrics?.font ?? font
+        let scale = layoutMetrics.map { $0.renderScale / selected.bitmapScale } ?? 1
+        return FontOutsetAttributes(face: selected.faceTraits, scale: scale)
     }
 
     var lineHeight: CGFloat {

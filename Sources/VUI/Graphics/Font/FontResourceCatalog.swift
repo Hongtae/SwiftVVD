@@ -228,6 +228,7 @@ struct BundledFontCatalog: Sendable {
 
     let configuration: FontFallbackConfiguration
     let resources: FontResourceCatalog
+    let outsetData: FontOutsetData?
 
     init(configuration: FontFallbackConfiguration, resourceDirectory: URL) {
         self.configuration = configuration
@@ -235,6 +236,17 @@ struct BundledFontCatalog: Sendable {
             configuration: configuration,
             resourceDirectory: resourceDirectory
         )
+        let url = resourceDirectory.appendingPathComponent("font-outsets.json")
+        if FileManager.default.fileExists(atPath: url.path) {
+            do {
+                self.outsetData = try JSONDecoder().decode(FontOutsetData.self, from: Data(contentsOf: url))
+            } catch {
+                Log.error("Invalid font outset data at \(url): \(error)")
+                self.outsetData = nil
+            }
+        } else {
+            self.outsetData = nil
+        }
     }
 
     func resource(

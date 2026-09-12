@@ -66,6 +66,7 @@ final class TerminalFallbackTypeface: Typeface {
     }
     var resolvedMetrics: ResolvedFontMetrics { base.resolvedMetrics }
     var designMetrics: TypefaceDesignMetrics? { base.designMetrics }
+    var outsetAttributes: FontOutsetAttributes? { base.outsetAttributes }
     var identifier: String { "terminal:\(base.identifier)" }
 
     func isEqual(to other: any Typeface) -> Bool {
@@ -146,6 +147,7 @@ final class ShapingFeatureTypeface: Typeface {
     }
     var resolvedMetrics: ResolvedFontMetrics { base.resolvedMetrics }
     var designMetrics: TypefaceDesignMetrics? { base.designMetrics }
+    var outsetAttributes: FontOutsetAttributes? { base.outsetAttributes }
     var identifier: String {
         "features:\(features):\(base.identifier)"
     }
@@ -260,6 +262,7 @@ final class DeferredTypeface: Typeface {
     }
     var resolvedMetrics: ResolvedFontMetrics { resolved.resolvedMetrics }
     var designMetrics: TypefaceDesignMetrics? { resolved.designMetrics }
+    var outsetAttributes: FontOutsetAttributes? { resolved.outsetAttributes }
 
     func isEqual(to other: any Typeface) -> Bool {
         guard let other = other as? DeferredTypeface else { return false }

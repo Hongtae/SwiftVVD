@@ -37,17 +37,34 @@ extension GraphicsContext {
             let scaleFactor: CGFloat
             let displayScale: CGFloat
             let drawMissingGlyphs: Bool
+            let outsetData: FontOutsetData?
+            let outsetLanguageGroup: Int
+            let hasOversizedScalars: Bool
 
             init(
                 runs: [Run],
                 scaleFactor: CGFloat,
                 displayScale: CGFloat,
-                drawMissingGlyphs: Bool
+                drawMissingGlyphs: Bool,
+                outsetData: FontOutsetData?,
+                preferredLanguages: [String]
             ) {
                 self.state = Mutex(State(runs: runs))
                 self.scaleFactor = scaleFactor
                 self.displayScale = displayScale
                 self.drawMissingGlyphs = drawMissingGlyphs
+                self.outsetData = outsetData
+                self.outsetLanguageGroup = outsetData?.preferredGroup(for: preferredLanguages) ?? 0
+                self.hasOversizedScalars = outsetData.map { data in
+                    runs.contains { run in
+                        switch run {
+                        case let .text(_, text), let .attributedText(_, text, _), let .styledText(_, text, _, _):
+                            text.unicodeScalars.contains(where: data.contains)
+                        case .attachment, .attributedAttachment:
+                            data.contains("\u{fffc}")
+                        }
+                    }
+                } ?? false
             }
 
             var runs: [Run] {
@@ -114,7 +131,9 @@ extension GraphicsContext {
             runs: [Run],
             scaleFactor: CGFloat,
             displayScale: CGFloat? = nil,
-            drawMissingGlyphs: Bool = false
+            drawMissingGlyphs: Bool = false,
+            outsetData: FontOutsetData? = BundledFontCatalog.shared.outsetData,
+            preferredLanguages: [String] = Locale.preferredLanguages
         ) {
             let displayScale = displayScale ?? scaleFactor
             precondition(
@@ -126,7 +145,9 @@ extension GraphicsContext {
                 runs: runs,
                 scaleFactor: scaleFactor,
                 displayScale: displayScale,
-                drawMissingGlyphs: drawMissingGlyphs
+                drawMissingGlyphs: drawMissingGlyphs,
+                outsetData: outsetData,
+                preferredLanguages: preferredLanguages
             )
         }
 
@@ -187,8 +208,18 @@ extension GraphicsContext {
                     resource = style.fontResource
                 }
                 guard let face = faces.first else { continue }
-                let metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
+                var metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
                     ?? face.resolvedMetrics.scaled(by: scaleFactor)
+                // One scalar decision applies to every attribute font in the complete text.
+                if let attributes = face.outsetAttributes,
+                   storage.hasOversizedScalars || attributes.needsOutsets,
+                   let outsets = storage.outsetData?.outsets(
+                       for: attributes,
+                       pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
+                       preferredGroup: storage.outsetLanguageGroup) {
+                    // A successful tuple replaces clipping, including a zero tuple.
+                    metrics.outsets = outsets
+                }
                 if result == nil {
                     result = metrics
                 } else {
@@ -1907,7 +1938,7 @@ extension GraphicsContext {
             in: rect.size,
             layoutProperties: layoutProperties
         )
-        draw(drawing, in: rect, shading: shading)
+        draw(drawing, in: rect, shading: shading, clipBounds: false)
     }
 
     func draw(
@@ -1915,10 +1946,11 @@ extension GraphicsContext {
         in rect: CGRect,
         shading: Shading,
         snapOrigin: Bool = true,
-        snappingOrigin: CGPoint? = nil
+        snappingOrigin: CGPoint? = nil,
+        clipBounds: Bool = true
     ) {
         var rect = rect.standardized
-        if rect.isEmpty { return }
+        if rect.isEmpty && clipBounds { return }
         if rect.isNull { return }
 
         if shading.properties.isEmpty {
@@ -1927,11 +1959,10 @@ extension GraphicsContext {
         if drawing.isEmpty { return }
         if recording != nil, record(bounds: rect, {
             $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
-                    snappingOrigin: snappingOrigin)
+                    snappingOrigin: snappingOrigin, clipBounds: clipBounds)
         }) { return }
 
         var scissorRect: ScissorRect? = nil
-        let clipBounds = true
         if snapOrigin || clipBounds {
             let transform = self.transform
                 .concatenating(CGAffineTransform(

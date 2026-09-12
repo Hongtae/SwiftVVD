@@ -69,8 +69,15 @@ enum FontWeightScale {
         // Resource tables and variation axes may extend beyond the standard range.
         let value = value.isFinite ? min(max(value, 0), 1000) : 400
         let lower = min(Int(value / 100), 9)
-        let fraction = Float(value - CGFloat(lower * 100)) / 100
-        return CGFloat(values[lower] + (values[lower + 1] - values[lower]) * fraction)
+        let fraction = Float((value - CGFloat(lower * 100)) / 100)
+        let start = values[lower]
+        let end = values[lower + 1]
+        // Keep one rounding step for the product and sum at weight boundaries.
+        if start <= 0 && end >= 0 {
+            return CGFloat((start * (1 - fraction)).addingProduct(fraction, end))
+        }
+        if fraction == 1 { return CGFloat(end) }
+        return CGFloat(min(start.addingProduct(fraction, end - start), end))
     }
 }
 

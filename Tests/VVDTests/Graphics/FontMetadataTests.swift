@@ -9,6 +9,27 @@ final class FontMetadataTests: XCTestCase {
     private static let weightTag: UInt32 = 0x7767_6874
     private static let widthTag: UInt32 = 0x7764_7468
 
+    func testActiveFaceTraitsRetainVariationAndSizeWithoutReopeningMetadata() throws {
+        for name in [Self.roboto, Self.nanum] {
+            let url = Self.resource(name)
+            let file = try XCTUnwrap(Font(path: url.path))
+            let memory = try XCTUnwrap(Font(data: Data(contentsOf: url)))
+            let original = file.faceTraits
+            XCTAssertEqual(original, memory.faceTraits)
+            for font in [file, memory] {
+                font.setPointSize(15.625, dpi: (96, 144))
+                XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 780]))
+                let selected = font.faceTraits
+                XCTAssertEqual(selected.pixelSize, 31.25)
+                XCTAssertEqual(selected.variationCoordinates[Self.weightTag], 780)
+                XCTAssertEqual(selected.sfntStyle.weightClass, 400)
+                XCTAssertTrue(font.setVariationCoordinates([:]))
+                XCTAssertEqual(font.faceTraits.variationCoordinates, original.variationCoordinates)
+                XCTAssertEqual(selected.variationCoordinates[Self.weightTag], 780)
+            }
+        }
+    }
+
     private static func resource(_ name: String) -> URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
