@@ -159,6 +159,46 @@ final class TextDrawingMarginTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS fontStylisticAlternativeGlyphConsumerObserved
+    // ASSERTIONS textStylisticAlternativeCarrierObserved
+    func testStylisticSetsReachPreparedAndRendererPixelsInBothModes() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        let data = try StylisticFontFixture.make(enabled: true)
+        let base = VUI.Font.data(data, size: 23)
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for renderScale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.defaultFontRenderingMode = mode
+                environment._contentScaleFactor = renderScale
+                for (sequence, letters) in [([1], "BB"), ([2], "CC"), ([20], "UB"), ([2, 1], "CC")] {
+                    let text = sequence.reduce(Text(verbatim: "AB").font(base)) {
+                        $0._stylisticAlternative(.init(rawValue: $1)!)
+                    }
+                    let source = try resolve(text, environment: environment)
+                    let reference = try resolve(Text(verbatim: letters).font(base), environment: environment)
+                    let styled = ResolvedStyledText(resolvedText: source)
+                    let plain = try value(styled)
+                    let expected = try render(device: device, environment: environment) {
+                        try value(ResolvedStyledText(resolvedText: reference)).draw(in: $0)
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    let prepared = try XCTUnwrap(plain.makeDrawing())
+                    let renderer = MarginRenderer(environment: environment, operation: .line)
+                    let custom = try value(styled, renderer: renderer)
+                    let immediatePixels = try render(device: device, environment: environment) { plain.draw(in: $0) }
+                    let preparedPixels = try render(device: device, environment: environment) { plain.draw(prepared, in: $0) }
+                    let rendererPixels = try render(device: device, environment: environment) { custom.draw(in: $0) }
+                    XCTAssertTrue(immediatePixels == expected, "Immediate \(mode) \(sequence)")
+                    XCTAssertTrue(preparedPixels == expected, "Prepared \(mode) \(sequence)")
+                    XCTAssertTrue(rendererPixels == expected, "Renderer \(mode) \(sequence)")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS fontClippingFractionalTextConsumerObserved
     // ASSERTIONS fontClippingFractionalInterpolationObserved
     // ASSERTIONS textDrawingFrameCompensationObserved

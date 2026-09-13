@@ -1882,6 +1882,28 @@ final class MonospacedDigitTextModifier: AnyTextModifier {
     }
 }
 
+/// Adds a font-provided stylistic set to the ordered text style.
+final class StylisticAlternativeTextModifier: AnyTextModifier {
+    let value: Font._StylisticAlternative
+
+    init(value: Font._StylisticAlternative) {
+        self.value = value
+    }
+
+    override func modify(style: inout Text.Style) {
+        style.addFontModifier(.dynamic(Font.StylisticAlternativeModifier(alternative: value)))
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? StylisticAlternativeTextModifier)?.value == value
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(StylisticAlternativeTextModifier.self))
+        hasher.combine(value)
+    }
+}
+
 final class UnderlineTextModifier: AnyTextModifier {
     override func modify(style: inout Text.Style) { style.underline = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
     let lineStyle: Text.LineStyle?
@@ -2075,6 +2097,10 @@ extension Text {
 
     public func monospacedDigit() -> Text {
         modified(with: .anyTextModifier(MonospacedDigitTextModifier()))
+    }
+
+    public func _stylisticAlternative(_ alternative: Font._StylisticAlternative) -> Text {
+        modified(with: .anyTextModifier(StylisticAlternativeTextModifier(value: alternative)))
     }
 
     var usesMonospacedDigits: Bool {

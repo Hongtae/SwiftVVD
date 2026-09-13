@@ -274,7 +274,8 @@ final class FontDescriptor {
     }
 }
 
-protocol FontDefinition {
+// Definition metatypes are shared through font resolution contexts.
+protocol FontDefinition: SendableMetatype {
     static func resolveTextStyleFont(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> FontDescriptor
     static func resolveTextStyleFontInfo(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> Font.ResolvedTraits
     static func resolveSystemFont(size: CGFloat, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> FontDescriptor

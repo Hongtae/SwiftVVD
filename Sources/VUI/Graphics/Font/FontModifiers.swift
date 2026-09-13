@@ -160,6 +160,23 @@ extension Font {
         func modify(traits: inout ResolvedTraits) { traits.width = width }
     }
 
+    struct StylisticAlternativeModifier: FontModifier {
+        var alternative: _StylisticAlternative
+        var tag: DynamicModifierTag { ._stylisticAlternative }
+        var codingProxy: RawRepresentableProxy<_StylisticAlternative> { alternative.codingProxy }
+        static func unwrap(codingProxy: RawRepresentableProxy<_StylisticAlternative>) -> Self {
+            Self(alternative: codingProxy.base)
+        }
+
+        func modify(descriptor: inout FontDescriptor, in context: Context) {
+            guard !context.shouldRedactContent else { return }
+            let value = UInt32(alternative.rawValue)
+            // Encode the selected set as the four-byte ss01...ss20 tag.
+            let tag: UInt32 = 0x7373_3030 + (value / 10) * 256 + value % 10
+            descriptor = descriptor.adding(features: [TypefaceShapingFeature(tag: tag)])
+        }
+    }
+
     struct BoldModifier: UndoableStaticFontModifier {
         static var undoableTag: UndoableStaticModifierTag { .bold }
         static func modify(descriptor: inout FontDescriptor, in context: Context) { descriptor = descriptor.symbolicTrait(2, active: true) }

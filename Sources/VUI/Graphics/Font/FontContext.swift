@@ -70,7 +70,7 @@ extension Font {
     }
 }
 
-struct FontDefinitionType: Hashable {
+struct FontDefinitionType: Hashable, Sendable {
     var base: any FontDefinition.Type = DefaultFontDefinition.self
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.base == rhs.base }
