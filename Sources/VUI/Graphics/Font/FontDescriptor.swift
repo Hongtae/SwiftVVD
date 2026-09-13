@@ -27,6 +27,7 @@ final class FontDescriptor {
 
     let source: Source
     let pointSize: CGFloat
+    let stylePolicy: FontStylePolicy?
     let shapingFeatures: [TypefaceShapingFeature]
     let renderingMode: Font.DefaultRenderingMode?
     let language: String?
@@ -36,9 +37,10 @@ final class FontDescriptor {
 
     init(source: Source, pointSize: CGFloat, shapingFeatures: [TypefaceShapingFeature] = [],
          renderingMode: Font.DefaultRenderingMode? = nil, language: String? = nil,
-         languageAwareLineHeightRatio: Double? = nil) {
+         languageAwareLineHeightRatio: Double? = nil, stylePolicy: FontStylePolicy? = nil) {
         self.source = source
         self.pointSize = pointSize
+        self.stylePolicy = stylePolicy
         self.shapingFeatures = shapingFeatures
         self.renderingMode = renderingMode
         self.language = language
@@ -63,27 +65,27 @@ final class FontDescriptor {
         case let .system(design, _, italic, width, textStyle):
             return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .family(catalog, name, current):
             var traits = current
             traits.weight = weight.value
             return FontDescriptor(source: .family(catalog, name, traits), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
                     size: pointSize, weight: weight, design: system.design,
                     renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
             }
             if let external = provider as? ExternalFontProvider {
                 return FontDescriptor(source: .typeface(ExternalFontProvider(
                     source: external.source, size: pointSize, weight: weight, design: external.design,
                     faceIndex: external.faceIndex, renderingMode: external.renderingMode
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
             }
             return self
         default:
@@ -93,7 +95,7 @@ final class FontDescriptor {
             traits.weight = weight.value
             return FontDescriptor(source: .family(catalog, candidate.family, traits), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         }
     }
 
@@ -102,20 +104,20 @@ final class FontDescriptor {
         case let .system(design, weight, italic, _, textStyle):
             return FontDescriptor(source: .system(design, weight, italic, width: width, textStyle: textStyle), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .family(catalog, name, current):
             var traits = current
             traits.width = width
             return FontDescriptor(source: .family(catalog, name, traits), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
             return FontDescriptor(source: .typeface(SystemFontProvider(
                 size: pointSize, weight: system.weight, design: system.design,
                 renderingMode: system.renderingMode, isItalic: system.isItalic, width: Font.Width(width)
             )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         default:
             let resolved = resolve()
             guard let catalog = resolved.catalog, let candidate = resolved.candidate else { return self }
@@ -124,18 +126,24 @@ final class FontDescriptor {
             traits.width = width
             return FontDescriptor(source: .family(catalog, candidate.family, traits), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         }
     }
 
     func symbolicTrait(_ trait: UInt32, active: Bool) -> FontDescriptor {
+        if trait == 0x8000 || trait == 0x10000 {
+            return FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
+                                  renderingMode: renderingMode, language: language,
+                                  languageAwareLineHeightRatio: languageAwareLineHeightRatio,
+                                  stylePolicy: stylePolicy?.applying(trait: trait, active: active))
+        }
         switch source {
         case let .system(design, weight, italic, width, textStyle):
             let nextWeight = trait == 2 ? symbolicWeight(weight, active: active) : weight
             return FontDescriptor(source: .system(design, nextWeight, trait == 1 ? active : italic,
                                                   width: width, textStyle: textStyle),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .typeface(provider):
             guard let system = provider as? SystemFontProvider else { return self }
             let nextWeight = trait == 2 ? symbolicWeight(system.weight, active: active) : system.weight
@@ -144,7 +152,7 @@ final class FontDescriptor {
                 renderingMode: system.renderingMode, isItalic: trait == 1 ? active : system.isItalic,
                 width: system.width
             )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         default:
             let resolved = resolve()
             guard let catalog = resolved.catalog, let candidate = resolved.candidate else { return self }
@@ -157,7 +165,19 @@ final class FontDescriptor {
             guard let selected = FontResourceResolver.select(candidates, matching: requested) else { return self }
             return FontDescriptor(source: .selected(catalog, selected, retainedTraits), pointSize: pointSize,
                                   shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
+        }
+    }
+
+    func leading(_ leading: Font.Leading) -> FontDescriptor {
+        // Each copy consumes the descriptor selected by the preceding operation.
+        switch leading {
+        case .standard:
+            symbolicTrait(0x10000, active: false).symbolicTrait(0x8000, active: false)
+        case .tight:
+            symbolicTrait(0x10000, active: false).symbolicTrait(0x8000, active: true)
+        case .loose:
+            symbolicTrait(0x8000, active: false).symbolicTrait(0x10000, active: true)
         }
     }
 
@@ -167,7 +187,7 @@ final class FontDescriptor {
         case let .system(_, weight, italic, width, textStyle):
             return FontDescriptor(source: .system(.monospaced, weight, italic, width: width, textStyle: textStyle),
                                   pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
         case let .typeface(provider):
             if let system = provider as? SystemFontProvider {
                 return FontDescriptor(source: .typeface(SystemFontProvider(
@@ -175,7 +195,7 @@ final class FontDescriptor {
                     design: .monospaced,
                     renderingMode: system.renderingMode, isItalic: system.isItalic, width: system.width
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
             }
             if let external = provider as? ExternalFontProvider {
                 return FontDescriptor(source: .typeface(ExternalFontProvider(
@@ -183,7 +203,7 @@ final class FontDescriptor {
                     design: .monospaced,
                     faceIndex: external.faceIndex, renderingMode: external.renderingMode
                 )), pointSize: pointSize, shapingFeatures: shapingFeatures, renderingMode: renderingMode,
-                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                                  language: language, languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
             }
             return self
         default:
@@ -206,13 +226,13 @@ final class FontDescriptor {
     func adding(features: [TypefaceShapingFeature]) -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures + features,
                        renderingMode: renderingMode, language: language,
-                       languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                       languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
     }
 
     func withTypesetting(language: String? = nil, lineHeightRatio: Double? = nil) -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
                        renderingMode: renderingMode, language: language ?? self.language,
-                       languageAwareLineHeightRatio: lineHeightRatio ?? languageAwareLineHeightRatio)
+                       languageAwareLineHeightRatio: lineHeightRatio ?? languageAwareLineHeightRatio, stylePolicy: stylePolicy)
     }
 
     private func resolve() -> Resolution {
@@ -287,7 +307,8 @@ enum DefaultFontDefinition: FontDefinition {}
 extension FontDefinition {
     static func resolveTextStyleFont(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> FontDescriptor {
         FontDescriptor(source: .system(design ?? .default, weight ?? Font.weight(for: textStyle), false,
-                                       textStyle: textStyle), pointSize: Font.pointSize(for: textStyle))
+                                       textStyle: textStyle), pointSize: Font.pointSize(for: textStyle),
+                       stylePolicy: FontStylePolicy(style: textStyle))
     }
 
     static func resolveTextStyleFontInfo(textStyle: Font.TextStyle, design: Font.Design?, weight: Font.Weight?, in context: Font.Context) -> Font.ResolvedTraits {

@@ -16,6 +16,7 @@ extension Font {
         var resource: FontResource { font.platformFont(in: context) }
 
         public var pointSize: CGFloat { resource.pointSize }
+        public var leading: Leading { resource.stylePolicy?.leading ?? .standard }
 
         public static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.resource == rhs.resource

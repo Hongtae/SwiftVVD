@@ -15,8 +15,11 @@ final class FontResource: Hashable, @unchecked Sendable {
     let selectedWeight: CGFloat?
     let shapingFeatures: [TypefaceShapingFeature]
     let textStyle: Font.TextStyle?
+    let stylePolicy: FontStylePolicy?
     let language: String?
     let languageAwareLineHeightRatio: Double?
+    private let preferredLanguageGroup: Int
+    private let metricLanguageGroup: Int
     private let source: FontDescriptor.Source
     private let renderingMode: Font.DefaultRenderingMode
 
@@ -29,6 +32,11 @@ final class FontResource: Hashable, @unchecked Sendable {
         self.shapingFeatures = descriptor.shapingFeatures
         self.language = descriptor.language
         self.languageAwareLineHeightRatio = descriptor.languageAwareLineHeightRatio
+        self.stylePolicy = descriptor.stylePolicy
+        let data = descriptor.stylePolicy == nil ? nil : BundledFontCatalog.shared.outsetData
+        self.preferredLanguageGroup = data?.preferredGroup(for: Locale.preferredLanguages) ?? 0
+        self.metricLanguageGroup = descriptor.language.map { data?.preferredGroup(for: [$0]) ?? 0 }
+            ?? preferredLanguageGroup
         self.source = descriptor.source
         self.renderingMode = descriptor.renderingMode ?? context.defaultFontRenderingMode
         if case let .system(_, _, _, _, style) = descriptor.source {
@@ -42,7 +50,7 @@ final class FontResource: Hashable, @unchecked Sendable {
     func descriptor() -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
                        renderingMode: renderingMode, language: language,
-                       languageAwareLineHeightRatio: languageAwareLineHeightRatio)
+                       languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
     }
 
     var requestedPointSize: CGFloat? {
@@ -50,8 +58,23 @@ final class FontResource: Hashable, @unchecked Sendable {
         return pointSize
     }
 
+    private var hasLanguageAwareMetrics: Bool {
+        stylePolicy != nil && (metricLanguageGroup > 0 ||
+            (languageAwareLineHeightRatio != nil && preferredLanguageGroup > 0))
+    }
+
+    /// Outset adjustment has its own component default, independent of the metric ratio.
+    func adjustedOutsets(_ outsets: EdgeInsets) -> EdgeInsets {
+        guard hasLanguageAwareMetrics else { return outsets }
+        var result = outsets
+        result.top -= 0.33 * result.top
+        result.bottom -= 0.33 * result.bottom
+        return result
+    }
+
     /// Resolves natural metrics and independent clipping outsets in points.
-    func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat) -> ResolvedFontMetrics? {
+    func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat,
+                         applyingStylePolicy: Bool = true) -> ResolvedFontMetrics? {
         // A supplied face has no independent requested point size to resolve.
         if case let .typeface(provider) = source, provider is FixedFontProvider {
             return nil
@@ -78,9 +101,39 @@ final class FontResource: Hashable, @unchecked Sendable {
         // Cap height retains its independent backend input.
         var result = face.resolvedMetrics.scaled(by: scaleFactor)
         let size = Double(pointSize) / units
-        result.ascender = CGFloat(convert(design.ascender) * size)
-        result.descender = -CGFloat(abs(convert(design.descender)) * size)
-        result.leading = CGFloat(convert(design.lineGap) * size)
+        let rawAscent = convert(design.ascender)
+        let rawDescent = abs(convert(design.descender))
+        let policy = applyingStylePolicy ? stylePolicy : nil
+        let gap = policy.map { $0.targetHeight * units / $0.nominalSize - (rawAscent + rawDescent) }
+            ?? convert(design.lineGap)
+        var ascent = rawAscent
+        var descent = rawDescent
+        if let policy, hasLanguageAwareMetrics {
+            let ratio = languageAwareLineHeightRatio ?? policy.lineHeightRatio(languageGroup: metricLanguageGroup)
+            var attributes = face.outsetAttributes
+            if let selectedWeight { attributes?.weight = selectedWeight }
+            if ratio > 0, let attributes,
+               let outsets = BundledFontCatalog.shared.outsetData?.outsets(
+                   for: attributes, pointSize: 1, preferredGroup: metricLanguageGroup) {
+                let fraction = ratio > 1 ? 0.33 : ratio
+                ascent = rawAscent.addingProduct(fraction * Double(outsets.top), units)
+                descent = rawDescent.addingProduct(fraction * Double(outsets.bottom), units)
+                if ratio > 1 {
+                    // Exactly one uses the additive branch. Larger ratios preserve
+                    // optical leading while redistributing the ascent/descent target.
+                    let naturalHeight = ((rawAscent + rawDescent) + gap) * size
+                    let leading = gap * size
+                    let factor = (naturalHeight * ratio - leading) / (naturalHeight - leading)
+                    let target = (rawDescent * factor).addingProduct(rawAscent, factor)
+                    let total = ascent + descent
+                    ascent = ascent / total * target
+                    descent = descent / total * target
+                }
+            }
+        }
+        result.ascender = CGFloat(ascent * size)
+        result.descender = -CGFloat(descent * size)
+        result.leading = CGFloat(gap * size)
         if let clipping = design.clipping {
             // Clipping uses the requested point size directly, independently
             // of outline-format quantization of the natural metrics.
@@ -94,6 +147,9 @@ final class FontResource: Hashable, @unchecked Sendable {
         lhs.selectedWeight == rhs.selectedWeight &&
             lhs.language == rhs.language &&
             lhs.languageAwareLineHeightRatio == rhs.languageAwareLineHeightRatio &&
+            lhs.stylePolicy == rhs.stylePolicy &&
+            lhs.preferredLanguageGroup == rhs.preferredLanguageGroup &&
+            lhs.metricLanguageGroup == rhs.metricLanguageGroup &&
             lhs.textStyle == rhs.textStyle &&
             lhs.shapingFeatures == rhs.shapingFeatures &&
             lhs.provider.isEqual(to: rhs.provider)
@@ -103,6 +159,9 @@ final class FontResource: Hashable, @unchecked Sendable {
         hasher.combine(selectedWeight)
         hasher.combine(language)
         hasher.combine(languageAwareLineHeightRatio)
+        hasher.combine(stylePolicy)
+        hasher.combine(preferredLanguageGroup)
+        hasher.combine(metricLanguageGroup)
         hasher.combine(textStyle)
         hasher.combine(shapingFeatures)
         provider.hash(into: &hasher)

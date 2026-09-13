@@ -553,6 +553,41 @@ final class TextStyleConsumerTests {
         }
     }
 
+    // ASSERTIONS fontStyleFallbackMetricsObserved
+    // ASSERTIONS fontSystemStylePolicyCopyObserved
+    @Test
+    func testLeadingUsesPrimaryLineMetricsWithoutChangingFallbackRunsOrGlyphResources() throws {
+        var env = environment()
+        env.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+        let context = GraphTextResolutionContext(environment: env, sceneResources: SceneResources())
+        func resolve(_ font: VUI.Font) throws -> GraphicsContext.ResolvedText {
+            try #require(Text(verbatim: "A한").font(font)._resolve(context: context,
+                referenceDate: Date(timeIntervalSince1970: 0)))
+        }
+        let ordinary = try resolve(.system(size: 13))
+        let original = ordinary.makeGlyphs().flatMap(\.glyphs)
+        try #require(original.count == 2)
+        for leading: VUI.Font.Leading in [.standard, .tight, .loose] {
+            let font = Font.body.leading(leading)
+            for copy in [font, font.resolved(in: env)] {
+                let source = try resolve(copy)
+                let glyphs = source.makeGlyphs().flatMap(\.glyphs)
+                try #require(glyphs.count == 2)
+                for index in glyphs.indices {
+                    #expect(glyphs[index].face.isEqual(to: original[index].face))
+                    #expect(glyphs[index].glyphIndex == original[index].glyphIndex)
+                    #expect(glyphs[index].advance == original[index].advance)
+                    #expect(glyphs[index].ascender == original[index].ascender)
+                    #expect(glyphs[index].descender == original[index].descender)
+                }
+                #expect(glyphs[1].leading == original[1].leading)
+                #expect(glyphs[0].leading != original[0].leading)
+                #expect(glyphs[0].fontLineMetrics == glyphs[1].fontLineMetrics)
+                #expect(glyphs[0].style.fontResource?.stylePolicy?.leading == leading)
+            }
+        }
+    }
+
     // ASSERTIONS fontRawMetricFormatQuantizationObserved
     // ASSERTIONS fontLeadingBaseHeightConsumerObserved
     // ASSERTIONS fontLeadingLineBoundsStorageObserved
@@ -1234,7 +1269,8 @@ final class TextStyleConsumerTests {
     @Test
     func testResourceFontsDoNotAcquireComponentMetricsFromTypesettingRequests() throws {
         let url = fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf")
-        for font in [Font.file(url, size: 23), .system(size: 23), .body] {
+        for font in [Font.file(url, size: 23), .data(try Data(contentsOf: url), size: 23),
+                     .custom("Roboto-Regular", fixedSize: 23), .system(size: 23)] {
             var env = environment()
             env.font = font
             let text = Text(verbatim: "Ågj\nÅgj")

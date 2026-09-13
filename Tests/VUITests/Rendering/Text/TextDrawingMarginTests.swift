@@ -4,6 +4,45 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS fontStyleLinePlacementObserved
+    // ASSERTIONS textComponentFontLanguageAndRatioObserved
+    // ASSERTIONS textDrawingFrameCompensationObserved
+    func testStyleLeadingPreservesPreparedAndRendererPixelsInBothModes() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for leading: VUI.Font.Leading in [.standard, .tight, .loose] {
+                    for language in ["en", "ur"] {
+                        var environment = EnvironmentValues()
+                        environment.font = .body.leading(leading)
+                        environment.defaultFontRenderingMode = mode
+                        environment._contentScaleFactor = scale
+                        environment.displayScale = 2
+                        environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: language))
+                        let source = try resolve(Text(verbatim: "Ågj\nHg\nA한"), environment: environment)
+                        let item = try value(ResolvedStyledText(resolvedText: source))
+                        let expected = try render(device: device, environment: environment) {
+                            $0.draw(source, in: CGRect(origin: .zero, size: item.size))
+                        }
+                        XCTAssertTrue(expected.contains { $0 != 0 })
+                        let prepared = try XCTUnwrap(item.makeDrawing())
+                        let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
+                        let cached = try render(device: device, environment: environment) { item.draw(prepared, in: $0) }
+                        let renderer = MarginRenderer(environment: environment, operation: .line)
+                        let custom = try value(ResolvedStyledText(resolvedText: source), renderer: renderer)
+                        let rendered = try render(device: device, environment: environment) { custom.draw(in: $0) }
+                        XCTAssertTrue(immediate == expected, "Immediate \(mode) \(leading) \(language) \(scale)")
+                        XCTAssertTrue(cached == expected, "Prepared \(mode) \(leading) \(language) \(scale)")
+                        XCTAssertTrue(rendered == expected, "Renderer \(mode) \(leading) \(language) \(scale)")
+                    }
+                }
+            }
+        }
+    }
+
     private func render(device: GraphicsDeviceContext, environment: EnvironmentValues,
                         content: (inout GraphicsContext) throws -> Void) throws -> [UInt8] {
         let scale = environment._contentScaleFactor

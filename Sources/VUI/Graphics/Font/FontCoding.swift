@@ -18,7 +18,7 @@ extension Font: CodableByProxy {
     }
 
     enum DynamicModifierTag: String, Codable {
-        case weight, width, _stylisticAlternative, language, lineHeightRatio
+        case weight, width, leading, _stylisticAlternative, language, lineHeightRatio
     }
 
     enum UndoableStaticModifierTag: Codable, Hashable {
@@ -47,6 +47,7 @@ extension Font: CodableByProxy {
             case .typeface: FontBox<TypefaceFontProvider>.self
             case .modifier(.weight): FontBox<ModifierProvider<WeightModifier>>.self
             case .modifier(.width): FontBox<ModifierProvider<WidthModifier>>.self
+            case .modifier(.leading): FontBox<ModifierProvider<LeadingModifier>>.self
             case .modifier(._stylisticAlternative): FontBox<ModifierProvider<StylisticAlternativeModifier>>.self
             case .modifier(.language): FontBox<ModifierProvider<LanguageFontModifier>>.self
             case .modifier(.lineHeightRatio): FontBox<ModifierProvider<LanguageAwareLineHeightRatioFontModifier>>.self

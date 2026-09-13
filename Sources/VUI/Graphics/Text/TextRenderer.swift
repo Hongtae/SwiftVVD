@@ -110,17 +110,20 @@ fileprivate struct _TextLayoutLineStorage {
 fileprivate final class _TextLayoutStorage {
     var source: GraphicsContext.ResolvedText
     var lines: [_TextLayoutLineStorage]
+    var origin: CGPoint
     var layoutDirection: LayoutDirection
     var isTruncated: Bool
 
     init(
         source: GraphicsContext.ResolvedText,
         lines: [_TextLayoutLineStorage],
+        origin: CGPoint,
         layoutDirection: LayoutDirection,
         isTruncated: Bool
     ) {
         self.source = source
         self.lines = lines
+        self.origin = origin
         self.layoutDirection = layoutDirection
         self.isTruncated = isTruncated
     }
@@ -486,10 +489,9 @@ extension GraphicsContext.ResolvedText {
         let maxWidth = width > CGFloat(Int.max)
             ? Int.max
             : Int(ceil(width))
-        let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
         let lineGlyphs = makeGlyphs(
             maxWidth: maxWidth,
-            maxHeight: maxHeight,
+            maximumHeight: height,
             lineLimit: layoutProperties?.lineLimit,
             truncationMode: layoutProperties?.truncationMode ?? .tail
         )
@@ -558,6 +560,7 @@ extension GraphicsContext.ResolvedText {
         return Text.Layout(storage: _TextLayoutStorage(
             source: self,
             lines: lines,
+            origin: origin,
             layoutDirection: layoutDirection,
             isTruncated: isTruncated
         ))
@@ -608,10 +611,10 @@ extension GraphicsContext {
             ),
             shading: run.layoutRenderer.source.shading,
             snapOrigin: !run.baseDrawingOptions.union(options).contains(.disablesSubpixelQuantization),
-            // Slices keep glyph positions relative to the shared line origin.
-            // Quantizing each slice independently changes inter-glyph spacing.
-            snappingOrigin: CGPoint(x: run.lineOrigin.x,
-                                    y: run.lineOrigin.y - sourceLine.ascent),
+            // Preserve fractional line placement relative to the text origin.
+            // Only an explicit edit of the public line origin moves that anchor.
+            snappingOrigin: CGPoint(x: run.line.storage.origin.x + run.lineOrigin.x - sourceLine.origin.x,
+                                    y: run.line.storage.origin.y + run.lineOrigin.y - sourceLine.origin.y),
             // Typographic slice bounds do not clip the glyph's ink.
             clipBounds: false
         )

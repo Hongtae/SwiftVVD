@@ -223,7 +223,7 @@ extension GraphicsContext {
                        pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
                        preferredGroup: storage.outsetLanguageGroup) {
                     // A successful tuple replaces clipping, including a zero tuple.
-                    metrics.outsets = outsets
+                    metrics.outsets = resource?.adjustedOutsets(outsets) ?? outsets
                 }
                 if result == nil {
                     result = metrics
@@ -258,10 +258,9 @@ extension GraphicsContext {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
-            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(
                 maxWidth: maxWidth,
-                maxHeight: maxHeight,
+                maximumHeight: height,
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
@@ -291,22 +290,8 @@ extension GraphicsContext {
         }
 
         public func measure(maxWidth: CGFloat? = nil, maxHeight: CGFloat? = nil) -> CGSize {
-            var width: Int = .max
-            var height: Int = .max
-            if let w = maxWidth, w < CGFloat(width) {
-                width = Self.pixelLimit(w * self.scaleFactor)
-            }
-            if let h = maxHeight, h < CGFloat(height) {
-                height = Int(h * self.scaleFactor)
-            }
-            let scale = 1.0 / self.scaleFactor
-            var size = self.sizeInPixel(
-                maxWidth: width,
-                maxHeight: height
-            ) * scale
-            size.width = alignedLength(size.width)
-            size.height = alignedLength(size.height)
-            return size
+            layoutMetrics(in: CGSize(width: maxWidth ?? .infinity,
+                                     height: maxHeight ?? .infinity)).size
         }
 
         public func firstBaseline(in size: CGSize) -> CGFloat {
@@ -356,6 +341,7 @@ extension GraphicsContext {
             // The explicit run's primary face owns line measurement.
             var lineBoxAscender: CGFloat = .zero
             var lineBoxDescender: CGFloat = .zero
+            var fontLineMetrics: FontLineMetrics?
             var kerning: CGPoint = .zero    // kern advance from previous glyph.
             var attributes = _TextAttributeValues()
             var style = _ResolvedTextRunAttributes()
@@ -426,6 +412,9 @@ extension GraphicsContext {
             var isTruncated: Bool = false
             // Placement is resolved after wrapping and shared by all consumers.
             var originY: CGFloat = 0
+            var spacing: CGFloat = 0
+            var paragraphStartSpacing: CGFloat = 0
+            var isParagraphEnd: Bool = true
             var height: CGFloat { ascender - descender }
             var baseline: CGFloat { originY + ascender }
             var maxY: CGFloat { originY + height }
@@ -444,10 +433,9 @@ extension GraphicsContext {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
-            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lines = makeGlyphs(
                 maxWidth: maxWidth,
-                maxHeight: maxHeight,
+                maximumHeight: height,
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
@@ -597,14 +585,6 @@ extension GraphicsContext {
             }
         }
 
-        private func sizeInPixel(maxWidth: Int = .max, maxHeight: Int = .max) -> CGSize {
-            return makeGlyphs(maxWidth: maxWidth, maxHeight: maxHeight)
-                .reduce(CGSize.zero) { result, line in
-                    CGSize(width: max(result.width, line.width),
-                           height: max(result.height, line.maxY))
-                }
-        }
-
         struct TextGlyphs {
             private struct SourceSpan {
                 var range: Range<Int>
@@ -619,6 +599,7 @@ extension GraphicsContext {
             let descender: CGFloat
             let lastFace: Typeface?
             let lastCharacter: UnicodeScalar
+            var fontLineMetrics: FontLineMetrics? = nil
             static func from(unicodeScalars: String.UnicodeScalarView,
                              with faces: [Typeface],
                              drawMissingGlyphs: Bool,
@@ -635,6 +616,10 @@ extension GraphicsContext {
                 var face1 = prevFace
                 var char1 = prevChar
                 let primaryMetrics = fontResource?.resolvedMetrics(for: faces[0], scaleFactor: scaleFactor)
+                let fontLineMetrics = primaryMetrics.map {
+                    FontLineMetrics(metrics: $0, pointSize: fontResource!.pointSize,
+                                    isTextStyle: fontResource!.stylePolicy != nil, scale: scaleFactor)
+                }
                 // Ordinary line inputs round in points before applying the render scale.
                 // Natural font leading remains a separate run metric.
                 let lineBoxAscender = primaryMetrics.map { floor($0.ascender + 0.5) * scaleFactor }
@@ -742,7 +727,8 @@ extension GraphicsContext {
                 }
 
                 func appendScalarGlyphs(_ span: SourceSpan) {
-                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor)
+                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor,
+                        applyingStylePolicy: span.face.isEqual(to: faces[0]))
                     let leading = rawMetrics.map { $0.leading * scaleFactor } ?? span.face.resolvedMetrics.leading
                     for index in span.range {
                         let scalar = scalars[index]
@@ -750,6 +736,7 @@ extension GraphicsContext {
                         glyph.sourceRange = index..<(index + 1)
                         glyph.lineBoxAscender = lineBoxAscender
                         glyph.lineBoxDescender = lineBoxDescender
+                        glyph.fontLineMetrics = fontLineMetrics
                         if span.makesGlyphs,
                            let metrics = span.face.glyphMetrics(for: scalar) {
                             glyph.content = .unresolved
@@ -804,7 +791,8 @@ extension GraphicsContext {
                         continue
                     }
 
-                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor)
+                    let rawMetrics = fontResource?.resolvedMetrics(for: span.face, scaleFactor: scaleFactor,
+                        applyingStylePolicy: span.face.isEqual(to: faces[0]))
                     let leading = rawMetrics.map { $0.leading * scaleFactor } ?? span.face.resolvedMetrics.leading
                     for (index, shapedGlyph) in shaped.glyphs.enumerated() {
                         let sourceRange = (
@@ -822,6 +810,7 @@ extension GraphicsContext {
                         glyph.positionOffset = shapedGlyph.offset
                         glyph.lineBoxAscender = lineBoxAscender
                         glyph.lineBoxDescender = lineBoxDescender
+                        glyph.fontLineMetrics = fontLineMetrics
                         if let metrics = span.face.glyphMetrics(
                             at: shapedGlyph.index
                         ) {
@@ -863,7 +852,8 @@ extension GraphicsContext {
                     ascender: ascender,
                     descender: descender,
                     lastFace: face1,
-                    lastCharacter: char1
+                    lastCharacter: char1,
+                    fontLineMetrics: fontLineMetrics
                 )
             }
         }
@@ -871,6 +861,16 @@ extension GraphicsContext {
         func makeGlyphs(
             maxWidth: Int = .max,
             maxHeight: Int = .max,
+            lineLimit: Int? = nil,
+            truncationMode: Text.TruncationMode = .tail
+        ) -> [LineGlyphs] {
+            makeGlyphs(maxWidth: maxWidth, maximumHeight: CGFloat(maxHeight),
+                       lineLimit: lineLimit, truncationMode: truncationMode)
+        }
+
+        func makeGlyphs(
+            maxWidth: Int = .max,
+            maximumHeight: CGFloat,
             lineLimit: Int? = nil,
             truncationMode: Text.TruncationMode = .tail
         ) -> [LineGlyphs] {
@@ -885,7 +885,7 @@ extension GraphicsContext {
             return _lineWrap(
                 lineGlyphs,
                 maxWidth: maxWidth,
-                maxHeight: maxHeight,
+                maxHeight: maximumHeight,
                 lineLimit: lineLimit,
                 truncationMode: truncationMode
             )
@@ -912,10 +912,9 @@ extension GraphicsContext {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
-            let maxHeight = height > CGFloat(Int.max) ? Int.max : Int(height)
             let lineGlyphs = makeGlyphs(
                 maxWidth: maxWidth,
-                maxHeight: maxHeight,
+                maximumHeight: height,
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
@@ -1264,7 +1263,7 @@ extension GraphicsContext {
         private func _lineWrap(
             _ lines: [LineGlyphs],
             maxWidth: Int,
-            maxHeight: Int,
+            maxHeight: CGFloat,
             lineLimit: Int?,
             truncationMode: Text.TruncationMode
         ) -> [LineGlyphs] {
@@ -1359,6 +1358,7 @@ extension GraphicsContext {
                     var first = line
                     first.glyphs = split.first
                     first.trailingBoundary = nil
+                    first.isParagraphEnd = false
                     updateMetrics(&first)
                     wrappedLines.append(first)
 
@@ -1370,19 +1370,60 @@ extension GraphicsContext {
 
             // Separator-only layouts have no glyph-backed paragraph input.
             let hasTextContent = wrappedLines.contains { !$0.glyphs.isEmpty }
+            var paragraphInputs: [Int: Glyph] = [:]
+            var precedingBoundary: Glyph?
+            for line in lines {
+                paragraphInputs[line.paragraphIndex] = line.glyphs.first ?? line.trailingBoundary ?? precedingBoundary
+                precedingBoundary = line.trailingBoundary
+            }
+
+            func metrics(for glyphs: [Glyph], usesSystemLeading: Bool, usesNegativeLeading: Bool) -> TextLineMetrics {
+                var result = TextLineMetrics()
+                for glyph in glyphs {
+                    let input = glyph.fontLineMetrics
+                    result.add(ascent: input?.ascent ?? glyph.lineBoxAscender,
+                               height: input?.height(usesSystemLeading: usesSystemLeading) ??
+                                   (glyph.lineBoxAscender - glyph.lineBoxDescender),
+                               leading: input?.leading(usesSystemLeading: usesSystemLeading,
+                                                       usesNegativeLeading: usesNegativeLeading) ?? 0,
+                               baselineOffset: glyph.baselineOffset)
+                }
+                return result
+            }
+
             func place(_ source: LineGlyphs, after previous: LineGlyphs?) -> LineGlyphs {
                 var line = source
                 line.originY = previous?.maxY ?? 0
-                if let previous, hasTextContent {
-                    let style = previous.glyphs.first?.style.paragraphStyle ??
-                        previous.trailingBoundary?.style.paragraphStyle
-                    let spacing = max(style?.lineSpacing ?? 0, 0) * scaleFactor
-                    if line.glyphs.isEmpty, line.trailingBoundary != nil {
-                        // A terminated empty paragraph owns the incoming gap
-                        // below its baseline instead of moving the baseline.
-                        line.descender -= spacing
+                guard hasTextContent else { return line }
+                let paragraphInput = paragraphInputs[line.paragraphIndex]
+                let spacing = max(paragraphInput?.style.paragraphStyle?.lineSpacing ?? 0, 0) * scaleFactor
+                let inputs = line.glyphs.isEmpty ? paragraphInput.map { [$0] } ?? [] : line.glyphs
+                if !inputs.isEmpty {
+                    let merged = metrics(for: inputs,
+                                         usesSystemLeading: line.paragraphIndex != 0 || !line.isParagraphEnd,
+                                         usesNegativeLeading: previous != nil)
+                    line.ascender = merged.baseline
+                    line.descender = merged.baseline - merged.height
+                    line.spacing = merged.spacing(requested: spacing)
+                }
+                if let previous {
+                    if previous.paragraphIndex == line.paragraphIndex {
+                        line.paragraphStartSpacing = previous.paragraphStartSpacing
+                        line.originY += previous.spacing
                     } else {
-                        line.originY += spacing
+                        // Paragraph advance and the first attribute's leading contribution
+                        // are separate. A mixed paragraph cannot substitute its maximum here.
+                        line.originY -= previous.paragraphStartSpacing
+                        if previous.paragraphIndex != 0 { line.originY += previous.spacing }
+                        if let paragraphInput {
+                            line.paragraphStartSpacing = metrics(for: [paragraphInput],
+                                usesSystemLeading: true, usesNegativeLeading: true).spacing(requested: spacing)
+                        }
+                        if line.glyphs.isEmpty, line.trailingBoundary != nil {
+                            line.descender -= line.paragraphStartSpacing
+                        } else {
+                            line.originY += line.paragraphStartSpacing
+                        }
                     }
                 }
                 return line
@@ -1398,7 +1439,7 @@ extension GraphicsContext {
                 }
                 let line = place(wrappedLines[nextLineIndex], after: visibleLines.last)
                 if !visibleLines.isEmpty,
-                   ceil(line.maxY) > CGFloat(maxHeight) {
+                   line.maxY > maxHeight {
                     break
                 }
                 visibleLines.append(line)
@@ -1467,8 +1508,12 @@ extension GraphicsContext {
                 glyph.attributes = source.attributes
                 glyph.style = source.style
                 glyph.baselineOffset = source.baselineOffset
+                glyph.ascender = source.ascender
+                glyph.descender = source.descender
+                glyph.leading = source.leading
                 glyph.lineBoxAscender = source.lineBoxAscender
                 glyph.lineBoxDescender = source.lineBoxDescender
+                glyph.fontLineMetrics = source.fontLineMetrics
                 glyph.foregroundColor = source.foregroundColor
                 glyph.characterIndex = characterIndex
                 glyph.sourceRange = characterIndex..<(characterIndex + 1)
@@ -1679,6 +1724,8 @@ extension GraphicsContext {
                         visibleLines[lastVisibleIndex].width =
                             CGFloat(maxWidth)
                     }
+                    visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
+                        after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
                 }
                 return visibleLines
             }
@@ -1837,6 +1884,7 @@ extension GraphicsContext {
                             glyph.descender = textGlyphs.descender
                             glyph.lineBoxAscender = textGlyphs.ascender
                             glyph.lineBoxDescender = textGlyphs.descender
+                            glyph.fontLineMetrics = textGlyphs.fontLineMetrics
                             glyph.attributes = attributes
                             glyph.style = resolvedStyle
                             glyph.baselineOffset = baselineOffset
