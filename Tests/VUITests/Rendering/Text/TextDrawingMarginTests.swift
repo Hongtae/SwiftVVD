@@ -159,6 +159,74 @@ final class TextDrawingMarginTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS fontClippingFractionalTextConsumerObserved
+    // ASSERTIONS fontClippingFractionalInterpolationObserved
+    // ASSERTIONS textDrawingFrameCompensationObserved
+    // ASSERTIONS textDrawingRendererLocalContextObserved
+    func testFractionalClippingPreservesPreparedAndRendererPixelsOnGPU() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for (kind, size, weightClass, expectedTop): (FractionalClippingFixture.Kind, CGFloat, CGFloat, CGFloat) in [
+            (.single, 1024 / 350.5, 650, 0.5),
+            (.multiple, 2.6654860046407274, 650, 1),
+            (.mapped, 2.8199855150878617, 525, 0.5)
+        ] {
+            let data = try FractionalClippingFixture.make(kind)
+            for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+                for renderScale: CGFloat in [1, 2] {
+                    var environment = EnvironmentValues()
+                    environment.font = .data(data, size: size,
+                        weight: .init(value: FontWeightScale.logicalWeight(forClass: weightClass)))
+                    environment.defaultFontRenderingMode = mode
+                    environment.displayScale = 2
+                    environment._contentScaleFactor = renderScale
+                    let source = try resolve(Text(verbatim: "Hg\nHg"), environment: environment)
+                    let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                        displayScale: 2, preferredLanguages: ["en"])
+                    let styled = ResolvedStyledText(resolvedText: text)
+                    XCTAssertEqual(styled.drawingMargins.top, expectedTop)
+                    let plain = try value(styled)
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(text, in: CGRect(origin: .zero, size: plain.size))
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    // The display-list frame uses a pixel-aligned scissor, while
+                    // the renderer's local context remains unbounded.
+                    let clip = plain.frame.applying(CGAffineTransform(scaleX: renderScale, y: renderScale))
+                        .integral.applying(CGAffineTransform(scaleX: 1 / renderScale, y: 1 / renderScale))
+                    let clipped = try render(device: device, environment: environment) {
+                        $0.clip(to: Path(clip))
+                        $0.draw(text, in: CGRect(origin: .zero, size: plain.size))
+                    }
+                    let prepared = try XCTUnwrap(plain.makeDrawing())
+                    let renderer = MarginRenderer(environment: environment, operation: .line)
+                    let item = try value(styled, renderer: renderer)
+                    let immediate = try render(device: device, environment: environment) { plain.draw(in: $0) }
+                    let cached = try render(device: device, environment: environment) { plain.draw(prepared, in: $0) }
+                    let custom = try render(device: device, environment: environment) { item.draw(in: $0) }
+                    let label = "\(kind) \(mode) renderScale=\(renderScale) frame=\(plain.frame)"
+                    if kind == .single, case .bitmap = mode {
+                        // The tiny bitmap's right-edge coverage exceeds its advance.
+                        // Restoring the previous vertical allowance leaves that
+                        // independent horizontal clip unchanged.
+                        let padded = ResolvedStyledText(stylePadding: EdgeInsets(top: 0.5, leading: 0, bottom: 0, trailing: 0), resolvedText: text)
+                        let previous = try value(padded)
+                        XCTAssertEqual(previous.frame.minY, -1)
+                        let pixels = try render(device: device, environment: environment) { previous.draw(in: $0) }
+                        XCTAssertTrue(pixels == immediate, label)
+                    }
+                    XCTAssertTrue(immediate == clipped, label)
+                    XCTAssertTrue(cached == clipped, label)
+                    XCTAssertTrue(custom == expected, label)
+                    XCTAssertEqual(prepared.origin.y, expectedTop)
+                    XCTAssertEqual(renderer.origin?.y, text.firstBaseline(in: plain.size) + expectedTop)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textDrawingFrameCompensationObserved
     // ASSERTIONS textDrawingRendererLocalContextObserved
     func testRendererShapesAndRecordedReplayUseTheExpandedFrameOnGPU() throws {

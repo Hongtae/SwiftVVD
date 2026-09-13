@@ -259,15 +259,6 @@ public class Font: @unchecked Sendable {
         }
     }
 
-    public struct GlyphMetrics: Sendable {
-        public let index: UInt32        // glyph index (FT_UInt)
-        public let advance: CGSize      // distance to next glyph
-        public let bearing: CGPoint     // offset from baseline (left, top)
-        public let size: CGSize         // glyph size (width, height)
-        public let ascender: CGFloat    // upper distance from baseline
-        public let descender: CGFloat   // lower distance from baseline (negative direction)
-    }
-
     public struct VariationAxis: Hashable, Sendable {
         public let tag: UInt32
         public let minimumValue: CGFloat
@@ -1738,36 +1729,6 @@ public class Font: @unchecked Sendable {
         return true
     }
 
-    /// The outline representation reported by the selected font driver.
-    public enum OutlineFormat: Hashable, Sendable {
-        case trueType
-        case compactFontFormat
-        case other
-    }
-
-    /// Nonnegative distances above and below the baseline in font design units.
-    public struct ClippingMetrics: Hashable, Sendable {
-        public let ascent: Int
-        public let descent: Int
-    }
-
-    /// Unscaled horizontal metrics selected by the font backend.
-    /// Values use font design units and include the active variation's adjustments.
-    public struct DesignMetrics: Hashable, Sendable {
-        public let outlineFormat: OutlineFormat
-        public let unitsPerEM: Int
-        public let ascender: Int
-        public let descender: Int
-        public let height: Int
-
-        /// Independent clipping distances, when the selected face provides them.
-        /// These use unitsPerEM and retain the backend's variation quantization.
-        public let clipping: ClippingMetrics?
-
-        /// The signed gap between the descent and the next line's ascent.
-        public var lineGap: Int { height - (ascender - descender) }
-    }
-
     /// Returns a value snapshot before size scaling and pixel rounding.
     /// Bitmap-only faces have no scalable design metrics and return nil.
     /// Divide by unitsPerEM and multiply by the desired em size to scale a value.
@@ -1783,14 +1744,7 @@ public class Font: @unchecked Sendable {
             case "CFF": outlineFormat = .compactFontFormat
             default: outlineFormat = .other
             }
-            let clipping: ClippingMetrics?
-            if let os2 = FT_Get_Sfnt_Table(face, FT_SFNT_OS2)?.assumingMemoryBound(to: TT_OS2.self),
-               os2.pointee.version != 0xffff {
-                clipping = ClippingMetrics(ascent: Int(os2.pointee.usWinAscent),
-                                           descent: Int(os2.pointee.usWinDescent))
-            } else {
-                clipping = nil
-            }
+            let clipping = FontClippingMetricsReader.read(face: face, library: library.library)
             return DesignMetrics(outlineFormat: outlineFormat,
                                  unitsPerEM: Int(face.pointee.units_per_EM),
                                  ascender: Int(face.pointee.ascender),
@@ -1798,17 +1752,6 @@ public class Font: @unchecked Sendable {
                                  height: Int(face.pointee.height),
                                  clipping: clipping)
         }
-    }
-
-    public struct SizeMetrics: Sendable {
-        public let xPixelsPerEM: Int
-        public let yPixelsPerEM: Int
-        public let xScale: CGFloat
-        public let yScale: CGFloat
-        public let ascender: CGFloat
-        public let descender: CGFloat
-        public let height: CGFloat
-        public let maxAdvance: CGFloat
     }
 
     public var baseMetrics: SizeMetrics {

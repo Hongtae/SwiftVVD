@@ -53,7 +53,7 @@ final class FontDesignMetricsTests: XCTestCase {
     }
 
     func testOutlineFormatUsesSelectedFileAndMemoryFace() throws {
-        let cases: [(String, Int, Font.OutlineFormat, Int, [Int])] = [
+        let cases: [(String, Int, Font.OutlineFormat, Int, [Double])] = [
             (Self.roboto, 0, .trueType, 2048, [1946, 512]),
             ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 0, .trueType, 1000, [850, 255]),
             ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 0, .compactFontFormat, 1000, [1160, 288]),
@@ -110,7 +110,7 @@ final class FontDesignMetricsTests: XCTestCase {
             let font = try XCTUnwrap(Font(data: Self.fixture(clipping: distances)))
             let metrics = try XCTUnwrap(font.designMetrics)
             let clipping = try XCTUnwrap(metrics.clipping)
-            XCTAssertEqual([clipping.ascent, clipping.descent], distances.map(Int.init))
+            XCTAssertEqual([clipping.ascent, clipping.descent], distances.map(Double.init))
             XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height], [1800, -400, 2100])
             return metrics
         }
@@ -118,14 +118,14 @@ final class FontDesignMetricsTests: XCTestCase {
         XCTAssertEqual(Set(snapshots.compactMap(\.clipping)).count, 3)
     }
 
-    func testClippingVariationRetainsBackendQuantizationAndEarlierSnapshots() throws {
+    func testClippingVariationRetainsFractionsAndEarlierSnapshots() throws {
         let data = try Self.fixture(variableMetrics: true)
         let font = try XCTUnwrap(Font(data: data))
         let original = try XCTUnwrap(font.designMetrics)
         let initial = try XCTUnwrap(original.clipping)
-        for (weight, expected): (CGFloat, [Int]) in [
-            (900, [2201, 649]), (650, [2151, 675]), (525, [2125, 687]),
-            (400, [2100, 700]), (100, [2100, 700]), (650, [2151, 675]),
+        for (weight, expected): (CGFloat, [Double]) in [
+            (900, [2201, 649]), (650, [2150.5, 674.5]), (525, [2125.25, 687.25]),
+            (400, [2100, 700]), (100, [2100, 700]), (650, [2150.5, 674.5]),
         ] {
             XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: weight]))
             let metrics = try XCTUnwrap(font.designMetrics)
@@ -153,6 +153,110 @@ final class FontDesignMetricsTests: XCTestCase {
             XCTAssertEqual([adjusted.ascender, adjusted.descender, adjusted.height, adjusted.lineGap], expected)
             XCTAssertEqual([original.ascender, original.descender, original.height, original.lineGap],
                            [1800, -400, 2100, -100])
+        }
+    }
+
+    func testClippingRequiresReadableFieldsAndPreservesNegativeAdjustments() throws {
+        for length in [0, 2, 68, 74, 76, 77, 78, 86] {
+            let data = try Self.fixture { tables in tables["OS/2"] = tables["OS/2"]!.prefix(length) }
+            let font = try XCTUnwrap(Font(data: data))
+            if length < 78 {
+                XCTAssertNil(font.designMetrics?.clipping)
+            } else {
+                XCTAssertEqual(font.designMetrics?.clipping?.ascent, 2100)
+                XCTAssertEqual(font.designMetrics?.clipping?.descent, 700)
+            }
+        }
+        for version: UInt16 in [0, 99, 65535] {
+            let data = try Self.fixture { tables in Self.write16(version, &tables["OS/2"]!, 0) }
+            XCTAssertEqual(try XCTUnwrap(Font(data: data)).designMetrics?.clipping?.ascent, 2100)
+        }
+        let font = try XCTUnwrap(Font(data: Self.fixture(clipping: [0, 0], variableMetrics: true)))
+        XCTAssertEqual(font.designMetrics?.clipping?.ascent, 0)
+        XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 650]))
+        XCTAssertEqual(font.designMetrics?.clipping?.ascent, 50.5)
+        XCTAssertEqual(font.designMetrics?.clipping?.descent, -25.5)
+    }
+
+    func testInvalidClippingRecordRetainsTheIndependentValidEdge() throws {
+        // The hcla record is second; hcld remains independently valid.
+        for offset in [24, 26] {
+            let data = try Self.fixture(variableMetrics: true) { tables in
+                Self.write16(65535, &tables["MVAR"]!, offset)
+            }
+            let font = try XCTUnwrap(Font(data: data))
+            XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 650]))
+            XCTAssertEqual(font.designMetrics?.clipping?.ascent, 2100)
+            XCTAssertEqual(font.designMetrics?.clipping?.descent, 674.5)
+        }
+        let data = try Self.fixture(variableMetrics: true) { tables in tables["MVAR"]!.removeLast() }
+        let font = try XCTUnwrap(Font(data: data))
+        XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 650]))
+        // A missing last row invalidates this entire selected item, including row zero.
+        XCTAssertEqual(font.designMetrics?.clipping?.ascent, 2100)
+        XCTAssertEqual(font.designMetrics?.clipping?.descent, 700)
+    }
+
+    func testClippingReadPreservesSelectedCoordinatesAndLoadedGlyphs() throws {
+        let data = try Self.fixture(variableMetrics: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("variable.ttf")
+        try data.write(to: url)
+        let file = try XCTUnwrap(Font(path: url.path)), memory = try XCTUnwrap(Font(data: data))
+        for weight: CGFloat in [650, 900, 400, 525, 650] {
+            for font in [file, memory] {
+                XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: weight]))
+                font.setPointSize(13, dpi: (144, 96))
+                let coordinates = font.variationCoordinates
+                let glyph = try XCTUnwrap(font.glyphMetrics(for: "H"))
+                let metrics = try XCTUnwrap(font.designMetrics)
+                for _ in 0..<4 { XCTAssertEqual(font.designMetrics, metrics) }
+                XCTAssertEqual(font.variationCoordinates, coordinates)
+                let after = try XCTUnwrap(font.glyphMetrics(for: "H"))
+                XCTAssertEqual(after.advance, glyph.advance)
+                XCTAssertEqual(after.bearing, glyph.bearing)
+                XCTAssertEqual(after.size, glyph.size)
+            }
+            XCTAssertEqual(file.designMetrics, memory.designMetrics)
+        }
+    }
+
+    // ASSERTIONS fontClippingAvarV2NormalizationObserved
+    // ASSERTIONS fontClippingCheckedTablesObserved
+    func testAvarCorrectionsPreserveHalfTiesAndSeparateSegmentFailure() throws {
+        func mapping(_ delta: Int16) -> Data {
+            var avar = Self.words([2, 0, 0, 2])
+            for _ in 0..<2 { avar.append(Self.words([3, 0xc000, 0xc000, 0, 0, 0x4000, 0x4000])) }
+            avar.append(Self.words([0, 0, 0, 44]))
+            avar.append(Self.words([1, 0, 12, 1, 0, 28, 2, 1, 0, 16384, 16384, 0, 0, 0,
+                                    2, 1, 1, 0, UInt16(bitPattern: delta), UInt16(bitPattern: -delta)]))
+            return avar
+        }
+        for (delta, expected): (Int16, [Double]) in [
+            (1, [2150.5061645507812, 674.4968872070312]),
+            (-1, [2150.4938354492188, 674.5031127929688])
+        ] {
+            let data = try Self.fixture(variableMetrics: true) { $0["avar"] = mapping(delta) }
+            let font = try XCTUnwrap(Font(data: data))
+            let original = font.designMetrics
+            XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 650]))
+            let clipping = try XCTUnwrap(font.designMetrics?.clipping)
+            XCTAssertEqual([clipping.ascent, clipping.descent], expected)
+            XCTAssertTrue(font.setVariationCoordinates([:]))
+            XCTAssertEqual(font.designMetrics, original)
+        }
+        for length in [7, 8, 36, 40, 44] {
+            let data = try Self.fixture(variableMetrics: true) { $0["avar"] = mapping(1).prefix(length) }
+            let font = try XCTUnwrap(Font(data: data))
+            XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: 650]))
+            if length == 8 {
+                XCTAssertNil(font.designMetrics?.clipping)
+            } else {
+                XCTAssertEqual(font.designMetrics?.clipping?.ascent, 2150.5)
+                XCTAssertEqual(font.designMetrics?.clipping?.descent, 674.5)
+            }
         }
     }
 
@@ -283,7 +387,8 @@ final class FontDesignMetricsTests: XCTestCase {
                                 clipping: [UInt16] = [2100, 700],
                                 useTypographic: Bool = false,
                                 removeOS2: Bool = false,
-                                variableMetrics: Bool = false) throws -> Data {
+                                variableMetrics: Bool = false,
+                                editTables: ((inout [String: Data]) -> Void)? = nil) throws -> Data {
         let source = try Data(contentsOf: resource(roboto))
         var tables: [String: Data] = [:]
         for index in 0..<Int(read16(source, 4)) {
@@ -316,6 +421,7 @@ final class FontDesignMetricsTests: XCTestCase {
             tables["MVAR"] = mvar
             tables.removeValue(forKey: "avar")
         }
+        editTables?(&tables)
         write32(0, &tables["head"]!, 8)
         let count = tables.count
         var power = 1, selector = 0
