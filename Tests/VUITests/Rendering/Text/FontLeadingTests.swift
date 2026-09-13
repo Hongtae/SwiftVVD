@@ -242,6 +242,31 @@ final class FontLeadingTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textEmptyFragmentConsumerBoundariesObserved
+    // ASSERTIONS fontStyleLinePlacementObserved
+    func testRetainedExtraRemainsInTheFinalParagraphLeadingContext() throws {
+        let cases: [(VUI.Font.Leading, CGFloat, [CGFloat])] = [
+            (.tight, 0, [13, 27]), (.loose, 0, [13, 31]),
+            (.tight, 7, [13, 34]), (.loose, 7, [13, 35.310546875])
+        ]
+        for scale: CGFloat in [1, 1.5, 2] {
+            let face = try face(scale: scale, referenceMetrics: true)
+            for (leading, spacing, baselines) in cases {
+                for separator in ["\n", "\u{c}", "\u{85}", "\u{2028}"] {
+                    let source = text("A" + separator, font: .body.leading(leading), face: face, scale: scale, spacing: spacing)
+                    let lines = source.makeGlyphs()
+                    XCTAssertEqual(lines.count, 2)
+                    guard lines.count == 2 else { continue }
+                    XCTAssertEqual(lines.map { $0.baseline / scale }, baselines)
+                    XCTAssertEqual(-lines[0].descender / scale, 2.310546875, accuracy: 1e-8)
+                    XCTAssertEqual(-lines[1].descender / scale, 3, accuracy: 1e-8)
+                    XCTAssertEqual(lines[0].paragraphIndex, lines[1].paragraphIndex)
+                    XCTAssertEqual(source.measure().height, ceil((baselines[1] + 3) * 2) / 2)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS fontStyleLinePlacementObserved
     func testFractionalMeasuredHeightRemainsAValidLayoutProposal() throws {
         for scale: CGFloat in [1, 1.5, 2] {

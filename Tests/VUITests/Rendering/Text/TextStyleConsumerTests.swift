@@ -940,15 +940,20 @@ final class TextStyleConsumerTests {
 
     // ASSERTIONS textEmptyParagraphSpacingBoundsObserved
     // ASSERTIONS textLineSpacingMeasurementAndLimitObserved
+    // ASSERTIONS textEmptyFragmentDefaultFontObserved
     @Test
     func testEmptyParagraphSpacingAndTrailingLineAreRetained() throws {
         let proposal = CGSize(width: 90, height: 1000)
-        for string in ["\n", "\n\n"] {
+        for (string, height, spacedHeight): (String, CGFloat, CGFloat) in [
+            ("\n", 28, 28), ("\n\n", 55, 61)
+        ] {
             var environment = self.environment()
             let base = try resolve(Text(verbatim: string), environment: environment)
             environment.lineSpacing = 7
             let spaced = try resolve(Text(verbatim: string), environment: environment)
-            #expect(spaced.measure(in: proposal) == base.measure(in: proposal))
+            // The middle paragraph can extend below the final default fragment.
+            #expect(base.measure(in: proposal).height == height)
+            #expect(spaced.measure(in: proposal).height == spacedHeight)
             #expect(spaced.lastBaseline(in: proposal) == base.lastBaseline(in: proposal))
         }
         let cases: [(String, Int, Set<Int>)] = [("Hg\n", 2, []),

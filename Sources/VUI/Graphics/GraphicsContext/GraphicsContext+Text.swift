@@ -12,6 +12,8 @@ import VVD
 extension GraphicsContext {
     public struct ResolvedText {
         var resolvedProperties: Text.ResolvedProperties?
+        // Default metrics affect placement, not the cached source glyphs.
+        var defaultLineMetrics: FontLineMetrics?
         enum Run {
             case text([Typeface], String)
             case attachment([Typeface], ImageDrawing)
@@ -73,6 +75,10 @@ extension GraphicsContext {
                     runs = state.runs
                 }
                 return runs
+            }
+
+            var hasEmptyContent: Bool {
+                state.withLock { !$0.terminated && $0.runs.isEmpty }
             }
 
             func lineGlyphs(make: ([Run]) -> [LineGlyphs]) -> [LineGlyphs] {
@@ -264,6 +270,10 @@ extension GraphicsContext {
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
+            if lineGlyphs.isEmpty, storage.hasEmptyContent, let input = defaultLineMetrics {
+                return LayoutMetrics(size: CGSize(width: 0, height: alignedLength(input.height / scaleFactor)),
+                    firstBaseline: input.ascent / scaleFactor, lastBaseline: input.ascent / scaleFactor)
+            }
             let pixelSize = lineGlyphs.reduce(CGSize.zero) { result, line in
                 CGSize(
                     width: max(result.width, line.width),
@@ -403,12 +413,20 @@ extension GraphicsContext {
         }
 
         struct LineGlyphs {
+            enum Kind {
+                case content
+                case extra(Glyph?)
+            }
+
             var glyphs: [Glyph]
             var ascender: CGFloat
             var descender: CGFloat
             var width: CGFloat
             var trailingBoundary: Glyph? = nil
             var paragraphIndex: Int = 0
+            var paragraphInput: Glyph? = nil
+            var kind: Kind = .content
+            var isSimpleParagraph: Bool = false
             var isTruncated: Bool = false
             // Placement is resolved after wrapping and shared by all consumers.
             var originY: CGFloat = 0
@@ -659,7 +677,7 @@ extension GraphicsContext {
                     let range = scalarIndex..<(scalarIndex + characterScalars.count)
                     scalarIndex = range.upperBound
                     let visibleScalars = characterScalars.filter {
-                        !$0.properties.isDefaultIgnorableCodePoint
+                        !$0.properties.isDefaultIgnorableCodePoint && $0.value != 0x0b
                     }
                     let emojiRequested = characterScalars.contains { $0.value == 0xfe0f }
                     let textRequested = characterScalars.contains { $0.value == 0xfe0e }
@@ -1368,12 +1386,12 @@ extension GraphicsContext {
                 wrappedLines.append(line)
             }
 
-            // Separator-only layouts have no glyph-backed paragraph input.
-            let hasTextContent = wrappedLines.contains { !$0.glyphs.isEmpty }
             var paragraphInputs: [Int: Glyph] = [:]
             var precedingBoundary: Glyph?
             for line in lines {
-                paragraphInputs[line.paragraphIndex] = line.glyphs.first ?? line.trailingBoundary ?? precedingBoundary
+                if paragraphInputs[line.paragraphIndex] == nil {
+                    paragraphInputs[line.paragraphIndex] = line.paragraphInput ?? line.glyphs.first ?? line.trailingBoundary ?? precedingBoundary
+                }
                 precedingBoundary = line.trailingBoundary
             }
 
@@ -1394,10 +1412,23 @@ extension GraphicsContext {
             func place(_ source: LineGlyphs, after previous: LineGlyphs?) -> LineGlyphs {
                 var line = source
                 line.originY = previous?.maxY ?? 0
-                guard hasTextContent else { return line }
+                if case .extra(nil) = line.kind {
+                    guard let input = defaultLineMetrics else {
+                        preconditionFailure("A missing-attribute fragment requires default font metrics.")
+                    }
+                    line.ascender = input.ascent
+                    line.descender = input.ascent - input.height
+                    line.originY = (previous?.originY ?? 0) + input.height
+                    return line
+                }
                 let paragraphInput = paragraphInputs[line.paragraphIndex]
                 let spacing = max(paragraphInput?.style.paragraphStyle?.lineSpacing ?? 0, 0) * scaleFactor
-                let inputs = line.glyphs.isEmpty ? paragraphInput.map { [$0] } ?? [] : line.glyphs
+                let inputs: [Glyph]
+                if case let .extra(attributes?) = line.kind {
+                    inputs = [attributes]
+                } else {
+                    inputs = line.glyphs.isEmpty ? paragraphInput.map { [$0] } ?? [] : line.glyphs
+                }
                 if !inputs.isEmpty {
                     let merged = metrics(for: inputs,
                                          usesSystemLeading: line.paragraphIndex != 0 || !line.isParagraphEnd,
@@ -1419,7 +1450,7 @@ extension GraphicsContext {
                             line.paragraphStartSpacing = metrics(for: [paragraphInput],
                                 usesSystemLeading: true, usesNegativeLeading: true).spacing(requested: spacing)
                         }
-                        if line.glyphs.isEmpty, line.trailingBoundary != nil {
+                        if line.isSimpleParagraph {
                             line.descender -= line.paragraphStartSpacing
                         } else {
                             line.originY += line.paragraphStartSpacing
@@ -1433,12 +1464,20 @@ extension GraphicsContext {
             let maximumLineCount = lineLimit.map { max($0, 1) }
             var nextLineIndex = 0
             while nextLineIndex < wrappedLines.count {
-                if let maximumLineCount,
+                // A simple paragraph's missing-attribute extra fragment is
+                // published with the admitted paragraph, outside its line budget.
+                let isSimpleExtra: Bool
+                if case .extra(nil) = wrappedLines[nextLineIndex].kind {
+                    isSimpleExtra = visibleLines.last?.paragraphIndex == wrappedLines[nextLineIndex].paragraphIndex
+                } else {
+                    isSimpleExtra = false
+                }
+                if !isSimpleExtra, let maximumLineCount,
                    visibleLines.count >= maximumLineCount {
                     break
                 }
                 let line = place(wrappedLines[nextLineIndex], after: visibleLines.last)
-                if !visibleLines.isEmpty,
+                if !isSimpleExtra, !visibleLines.isEmpty,
                    line.maxY > maxHeight {
                     break
                 }
@@ -1746,39 +1785,35 @@ extension GraphicsContext {
             drawMissingGlyphs: Bool) -> [LineGlyphs] {
             var lines: [LineGlyphs] = []
             var glyphs: [Glyph] = []
-
-            let newlines = CharacterSet.newlines
-
             var offset: CGPoint = .zero
             var ascender: CGFloat = .zero
             var descender: CGFloat = .zero
-            var char1: UnicodeScalar = UnicodeScalar(0) // previous char
-            var face1: Typeface? = nil   // previous face
+            var char1 = UnicodeScalar(UInt8(0))
+            var face1: Typeface?
             var characterIndex = 0
             var paragraphIndex = 0
+            var paragraphInput: Glyph?
+            var paragraphLength = 0
+            var terminatedLength = 0
+            var lastBreak: TextLineBreak?
+            var lastBoundary: Glyph?
+            var previousWasCR = false
 
-            let addLine = { (trailingBoundary: Glyph?) in
+            func addLine(_ boundary: Glyph?, isParagraphEnd: Bool) {
                 lines.append(LineGlyphs(glyphs: glyphs,
-                                        ascender: ascender,
-                                        descender: descender,
-                                        width: offset.x,
-                                        trailingBoundary: trailingBoundary,
-                                        paragraphIndex: paragraphIndex))
+                    ascender: ascender, descender: descender, width: offset.x,
+                    trailingBoundary: boundary, paragraphIndex: paragraphIndex,
+                    paragraphInput: paragraphInput,
+                    isSimpleParagraph: boundary != nil && isParagraphEnd && paragraphLength == 1,
+                    isParagraphEnd: isParagraphEnd))
                 glyphs.removeAll(keepingCapacity: true)
-                let lineHeight = ascender - descender
-                assert(lineHeight > 0)
                 offset.x = 0
                 ascender = 0
                 descender = 0
             }
 
             for s in runs {
-                let textRun: (
-                    [Typeface],
-                    String,
-                    _TextAttributeValues,
-                    _ResolvedTextRunAttributes?
-                )?
+                let textRun: ([Typeface], String, _TextAttributeValues, _ResolvedTextRunAttributes?)?
                 switch s {
                 case let .text(faces, text):
                     textRun = (faces, text, _TextAttributeValues(), nil)
@@ -1791,122 +1826,109 @@ extension GraphicsContext {
                 }
                 if let (faces, text, attributes, style) = textRun {
                     if faces.isEmpty || text.isEmpty { continue }
+                    let scalars = Array(text.unicodeScalars)
+                    let resolvedStyle = style ?? _ResolvedTextRunAttributes()
+                    let spacing = (resolvedStyle.tracking ?? resolvedStyle.kern ?? 0) * scaleFactor
+                    let baselineOffset = (resolvedStyle.baselineOffset ?? 0) * scaleFactor
+                    let fontInput = TextGlyphs.from(unicodeScalars: "".unicodeScalars,
+                        with: faces, drawMissingGlyphs: false, prevFace: nil, prevChar: UnicodeScalar(0),
+                        fontResource: style?.fontResource, scaleFactor: scaleFactor)
 
-                    var components = text.components(separatedBy: newlines).map {
-                        $0.unicodeScalars
+                    func attributeGlyph(_ scalar: UnicodeScalar) -> Glyph {
+                        var glyph = Glyph(scalar: scalar, face: faces[0])
+                        glyph.ascender = fontInput.ascender
+                        glyph.descender = fontInput.descender
+                        glyph.lineBoxAscender = fontInput.ascender
+                        glyph.lineBoxDescender = fontInput.descender
+                        glyph.fontLineMetrics = fontInput.fontLineMetrics
+                        glyph.attributes = attributes
+                        glyph.style = resolvedStyle
+                        glyph.baselineOffset = baselineOffset
+                        glyph.foregroundColor = resolvedStyle.foregroundColor
+                        glyph.characterIndex = characterIndex
+                        glyph.sourceRange = characterIndex..<(characterIndex + 1)
+                        return glyph
                     }
-                    while components.isEmpty == false {
-                        let scalars = components.removeFirst()
-                        let textGlyphs = TextGlyphs.from(unicodeScalars: scalars,
-                                                         with: faces,
-                                                         drawMissingGlyphs: drawMissingGlyphs,
-                                                         prevFace: face1,
-                                                         prevChar: char1,
-                                                         fontResource: style?.fontResource,
-                                                         scaleFactor: scaleFactor)
+
+                    var index = 0
+                    while index < scalars.count {
+                        let scalar = scalars[index]
+                        if previousWasCR, scalar.value == 0x0a {
+                            // A CRLF can cross attribute runs. Keep its first input
+                            // for the paragraph and its final input for the extra line.
+                            var boundary = attributeGlyph(scalar)
+                            let start = lastBoundary!.sourceRange!.lowerBound
+                            boundary.characterIndex = start
+                            boundary.sourceRange = start..<(characterIndex + 1)
+                            lines[lines.count - 1].trailingBoundary = boundary
+                            lines[lines.count - 1].isSimpleParagraph = false
+                            lastBoundary = boundary
+                            terminatedLength += 1
+                            characterIndex += 1
+                            previousWasCR = false
+                            index += 1
+                            continue
+                        }
+                        previousWasCR = false
+                        if let lineBreak = TextLineBreak(scalar) {
+                            let boundary = attributeGlyph(scalar)
+                            if paragraphInput == nil { paragraphInput = boundary }
+                            if glyphs.isEmpty {
+                                ascender = boundary.lineAscender
+                                descender = boundary.lineDescender
+                            }
+                            paragraphLength += 1
+                            addLine(boundary, isParagraphEnd: lineBreak == .paragraph)
+                            lastBoundary = boundary
+                            lastBreak = lineBreak
+                            if lineBreak == .paragraph {
+                                terminatedLength = paragraphLength
+                                paragraphLength = 0
+                                paragraphInput = nil
+                                paragraphIndex += 1
+                            }
+                            characterIndex += 1
+                            previousWasCR = scalar.value == 0x0d
+                            face1 = nil
+                            char1 = UnicodeScalar(UInt8(0))
+                            index += 1
+                            continue
+                        }
+
+                        let start = index
+                        while index < scalars.count, TextLineBreak(scalars[index]) == nil {
+                            paragraphLength += scalars[index].value > 0xffff ? 2 : 1
+                            index += 1
+                        }
+                        if paragraphInput == nil { paragraphInput = attributeGlyph(scalars[start]) }
+                        let span = String(String.UnicodeScalarView(scalars[start..<index]))
+                        let textGlyphs = TextGlyphs.from(unicodeScalars: span.unicodeScalars,
+                            with: faces, drawMissingGlyphs: drawMissingGlyphs, prevFace: face1,
+                            prevChar: char1, fontResource: style?.fontResource, scaleFactor: scaleFactor)
                         face1 = textGlyphs.lastFace
                         char1 = textGlyphs.lastCharacter
-
-                        let resolvedStyle = style ??
-                            _ResolvedTextRunAttributes()
-                        let spacing = (
-                            resolvedStyle.tracking ??
-                            resolvedStyle.kern ??
-                            0
-                        ) * scaleFactor
-                        let baselineOffset =
-                            (resolvedStyle.baselineOffset ?? 0) * scaleFactor
+                        lastBreak = nil
                         let runStartIndex = characterIndex
-                        characterIndex += scalars.count
-                        let runGlyphs = textGlyphs.glyphs.map { glyph in
-                            var glyph = glyph
+                        characterIndex += index - start
+                        for var glyph in textGlyphs.glyphs {
                             if let range = glyph.sourceRange {
-                                glyph.sourceRange = (
-                                    runStartIndex + range.lowerBound
-                                )..<(
-                                    runStartIndex + range.upperBound
-                                )
-                                glyph.characterIndex =
-                                    runStartIndex + range.lowerBound
+                                glyph.sourceRange = (runStartIndex + range.lowerBound)..<(runStartIndex + range.upperBound)
+                                glyph.characterIndex = runStartIndex + range.lowerBound
                             } else {
                                 glyph.characterIndex = runStartIndex
                             }
                             glyph.attributes = attributes
                             glyph.style = resolvedStyle
                             glyph.baselineOffset = baselineOffset
-                            glyph.foregroundColor =
-                                resolvedStyle.foregroundColor
+                            glyph.foregroundColor = resolvedStyle.foregroundColor
                             glyph.advance.width += spacing
-                            return glyph
+                            if glyphs.isEmpty { glyph.kerning = .zero }
+                            let kerning = glyphs.isEmpty ? CGFloat.zero : glyph.kerning.x
+                            glyphs.append(glyph)
+                            offset.x += kerning + glyph.advance.width
+                            ascender = max(ascender, glyph.lineAscender)
+                            descender = min(descender, glyph.lineDescender)
                         }
-                        if runGlyphs.isEmpty {
-                            ascender = max(
-                                ascender,
-                                textGlyphs.ascender + max(baselineOffset, 0)
-                            )
-                            descender = min(
-                                descender,
-                                textGlyphs.descender + min(baselineOffset, 0)
-                            )
-                        } else {
-                            for var glyph in runGlyphs {
-                                if glyphs.isEmpty {
-                                    glyph.kerning = .zero
-                                }
-                                let kerning = glyphs.isEmpty
-                                    ? CGFloat.zero
-                                    : glyph.kerning.x
-                                glyphs.append(glyph)
-                                offset.x += kerning + glyph.advance.width
-                                ascender = max(
-                                    ascender,
-                                    glyph.lineAscender
-                                )
-                                descender = min(
-                                    descender,
-                                    glyph.lineDescender
-                                )
-                            }
-                        }
-
-                        if components.isEmpty {
-                            // The last line can be combined with other text.
-                            // Don't complete the line.
-                            break
-                        }
-
-                        var boundary = glyphs.last ?? {
-                            var glyph = Glyph(
-                                scalar: UnicodeScalar("\n"),
-                                face: faces[0]
-                            )
-                            glyph.ascender = textGlyphs.ascender
-                            glyph.descender = textGlyphs.descender
-                            glyph.lineBoxAscender = textGlyphs.ascender
-                            glyph.lineBoxDescender = textGlyphs.descender
-                            glyph.fontLineMetrics = textGlyphs.fontLineMetrics
-                            glyph.attributes = attributes
-                            glyph.style = resolvedStyle
-                            glyph.baselineOffset = baselineOffset
-                            glyph.foregroundColor =
-                                resolvedStyle.foregroundColor
-                            return glyph
-                        }()
-                        boundary.scalar = UnicodeScalar("\n")
-                        boundary.glyphIndex = nil
-                        boundary.sourceRange =
-                            characterIndex..<(characterIndex + 1)
-                        boundary.content = .missing
-                        boundary.advance = .zero
-                        boundary.positionOffset = .zero
-                        boundary.kerning = .zero
-                        boundary.characterIndex = characterIndex
-                        boundary.isTruncationToken = false
-                        addLine(boundary)
-                        characterIndex += 1
-                        paragraphIndex += 1
-                        face1 = nil
-                        char1 = UnicodeScalar(0)
                     }
                 }
                 let attachmentRun: ([Typeface], ImageDrawing, _TextAttributeValues)?
@@ -1944,29 +1966,34 @@ extension GraphicsContext {
                     glyph.characterIndex = characterIndex
                     glyph.sourceRange =
                         characterIndex..<(characterIndex + 1)
+                    if paragraphInput == nil { paragraphInput = glyph }
                     glyphs.append(glyph)
                     characterIndex += 1
+                    paragraphLength += 1
+                    lastBreak = nil
+                    previousWasCR = false
 
                     offset.x += glyph.advance.width
                     ascender = max(ascender, glyph.lineAscender)
                     descender = min(descender, glyph.lineDescender)
 
                     face1 = nil
-                    char1 = UnicodeScalar(0)
+                    char1 = UnicodeScalar(UInt8(0))
                 }
             }
-            if !glyphs.isEmpty || (ascender > descender && lines.contains { !$0.glyphs.isEmpty }) {
-                let lineHeight = ascender - descender
-                assert(lineHeight > 0)
-
-                // Retain valid vertical metrics, including the empty line
-                // following a final separator in a text-bearing layout.
-
-                lines.append(LineGlyphs(glyphs: glyphs,
-                                        ascender: ascender,
-                                        descender: descender,
-                                        width: offset.x,
-                                        paragraphIndex: paragraphIndex))
+            if !glyphs.isEmpty {
+                addLine(nil, isParagraphEnd: true)
+            } else if let lastBreak, let lastBoundary, let previous = lines.last {
+                let length = lastBreak == .paragraph ? terminatedLength : paragraphLength
+                let attributes: Glyph? = length == 1 ? nil : lastBoundary
+                // Only a retained extra fragment participates in paragraph leading.
+                lines[lines.count - 1].isParagraphEnd = attributes == nil
+                lines[lines.count - 1].isSimpleParagraph = length == 1
+                lines.append(LineGlyphs(glyphs: [],
+                    ascender: attributes?.lineAscender ?? 0,
+                    descender: attributes?.lineDescender ?? 0, width: 0,
+                    paragraphIndex: previous.paragraphIndex, paragraphInput: previous.paragraphInput,
+                    kind: .extra(attributes)))
             }
             return lines
         }

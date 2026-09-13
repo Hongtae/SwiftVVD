@@ -70,6 +70,18 @@ protocol TextResolutionContext {
 }
 
 extension TextResolutionContext {
+    /// Resolves the independent missing-attribute font in logical points.
+    func defaultTextLineMetrics() -> FontLineMetrics? {
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let resource = Font.system(size: 12).platformFont(in: environment.fontResolutionContext)
+        let font = Font(typefaceProvider: resource.provider)
+        guard let face = font.typeface(forContext: sceneResources, dpi: UInt32(defaultDPI)),
+              let metrics = resource.resolvedMetrics(for: face, scaleFactor: 1) else { return nil }
+        return FontLineMetrics(metrics: metrics, pointSize: resource.pointSize,
+            isTextStyle: false, scale: contentScaleFactor)
+    }
+
     var displayScale: CGFloat {
         environment.displayScale
     }
@@ -1595,6 +1607,9 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         }
         guard var resolved = _resolve(context: context, referenceDate: referenceDate,
                                       style: style, properties: &properties, text: &string) else { return nil }
+        if TextLineBreak.requiresDefaultFont(in: string) {
+            resolved.defaultLineMetrics = context.defaultTextLineMetrics()
+        }
         properties.markParagraphBoundary(at: string.utf16.count, in: string, environment: context.environment)
         resolved.resolvedProperties = properties
         return resolved
