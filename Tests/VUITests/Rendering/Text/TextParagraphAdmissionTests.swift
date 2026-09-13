@@ -131,7 +131,7 @@ final class TextParagraphAdmissionTests: XCTestCase {
         }
         let size = CGSize(width: 300, height: 0)
         XCTAssertEqual(source.measure(in: size).height, 27)
-        XCTAssertEqual(TextProxy(source).sizeThatFits(.init(size)), source.measure(in: size))
+        XCTAssertEqual(TextProxy(ResolvedStyledText(resolvedText: source)).sizeThatFits(.init(size)), source.measure(in: size))
     }
 }
 

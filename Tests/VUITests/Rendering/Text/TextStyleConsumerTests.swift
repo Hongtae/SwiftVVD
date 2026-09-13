@@ -614,7 +614,7 @@ final class TextStyleConsumerTests {
                     let layout = resolved.makeLayout(in: proposal, layoutDirection: .leftToRight)
                     try #require(layout.count == 3)
                     #expect(resolved.measure(in: proposal).height == (lineA + lineD) * 3)
-                    #expect(TextProxy(resolved).sizeThatFits(.init(width: proposal.width)).height == (lineA + lineD) * 3)
+                    #expect(TextProxy(ResolvedStyledText(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)).height == (lineA + lineD) * 3)
                     let maximum = try #require(resolved.maximumFontMetrics)
                     #expect(abs(maximum.ascender - rawA) < 1e-9)
                     #expect(abs(maximum.descender + rawD) < 1e-9)
@@ -919,7 +919,7 @@ final class TextStyleConsumerTests {
                     let expectedHeight = ceil((originalSize.height + CGFloat(layout.count - 1) * gap) * displayScale) / displayScale
                     #expect(resolved.measure(in: proposal).height == expectedHeight)
                     #expect(resolved.measure(maxWidth: proposal.width) == resolved.measure(in: proposal))
-                    #expect(TextProxy(resolved).sizeThatFits(.init(width: proposal.width)) == resolved.measure(in: proposal))
+                    #expect(TextProxy(ResolvedStyledText(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)) == resolved.measure(in: proposal))
                     for index in layout.indices {
                         #expect(layout[index].origin.y == originalLayout[index].origin.y + CGFloat(index) * gap)
                         #expect(layout[index].typographicBounds.ascent == originalLayout[index].typographicBounds.ascent)

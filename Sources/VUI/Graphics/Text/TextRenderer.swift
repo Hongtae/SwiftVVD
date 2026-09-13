@@ -64,30 +64,17 @@ extension TextRenderer {
     public var displayPadding: EdgeInsets { EdgeInsets() }
 }
 
-private final class _TextProxyStorage {
-    var resolvedText: GraphicsContext.ResolvedText
-
-    init(resolvedText: GraphicsContext.ResolvedText) {
-        self.resolvedText = resolvedText
-    }
-}
-
+/// Measures text with its resolved layout properties.
 public struct TextProxy {
-    private var storage: _TextProxyStorage
+    private var text: ResolvedStyledText
 
-    init(_ resolvedText: GraphicsContext.ResolvedText) {
-        storage = _TextProxyStorage(resolvedText: resolvedText)
+    init(_ text: ResolvedStyledText) {
+        self.text = text
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        let text = storage.resolvedText
         if proposal == .zero { return .zero }
-        if proposal.width == 0 {
-            let measured = text.measure(maxWidth: 0, maxHeight: proposal.height)
-            return CGSize(width: 0, height: measured.height)
-        }
-        if proposal == .infinity { return text.measure() }
-        return text.measure(maxWidth: proposal.width, maxHeight: proposal.height)
+        return text.sizeThatFits(_ProposedSize(proposal))
     }
 }
 

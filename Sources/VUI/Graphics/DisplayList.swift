@@ -1310,7 +1310,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     local.environment = renderer.environment
                     var source = resolvedText
                     source.shading = shading
-                    let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(source))
+                    let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(view.text))
                     let margins = view.text.drawingMargins
                     let layout = source.makeLayout(
                         in: bounds.size,

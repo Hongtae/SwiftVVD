@@ -556,9 +556,9 @@ struct StyledTextLayoutEngine: LayoutEngine {
 
     func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
         let proposal = ProposedViewSize(proposal)
-        guard let resolved = text.resolvedText else { return .zero }
+        guard text.resolvedText != nil else { return .zero }
         if let renderer {
-            return renderer.sizeThatFits(proposal: proposal, text: TextProxy(resolved))
+            return renderer.sizeThatFits(proposal: proposal, text: TextProxy(text))
         }
         return text.sizeThatFits(_ProposedSize(proposal))
     }

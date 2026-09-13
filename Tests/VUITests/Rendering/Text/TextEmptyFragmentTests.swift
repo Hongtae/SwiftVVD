@@ -52,7 +52,7 @@ final class TextEmptyFragmentTests: XCTestCase {
                     XCTAssertEqual(metrics.size, CGSize(width: 0, height: ceil(input.height / scale * 2) / 2))
                     XCTAssertEqual(metrics.firstBaseline, input.ascent / scale)
                     XCTAssertEqual(metrics.lastBaseline, input.ascent / scale)
-                    XCTAssertEqual(TextProxy(source).sizeThatFits(.init(width: 300, height: height)), metrics.size)
+                    XCTAssertEqual(TextProxy(ResolvedStyledText(resolvedText: source)).sizeThatFits(.init(width: 300, height: height)), metrics.size)
                     XCTAssertTrue(source.makeLayout(in: size, layoutDirection: .leftToRight).isEmpty)
                     XCTAssertTrue(source.makeDrawing(in: size).isEmpty)
                 }

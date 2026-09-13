@@ -519,8 +519,8 @@ final class ResolvedStyledText: InterpolatableContent {
     private var didResolveAttributedStorage: Bool
     private var _computedMaxFontMetrics: ResolvedFontMetrics?
     private var didComputeMaxFontMetrics: Bool
-    // Each instance belongs to one scene graph. Its serialized update task owns
-    // layout measurement; display-list rendering only reads `resolvedText`.
+    // Each instance belongs to one scene graph. Layout and renderer measurement
+    // on its serialized update task share this cache through retained proxies.
     private var metricsCache: [MetricsCacheEntry]
 
     init(
@@ -646,12 +646,12 @@ final class ResolvedStyledText: InterpolatableContent {
         in size: CGSize,
         renderer: TextRendererBoxBase?
     ) -> CGRect {
-        guard let resolvedText else {
+        guard resolvedText != nil else {
             return CGRect(origin: .zero, size: size)
         }
         let measured = renderer?.sizeThatFits(
             proposal: ProposedViewSize(size),
-            text: TextProxy(resolvedText)
+            text: TextProxy(self)
         ) ?? sizeThatFits(_ProposedSize(size))
         var frame = CGRect(origin: .zero, size: measured)
         if measured.height < size.height {

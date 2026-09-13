@@ -4,6 +4,65 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textProxyRetainedLayoutPropertiesObserved
+    // ASSERTIONS textProxyRetainedOwnerAndCacheObserved
+    func testRendererBoundsRetainStyledSizingThroughDrawingAndReplay() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let controls: [(Int?, CGFloat, CGFloat, Int)] = [
+            (nil, 0, 60, 4), (nil, 6, 78, 4), (1, 0, 15, 1),
+            (1, 6, 15, 1), (2, 0, 30, 2), (2, 6, 36, 2)
+        ]
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for (limit, spacing, height, count) in controls {
+                    var environment = EnvironmentValues()
+                    environment.font = .file(file, size: 13)
+                    environment.defaultFontRenderingMode = mode
+                    environment._contentScaleFactor = scale
+                    environment.displayScale = 2
+                    environment.lineLimit = limit
+                    environment.lineSpacing = spacing
+                    environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+                    var source = try resolve(Text(verbatim: "Alpha\nBeta\nGamma\nDelta"), environment: environment)
+                    source.shading = .color(.black)
+                    let properties = TextLayoutProperties(from: environment)
+                    let styled = ResolvedStyledText(layoutProperties: properties, resolvedText: source)
+                    let renderer = MarginRenderer(environment: environment, operation: .line)
+                    renderer.recordsProxy = true
+                    let size = StyledTextLayoutEngine(text: styled, renderer: renderer)
+                        .sizeThatFits(.init(width: 100, height: 120))
+                    XCTAssertEqual(size.height, height)
+                    let item = DisplayList.Content.TextValue(
+                        view: StyledTextContentView(text: styled, renderer: renderer), size: size,
+                        frame: styled.frame(in: size, renderer: renderer), shading: source.shading,
+                        transform: .identity, command: .closure(bounds: nil))
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(source, in: CGRect(origin: .zero, size: size), shading: source.shading, layoutProperties: properties)
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    for record in [false, true] {
+                        let actual = try render(device: device, environment: environment) { context in
+                            if record {
+                                let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                                item.draw(in: recording)
+                                recording.recording!.draw(in: context)
+                            } else { item.draw(in: context) }
+                        }
+                        XCTAssertEqual(renderer.proxySize?.height, height)
+                        XCTAssertEqual(renderer.layoutLineCount, count)
+                        XCTAssertEqual(actual, expected, "\(mode) scale=\(scale) limit=\(String(describing: limit)) spacing=\(spacing) replay=\(record)")
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textParagraphAdmissionBudgetObserved
     // ASSERTIONS textFinalExtraFragmentOverlapObserved
     func testConstrainedParagraphsPreservePreparedAndRendererPixels() throws {
@@ -463,12 +522,19 @@ private final class MarginRenderer: TextRendererBoxBase {
     var opacity: Double?
     var drawMarker = false
     var onlyGlyph: Int?
+    var recordsProxy = false
+    var proxySize: CGSize?
+    var layoutLineCount: Int?
     init(environment: EnvironmentValues, operation: Operation) { values = environment; self.operation = operation }
     override var environment: EnvironmentValues { values }
     override var displayPadding: EdgeInsets { EdgeInsets() }
     override func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize { text.sizeThatFits(proposal) }
-    override func textLayoutBounds(size: CGSize, text: TextProxy) -> CGRect { CGRect(origin: .zero, size: size) }
+    override func textLayoutBounds(size: CGSize, text: TextProxy) -> CGRect {
+        if recordsProxy { proxySize = text.sizeThatFits(.unspecified) }
+        return CGRect(origin: .zero, size: size)
+    }
     override func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        layoutLineCount = layout.count
         origin = layout.first?.origin
         transform = context.transform
         clipBounds = context.clipBoundingRect
