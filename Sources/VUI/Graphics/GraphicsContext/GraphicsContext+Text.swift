@@ -1409,6 +1409,12 @@ extension GraphicsContext {
                 return result
             }
 
+            func paragraphOrigin(after previous: LineGlyphs?) -> CGFloat {
+                guard let previous else { return 0 }
+                return previous.maxY - previous.paragraphStartSpacing +
+                    (previous.paragraphIndex == 0 ? 0 : previous.spacing)
+            }
+
             func place(_ source: LineGlyphs, after previous: LineGlyphs?) -> LineGlyphs {
                 var line = source
                 line.originY = previous?.maxY ?? 0
@@ -1444,8 +1450,7 @@ extension GraphicsContext {
                     } else {
                         // Paragraph advance and the first attribute's leading contribution
                         // are separate. A mixed paragraph cannot substitute its maximum here.
-                        line.originY -= previous.paragraphStartSpacing
-                        if previous.paragraphIndex != 0 { line.originY += previous.spacing }
+                        line.originY = paragraphOrigin(after: previous)
                         if let paragraphInput {
                             line.paragraphStartSpacing = metrics(for: [paragraphInput],
                                 usesSystemLeading: true, usesNegativeLeading: true).spacing(requested: spacing)
@@ -1461,32 +1466,142 @@ extension GraphicsContext {
             }
 
             var visibleLines: [LineGlyphs] = []
-            let maximumLineCount = lineLimit.map { max($0, 1) }
+            let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
+            let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight
+            let heightEpsilon = 0.001 * scaleFactor
             var nextLineIndex = 0
-            while nextLineIndex < wrappedLines.count {
-                // A simple paragraph's missing-attribute extra fragment is
-                // published with the admitted paragraph, outside its line budget.
-                let isSimpleExtra: Bool
-                if case .extra(nil) = wrappedLines[nextLineIndex].kind {
-                    isSimpleExtra = visibleLines.last?.paragraphIndex == wrappedLines[nextLineIndex].paragraphIndex
+            var needsTruncation = false
+            paragraphLoop: while nextLineIndex < wrappedLines.count {
+                let start = nextLineIndex
+                let paragraph = wrappedLines[start].paragraphIndex
+                var end = start + 1
+                while end < wrappedLines.count, wrappedLines[end].paragraphIndex == paragraph {
+                    end += 1
+                }
+                let budget = maximumLineCount.map { $0 - visibleLines.count }
+                if let budget, budget <= 0 { break }
+                let paragraphY = paragraphOrigin(after: visibleLines.last)
+                let remainingHeight = availableHeight - paragraphY
+                if paragraphY > 0, remainingHeight <= 0 { break }
+
+                if wrappedLines[start].isSimpleParagraph {
+                    let line = place(wrappedLines[start], after: visibleLines.last)
+                    // Simple paragraphs test the font height before adding the
+                    // paragraph's starting spacing to the published rectangle.
+                    let height = line.height - line.paragraphStartSpacing
+                    if start != 0, height > remainingHeight + heightEpsilon { break }
+                    visibleLines.append(line)
+                    nextLineIndex = start + 1
+                    // A simple paragraph publishes its missing-attribute extra
+                    // outside both its height check and its ordinary line budget.
+                    if nextLineIndex < end, case .extra(nil) = wrappedLines[nextLineIndex].kind {
+                        visibleLines.append(place(wrappedLines[nextLineIndex], after: visibleLines.last))
+                        nextLineIndex += 1
+                    }
+                    continue
+                }
+
+                var candidates = Array(wrappedLines[start..<end])
+                let hasFinalExtra: Bool
+                if case .extra = candidates.last!.kind {
+                    hasFinalExtra = true
                 } else {
-                    isSimpleExtra = false
+                    hasFinalExtra = false
+                    if let boundary = candidates.last!.trailingBoundary {
+                        // A terminated paragraph must also attempt its continuation
+                        // before committing its final content line. Only the last
+                        // paragraph can expose this continuation as an extra line.
+                        candidates.append(LineGlyphs(glyphs: [], ascender: 0, descender: 0, width: 0,
+                            paragraphIndex: paragraph, paragraphInput: paragraphInputs[paragraph],
+                            kind: .extra(boundary)))
+                    }
                 }
-                if !isSimpleExtra, let maximumLineCount,
-                   visibleLines.count >= maximumLineCount {
+
+                if candidates.count == 1, !hasFinalExtra,
+                   Int(ceil(candidates[0].width)) <= maxWidth {
+                    // A complete line that fits a rectangular container uses
+                    // the paragraph-origin gate, without a second height test.
+                    visibleLines.append(place(candidates[0], after: visibleLines.last))
+                    nextLineIndex = end
+                    continue
+                }
+
+                var pending: (line: LineGlyphs, index: Int)?
+                var admitted = 0
+                for (offset, source) in candidates.enumerated() {
+                    if let budget, admitted >= budget {
+                        if let pending, !pending.line.glyphs.isEmpty {
+                            visibleLines.append(pending.line)
+                            nextLineIndex = pending.index + 1
+                            needsTruncation = true
+                        }
+                        break paragraphLoop
+                    }
+                    let line = place(source, after: pending?.line ?? visibleLines.last)
+                    let isExtra: Bool
+                    if case .extra = source.kind { isExtra = true } else { isExtra = false }
+                    let enforcesMinimum = start == 0 && admitted == 0
+                    let candidateHeight = (line.originY - paragraphY) + line.height
+                    if !enforcesMinimum, candidateHeight > remainingHeight + heightEpsilon {
+                        if let pending {
+                            if hasFinalExtra && isExtra {
+                                // A failed final extra retains the pending rectangle.
+                                // Publish the empty fragment there before finalizing
+                                // any text, so their bounds can overlap.
+                                var empty = pending.line
+                                empty.glyphs = []
+                                empty.width = 0
+                                empty.trailingBoundary = nil
+                                empty.kind = source.kind
+                                visibleLines.append(empty)
+                                if !pending.line.glyphs.isEmpty { visibleLines.append(pending.line) }
+                                nextLineIndex = end
+                            } else if !pending.line.glyphs.isEmpty {
+                                visibleLines.append(pending.line)
+                                nextLineIndex = pending.index + 1
+                                // Finalization tests two pending line heights,
+                                // excluding interline spacing and the admission
+                                // tolerance. A failed provisional extra can thus
+                                // finish this paragraph without truncating it.
+                                let nextHeight = (pending.line.originY - paragraphY) +
+                                    pending.line.height + pending.line.height
+                                needsTruncation = !isExtra || nextHeight > remainingHeight
+                                if isExtra, !needsTruncation {
+                                    nextLineIndex = end
+                                    continue paragraphLoop
+                                }
+                            }
+                        }
+                        break paragraphLoop
+                    }
+                    if let pending {
+                        visibleLines.append(pending.line)
+                        nextLineIndex = pending.index + 1
+                    }
+                    admitted += 1
+                    pending = (line, start + offset)
+                    if isExtra {
+                        if hasFinalExtra { visibleLines.append(line) }
+                        pending = nil
+                        nextLineIndex = end
+                    }
+                }
+                if let pending {
+                    // A shaped line can finalize without a following candidate.
+                    // A separator-only candidate has no such text line to flush.
+                    if !pending.line.glyphs.isEmpty { visibleLines.append(pending.line) }
+                    nextLineIndex = end
+                }
+                if nextLineIndex != end {
                     break
                 }
-                let line = place(wrappedLines[nextLineIndex], after: visibleLines.last)
-                if !isSimpleExtra, !visibleLines.isEmpty,
-                   line.maxY > maxHeight {
-                    break
-                }
-                visibleLines.append(line)
-                nextLineIndex += 1
             }
 
             guard let lastVisibleIndex = visibleLines.indices.last else {
                 return []
+            }
+            if !needsTruncation, Int(ceil(visibleLines[lastVisibleIndex].width)) <= maxWidth {
+                return visibleLines
             }
 
             let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex

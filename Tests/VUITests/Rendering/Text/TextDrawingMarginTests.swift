@@ -4,6 +4,53 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textParagraphAdmissionBudgetObserved
+    // ASSERTIONS textFinalExtraFragmentOverlapObserved
+    func testConstrainedParagraphsPreservePreparedAndRendererPixels() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let controls: [(String, CGFloat, Int?, CGFloat)] = [
+            ("A\n", 14, nil, 0), ("A\n\n", 56, 1, 0), ("A\n\n", 56, 2, 0),
+            ("\r\n\r\n", 56, 1, 0), ("A\n\r\n", 54, nil, 7), ("A\u{2028}\u{2028}", 54, nil, 7)
+        ]
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for (string, height, limit, spacing) in controls {
+                    var environment = EnvironmentValues()
+                    environment.font = .file(file, size: 23)
+                    environment.defaultFontRenderingMode = mode
+                    environment._contentScaleFactor = scale
+                    environment.displayScale = 2
+                    environment.lineSpacing = spacing
+                    environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+                    var source = try resolve(Text(verbatim: string), environment: environment)
+                    source.shading = .color(.black)
+                    var properties = TextLayoutProperties()
+                    properties.lineLimit = limit
+                    let rect = CGRect(x: 0, y: 0, width: 100, height: height)
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(source, in: rect, shading: source.shading, layoutProperties: properties)
+                    }
+                    XCTAssertEqual(expected.contains { $0 != 0 }, string.hasPrefix("A"))
+                    let prepared = source.makeDrawing(in: rect.size, layoutProperties: properties)
+                    let cached = try render(device: device, environment: environment) {
+                        $0.draw(prepared, in: rect, shading: source.shading, clipBounds: false)
+                    }
+                    let layout = source.makeLayout(in: rect.size, layoutDirection: .leftToRight, layoutProperties: properties)
+                    let renderer = MarginRenderer(environment: environment, operation: .line)
+                    let rendered = try render(device: device, environment: environment) { renderer.draw(layout: layout, in: &$0) }
+                    XCTAssertEqual(cached, expected, "Prepared \(mode) \(scale) \(string.debugDescription)")
+                    XCTAssertEqual(rendered, expected, "Renderer \(mode) \(scale) \(string.debugDescription)")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textEmptyFragmentDefaultFontObserved
     // ASSERTIONS textEmptyFragmentSeparatorRoutingObserved
     // ASSERTIONS textEmptyFragmentConsumerBoundariesObserved

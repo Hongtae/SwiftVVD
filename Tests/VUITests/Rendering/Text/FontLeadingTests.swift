@@ -268,6 +268,7 @@ final class FontLeadingTests: XCTestCase {
     }
 
     // ASSERTIONS fontStyleLinePlacementObserved
+    // ASSERTIONS textParagraphAdmissionBudgetObserved
     func testFractionalMeasuredHeightRemainsAValidLayoutProposal() throws {
         for scale: CGFloat in [1, 1.5, 2] {
             let face = try face(scale: scale)
@@ -282,7 +283,7 @@ final class FontLeadingTests: XCTestCase {
                 let last = try XCTUnwrap(source.makeGlyphs().last)
                 XCTAssertEqual(source.lastBaseline(in: measured), last.baseline / scale, accuracy: 1e-8)
                 XCTAssertEqual(source.makeGlyphs(maximumHeight: last.maxY).count, 3)
-                XCTAssertEqual(source.makeGlyphs(maximumHeight: last.maxY.nextDown).count, 2)
+                XCTAssertEqual(source.makeGlyphs(maximumHeight: last.maxY.nextDown).count, 3)
             }
         }
     }
