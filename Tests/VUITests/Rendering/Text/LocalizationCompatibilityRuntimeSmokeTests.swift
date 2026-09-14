@@ -77,6 +77,44 @@ func portableLocalizationCompatibilityRuntimeSmoke() throws {
 }
 
 @Test
+func portableLocalizationDevelopmentRegionRuntimeSmoke() throws {
+    let cases: [(Any?, String?)] = [
+        (nil, nil),
+        ("", nil),
+        (42, nil),
+        ("en", "en"),
+        ("ko", "ko")
+    ]
+    for (developmentRegion, expectedLanguage) in cases {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".bundle")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        var info: [String: Any] = ["CFBundleIdentifier": "test." + UUID().uuidString]
+        info["CFBundleDevelopmentRegion"] = developmentRegion
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: url.appendingPathComponent("Info.plist"))
+        let bundle = try #require(Bundle(url: url))
+
+        let resolved = _StringLocalizationValue("Untranslated").resolvedLocalization(
+            table: "Absent",
+            bundle: bundle,
+            locale: Locale(identifier: "fr")
+        )
+        #expect(resolved.string == "Untranslated")
+        #expect(resolved.languageIdentifier == expectedLanguage)
+        #expect(
+            AnySequence(resolved.attributedString().runs).map(\.languageIdentifier)
+                == [expectedLanguage]
+        )
+    }
+
+    // Command menu titles classify localized text through the main bundle.
+    #expect(!Text("Command Lab").isStyled())
+}
+
+@Test
 func portableLocalizationPluralRuntimeSmoke() {
     // ASSERTIONS foundationLocalizationStringsDictionaryObserved
     var pluralInterpolation =

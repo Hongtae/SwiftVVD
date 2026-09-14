@@ -610,8 +610,11 @@ final class LocalizedStringKeyTests: XCTestCase {
 
         var intent = _InlinePresentationIntent.emphasized
         intent.formUnion(.stronglyEmphasized)
+        intent.formUnion([.code, .strikethrough])
         XCTAssertTrue(intent.contains(.emphasized))
         XCTAssertTrue(intent.contains(.stronglyEmphasized))
+        XCTAssertTrue(intent.contains(.code))
+        XCTAssertTrue(intent.contains(.strikethrough))
         XCTAssertEqual(_InlinePresentationIntent.emphasized.rawValue, 1)
         XCTAssertEqual(_InlinePresentationIntent.stronglyEmphasized.rawValue, 2)
         XCTAssertEqual(
@@ -682,6 +685,14 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertEqual(
             _InlinePresentationIntent.stronglyEmphasized.rawValue,
             InlinePresentationIntent.stronglyEmphasized.rawValue
+        )
+        XCTAssertEqual(
+            _InlinePresentationIntent.code.rawValue,
+            InlinePresentationIntent.code.rawValue
+        )
+        XCTAssertEqual(
+            _InlinePresentationIntent.strikethrough.rawValue,
+            InlinePresentationIntent.strikethrough.rawValue
         )
         XCTAssertEqual(
             _InlinePresentationIntentAttribute.name,

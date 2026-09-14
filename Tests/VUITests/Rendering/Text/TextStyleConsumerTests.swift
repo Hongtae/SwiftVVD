@@ -1155,12 +1155,14 @@ final class TextStyleConsumerTests {
         var parent = style(Text(verbatim: "A").bold(false).tracking(11).font(.system(size: 41)))
         var dictionary: [NSAttributedString.Key: Any] = [
             .coreFont: VUI.Font.system(size: 31), .coreKern: CGFloat(3),
-            .init("NSInlinePresentationIntent"): InlinePresentationIntent([.emphasized, .stronglyEmphasized, .code]),
+            .coreStrikethroughStyle: Text.LineStyle(pattern: .dot, color: .blue),
+            .init("NSInlinePresentationIntent"): InlinePresentationIntent([.emphasized, .stronglyEmphasized, .code, .strikethrough]),
             .init("NSLanguage"): "ja"
         ]
         dictionary.transferAttributedStringStyles(to: &parent)
         #expect(dictionary.count == 1)
         #expect(dictionary[.init("NSLanguage")] as? String == "ja")
+        #expect(parent.strikethrough.resolve(fallback: nil) == .single)
         let key = try #require(parent.fontKey(in: inherited))
         #expect(key.modifiers == [.static(Font.ItalicModifier.self), .static(Font.BoldModifier.self), .static(Font.MonospacedModifier.self)])
         var properties = Text.ResolvedProperties()

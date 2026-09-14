@@ -231,7 +231,19 @@ struct LocalizationResolver {
         let tableName = table ?? "Localizable"
         let hasTable = lookupBundle.url(forResource: tableName, withExtension: "strings") != nil
             || lookupBundle.url(forResource: tableName, withExtension: "stringsdict") != nil
-        let languageIdentifier = hasTable ? candidates.first : bundle.developmentLocalization
+        let languageIdentifier: String?
+        if hasTable {
+            languageIdentifier = candidates.first
+        } else {
+#if canImport(Darwin)
+            languageIdentifier = bundle.developmentLocalization
+#else
+            // Corelibs Foundation force-unwraps a missing development region.
+            // Preserve its metadata rules without calling the trapping getter.
+            let region = bundle.infoDictionary?["CFBundleDevelopmentRegion"] as? String
+            languageIdentifier = region.flatMap { $0.isEmpty ? nil : $0 }
+#endif
+        }
 
 #if !canImport(Darwin)
         switch stringsDictionaryLookup(
