@@ -175,6 +175,114 @@ final class TextProxyTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textStringDrawingMarginPublicationObserved
+    func testStringDrawingPublishesMarginsAfterRawBaselineMeasurement() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        var environment = EnvironmentValues()
+        environment.font = .file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23)
+        environment.defaultFontRenderingMode = .vector()
+        environment.displayScale = 2
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            func engine<Content: View>(_ content: Content, margins: EdgeInsets) throws -> StyledTextLayoutEngine {
+                let outputs = Content._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: content)),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                let layout = try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+                XCTAssertTrue(layout.text is ResolvedStyledText.StringDrawing)
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 0)
+                layout.text.layoutMargins = margins
+                return layout
+            }
+            let request = CGSize(width: 300, height: 81)
+            let margins = EdgeInsets(top: 0.1, leading: 2.25, bottom: 3.5, trailing: 4.125)
+            let separators = try engine(Text(verbatim: "\n\n"), margins: margins)
+            XCTAssertEqual(separators.sizeThatFits(_ProposedSize(request)).width, 6.375, accuracy: 0.000001)
+            XCTAssertEqual(separators.sizeThatFits(_ProposedSize(request)).height, 57.6, accuracy: 0.000001)
+            XCTAssertEqual(separators.text.firstBaseline(in: request), 21)
+            XCTAssertEqual(separators.text.lastBaseline(in: request), 54)
+            XCTAssertEqual(separators.text.metricsCacheEntryCount, 1)
+
+            for content in ["A", "A\n"] {
+                let plain = try engine(Text(verbatim: content), margins: .init())
+                let padded = try engine(Text(verbatim: content), margins: margins)
+                let original = plain.sizeThatFits(_ProposedSize(request))
+                let measured = padded.sizeThatFits(_ProposedSize(request))
+                // Compare the margin contribution independently of font advance precision.
+                XCTAssertEqual(measured.width - original.width, 6.375, accuracy: 0.000001)
+                XCTAssertEqual(measured.height - original.height, 3.6, accuracy: 0.000001)
+                XCTAssertEqual(padded.text.firstBaseline(in: request), 21)
+                XCTAssertEqual(padded.text.lastBaseline(in: request), content == "A" ? 21 : 48)
+                XCTAssertEqual(padded.text.metricsCacheEntryCount, 1)
+            }
+            let offset = try engine(Text(verbatim: "A").baselineOffset(0.1), margins: .init())
+            XCTAssertEqual(offset.text.firstBaseline(in: request), 21)
+            XCTAssertEqual(offset.text.lastBaseline(in: request), 21)
+
+            struct Sample {
+                var text: String
+                var request = CGSize(width: 300, height: 81)
+                var margins = EdgeInsets(top: 0.1, leading: 2.25, bottom: 3.5, trailing: 4.125)
+                var spacing: CGFloat = 0
+                var offset: CGFloat = 0
+                var size: CGSize
+                var first: CGFloat
+                var last: CGFloat
+            }
+            let negative = EdgeInsets(top: -0.2, leading: 0.3, bottom: -0.4, trailing: 0.5)
+            let fractional = EdgeInsets(top: 0.2, leading: 0.3, bottom: 0.4, trailing: 0.5)
+            let samples: [Sample] = [
+                .init(text: "", size: .init(width: 6.375, height: 17.6), first: 11, last: 11),
+                .init(text: "", margins: negative, size: .init(width: 0.8, height: 13.4), first: 11, last: 11),
+                .init(text: "A", request: .init(width: 7.375, height: 81),
+                      size: .init(width: 7.375, height: 30.6), first: 21, last: 21),
+                .init(text: "A", request: .init(width: 6.375, height: 14),
+                      size: .init(width: 6.375, height: 30.6), first: 21, last: 21),
+                .init(text: "A", request: .init(width: 7.375, height: 81), margins: negative,
+                      size: .init(width: 7.8, height: 26.4), first: 21, last: 21),
+                .init(text: "\n", size: .init(width: 6.375, height: 57.6), first: 27, last: 27),
+                .init(text: "\n", margins: negative, size: .init(width: 0.8, height: 53.4), first: 27, last: 27),
+                .init(text: "\n\n", request: .init(width: 300, height: 54),
+                      size: .init(width: 7.375, height: 30.6), first: 21, last: 21),
+                .init(text: "\n\n", request: .init(width: 300, height: 54), margins: negative,
+                      size: .init(width: 0.8, height: 53.4), first: 21, last: 54),
+                .init(text: "\n\n\n", size: .init(width: 7.375, height: 57.6), first: 21, last: 54),
+                .init(text: "\n\n\n", margins: negative, size: .init(width: 0.8, height: 80.4), first: 21, last: 81),
+                .init(text: "A\n", request: .init(width: 7.375, height: 81),
+                      size: .init(width: 7.375, height: 57.6), first: 21, last: 48),
+                .init(text: "A\n", request: .init(width: 7.375, height: 81), margins: negative,
+                      size: .init(width: 7.8, height: 53.4), first: 21, last: 48),
+                .init(text: "\n", margins: fractional, spacing: 0.1,
+                      size: .init(width: 0.8, height: 55.1), first: 27.5, last: 27.5),
+                .init(text: "\n\n", margins: fractional, spacing: 0.1,
+                      size: .init(width: 0.8, height: 55.1), first: 21, last: 54.5),
+                .init(text: "A", request: .init(width: 7.375, height: 81), offset: 0.1,
+                      size: .init(width: 7.375, height: 31.1), first: 21, last: 21),
+                .init(text: "A", request: .init(width: 7.375, height: 81), offset: 0.2,
+                      size: .init(width: 7.375, height: 31.1), first: 21.5, last: 21.5),
+                .init(text: "A", request: .init(width: 7.375, height: 81), offset: 4.25,
+                      size: .init(width: 7.375, height: 35.1), first: 25.5, last: 25.5)
+            ]
+            for sample in samples {
+                let text = Text(verbatim: sample.text).baselineOffset(sample.offset).lineSpacing(sample.spacing)
+                let layout = try engine(text, margins: sample.margins)
+                let measured = layout.sizeThatFits(_ProposedSize(sample.request))
+                let label = "\(sample.text.debugDescription) request=\(sample.request) margins=\(sample.margins) spacing=\(sample.spacing) offset=\(sample.offset)"
+                XCTAssertEqual(measured.width, sample.size.width, accuracy: 0.000001, label)
+                XCTAssertEqual(measured.height, sample.size.height, accuracy: 0.000001, label)
+                XCTAssertEqual(layout.text.firstBaseline(in: sample.request), sample.first, accuracy: 0.000001, label)
+                XCTAssertEqual(layout.text.lastBaseline(in: sample.request), sample.last, accuracy: 0.000001, label)
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 1, label)
+            }
+        }
+    }
+
     // ASSERTIONS textStringDrawingLegacySeparatorProducerObserved textStringDrawingLegacyReflowObserved
     // ASSERTIONS textStringDrawingUsedRectFloorObserved textStringDrawingLegacyBaselinePublicationObserved
     // ASSERTIONS textStringDrawingTrailingCoreTextProducerObserved

@@ -782,10 +782,22 @@ extension ResolvedStyledText {
             let sources = resolvedText.unwrappedGlyphLines()
             var metrics = separatorMetrics(in: drawingSize, sources: sources)
                 ?? trailingParagraphMetrics(in: drawingSize, sources: sources)
-                ?? resolvedText.layoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
+                ?? resolvedText.unroundedLayoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
             let clippedWidth = min(metrics.size.width, normalizedWidth)
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
-            metrics.size.width = ceil(width * resolvedText.displayScale) / resolvedText.displayScale
+            let height = metrics.size.height == .leastNonzeroMagnitude ? 0 : metrics.size.height
+            let pixelLength = 1 / resolvedText.displayScale
+            metrics.size.width = (layoutMargins.leading + layoutMargins.trailing)
+                + ceil(width / pixelLength) * pixelLength
+            metrics.size.height = (layoutMargins.top + layoutMargins.bottom)
+                + ceil(height / pixelLength) * pixelLength
+            // Retain raw baselines through margin application. The first
+            // baseline's rounding adjustment also affects the last baseline.
+            let firstBaseline = layoutMargins.top + metrics.firstBaseline
+            metrics.firstBaseline = (firstBaseline / pixelLength).rounded() * pixelLength
+            let adjustment = metrics.firstBaseline - firstBaseline
+            metrics.lastBaseline = ceil((layoutMargins.top + metrics.lastBaseline + adjustment)
+                / pixelLength) * pixelLength
             measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics))
             return metrics
         }
@@ -891,13 +903,7 @@ extension ResolvedStyledText {
                     CGSize(width: max($0.width, $1.usedRect.maxX), height: max($0.height, $1.usedRect.maxY))
                 }
             }
-            let scale = resolvedText.displayScale
-            let roundedFirst = (firstBaseline * scale).rounded() / scale
-            let adjustment = roundedFirst - firstBaseline
-            let usedHeight = usedExtent.height == .leastNonzeroMagnitude ? 0 : usedExtent.height
-            return .init(size: CGSize(width: usedExtent.width, height: ceil(usedHeight * scale) / scale),
-                         firstBaseline: roundedFirst,
-                         lastBaseline: ceil((lastBaseline + adjustment) * scale) / scale)
+            return .init(size: usedExtent, firstBaseline: firstBaseline, lastBaseline: lastBaseline)
         }
 
         private func trailingParagraphMetrics(
@@ -918,7 +924,7 @@ extension ResolvedStyledText {
             // merely because the final empty fragment failed the height check.
             guard lines.count == 2, case .extra = lines[1].kind else { return nil }
             let admitted = lines[1].maxY / resolvedText.scaleFactor <= size.height ? lines : [lines[0]]
-            return resolvedText.layoutMetrics(lineGlyphs: admitted)
+            return resolvedText.unroundedLayoutMetrics(lineGlyphs: admitted)
         }
     }
 

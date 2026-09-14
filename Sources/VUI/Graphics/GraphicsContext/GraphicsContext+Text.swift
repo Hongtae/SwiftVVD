@@ -261,6 +261,23 @@ extension GraphicsContext {
             in size: CGSize,
             layoutProperties: TextLayoutProperties? = nil
         ) -> LayoutMetrics {
+            var metrics = unroundedLayoutMetrics(in: size, layoutProperties: layoutProperties)
+            metrics.size.width = alignedLength(metrics.size.width)
+            metrics.size.height = alignedLength(metrics.size.height)
+            return metrics
+        }
+
+        func layoutMetrics(lineGlyphs: [LineGlyphs]) -> LayoutMetrics {
+            var metrics = unroundedLayoutMetrics(lineGlyphs: lineGlyphs)
+            metrics.size.width = alignedLength(metrics.size.width)
+            metrics.size.height = alignedLength(metrics.size.height)
+            return metrics
+        }
+
+        func unroundedLayoutMetrics(
+            in size: CGSize,
+            layoutProperties: TextLayoutProperties? = nil
+        ) -> LayoutMetrics {
             let width = max(size.width, 0) * scaleFactor
             let height = max(size.height, 0) * scaleFactor
             let maxWidth = Self.pixelLimit(width)
@@ -270,12 +287,13 @@ extension GraphicsContext {
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
-            return layoutMetrics(lineGlyphs: lineGlyphs)
+            return unroundedLayoutMetrics(lineGlyphs: lineGlyphs)
         }
 
-        func layoutMetrics(lineGlyphs: [LineGlyphs]) -> LayoutMetrics {
+        // The measurement owner applies margins before aligning baselines.
+        func unroundedLayoutMetrics(lineGlyphs: [LineGlyphs]) -> LayoutMetrics {
             if lineGlyphs.isEmpty, storage.hasEmptyContent, let input = defaultLineMetrics {
-                return LayoutMetrics(size: CGSize(width: 0, height: alignedLength(input.height / scaleFactor)),
+                return LayoutMetrics(size: CGSize(width: 0, height: input.height / scaleFactor),
                     firstBaseline: input.ascent / scaleFactor, lastBaseline: input.ascent / scaleFactor)
             }
             let pixelSize = lineGlyphs.reduce(CGSize.zero) { result, line in
@@ -287,11 +305,8 @@ extension GraphicsContext {
             let firstBaseline = lineGlyphs.first?.baseline ?? .zero
             let lastBaseline = lineGlyphs.last?.baseline ?? .zero
             let inverseScale = 1 / scaleFactor
-            var logicalSize = pixelSize * inverseScale
-            logicalSize.width = alignedLength(logicalSize.width)
-            logicalSize.height = alignedLength(logicalSize.height)
             return LayoutMetrics(
-                size: logicalSize,
+                size: pixelSize * inverseScale,
                 firstBaseline: firstBaseline * inverseScale,
                 lastBaseline: lastBaseline * inverseScale
             )
