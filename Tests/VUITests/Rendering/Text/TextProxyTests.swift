@@ -303,6 +303,90 @@ final class TextProxyTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textStringDrawingSeparatorSpacingAdmissionObserved
+    // ASSERTIONS textStringDrawingSeparatorRetryRangeObserved
+    // ASSERTIONS textStringDrawingStoredUsageInvalidationObserved
+    func testSeparatorSpacingRetainsUsageThroughRangeRetry() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        var environment = EnvironmentValues()
+        let fontURL = root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        environment.font = .file(fontURL, size: 23)
+        environment.defaultFontRenderingMode = .vector()
+        environment.displayScale = 2
+        environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+        try viewGraph.data.withCurrent {
+            func engine<Content: View>(_ content: Content) throws -> StyledTextLayoutEngine {
+                let graph = viewGraph.data.graph
+                let outputs = Content._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: content)),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                return try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+            }
+            let heights: [CGFloat?] = [0, 14, 33, 53, 54, 66, 81, nil]
+            let controls: [(String, [[CGFloat]], [[CGFloat]])] = [
+                ("\n", [[0, 0, 0, 0], [0, 14, 14, 14], [0, 33, 33, 33], [0, 33, 33, 33],
+                         [0, 33, 33, 33], [0, 60, 33, 33], [0, 60, 33, 33], [0, 60, 33, 33]],
+                 Array(repeating: [0, 28, 21, 25], count: 8)),
+                ("\n\n", [[1, 27, 21, 21], [1, 27, 21, 21], [1, 33, 21, 21], [1, 33, 21, 21],
+                           [1, 54, 21, 54], [0, 66, 21, 66], [0, 66, 21, 66], [0, 93, 21, 66]],
+                 [[0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21],
+                  [0, 60, 21, 52], [0, 60, 21, 52], [0, 60, 21, 52], [0, 60, 21, 52]]),
+                ("\n\n\n", [[1, 27, 21, 21], [1, 27, 21, 21], [1, 33, 21, 21], [1, 33, 21, 21],
+                             [1, 54, 21, 54], [1, 60, 21, 60], [1, 60, 21, 60], [0, 126, 21, 99]],
+                 [[0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21],
+                  [0, 60, 21, 48], [0, 60, 21, 48], [0, 60, 21, 48], [0, 93, 21, 85]])
+            ]
+            for (content, bare, customMetrics) in controls {
+                for custom in [false, true] {
+                    for (index, height) in heights.enumerated() {
+                        let text = Text(verbatim: content).lineSpacing(6)
+                        let capture = ProxyCapture()
+                        let layout = try custom ? engine(text.textRenderer(ProxyRecorder(capture: capture))) : engine(text)
+                        let proposal = _ProposedSize(width: 300, height: height)
+                        let expected = custom ? customMetrics[index] : bare[index]
+                        let label = "content=\(content.debugDescription) custom=\(custom) height=\(String(describing: height))"
+                        let size = layout.sizeThatFits(proposal)
+                        XCTAssertEqual(size, CGSize(width: expected[0], height: expected[1]), label)
+                        XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.firstTextBaseline.key, at: ViewSize(size)), expected[2], label)
+                        XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.lastTextBaseline.key, at: ViewSize(size)), expected[3], label)
+                        XCTAssertEqual(layout.text.frame(in: size, renderer: layout.renderer),
+                            CGRect(x: 0, y: -1, width: expected[0], height: expected[1] + 1.5), label)
+                        XCTAssertEqual(layout.text.metricsCacheEntryCount, 1, label)
+                        if custom {
+                            XCTAssertEqual(try XCTUnwrap(capture.proxy).sizeThatFits(ProposedViewSize(proposal)), size, label)
+                        }
+                    }
+                }
+            }
+            let retries: [(Int, CGFloat, CGFloat, CGFloat?, Int?, [CGFloat])] = [
+                (3, 23, 6, 87, nil, [1, 87, 21, 60]),
+                (4, 23, 6, 99, nil, [1, 93, 21, 93]),
+                (4, 23, 6, nil, 2, [1, 87, 21, 60]),
+                (3, 14, 20, 72, nil, [1, 68, 13, 52]),
+                (2, 23, 20, 81, nil, [0, 74, 21, 74]),
+                (2, 14, 20, 36, nil, [1, 36, 13, 32]),
+                (3, 37, 0.5, nil, 2, [1, 129.5, 34, 86.5]),
+                (4, 23, 0, 81, nil, [1, 81, 21, 81])
+            ]
+            for (count, pointSize, spacing, height, limit, expected) in retries {
+                environment.font = .file(fontURL, size: pointSize)
+                let content = String(repeating: "\n", count: count)
+                let layout = try engine(Text(verbatim: content).lineSpacing(spacing).lineLimit(limit))
+                let size = layout.sizeThatFits(.init(width: 300, height: height))
+                let label = "count=\(count) font=\(pointSize) spacing=\(spacing) height=\(String(describing: height)) limit=\(String(describing: limit))"
+                XCTAssertEqual(size, CGSize(width: expected[0], height: expected[1]), label)
+                XCTAssertEqual(layout.text.firstBaseline(in: size), expected[2], label)
+                XCTAssertEqual(layout.text.lastBaseline(in: size), expected[3], label)
+            }
+        }
+    }
+
     private func resolve(limit: Int?, spacing: CGFloat) throws -> ResolvedStyledText {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

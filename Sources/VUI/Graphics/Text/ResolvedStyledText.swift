@@ -800,6 +800,8 @@ extension ResolvedStyledText {
             let paragraphs = sources.dropLast()
             guard let firstInput = paragraphs.first?.paragraphInput,
                   let font = firstInput.fontLineMetrics, font.leading == 0 else { return nil }
+            let spacing = firstInput.style.paragraphStyle?.lineSpacing ?? 0
+            guard spacing.isFinite, spacing >= 0 else { return nil }
             // This fragment path handles uniform separator paragraphs. Other
             // paragraph attributes continue through the existing layout producer.
             for line in paragraphs {
@@ -809,41 +811,68 @@ extension ResolvedStyledText {
                       [0x0a, 0x0d, 0x2028, 0x2029].contains(boundary.scalar.value),
                       boundary.fontLineMetrics == font, input.fontLineMetrics == font,
                       boundary.baselineOffset == 0, input.baselineOffset == 0,
-                      (boundary.style.paragraphStyle?.lineSpacing ?? 0) == 0,
-                      (input.style.paragraphStyle?.lineSpacing ?? 0) == 0 else { return nil }
+                      (boundary.style.paragraphStyle?.lineSpacing ?? 0) == spacing,
+                      (input.style.paragraphStyle?.lineSpacing ?? 0) == spacing else { return nil }
             }
             let height = font.height / resolvedText.scaleFactor
             let baseline = font.ascent / resolvedText.scaleFactor
             let limit = layoutProperties.lineLimit.map { max($0, 1) } ?? .max
             var fragments: [Fragment] = []
-            var exhausted = false
-            for line in paragraphs {
+            var usedExtent = CGSize.zero
+            var invalidUsage = false
+            var nextParagraph = paragraphs.startIndex
+            var retriedEnd: Int?
+
+            func publish(_ fragment: Fragment) {
+                fragments.append(fragment)
+                if !invalidUsage {
+                    usedExtent.width = max(usedExtent.width, fragment.usedRect.maxX)
+                    usedExtent.height = max(usedExtent.height, fragment.usedRect.maxY)
+                }
+            }
+
+            while nextParagraph < paragraphs.endIndex {
                 let origin = fragments.last?.lineRect.maxY ?? 0
                 if !fragments.isEmpty,
                    fragments.count >= limit || origin + height > size.height {
-                    exhausted = true
-                    break
+                    // Empty paragraphs backtrack to the first adjacent pair.
+                    // The merged content range occupies one ordinary fragment;
+                    // later separators are laid out again from that range's end.
+                    let first = fragments[0]
+                    let end = fragments.dropFirst().first?.glyphRange.upperBound ?? first.glyphRange.upperBound
+                    guard retriedEnd != end else { break }
+                    retriedEnd = end
+                    let invalidatesUsage = fragments.count > 1
+                    fragments.removeAll(keepingCapacity: true)
+                    let lineRect = CGRect(x: 0, y: 0, width: size.width, height: height)
+                    var usedRect = CGRect(x: 0, y: 0, width: 0, height: height)
+                    if usedRect.intersection(lineRect).isEmpty, usedRect.width == 0 {
+                        usedRect.size.width = 1
+                    }
+                    publish(Fragment(lineRect: lineRect, usedRect: usedRect,
+                        glyphRange: first.glyphRange.lowerBound..<end, baselineOffset: baseline))
+                    // A single-fragment replacement accumulates usage. A range
+                    // spanning multiple fragments invalidates it for reduction.
+                    invalidUsage = invalidUsage || invalidatesUsage
+                    nextParagraph = paragraphs.firstIndex {
+                        $0.trailingBoundary!.sourceRange!.upperBound == end
+                    }! + 1
+                    continue
                 }
-                let lineHeight = fragments.isEmpty ? min(height, size.height) : height
+                let lineHeight: CGFloat
+                if fragments.isEmpty {
+                    lineHeight = min(height + spacing, size.height)
+                } else {
+                    // When the complete spacing does not fit, retain the font
+                    // rectangle without spacing rather than clipping the spacing.
+                    lineHeight = origin + height + spacing <= size.height ? height + spacing : height
+                }
                 let lineRect = CGRect(x: 0, y: origin, width: size.width, height: lineHeight)
                 let usedRect = CGRect(x: 0, y: origin, width: 0, height: lineHeight)
-                fragments.append(Fragment(lineRect: lineRect, usedRect: usedRect,
-                    glyphRange: line.trailingBoundary!.sourceRange!,
+                publish(Fragment(lineRect: lineRect, usedRect: usedRect,
+                    glyphRange: paragraphs[nextParagraph].trailingBoundary!.sourceRange!,
                     baselineOffset: usedRect.maxY - lineRect.minY))
-            }
-            if exhausted {
-                // Retrying the admitted prefix as content gives its first
-                // fragment ordinary run metrics. Subsequent separator fragments
-                // retain their rectangles and glyph baselines.
-                var first = fragments[0]
-                first.lineRect.size.height = height
-                first.usedRect.size.height = height
-                first.baselineOffset = baseline
-                if first.usedRect.intersection(first.lineRect).isEmpty,
-                   first.usedRect.width == 0 {
-                    first.usedRect.size.width = 1
-                }
-                fragments[0] = first
+                nextParagraph += 1
             }
             let first = fragments[0]
             let last = fragments.last!
@@ -851,20 +880,22 @@ extension ResolvedStyledText {
             let firstBaseline = first.glyphRange.upperBound == contentEnd ? first.baseline : baseline
             let lastBaseline = last.baseline
             let end = last.glyphRange.upperBound
-            if !exhausted, last.lineRect.maxY + height <= size.height {
+            if nextParagraph == paragraphs.endIndex, last.lineRect.maxY + height <= size.height {
                 let lineRect = CGRect(x: 0, y: last.lineRect.maxY, width: size.width, height: height)
-                fragments.append(Fragment(lineRect: lineRect,
+                publish(Fragment(lineRect: lineRect,
                     usedRect: CGRect(x: 0, y: lineRect.minY, width: 0, height: height),
                     glyphRange: end..<end, baselineOffset: 0))
             }
-            let extent = fragments.reduce(CGSize.zero) {
-                CGSize(width: max($0.width, $1.usedRect.maxX), height: max($0.height, $1.usedRect.maxY))
+            if invalidUsage {
+                usedExtent = fragments.reduce(CGSize.zero) {
+                    CGSize(width: max($0.width, $1.usedRect.maxX), height: max($0.height, $1.usedRect.maxY))
+                }
             }
             let scale = resolvedText.displayScale
             let roundedFirst = (firstBaseline * scale).rounded() / scale
             let adjustment = roundedFirst - firstBaseline
-            let usedHeight = extent.height == .leastNonzeroMagnitude ? 0 : extent.height
-            return .init(size: CGSize(width: extent.width, height: ceil(usedHeight * scale) / scale),
+            let usedHeight = usedExtent.height == .leastNonzeroMagnitude ? 0 : usedExtent.height
+            return .init(size: CGSize(width: usedExtent.width, height: ceil(usedHeight * scale) / scale),
                          firstBaseline: roundedFirst,
                          lastBaseline: ceil((lastBaseline + adjustment) * scale) / scale)
         }
