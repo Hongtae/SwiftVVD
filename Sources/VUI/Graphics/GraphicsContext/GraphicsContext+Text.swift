@@ -896,21 +896,23 @@ extension GraphicsContext {
             lineLimit: Int? = nil,
             truncationMode: Text.TruncationMode = .tail
         ) -> [LineGlyphs] {
-            let lineGlyphs = storage.lineGlyphs { runs in
+            _lineWrap(
+                unwrappedGlyphLines(),
+                maxWidth: maxWidth,
+                maxHeight: maximumHeight,
+                lineLimit: lineLimit,
+                truncationMode: truncationMode
+            )
+        }
+
+        func unwrappedGlyphLines() -> [LineGlyphs] {
+            storage.lineGlyphs { runs in
                 Self._makeGlyphs(
                     runs: runs,
                     scaleFactor: self.scaleFactor,
                     drawMissingGlyphs: self.drawMissingGlyphs
                 )
             }
-
-            return _lineWrap(
-                lineGlyphs,
-                maxWidth: maxWidth,
-                maxHeight: maximumHeight,
-                lineLimit: lineLimit,
-                truncationMode: truncationMode
-            )
         }
 
         func prepareResources() {
@@ -1874,6 +1876,9 @@ extension GraphicsContext {
                 }
             }
 
+            // Remeasuring the final line must preserve its admitted origin,
+            // including an empty continuation that shares the same rectangle.
+            let admittedOriginY = visibleLines[lastVisibleIndex].originY
             guard let truncatedGlyphs else {
                 if hasParagraphOverflow {
                     visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
@@ -1884,6 +1889,7 @@ extension GraphicsContext {
                     }
                     visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
                         after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
+                    visibleLines[lastVisibleIndex].originY = admittedOriginY
                 }
                 return visibleLines
             }
@@ -1895,6 +1901,7 @@ extension GraphicsContext {
                 visibleLines[lastVisibleIndex],
                 after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
             )
+            visibleLines[lastVisibleIndex].originY = admittedOriginY
             return visibleLines
         }
 

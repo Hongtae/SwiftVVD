@@ -743,6 +743,15 @@ class ResolvedStyledText: InterpolatableContent {
 
 extension ResolvedStyledText {
     final class StringDrawing: ResolvedStyledText {
+        private struct Fragment {
+            var lineRect: CGRect
+            var usedRect: CGRect
+            var glyphRange: Range<Int>
+            var baselineOffset: CGFloat
+
+            var baseline: CGFloat { lineRect.minY + baselineOffset }
+        }
+
         // Retained proxies and the host share this owner's measurement entries.
         private var measurements: [MeasurementEntry] = []
 
@@ -769,13 +778,116 @@ extension ResolvedStyledText {
             }
             let normalizedWidth = drawingDimension(available.width)
             let normalizedHeight = drawingDimension(available.height)
-            var metrics = resolvedText.layoutMetrics(
-                in: CGSize(width: normalizedWidth, height: normalizedHeight), layoutProperties: layoutProperties)
+            let drawingSize = CGSize(width: normalizedWidth, height: normalizedHeight)
+            let sources = resolvedText.unwrappedGlyphLines()
+            var metrics = separatorMetrics(in: drawingSize, sources: sources)
+                ?? trailingParagraphMetrics(in: drawingSize, sources: sources)
+                ?? resolvedText.layoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
             let clippedWidth = min(metrics.size.width, normalizedWidth)
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
             metrics.size.width = ceil(width * resolvedText.displayScale) / resolvedText.displayScale
             measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics))
             return metrics
+        }
+
+        private func separatorMetrics(
+            in size: CGSize,
+            sources: [GraphicsContext.ResolvedText.LineGlyphs]
+        ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+            guard let resolvedText, let extra = sources.last,
+                  case .extra = extra.kind, sources.count > 1,
+                  layoutProperties.truncationMode == .tail else { return nil }
+            let paragraphs = sources.dropLast()
+            guard let firstInput = paragraphs.first?.paragraphInput,
+                  let font = firstInput.fontLineMetrics, font.leading == 0 else { return nil }
+            // This fragment path handles uniform separator paragraphs. Other
+            // paragraph attributes continue through the existing layout producer.
+            for line in paragraphs {
+                guard line.glyphs.isEmpty, let boundary = line.trailingBoundary,
+                      let input = line.paragraphInput,
+                      boundary.sourceRange != nil,
+                      [0x0a, 0x0d, 0x2028, 0x2029].contains(boundary.scalar.value),
+                      boundary.fontLineMetrics == font, input.fontLineMetrics == font,
+                      boundary.baselineOffset == 0, input.baselineOffset == 0,
+                      (boundary.style.paragraphStyle?.lineSpacing ?? 0) == 0,
+                      (input.style.paragraphStyle?.lineSpacing ?? 0) == 0 else { return nil }
+            }
+            let height = font.height / resolvedText.scaleFactor
+            let baseline = font.ascent / resolvedText.scaleFactor
+            let limit = layoutProperties.lineLimit.map { max($0, 1) } ?? .max
+            var fragments: [Fragment] = []
+            var exhausted = false
+            for line in paragraphs {
+                let origin = fragments.last?.lineRect.maxY ?? 0
+                if !fragments.isEmpty,
+                   fragments.count >= limit || origin + height > size.height {
+                    exhausted = true
+                    break
+                }
+                let lineHeight = fragments.isEmpty ? min(height, size.height) : height
+                let lineRect = CGRect(x: 0, y: origin, width: size.width, height: lineHeight)
+                let usedRect = CGRect(x: 0, y: origin, width: 0, height: lineHeight)
+                fragments.append(Fragment(lineRect: lineRect, usedRect: usedRect,
+                    glyphRange: line.trailingBoundary!.sourceRange!,
+                    baselineOffset: usedRect.maxY - lineRect.minY))
+            }
+            if exhausted {
+                // Retrying the admitted prefix as content gives its first
+                // fragment ordinary run metrics. Subsequent separator fragments
+                // retain their rectangles and glyph baselines.
+                var first = fragments[0]
+                first.lineRect.size.height = height
+                first.usedRect.size.height = height
+                first.baselineOffset = baseline
+                if first.usedRect.intersection(first.lineRect).isEmpty,
+                   first.usedRect.width == 0 {
+                    first.usedRect.size.width = 1
+                }
+                fragments[0] = first
+            }
+            let first = fragments[0]
+            let last = fragments.last!
+            let contentEnd = paragraphs.last!.trailingBoundary!.sourceRange!.upperBound
+            let firstBaseline = first.glyphRange.upperBound == contentEnd ? first.baseline : baseline
+            let lastBaseline = last.baseline
+            let end = last.glyphRange.upperBound
+            if !exhausted, last.lineRect.maxY + height <= size.height {
+                let lineRect = CGRect(x: 0, y: last.lineRect.maxY, width: size.width, height: height)
+                fragments.append(Fragment(lineRect: lineRect,
+                    usedRect: CGRect(x: 0, y: lineRect.minY, width: 0, height: height),
+                    glyphRange: end..<end, baselineOffset: 0))
+            }
+            let extent = fragments.reduce(CGSize.zero) {
+                CGSize(width: max($0.width, $1.usedRect.maxX), height: max($0.height, $1.usedRect.maxY))
+            }
+            let scale = resolvedText.displayScale
+            let roundedFirst = (firstBaseline * scale).rounded() / scale
+            let adjustment = roundedFirst - firstBaseline
+            let usedHeight = extent.height == .leastNonzeroMagnitude ? 0 : extent.height
+            return .init(size: CGSize(width: extent.width, height: ceil(usedHeight * scale) / scale),
+                         firstBaseline: roundedFirst,
+                         lastBaseline: ceil((lastBaseline + adjustment) * scale) / scale)
+        }
+
+        private func trailingParagraphMetrics(
+            in size: CGSize,
+            sources: [GraphicsContext.ResolvedText.LineGlyphs]
+        ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+            guard let resolvedText, sources.count == 2,
+                  !sources[0].glyphs.isEmpty, sources[0].trailingBoundary != nil,
+                  case .extra = sources[1].kind,
+                  layoutProperties.truncationMode == .tail,
+                  layoutProperties.lineLimit.map({ $0 >= 2 }) ?? true else { return nil }
+            let pixelWidth = size.width * resolvedText.scaleFactor
+            let lines = resolvedText.makeGlyphs(
+                maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
+                maximumHeight: .infinity)
+            // A completed single content line admits its trailing fragment only
+            // when that complete rectangle fits. It does not truncate the line
+            // merely because the final empty fragment failed the height check.
+            guard lines.count == 2, case .extra = lines[1].kind else { return nil }
+            let admitted = lines[1].maxY / resolvedText.scaleFactor <= size.height ? lines : [lines[0]]
+            return resolvedText.layoutMetrics(lineGlyphs: admitted)
         }
     }
 

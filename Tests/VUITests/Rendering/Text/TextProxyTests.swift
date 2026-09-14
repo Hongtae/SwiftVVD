@@ -175,6 +175,134 @@ final class TextProxyTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textStringDrawingLegacySeparatorProducerObserved textStringDrawingLegacyReflowObserved
+    // ASSERTIONS textStringDrawingUsedRectFloorObserved textStringDrawingLegacyBaselinePublicationObserved
+    // ASSERTIONS textStringDrawingTrailingCoreTextProducerObserved
+    // ASSERTIONS textStringDrawingLegacyPrefixRetryObserved textParagraphClippedContinuationOriginObserved
+    // ASSERTIONS textStringDrawingFragmentRoundingObserved
+    func testRealTextHostsMeasureSeparatorFragmentsThroughTheirOwner() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        var environment = EnvironmentValues()
+        environment.font = .file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23)
+        environment.defaultFontRenderingMode = .vector()
+        environment.displayScale = 2
+        environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+
+        try viewGraph.data.withCurrent {
+            func engine<Content: View>(_ content: Content) throws -> StyledTextLayoutEngine {
+                let graph = viewGraph.data.graph
+                let outputs = Content._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: content)),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                return try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+            }
+            let heights: [CGFloat?] = [0, 14, 53, 54, 81, nil]
+            var controls: [(String, CGFloat, [[CGFloat]], [[CGFloat]])] = [
+                ("\n", 300,
+                 [[0, 0, 0, 0], [0, 14, 14, 14], [0, 27, 27, 27],
+                  [0, 54, 27, 27], [0, 54, 27, 27], [0, 54, 27, 27]],
+                 Array(repeating: [0, 28, 21, 25], count: 6)),
+                ("\n\n", 300,
+                 [[1, 27, 21, 21], [1, 27, 21, 21], [1, 27, 21, 21],
+                  [0, 54, 21, 54], [0, 81, 21, 54], [0, 81, 21, 54]],
+                 [[0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21],
+                  [0, 55, 21, 52], [0, 55, 21, 52], [0, 55, 21, 52]]),
+                ("\n\n\n", 300,
+                 [[1, 27, 21, 21], [1, 27, 21, 21], [1, 27, 21, 21],
+                  [1, 54, 21, 54], [0, 81, 21, 81], [0, 108, 21, 81]],
+                 [[0, 27, 21, 21], [0, 27, 21, 21], [0, 27, 21, 21],
+                  [0, 54, 21, 48], [0, 82, 21, 79], [0, 82, 21, 79]]),
+                ("\r\n", 300,
+                 [[0, 0, 0, 0], [0, 14, 14, 14], [0, 27, 27, 27],
+                  [0, 54, 27, 27], [0, 54, 27, 27], [0, 54, 27, 27]],
+                 [[0, 0, 0, 0], [0, 27, 21, 21], [0, 27, 21, 21],
+                  [0, 54, 21, 48], [0, 54, 21, 48], [0, 54, 21, 48]]),
+                ("A\n", 1,
+                 [[1, 27, 21, 21], [1, 27, 21, 21], [1, 27, 21, 21],
+                  [1, 54, 21, 48], [1, 54, 21, 48], [1, 54, 21, 48]],
+                 [[1, 27, 21, 21], [1, 27, 21, 21], [1, 27, 21, 21],
+                  [1, 54, 21, 48], [1, 54, 21, 48], [1, 54, 21, 48]])
+            ]
+            for separator in ["\r", "\u{2028}", "\u{2029}"] {
+                controls.append((separator, 300, controls[0].2, controls[0].3))
+            }
+            for (content, width, bareMetrics, customMetrics) in controls {
+                for custom in [false, true] {
+                    for (index, height) in heights.enumerated() {
+                        let text = Text(verbatim: content)
+                        let capture = ProxyCapture()
+                        let layout = try custom
+                            ? engine(text.textRenderer(ProxyRecorder(capture: capture)))
+                            : engine(text)
+                        let proposal = _ProposedSize(width: width, height: height)
+                        let size = layout.sizeThatFits(proposal)
+                        let expected = custom ? customMetrics[index] : bareMetrics[index]
+                        let label = "content=\(content.debugDescription) custom=\(custom) proposal=\(proposal)"
+                        XCTAssertEqual(size, CGSize(width: expected[0], height: expected[1]), label)
+                        XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.firstTextBaseline.key,
+                            at: ViewSize(size)), expected[2], label)
+                        XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.lastTextBaseline.key,
+                            at: ViewSize(size)), expected[3], label)
+                        // Non-ASCII separators have separate scalar-dependent drawing outsets.
+                        if content.unicodeScalars.allSatisfy(\.isASCII) {
+                            XCTAssertEqual(layout.text.frame(in: size, renderer: layout.renderer),
+                                CGRect(x: 0, y: -1, width: expected[0], height: expected[1] + 1.5), label)
+                        }
+                        XCTAssertEqual(layout.text.metricsCacheEntryCount, 1, label)
+                        if custom {
+                            let proxy = try XCTUnwrap(capture.proxy)
+                            XCTAssertEqual(proxy.sizeThatFits(ProposedViewSize(proposal)), size, label)
+                            if content == "A\n" {
+                                let source = try XCTUnwrap(layout.text.resolvedText)
+                                let lines = source.makeLayout(in: size, layoutDirection: .leftToRight,
+                                    layoutProperties: layout.text.layoutProperties)
+                                XCTAssertEqual(lines.count, 2, label)
+                                let origins = lines.map(\.origin.y)
+                                XCTAssertEqual(origins[1] - origins[0], expected[1] == 27 ? 0 : 27, label)
+                            }
+                        }
+                    }
+                }
+            }
+            for (height, measured, baseline): (CGFloat, CGFloat, CGFloat) in [
+                (0.01, 0.5, 0), (0.49, 0.5, 0.5), (14.1, 14.5, 14), (26.9, 27, 27)
+            ] {
+                let layout = try engine(Text(verbatim: "\n"))
+                let size = layout.sizeThatFits(.init(width: 300, height: height))
+                XCTAssertEqual(size, CGSize(width: 0, height: measured))
+                XCTAssertEqual(layout.text.firstBaseline(in: size), baseline)
+                XCTAssertEqual(layout.text.lastBaseline(in: size), baseline)
+            }
+            for limit in [1, 2] {
+                let layout = try engine(Text(verbatim: "\n\n").lineLimit(limit))
+                let size = layout.sizeThatFits(.init(width: 300, height: 81))
+                XCTAssertEqual(size, limit == 1 ? CGSize(width: 1, height: 27) : CGSize(width: 0, height: 81))
+                XCTAssertEqual(layout.text.firstBaseline(in: size), 21)
+                XCTAssertEqual(layout.text.lastBaseline(in: size), limit == 1 ? 21 : 54)
+            }
+            for (pointSize, height, baseline): (CGFloat, CGFloat, CGFloat) in [
+                (14, 16, 13), (23, 27, 21), (37, 43, 34)
+            ] {
+                environment.font = .file(root.appendingPathComponent(
+                    "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: pointSize)
+                for scale: CGFloat in [1, 2, 3] {
+                    environment.displayScale = scale
+                    let layout = try engine(Text(verbatim: "\n\n"))
+                    let size = layout.sizeThatFits(.init(width: 300, height: 0))
+                    XCTAssertEqual(size, CGSize(width: 1, height: height))
+                    XCTAssertEqual(layout.text.firstBaseline(in: size), baseline)
+                    XCTAssertEqual(layout.text.lastBaseline(in: size), baseline)
+                }
+            }
+        }
+    }
+
     private func resolve(limit: Int?, spacing: CGFloat) throws -> ResolvedStyledText {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
