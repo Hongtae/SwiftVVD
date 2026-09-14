@@ -82,7 +82,7 @@ final class TextRendererTests: XCTestCase {
                 inputs: &inputs
             )
 
-            let rendererAttribute = try XCTUnwrap(inputs[TextRendererInput.self])
+            let rendererAttribute = try XCTUnwrap(inputs[TextRendererInput.self].attribute)
             let box = rendererAttribute.value
             let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
             XCTAssertEqual(
@@ -100,6 +100,37 @@ final class TextRendererTests: XCTestCase {
                 ),
                 CGRect(x: 0, y: 0, width: 20, height: 10)
             )
+        }
+    }
+
+    // ASSERTIONS textRendererWeakInputObserved
+    func testRendererInputExpiresWithItsSubgraphAndPreservesGenerationIdentity() throws {
+        let graph = _AGGraph()
+        let context = _AGGraphContext(graph: graph)
+        try context.withCurrent {
+            var inputs = makeViewInputs(graph: graph)
+            let subgraph = AGSubgraph()
+            AGSubgraph.withCurrent(subgraph) {
+                let modifier = _TextRendererViewModifier(renderer: TextRendererProbe())
+                type(of: modifier)._makeViewInputs(
+                    modifier: _GraphValue(_attribute: graph.makeInput(value: modifier)), inputs: &inputs)
+            }
+            let saved = inputs[TextRendererInput.self]
+            let attribute = try XCTUnwrap(saved.attribute)
+            XCTAssertTrue(TextRendererInput.valuesEqual(saved, inputs[TextRendererInput.self]))
+            XCTAssertFalse(TextRendererInput.valuesEqual(saved, TextRendererInput.defaultValue))
+            subgraph.invalidate()
+            XCTAssertNil(saved.attribute)
+            XCTAssertNil(saved.value)
+            XCTAssertNil(inputs[TextRendererInput.self].value)
+
+            let replacements = (0..<16).map { _ in graph.makeInput(value: TextRendererBoxBase()) }
+            let replacement = try XCTUnwrap(replacements.first {
+                $0.identifier.rawValue == attribute.identifier.rawValue
+            })
+            let reused = WeakAttribute(replacement)
+            XCTAssertFalse(TextRendererInput.valuesEqual(saved, reused))
+            XCTAssertTrue(TextRendererInput.valuesEqual(TextRendererInput.defaultValue, TextRendererInput.defaultValue))
         }
     }
 

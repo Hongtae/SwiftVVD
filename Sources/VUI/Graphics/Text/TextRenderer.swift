@@ -644,11 +644,11 @@ private final class TextRendererBox<Renderer: TextRenderer>: TextRendererBoxBase
 }
 
 struct TextRendererInput: ViewInput {
-    typealias Value = Attribute<TextRendererBoxBase>?
-    static var defaultValue: Value { nil }
+    typealias Value = WeakAttribute<TextRendererBoxBase>
+    static var defaultValue: Value { WeakAttribute() }
 
     static func valuesEqual(_ lhs: Value, _ rhs: Value) -> Bool {
-        lhs?.identifier == rhs?.identifier
+        lhs == rhs
     }
 }
 
@@ -669,7 +669,7 @@ public struct _TextRendererViewModifier<Renderer: TextRenderer> {
         let box: Attribute<TextRendererBoxBase> = graph.makeStatefulRule(
             MakeTextRenderer(renderer: renderer._attribute, environment: environment, tracker: _PropertyListTracker())
         )
-        inputs[TextRendererInput.self] = box
+        inputs[TextRendererInput.self] = WeakAttribute(box)
     }
 
     public typealias Body = Never

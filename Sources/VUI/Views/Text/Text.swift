@@ -2253,11 +2253,16 @@ extension Text: View {
         }
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
+        let textFeatures: ResolvedProperties.Features = archiveOptions.isArchived ? [] : .useTextSuffix
+        let resolvedTextFeatures = textRendererAttr.attribute == nil
+            ? textFeatures
+            : textFeatures.union([.customRenderer, .produceTextLayout])
         let usesSizeFittingText = inputs.base[VariantThatFitsFlag.self]
         let resolvedTextHelper = ResolvedTextHelper(
             _time: timeAttr,
             _referenceDate: inputs[ReferenceDateInput.self],
-            archiveOptions: archiveOptions
+            archiveOptions: archiveOptions,
+            features: resolvedTextFeatures
         )
         let graphResolvedStyledTextAttr = graph.makeStatefulRule(
             ResolvedTextFilter(
@@ -2348,7 +2353,7 @@ extension Text: View {
                     context: context,
                     referenceDate: referenceDate,
                     archiveOptions: archiveOptions,
-                    features: [],
+                    features: resolvedTextFeatures,
                     sizeFitting: usesSizeFittingText
                 ) else {
                     fatalError("A graphics text context must resolve backend attachments.")
@@ -2399,7 +2404,7 @@ extension Text: View {
                 SizeFittingTextLayoutComputer(
                     _text: resolvedStyledTextAttr,
                     _environment: environmentAttr,
-                    _renderer: textRendererAttr?.asWeak() ?? WeakAttribute(),
+                    _renderer: textRendererAttr,
                     cache: cache
                 )
             )
@@ -2411,7 +2416,7 @@ extension Text: View {
                         let styledText = resolvedStyledTextAttr.value
                         return StyledTextContentView(
                             text: styledText,
-                            renderer: textRendererAttr?.value,
+                            renderer: textRendererAttr.value,
                             needsDrawingGroup: styledText.needsDrawingGroup
                         )
                     }
@@ -2423,7 +2428,7 @@ extension Text: View {
             let styledText = displayedStyledTextAttr.value
             return StyledTextContentView(
                 text: styledText,
-                renderer: textRendererAttr?.value,
+                renderer: textRendererAttr.value,
                 needsDrawingGroup: styledText.needsDrawingGroup
             )
         }
