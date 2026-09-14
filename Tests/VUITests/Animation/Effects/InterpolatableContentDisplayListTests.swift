@@ -8573,7 +8573,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             runs: [.text([face], text)],
             scaleFactor: 1
         )
-        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
         let view = StyledTextContentView(text: styledText, renderer: nil)
         let bounds = CGRect(x: 0, y: 0, width: 200, height: 20)
         var list = DisplayList()

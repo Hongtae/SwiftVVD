@@ -199,7 +199,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         var properties = TextLayoutProperties()
         properties.lineLimit = 3
 
-        let styled = ResolvedStyledText(
+        let styled = ResolvedStyledText.StringDrawing(
             layoutProperties: properties,
             archiveOptions: .isArchived,
             resolvedText: resolved,
@@ -228,7 +228,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
-        let styled = ResolvedStyledText(resolvedText: resolved)
+        let styled = ResolvedStyledText.StringDrawing(resolvedText: resolved)
 
         XCTAssertEqual(styled.metricsCacheEntryCount, 0)
         let base = styled.sizeThatFits(
@@ -266,7 +266,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
-        let styled = ResolvedStyledText(resolvedText: resolved)
+        let styled = ResolvedStyledText.StringDrawing(resolvedText: resolved)
 
         let ideal = styled.sizeThatFits(.unspecified)
         XCTAssertEqual(ideal, CGSize(width: 56, height: 10))
@@ -288,7 +288,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                 runs: [.text([face], "AAAA")],
                 scaleFactor: scale
             )
-            let styled = ResolvedStyledText(resolvedText: resolved)
+            let styled = ResolvedStyledText.StringDrawing(resolvedText: resolved)
             let naturalSize = styled.sizeThatFits(.unspecified)
             let expectedWidth = ceil(29.2 * scale) / scale
 
@@ -482,7 +482,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                     ],
                     scaleFactor: scale
                 )
-                let styled = ResolvedStyledText(resolvedText: resolved)
+                let styled = ResolvedStyledText.StringDrawing(resolvedText: resolved)
                 let line = try XCTUnwrap(resolved.makeGlyphs().first)
                 let logicalLineSize = CGSize(
                     width: line.width / scale,
@@ -528,7 +528,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
-        let styled = ResolvedStyledText(resolvedText: resolved)
+        let styled = ResolvedStyledText.StringDrawing(resolvedText: resolved)
 
         XCTAssertEqual(styled.sizeThatFits(.zero), .zero)
         XCTAssertEqual(styled.metricsCacheEntryCount, 0)
@@ -544,7 +544,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
     func testHeightConstraintOnlyTruncatesWhenTextHasOverflowingContent() {
         let face = ResolvedMetricsCacheTestTypeface()
 
-        let singleLine = ResolvedStyledText(
+        let singleLine = ResolvedStyledText.StringDrawing(
             resolvedText: GraphicsContext.ResolvedText(
                 runs: [.text([face], "metrics")],
                 scaleFactor: 1
@@ -561,7 +561,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             singleLineIdeal
         )
 
-        let explicitLines = ResolvedStyledText(
+        let explicitLines = ResolvedStyledText.StringDrawing(
             resolvedText: GraphicsContext.ResolvedText(
                 runs: [.text([face], "AA\nBB")],
                 scaleFactor: 1
@@ -580,7 +580,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             CGSize(width: 24, height: 10)
         )
 
-        let wrappedLine = ResolvedStyledText(
+        let wrappedLine = ResolvedStyledText.StringDrawing(
             resolvedText: GraphicsContext.ResolvedText(
                 runs: [.text([face], "AAAA")],
                 scaleFactor: 1

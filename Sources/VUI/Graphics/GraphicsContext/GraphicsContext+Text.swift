@@ -270,6 +270,10 @@ extension GraphicsContext {
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
+            return layoutMetrics(lineGlyphs: lineGlyphs)
+        }
+
+        func layoutMetrics(lineGlyphs: [LineGlyphs]) -> LayoutMetrics {
             if lineGlyphs.isEmpty, storage.hasEmptyContent, let input = defaultLineMetrics {
                 return LayoutMetrics(size: CGSize(width: 0, height: alignedLength(input.height / scaleFactor)),
                     firstBaseline: input.ascent / scaleFactor, lastBaseline: input.ascent / scaleFactor)

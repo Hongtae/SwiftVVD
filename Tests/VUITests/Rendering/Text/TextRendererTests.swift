@@ -86,7 +86,7 @@ final class TextRendererTests: XCTestCase {
             let box = rendererAttribute.value
             let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
             XCTAssertEqual(
-                box.sizeThatFits(proposal: .unspecified, text: TextProxy(ResolvedStyledText(resolvedText: resolved))),
+                box.sizeThatFits(proposal: .unspecified, text: TextProxy(ResolvedStyledText.TextLayoutManager(resolvedText: resolved))),
                 CGSize(width: 11, height: 7)
             )
             XCTAssertEqual(
@@ -96,7 +96,7 @@ final class TextRendererTests: XCTestCase {
             XCTAssertEqual(
                 box.textLayoutBounds(
                     size: CGSize(width: 20, height: 10),
-                    text: TextProxy(ResolvedStyledText(resolvedText: resolved))
+                    text: TextProxy(ResolvedStyledText.TextLayoutManager(resolvedText: resolved))
                 ),
                 CGRect(x: 0, y: 0, width: 20, height: 10)
             )

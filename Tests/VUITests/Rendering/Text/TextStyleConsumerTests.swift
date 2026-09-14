@@ -67,7 +67,7 @@ final class TextStyleConsumerTests {
                 for (actual, expected) in zip(observed, edges) { #expect(abs(actual - expected) < 1e-10) }
                 #expect(abs(metrics.ascender - 19.550140380859375) < 1e-10)
                 #expect(abs(metrics.descender + 5.8651123046875) < 1e-10)
-                let styled = ResolvedStyledText(resolvedText: text)
+                let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                 let margins = styled.drawingMargins
                 #expect(margins.leading == (language == "en" ? 4.5 : 1))
                 #expect(margins.trailing == 3)
@@ -615,7 +615,7 @@ final class TextStyleConsumerTests {
                     let layout = resolved.makeLayout(in: proposal, layoutDirection: .leftToRight)
                     try #require(layout.count == 3)
                     #expect(resolved.measure(in: proposal).height == (lineA + lineD) * 3)
-                    #expect(TextProxy(ResolvedStyledText(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)).height == (lineA + lineD) * 3)
+                    #expect(TextProxy(ResolvedStyledText.StringDrawing(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)).height == (lineA + lineD) * 3)
                     let maximum = try #require(resolved.maximumFontMetrics)
                     #expect(abs(maximum.ascender - rawA) < 1e-9)
                     #expect(abs(maximum.descender + rawD) < 1e-9)
@@ -808,7 +808,7 @@ final class TextStyleConsumerTests {
                         let source = try resolve(Text(verbatim: "Hg\nHg").font(.file(fontURL(name), size: pointSize)),
                                                  environment: environment)
                         let metrics = try #require(source.maximumFontMetrics)
-                        let styled = ResolvedStyledText(resolvedText: source)
+                        let styled = ResolvedStyledText.StringDrawing(resolvedText: source)
                         let measured = source.measure()
                         let baseline = source.firstBaseline(in: measured)
                         let rawTop = fontIndex == 0 ? 46 * pointSize / 2048 : 0
@@ -845,7 +845,7 @@ final class TextStyleConsumerTests {
             #expect(metrics.ascender == 12.060546875)
             #expect(metrics.descender == -3.173828125)
             #expect(metrics.outsets == EdgeInsets())
-            #expect(ResolvedStyledText(resolvedText: source).drawingMargins == EdgeInsets())
+            #expect(ResolvedStyledText.StringDrawing(resolvedText: source).drawingMargins == EdgeInsets())
         }
         // A half-design-unit difference can cross a half-point ceiling. Retain
         // the integer snapshot's actual result instead of hiding that boundary.
@@ -857,7 +857,7 @@ final class TextStyleConsumerTests {
         let source = try resolve(Text(verbatim: "Hg").font(.data(data, size: size)), environment: environment)
         let metrics = try #require(source.maximumFontMetrics)
         #expect(metrics.outsets.top > 0.5 && metrics.outsets.top < 0.501)
-        #expect(ResolvedStyledText(resolvedText: source).drawingMargins.top == 1)
+        #expect(ResolvedStyledText.StringDrawing(resolvedText: source).drawingMargins.top == 1)
         #expect(350.5 * size / 2048 == 0.5)
     }
 
@@ -873,7 +873,7 @@ final class TextStyleConsumerTests {
             environment.displayScale = 2
             environment._contentScaleFactor = scale
             let source = try resolve(Text(string), environment: environment)
-            let styled = ResolvedStyledText(stylePadding: EdgeInsets(top: 0.3, leading: 1.2, bottom: 0.6, trailing: 0.2),
+            let styled = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 0.3, leading: 1.2, bottom: 0.6, trailing: 0.2),
                                              resolvedText: source)
             #expect(styled.drawingMargins == EdgeInsets(top: 1, leading: 1.5, bottom: 1, trailing: 0.5))
             let size = source.measure()
@@ -920,7 +920,7 @@ final class TextStyleConsumerTests {
                     let expectedHeight = ceil((originalSize.height + CGFloat(layout.count - 1) * gap) * displayScale) / displayScale
                     #expect(resolved.measure(in: proposal).height == expectedHeight)
                     #expect(resolved.measure(maxWidth: proposal.width) == resolved.measure(in: proposal))
-                    #expect(TextProxy(ResolvedStyledText(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)) == resolved.measure(in: proposal))
+                    #expect(TextProxy(ResolvedStyledText.StringDrawing(resolvedText: resolved)).sizeThatFits(.init(width: proposal.width)) == resolved.measure(in: proposal))
                     for index in layout.indices {
                         #expect(layout[index].origin.y == originalLayout[index].origin.y + CGFloat(index) * gap)
                         #expect(layout[index].typographicBounds.ascent == originalLayout[index].typographicBounds.ascent)
@@ -1283,7 +1283,7 @@ final class TextStyleConsumerTests {
             let baseline = try resolve(text, environment: env)
             let metrics = try #require(baseline.maximumFontMetrics)
             let size = baseline.measure()
-            let styled = ResolvedStyledText(resolvedText: baseline)
+            let styled = ResolvedStyledText.StringDrawing(resolvedText: baseline)
             for language: String? in [nil, "en", "ur", "ja"] {
                 for (ratio, retained): (TypesettingLanguageAwareLineHeightRatio, Double?) in [
                     (.automatic, nil), (.disable, 0), (.legacy, 0.33), (.custom(0.5), 0.5), (.custom(1), 1)
@@ -1298,7 +1298,7 @@ final class TextStyleConsumerTests {
                     #expect(actual.outsets == metrics.outsets)
                     #expect(result.measure() == size)
                     #expect(result.firstBaseline(in: size) == baseline.firstBaseline(in: size))
-                    let actualStyled = ResolvedStyledText(resolvedText: result)
+                    let actualStyled = ResolvedStyledText.StringDrawing(resolvedText: result)
                     #expect(actualStyled.drawingMargins == styled.drawingMargins)
                     #expect(actualStyled.frame(in: size, renderer: nil) == styled.frame(in: size, renderer: nil))
                     for run in attributes(result) {

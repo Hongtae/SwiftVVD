@@ -134,7 +134,7 @@ final class FontOutsetTests: XCTestCase {
             let other = try XCTUnwrap(extended.maximumFontMetrics).outsets
             XCTAssertEqual(ordinary.top, 0.142579 * 15.625, accuracy: 1e-10)
             XCTAssertEqual(other.top, 0.206815 * 15.625, accuracy: 1e-10)
-            let styled = ResolvedStyledText(resolvedText: normal)
+            let styled = ResolvedStyledText.StringDrawing(resolvedText: normal)
             XCTAssertEqual(styled.drawingMargins.top, ceil(ordinary.top * 2) / 2)
             let size = normal.measure()
             let frame = styled.frame(in: size, renderer: nil)

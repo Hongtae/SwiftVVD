@@ -32,7 +32,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     var source = try resolve(Text(verbatim: "Alpha\nBeta\nGamma\nDelta"), environment: environment)
                     source.shading = .color(.black)
                     let properties = TextLayoutProperties(from: environment)
-                    let styled = ResolvedStyledText(layoutProperties: properties, resolvedText: source)
+                    let styled = ResolvedStyledText.StringDrawing(layoutProperties: properties, resolvedText: source)
                     let renderer = MarginRenderer(environment: environment, operation: .line)
                     renderer.recordsProxy = true
                     let size = StyledTextLayoutEngine(text: styled, renderer: renderer)
@@ -130,7 +130,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         environment.lineSpacing = 7
                         environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
                         let source = try resolve(Text(verbatim: string), environment: environment)
-                        let item = try value(ResolvedStyledText(resolvedText: source))
+                        let item = try value(ResolvedStyledText.StringDrawing(resolvedText: source))
                         let expected = try render(device: device, environment: environment) {
                             $0.draw(source, in: CGRect(origin: .zero, size: item.size))
                         }
@@ -139,7 +139,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
                         let cached = try render(device: device, environment: environment) { item.draw(prepared, in: $0) }
                         let renderer = MarginRenderer(environment: environment, operation: .line)
-                        let custom = try value(ResolvedStyledText(resolvedText: source), renderer: renderer)
+                        let custom = try value(ResolvedStyledText.StringDrawing(resolvedText: source), renderer: renderer)
                         let rendered = try render(device: device, environment: environment) { custom.draw(in: $0) }
                         XCTAssertEqual(immediate, expected, "Immediate \(mode) \(leading) \(scale) \(string.debugDescription)")
                         XCTAssertEqual(cached, expected, "Prepared \(mode) \(leading) \(scale) \(string.debugDescription)")
@@ -169,7 +169,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         environment.displayScale = 2
                         environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: language))
                         let source = try resolve(Text(verbatim: "Ågj\nHg\nA한"), environment: environment)
-                        let item = try value(ResolvedStyledText(resolvedText: source))
+                        let item = try value(ResolvedStyledText.StringDrawing(resolvedText: source))
                         let expected = try render(device: device, environment: environment) {
                             $0.draw(source, in: CGRect(origin: .zero, size: item.size))
                         }
@@ -178,7 +178,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
                         let cached = try render(device: device, environment: environment) { item.draw(prepared, in: $0) }
                         let renderer = MarginRenderer(environment: environment, operation: .line)
-                        let custom = try value(ResolvedStyledText(resolvedText: source), renderer: renderer)
+                        let custom = try value(ResolvedStyledText.StringDrawing(resolvedText: source), renderer: renderer)
                         let rendered = try render(device: device, environment: environment) { custom.draw(in: $0) }
                         XCTAssertTrue(immediate == expected, "Immediate \(mode) \(leading) \(language) \(scale)")
                         XCTAssertTrue(cached == expected, "Prepared \(mode) \(leading) \(language) \(scale)")
@@ -244,7 +244,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     environment._contentScaleFactor = renderScale
                     for string in ["Hg\nHg", "Ågj\nHg"] {
                         let source = try resolve(Text(verbatim: string), environment: environment)
-                        let styled = ResolvedStyledText(resolvedText: source)
+                        let styled = ResolvedStyledText.StringDrawing(resolvedText: source)
                         let plain = try value(styled)
                         let expected = try render(device: device, environment: environment) {
                             $0.draw(source, in: CGRect(origin: .zero, size: plain.size))
@@ -320,7 +320,7 @@ final class TextDrawingMarginTests: XCTestCase {
                 for language in ["en", "ur"] {
                     let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
                         displayScale: 2, preferredLanguages: [language])
-                    let styled = ResolvedStyledText(resolvedText: text)
+                    let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                     XCTAssertEqual(styled.drawingMargins.leading, language == "en" ? 4.5 : 1)
                     XCTAssertEqual(styled.drawingMargins.trailing, 3)
                     let plain = try value(styled)
@@ -364,10 +364,10 @@ final class TextDrawingMarginTests: XCTestCase {
                     }
                     let source = try resolve(text, environment: environment)
                     let reference = try resolve(Text(verbatim: letters).font(base), environment: environment)
-                    let styled = ResolvedStyledText(resolvedText: source)
+                    let styled = ResolvedStyledText.StringDrawing(resolvedText: source)
                     let plain = try value(styled)
                     let expected = try render(device: device, environment: environment) {
-                        try value(ResolvedStyledText(resolvedText: reference)).draw(in: $0)
+                        try value(ResolvedStyledText.StringDrawing(resolvedText: reference)).draw(in: $0)
                     }
                     XCTAssertTrue(expected.contains { $0 != 0 })
                     let prepared = try XCTUnwrap(plain.makeDrawing())
@@ -410,7 +410,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     let source = try resolve(Text(verbatim: "Hg\nHg"), environment: environment)
                     let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
                         displayScale: 2, preferredLanguages: ["en"])
-                    let styled = ResolvedStyledText(resolvedText: text)
+                    let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                     XCTAssertEqual(styled.drawingMargins.top, expectedTop)
                     let plain = try value(styled)
                     let expected = try render(device: device, environment: environment) {
@@ -436,7 +436,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         // The tiny bitmap's right-edge coverage exceeds its advance.
                         // Restoring the previous vertical allowance leaves that
                         // independent horizontal clip unchanged.
-                        let padded = ResolvedStyledText(stylePadding: EdgeInsets(top: 0.5, leading: 0, bottom: 0, trailing: 0), resolvedText: text)
+                        let padded = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 0.5, leading: 0, bottom: 0, trailing: 0), resolvedText: text)
                         let previous = try value(padded)
                         XCTAssertEqual(previous.frame.minY, -1)
                         let pixels = try render(device: device, environment: environment) { previous.draw(in: $0) }
@@ -465,7 +465,7 @@ final class TextDrawingMarginTests: XCTestCase {
         environment.displayScale = 2
         environment._contentScaleFactor = 2
         let source = try resolve(Text(verbatim: "Hg"), environment: environment)
-        let styled = ResolvedStyledText(stylePadding: EdgeInsets(top: 2, leading: 3, bottom: 1, trailing: 4), resolvedText: source)
+        let styled = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 2, leading: 3, bottom: 1, trailing: 4), resolvedText: source)
         let renderer = MarginRenderer(environment: environment, operation: .line)
         renderer.drawMarker = true
         let item = try value(styled, renderer: renderer)
@@ -501,7 +501,7 @@ final class TextDrawingMarginTests: XCTestCase {
             string._setCoreAttributes(_ResolvedTextRunAttributes(backgroundColor: .yellow,
                 strikethroughStyle: .init(), underlineStyle: .init()))
             let source = try resolve(Text(string), environment: environment)
-            let styled = ResolvedStyledText(stylePadding: EdgeInsets(top: 2, leading: 3, bottom: 1, trailing: 4), resolvedText: source)
+            let styled = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 2, leading: 3, bottom: 1, trailing: 4), resolvedText: source)
             let item = try value(styled)
             let expected = try render(device: device, environment: environment) {
                 $0.draw(source, in: CGRect(origin: .zero, size: item.size))

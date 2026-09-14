@@ -40,7 +40,7 @@ final class FractionalClippingTests: XCTestCase {
                                 let resolved = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: 1,
                                     displayScale: scale, preferredLanguages: ["en"])
                                 let metrics = try XCTUnwrap(resolved.maximumFontMetrics)
-                                let styled = ResolvedStyledText(resolvedText: resolved)
+                                let styled = ResolvedStyledText.TextLayoutManager(resolvedText: resolved)
                                 let top = CGFloat(ascent) * size / 2048 - metrics.ascender
                                 let bottom = CGFloat(descent) * size / 2048 + metrics.descender
                                 XCTAssertEqual(metrics.outsets.top, top)

@@ -1759,7 +1759,13 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             } else {
                 storage = attributedStorage
             }
-            return ResolvedStyledText(
+            let features = features.union(resolved.resolvedFeatures).union(additionalFeatures)
+            let managerFeatures: ResolvedProperties.Features = [
+                .customRenderer, .useTextLayoutManager, .produceTextLayout, .checkInterpolationStrategy
+            ]
+            let owner: ResolvedStyledText.Type = features.isDisjoint(with: managerFeatures)
+                ? ResolvedStyledText.StringDrawing.self : ResolvedStyledText.TextLayoutManager.self
+            return owner.init(
                 storage: needsDynamicArchive
                     ? _dynamicArchiveStorage(
                         for: storage,
@@ -1769,9 +1775,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                 layoutProperties: layoutProperties,
                 layoutMargins: source.resolvedProperties?.insets ?? EdgeInsets(),
                 archiveOptions: archiveOptions,
-                features: features
-                    .union(resolved.resolvedFeatures)
-                    .union(additionalFeatures),
+                features: features,
                 styles: source.resolvedProperties?.styles ?? [],
                 transitions: source.resolvedProperties?.transitions ?? [],
                 resolvedText: resolved,

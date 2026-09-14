@@ -164,7 +164,7 @@ private struct TestDateRangeDiscreteStringStyle: DiscreteFormatStyle {
 }
 
 private func makeVariantText(unique: Bool = true) -> ResolvedStyledText {
-    ResolvedStyledText(
+    ResolvedStyledText.StringDrawing(
         features: unique ? [.isUniqueSizeVariant] : [],
         resolvedText: GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
     )

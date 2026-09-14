@@ -18,7 +18,8 @@ final class TextProxyTests: XCTestCase {
         previousContext = nil
     }
 
-    // ASSERTIONS textRendererResolutionFeaturesObserved
+    // ASSERTIONS textRendererResolutionFeaturesObserved textIntrinsicBackendSelectionObserved
+    // ASSERTIONS textProxyRetainedOwnerAndCacheObserved
     func testRealTextHostsCarryRendererFeaturesIntoTheRetainedOwner() throws {
         let host = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
@@ -48,6 +49,8 @@ final class TextProxyTests: XCTestCase {
             let custom = try engine(text.textRenderer(ProxyRecorder(capture: capture)))
             XCTAssertNotNil(bare.text.resolvedText)
             XCTAssertNotNil(custom.text.resolvedText)
+            XCTAssertTrue(bare.text is ResolvedStyledText.StringDrawing)
+            XCTAssertTrue(custom.text is ResolvedStyledText.TextLayoutManager)
             XCTAssertNil(bare.renderer)
             XCTAssertNotNil(custom.renderer)
             let rendererFeatures: Text.ResolvedProperties.Features = [.customRenderer, .produceTextLayout]
@@ -63,6 +66,25 @@ final class TextProxyTests: XCTestCase {
             XCTAssertTrue(retained === custom.text)
             XCTAssertEqual(retained.features.intersection(rendererFeatures), rendererFeatures)
             XCTAssertFalse(try engine(text, archived: true).text.features.contains(.useTextSuffix))
+
+            for layout in [bare, custom] {
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
+                let measured = layout.sizeThatFits(proposal)
+                XCTAssertEqual(layout.sizeThatFits(.init(width: 90, height: 110)), measured)
+                _ = layout.explicitAlignment(VerticalAlignment.firstTextBaseline.key, at: ViewSize(measured))
+                _ = layout.explicitAlignment(VerticalAlignment.lastTextBaseline.key, at: ViewSize(measured))
+                _ = layout.text.frame(in: measured, renderer: layout.renderer)
+                XCTAssertEqual(layout.sizeThatFits(.zero), .zero)
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
+                _ = layout.sizeThatFits(.init(width: 30, height: 120))
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 2)
+            }
+            let independent = try engine(text)
+            XCTAssertFalse(independent.text === bare.text)
+            XCTAssertEqual(independent.text.metricsCacheEntryCount, 0)
+            XCTAssertEqual(independent.sizeThatFits(proposal), bare.sizeThatFits(proposal))
+            XCTAssertEqual(independent.text.metricsCacheEntryCount, 1)
+            XCTAssertEqual(bare.text.metricsCacheEntryCount, 2)
         }
     }
 
@@ -84,6 +106,75 @@ final class TextProxyTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS textIntrinsicBackendSelectionObserved textIntrinsicZeroWidthNormalizationObserved
+    // ASSERTIONS textStringDrawingEmptyMetricProducerObserved
+    func testRealTextHostsMeasureEmptyBaselinesAndNarrowWidthsThroughTheirOwner() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        var environment = EnvironmentValues()
+        environment.font = .file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23)
+        environment.defaultFontRenderingMode = .vector()
+        environment.displayScale = 2
+        environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+
+        try viewGraph.data.withCurrent {
+            func engine<Content: View>(_ content: Content) throws -> StyledTextLayoutEngine {
+                let graph = viewGraph.data.graph
+                let outputs = Content._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: content)),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                return try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+            }
+            for displayScale: CGFloat in [1, 2, 3] {
+                environment.displayScale = displayScale
+                for content in ["", "A"] {
+                    for custom in [false, true] {
+                        for height: CGFloat in [0, 14, 53, 54, 81] {
+                            for width: CGFloat in [0, 0.01, 0.5, 1] {
+                                let text = Text(verbatim: content)
+                                let capture = ProxyCapture()
+                                let layout = try custom
+                                    ? engine(text.textRenderer(ProxyRecorder(capture: capture)))
+                                    : engine(text)
+                                let proposal = _ProposedSize(width: width, height: height)
+                                let size = layout.sizeThatFits(proposal)
+                                let label = "content=\(content.debugDescription) custom=\(custom) scale=\(displayScale) proposal=\(proposal)"
+                                if proposal == .zero {
+                                    XCTAssertEqual(size, .zero, label)
+                                    continue
+                                }
+                                let expectedWidth: CGFloat = content.isEmpty ? 0
+                                    : width == 0 ? (custom ? 1 / displayScale : 0)
+                                    : ceil(width * displayScale) / displayScale
+                                let expectedHeight: CGFloat = content.isEmpty ? 14 : 27
+                                let expectedBaseline: CGFloat = content.isEmpty ? (custom ? 0 : 11) : 21
+                                XCTAssertEqual(size, CGSize(width: expectedWidth, height: expectedHeight), label)
+                                XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.firstTextBaseline.key,
+                                    at: ViewSize(size)), expectedBaseline, label)
+                                XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.lastTextBaseline.key,
+                                    at: ViewSize(size)), expectedBaseline, label)
+                                if displayScale == 2 {
+                                    let frame = layout.text.frame(in: size, renderer: layout.renderer)
+                                    XCTAssertEqual(frame, CGRect(x: 0, y: content.isEmpty ? 0 : -1,
+                                        width: expectedWidth, height: expectedHeight + (content.isEmpty ? 0 : 1.5)), label)
+                                }
+                                if custom {
+                                    let proxy = try XCTUnwrap(capture.proxy)
+                                    XCTAssertEqual(proxy.sizeThatFits(ProposedViewSize(proposal)), size, label)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func resolve(limit: Int?, spacing: CGFloat) throws -> ResolvedStyledText {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
@@ -98,7 +189,7 @@ final class TextProxyTests: XCTestCase {
         let source = try XCTUnwrap(Text(verbatim: "Alpha\nBeta\nGamma\nDelta")._resolve(context:
             GraphTextResolutionContext(environment: environment, sceneResources: scene),
             referenceDate: Date(timeIntervalSince1970: 0)))
-        return ResolvedStyledText(layoutProperties: TextLayoutProperties(from: environment), resolvedText: source)
+        return ResolvedStyledText.TextLayoutManager(layoutProperties: TextLayoutProperties(from: environment), resolvedText: source)
     }
 
     private func box<Renderer: TextRenderer>(_ renderer: Renderer) throws -> TextRendererBoxBase {

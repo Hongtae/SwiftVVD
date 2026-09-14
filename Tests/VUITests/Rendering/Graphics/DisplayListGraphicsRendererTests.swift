@@ -89,7 +89,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
 
     func testCustomRendererTextUsesDisplayPaddingAndBypassesStaticDrawingCache() throws {
         let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
-        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
         let box = TextRendererTestBox()
         let view = StyledTextContentView(text: styledText, renderer: box)
         let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
@@ -133,7 +133,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
             value: true,
             range: NSRange(location: 0, length: storage.length)
         )
-        let styledText = ResolvedStyledText(
+        let styledText = ResolvedStyledText.StringDrawing(
             storage: storage,
             resolvedText: resolved,
             version: 1
@@ -225,7 +225,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
 
     func testGraphicsRendererPromotesReusesAndEvictsTextCallbacks() throws {
         let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
-        let styledText = ResolvedStyledText(
+        let styledText = ResolvedStyledText.StringDrawing(
             resolvedText: resolved,
             version: 1
         )
@@ -285,7 +285,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
 
     func testTextCallbackReplaysThroughCurrentStateWithinRoundedScaleBucket() throws {
         let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
-        let styledText = ResolvedStyledText(resolvedText: resolved, version: 1)
+        let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
         let view = StyledTextContentView(text: styledText, renderer: nil)
         let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))
         var list = DisplayList()
