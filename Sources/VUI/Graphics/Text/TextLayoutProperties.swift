@@ -210,7 +210,9 @@ extension EnvironmentValues {
 
     public var minimumScaleFactor: CGFloat {
         get { self[MinimumScaleFactorKey.self] }
-        set { self[MinimumScaleFactorKey.self] = newValue }
+        set {
+            self[MinimumScaleFactorKey.self] = newValue > 1 || newValue <= 0 ? 1 : newValue
+        }
     }
 
     public var lineSpacing: CGFloat {

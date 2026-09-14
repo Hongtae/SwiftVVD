@@ -80,6 +80,28 @@ final class TextLayoutPropertiesTests: XCTestCase {
         XCTAssertFalse(value.sizeFitting)
     }
 
+    // ASSERTIONS textMinimumScaleFactorEnvironmentObserved
+    func testMinimumScaleFactorNormalizesOutOfRangeEnvironmentValues() {
+        let controls: [(CGFloat, CGFloat)] = [
+            (-.infinity, 1), (-0.5, 1), (-0.0, 1), (0, 1),
+            (.leastNonzeroMagnitude, .leastNonzeroMagnitude), (0.25, 0.25),
+            (1, 1), (CGFloat(1).nextUp, 1), (.infinity, 1), (.nan, .nan)
+        ]
+        var environment = EnvironmentValues()
+        for (input, expected) in controls {
+            environment.minimumScaleFactor = input
+            let stored = environment.minimumScaleFactor
+            let resolved = TextLayoutProperties(from: environment).minScaleFactor
+            if expected.isNaN {
+                XCTAssertTrue(stored.isNaN)
+                XCTAssertTrue(resolved.isNaN)
+            } else {
+                XCTAssertEqual(stored, expected, "Input: \(input)")
+                XCTAssertEqual(resolved, expected, "Input: \(input)")
+            }
+        }
+    }
+
     // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
     func testDerivedLayoutReadTracksNormalizedResultInsteadOfRawLineLimits() throws {
         var original = EnvironmentValues()
