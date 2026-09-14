@@ -501,7 +501,8 @@ final class TextStyleConsumerTests {
     // ASSERTIONS fontRawMetricFormatQuantizationObserved
     @Test
     func testFallbackGlyphKeepsItsDesignMetricsAndTheOriginalFontRequest() throws {
-        let result = try resolve(Text(verbatim: "A한").font(.system(.body)),
+        // Keep a CJK-only scalar so this control retains both outline formats.
+        let result = try resolve(Text(verbatim: "A\u{20087}").font(.system(.body)),
                                  environment: typesettingEnvironment())
         let resource = try #require(attributes(result).first?.fontResource)
         let glyphs = result.makeGlyphs().flatMap(\.glyphs)

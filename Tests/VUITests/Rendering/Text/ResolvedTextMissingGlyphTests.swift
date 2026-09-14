@@ -626,40 +626,55 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
 
     func testBundledConfigurationResolvesExactLanguageAndDefaultLocale() {
         let configuration = BundledFontCatalog.shared.configuration
+        let sharedFallbacks = [
+            "Roboto", "NotoSans", "NotoSansKR", "NotoSansCJK",
+            "NotoSansArabic", "NotoSansDevanagari", "NotoSansThai",
+            "NotoSansBengali", "NotoSansHebrew", "NotoSansTamil",
+            "NotoSansTelugu", "NotoSansKannada", "NotoSansMalayalam",
+            "NotoSansGujarati", "NotoSansGurmukhi", "NotoSansOriya",
+            "NotoSansSinhala", "NotoSansKhmer", "NotoSansLao",
+            "NotoSansMyanmar", "NotoSansArmenian", "NotoSansGeorgian",
+            "NotoSansEthiopic", "NotoSerifTibetan", "NotoSansThaana",
+            "NotoSansMongolian", "NotoSansSyriac", "NotoSansOlChiki",
+            "NotoSansMeeteiMayek", "NotoSansNKo", "NotoSansAdlam",
+            "NotoSansTifinagh", "NotoSansCherokee", "NotoSansCanadianAboriginal",
+            "NotoSansYi", "NotoSansJavanese", "NotoSansBalinese",
+            "NotoSansSundanese", "NotoSansChakma", "NotoSansSymbols", "NotoSansSymbols2"
+        ]
 
         XCTAssertEqual(configuration.version, 2)
         XCTAssertEqual(configuration.defaultLocale, "en")
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "en_US"))
                 .map(\.rawValue),
-            ["Roboto", "NotoSansCJK"]
+            sharedFallbacks
         )
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "ko_KR"))
                 .map(\.rawValue),
-            ["NanumSquareNeo", "NotoSansCJK"]
+            ["NanumSquareNeo"] + sharedFallbacks
         )
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "ja_JP"))
                 .map(\.rawValue),
-            ["NotoSansCJK", "Roboto"]
+            sharedFallbacks
         )
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "fr_FR"))
                 .map(\.rawValue),
-            ["Roboto", "NotoSansCJK"]
+            sharedFallbacks
         )
         XCTAssertEqual(
             configuration.fonts(for: Locale(identifier: "zh_Hans_CN"))
                 .map(\.rawValue),
-            ["NotoSansCJK", "Roboto"]
+            sharedFallbacks
         )
         XCTAssertEqual(
             configuration.fonts(
                 for: Locale(identifier: "ko_KR"),
                 design: .monospaced
             ).map(\.rawValue),
-            ["RobotoMono", "NotoSansMonoCJK"]
+            ["RobotoMono", "NotoSansMono", "NotoSansMonoCJK"] + sharedFallbacks
         )
         XCTAssertEqual(configuration.systemFont.rawValue, "Roboto")
         XCTAssertEqual(
@@ -671,6 +686,66 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             "Roboto"
         )
         XCTAssertEqual(configuration.missingGlyphFont.rawValue, "LastResort")
+    }
+
+    func testSharedFallbackPreservesExactLocaleAndDesignPriority() throws {
+        let url = BundledFontCatalog.shared.resources.resourceDirectory
+            .appendingPathComponent("font-config.json")
+        var source = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        source["designs"] = [
+            "fallbacks": ["NotoSans", "Roboto"],
+            "default": ["systemFont": "Roboto", "fallbacks": ["NotoSansCJK", "Roboto"], "locales": [
+                "ko": ["Roboto", "NanumSquareNeo"],
+                "ko-KR": ["NotoSansCJK", "Roboto"]
+            ]],
+            "monospaced": ["systemFont": "RobotoMono", "fallbacks": ["RobotoMono"], "locales": [
+                "en": ["RobotoMono", "NotoSansMonoCJK"]
+            ]]
+        ]
+        let configuration = try FontFallbackConfiguration(
+            data: JSONSerialization.data(withJSONObject: source)
+        )
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ko_KR")).map(\.rawValue),
+                       ["NotoSansCJK", "Roboto", "NotoSans"])
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ko_KP")).map(\.rawValue),
+                       ["Roboto", "NanumSquareNeo", "NotoSansCJK", "NotoSans"])
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ar_EG")).map(\.rawValue),
+                       ["NotoSansCJK", "Roboto", "NotoSans"])
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ar_EG"), design: .rounded)
+            .map(\.rawValue), ["NotoSansCJK", "Roboto", "NotoSans"])
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ar_EG"), design: .monospaced)
+            .map(\.rawValue), ["RobotoMono", "NotoSansMonoCJK", "NotoSans", "Roboto"])
+    }
+
+    func testSharedFallbackRejectsUndefinedDuplicateAndTerminalFonts() throws {
+        let url = BundledFontCatalog.shared.resources.resourceDirectory
+            .appendingPathComponent("font-config.json")
+        let base = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        )
+        let cases: [([String], FontFallbackConfigurationError)] = [
+            (["Undefined"], .undefinedFont(BundledFontID("Undefined"))),
+            (["Roboto", "Roboto"], .duplicateFallbackFont("designs", BundledFontID("Roboto"))),
+            (["LastResort"], .terminalFontInFallbacks("designs"))
+        ]
+        for (fallbacks, expectedError) in cases {
+            var source = base
+            var designs = try XCTUnwrap(source["designs"] as? [String: Any])
+            designs["fallbacks"] = fallbacks
+            source["designs"] = designs
+            let data = try JSONSerialization.data(withJSONObject: source)
+            XCTAssertThrowsError(try FontFallbackConfiguration(data: data)) {
+                XCTAssertEqual($0 as? FontFallbackConfigurationError, expectedError)
+            }
+        }
+        var source = base
+        source["defaultLocale"] = ""
+        let data = try JSONSerialization.data(withJSONObject: source)
+        XCTAssertThrowsError(try FontFallbackConfiguration(data: data)) {
+            XCTAssertEqual($0 as? FontFallbackConfigurationError, .invalidDefaultLocale(""))
+        }
     }
 
     func testBundledConfigurationRejectsTerminalFontInLocaleCascade() {
@@ -827,6 +902,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertEqual(source.weightAxis?.maximum, 800)
         XCTAssertFalse(descriptor.appliesSyntheticWeight)
         XCTAssertEqual(configuration.systemFont, primaryID)
+        XCTAssertEqual(configuration.fonts(for: Locale(identifier: "fr_FR")), [primaryID])
     }
 
     func testBundledConfigurationRejectsUnsafeFontFilePath() {
@@ -916,6 +992,9 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 try file("NanumSquareNeo", weight),
                 "NanumSquareNeo-Variable.ttf"
             )
+            XCTAssertEqual(try file("NotoSans", weight), "NotoSans-VariableFont_wdth,wght.ttf")
+            XCTAssertEqual(try file("NotoSans", weight, isItalic: true),
+                           "NotoSans-Italic-VariableFont_wdth,wght.ttf")
         }
     }
 
@@ -1251,16 +1330,75 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             0
         )
         let catalog = BundledFontCatalog.shared
-        let secondaryURL = try XCTUnwrap(catalog.resource(
-            for: BundledFontID("NotoSansCJK"),
-            locale: environment.locale
-        )?.url)
+        for family in catalog.configuration.fonts(for: environment.locale)
+            where family != catalog.configuration.systemFont {
+            let url = try XCTUnwrap(catalog.resource(for: family, locale: environment.locale)?.url)
+            XCTAssertFalse(testContext.loadedURLs.contains(url), family.rawValue)
+        }
         let terminalURL = try XCTUnwrap(catalog.resource(
             for: BundledFontID("LastResort"),
             locale: environment.locale
         )?.url)
-        XCTAssertFalse(testContext.loadedURLs.contains(secondaryURL))
         XCTAssertFalse(testContext.loadedURLs.contains(terminalURL))
+    }
+
+    @MainActor
+    func testSharedFallbackResolvesMixedScriptGlyphsAcrossDesigns() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+
+        let samples: [(String, String)] = [
+            ("한", "NotoSansKR"), ("ا", "NotoSansArabic"),
+            ("क", "NotoSans"), ("ก", "NotoSansThai"),
+            ("ক", "NotoSansBengali"), ("א", "NotoSansHebrew"),
+            ("அ", "NotoSansTamil"), ("అ", "NotoSansTelugu"),
+            ("ಅ", "NotoSansKannada"), ("അ", "NotoSansMalayalam"),
+            ("અ", "NotoSansGujarati"), ("ਅ", "NotoSansGurmukhi"),
+            ("ଅ", "NotoSansOriya"), ("අ", "NotoSansSinhala"),
+            ("ក", "NotoSansKhmer"), ("ກ", "NotoSansLao"),
+            ("က", "NotoSansMyanmar"), ("Ա", "NotoSansArmenian"),
+            ("ა", "NotoSansGeorgian"), ("ሀ", "NotoSansEthiopic"),
+            ("ཀ", "NotoSerifTibetan"), ("ހ", "NotoSansThaana"),
+            ("ᠠ", "NotoSansMongolian"), ("ܐ", "NotoSansSyriac"),
+            ("ᱚ", "NotoSansOlChiki"), ("ꯀ", "NotoSansMeeteiMayek"),
+            ("ߊ", "NotoSansNKo"), ("𞤀", "NotoSansAdlam"),
+            ("ⴰ", "NotoSansTifinagh"), ("Ꭰ", "NotoSansCherokee"),
+            ("ᐁ", "NotoSansCanadianAboriginal"), ("ꀀ", "NotoSansYi"),
+            ("ꦲ", "NotoSansJavanese"), ("ᬅ", "NotoSansBalinese"),
+            ("ᮃ", "NotoSansSundanese"), ("𑄃", "NotoSansChakma"),
+            ("⣿", "NotoSansSymbols2")
+        ]
+        for (locale, design) in ["en_US", "ar_EG", "th_TH", "he_IL"].flatMap({ locale in
+            [VUI.Font.Design.default, .monospaced].map { (locale, $0) }
+        }) {
+            var environment = EnvironmentValues()
+            environment.locale = Locale(identifier: locale)
+            environment.defaultFontRenderingMode = .vector()
+            let font = VUI.Font(typefaceProvider: SystemFontProvider(
+                size: 17, weight: .regular, design: design, renderingMode: .vector()
+            ))
+            let cascade = font.typefaceCascade(
+                in: environment, forContext: SceneResources(), contentScaleFactor: 1
+            )
+            let text = "A" + samples.map(\.0).joined()
+            let resolved = GraphicsContext.ResolvedText(
+                runs: [.text(cascade.runFaces, text)], scaleFactor: 1, drawMissingGlyphs: true
+            )
+            let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
+            XCTAssertEqual(glyphs.map(\.scalar), Array(text.unicodeScalars))
+            XCTAssertEqual((glyphs.first?.face as? VectorTypeface)?.font.familyName,
+                           design == .monospaced ? "Roboto Mono" : "Roboto")
+            for (glyph, sample) in zip(glyphs.dropFirst(), samples) {
+                let family = design == .monospaced && sample.1 == "NotoSansKR"
+                    ? "NotoSansMonoCJK" : sample.1
+                XCTAssertEqual(glyph.face.identifier, "deferred:\(family):0", locale)
+                XCTAssertGreaterThan(glyph.advance.width, 0, sample.0)
+                if design == .monospaced && sample.1 == "NotoSansArabic" {
+                    XCTAssertNotEqual(glyph.advance.width, glyphs[0].advance.width)
+                }
+            }
+        }
     }
 
     // ASSERTIONS textCustomFontFallbackWidthObserved textCustomFontFallbackCascadeObserved
@@ -1288,11 +1426,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let korean = UnicodeScalar("ㄱ")
         let han = UnicodeScalar("漢")
 
-        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 42)
         XCTAssertEqual(cascade.ordinaryFaces.filter(\.isEmojiFallback).count, 3)
         XCTAssertTrue(cascade.ordinaryFaces[0].hasGlyph(for: korean))
         XCTAssertFalse(cascade.ordinaryFaces[0].hasGlyph(for: han))
-        XCTAssertTrue(cascade.ordinaryFaces[1].hasGlyph(for: han))
+        let hanFallback = try XCTUnwrap(cascade.ordinaryFaces.first {
+            $0.identifier == "deferred:NotoSansKR:0"
+        })
+        XCTAssertTrue(hanFallback.hasGlyph(for: han))
         XCTAssertNotNil(cascade.missingGlyphFace)
 
         let faces = cascade.runFaces
@@ -1309,7 +1450,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         ])
         XCTAssertTrue(glyphs[0].face.isEqual(to: cascade.ordinaryFaces[0]))
         XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[0]))
-        XCTAssertTrue(glyphs[2].face.isEqual(to: cascade.ordinaryFaces[1]))
+        XCTAssertTrue(glyphs[2].face.isEqual(to: hanFallback))
         XCTAssertGreaterThan(resolved.measure().width, 0)
     }
 
@@ -1610,11 +1751,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let latin = UnicodeScalar("A")
         let korean = UnicodeScalar("한")
 
-        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 2)
+        XCTAssertEqual(cascade.ordinaryFaces.filter { !$0.isEmojiFallback }.count, 44)
         XCTAssertEqual(cascade.ordinaryFaces.filter(\.isEmojiFallback).count, 3)
         XCTAssertTrue(cascade.ordinaryFaces[0].hasGlyph(for: latin))
         XCTAssertFalse(cascade.ordinaryFaces[0].hasGlyph(for: korean))
-        XCTAssertTrue(cascade.ordinaryFaces[1].hasGlyph(for: korean))
+        XCTAssertFalse(cascade.ordinaryFaces[1].hasGlyph(for: korean))
+        XCTAssertTrue(cascade.ordinaryFaces[2].hasGlyph(for: korean))
 
         let primary = try XCTUnwrap(
             cascade.ordinaryFaces[0] as? VectorTypeface
@@ -1627,6 +1769,15 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertEqual(primary.embolden, 0)
         XCTAssertEqual(
             cascade.ordinaryFaces[1].identifier,
+            "deferred:NotoSansMono:0"
+        )
+        let monoWidths = try "imW01".unicodeScalars.map {
+            try XCTUnwrap(cascade.ordinaryFaces[1].glyphMetrics(for: $0)?.advance.width)
+        }
+        XCTAssertEqual(Set(monoWidths).count, 1)
+        XCTAssertGreaterThan(try XCTUnwrap(monoWidths.first), 0)
+        XCTAssertEqual(
+            cascade.ordinaryFaces[2].identifier,
             "deferred:NotoSansMonoCJK:1"
         )
 
@@ -1637,7 +1788,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
         XCTAssertEqual(glyphs.map(\.scalar), [latin, korean, latin])
         XCTAssertTrue(glyphs[0].face.isEqual(to: cascade.ordinaryFaces[0]))
-        XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[1]))
+        XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[2]))
         XCTAssertEqual(glyphs[0].advance.width, glyphs[2].advance.width)
         XCTAssertNotEqual(glyphs[1].advance.width, glyphs[0].advance.width)
 
@@ -1678,8 +1829,10 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             contentScaleFactor: 1
         )
         let primary = try XCTUnwrap(cascade.ordinaryFaces.first)
-        let fallback = try XCTUnwrap(cascade.ordinaryFaces.dropFirst().first)
         let scalar = UnicodeScalar("ㄱ")
+        let fallback = try XCTUnwrap(cascade.ordinaryFaces.dropFirst().first {
+            $0.hasGlyph(for: scalar)
+        })
 
         XCTAssertFalse(primary.hasGlyph(for: scalar))
         XCTAssertTrue(fallback.hasGlyph(for: scalar))

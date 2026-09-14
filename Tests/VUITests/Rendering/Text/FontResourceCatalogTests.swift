@@ -56,9 +56,9 @@ final class FontResourceCatalogTests: XCTestCase {
     func testCatalogRetainsEveryCollectionFaceAndNamedInstance() {
         let resources = BundledFontCatalog.shared.resources
         let faces = resources.allFaces
-        XCTAssertEqual(faces.count, 19)
-        XCTAssertEqual(Set(faces.map(\.resource)).count, 19)
-        XCTAssertEqual(faces.reduce(0) { $0 + $1.metadata.variationInstances.count }, 110)
+        XCTAssertEqual(faces.count, 60)
+        XCTAssertEqual(Set(faces.map(\.resource)).count, 60)
+        XCTAssertEqual(faces.reduce(0) { $0 + $1.metadata.variationInstances.count }, 400)
         let noto = faces.filter { $0.resource.url.lastPathComponent == "NotoSansCJK-VF.otf.ttc" }
         XCTAssertEqual(noto.map(\.resource.faceIndex), [0, 1, 2, 3, 4])
         for (first, second) in zip(faces, resources.allFaces) {

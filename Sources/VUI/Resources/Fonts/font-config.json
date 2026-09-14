@@ -63,6 +63,44 @@
       ],
       "syntheticWeight": false
     },
+    "NotoSans": {
+      "sources": [
+        {
+          "file": "NotoSans/NotoSans-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        },
+        {
+          "file": "NotoSans/NotoSans-Italic-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "italic": true,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansKR": {
+      "sources": [
+        {
+          "file": "NotoSansKR/NotoSansKR-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
     "NotoSansCJK": {
       "sources": [
         {
@@ -75,6 +113,20 @@
             "zh-Hant": 3,
             "zh-HK": 4
           },
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansMono": {
+      "sources": [
+        {
+          "file": "NotoSansMono/NotoSansMono-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
           "weightAxis": {
             "tag": "wght",
             "minimum": 100,
@@ -101,6 +153,500 @@
             "minimum": 400,
             "maximum": 700
           }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansArabic": {
+      "sources": [
+        {
+          "file": "NotoSansArabic/NotoSansArabic-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansDevanagari": {
+      "sources": [
+        {
+          "file": "NotoSansDevanagari/NotoSansDevanagari-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansThai": {
+      "sources": [
+        {
+          "file": "NotoSansThai/NotoSansThai-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansBengali": {
+      "sources": [
+        {
+          "file": "NotoSansBengali/NotoSansBengali-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansHebrew": {
+      "sources": [
+        {
+          "file": "NotoSansHebrew/NotoSansHebrew-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansTamil": {
+      "sources": [
+        {
+          "file": "NotoSansTamil/NotoSansTamil-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansTelugu": {
+      "sources": [
+        {
+          "file": "NotoSansTelugu/NotoSansTelugu-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansKannada": {
+      "sources": [
+        {
+          "file": "NotoSansKannada/NotoSansKannada-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansMalayalam": {
+      "sources": [
+        {
+          "file": "NotoSansMalayalam/NotoSansMalayalam-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansGujarati": {
+      "sources": [
+        {
+          "file": "NotoSansGujarati/NotoSansGujarati-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansGurmukhi": {
+      "sources": [
+        {
+          "file": "NotoSansGurmukhi/NotoSansGurmukhi-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansOriya": {
+      "sources": [
+        {
+          "file": "NotoSansOriya/NotoSansOriya-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansSinhala": {
+      "sources": [
+        {
+          "file": "NotoSansSinhala/NotoSansSinhala-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansKhmer": {
+      "sources": [
+        {
+          "file": "NotoSansKhmer/NotoSansKhmer-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansLao": {
+      "sources": [
+        {
+          "file": "NotoSansLao/NotoSansLao-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansMyanmar": {
+      "sources": [
+        {
+          "file": "NotoSansMyanmar/NotoSansMyanmar-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansArmenian": {
+      "sources": [
+        {
+          "file": "NotoSansArmenian/NotoSansArmenian-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansGeorgian": {
+      "sources": [
+        {
+          "file": "NotoSansGeorgian/NotoSansGeorgian-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansEthiopic": {
+      "sources": [
+        {
+          "file": "NotoSansEthiopic/NotoSansEthiopic-VariableFont_wdth,wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSerifTibetan": {
+      "sources": [
+        {
+          "file": "NotoSerifTibetan/NotoSerifTibetan-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansThaana": {
+      "sources": [
+        {
+          "file": "NotoSansThaana/NotoSansThaana-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansMongolian": {
+      "sources": [
+        {
+          "file": "NotoSansMongolian/NotoSansMongolian-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansSyriac": {
+      "sources": [
+        {
+          "file": "NotoSansSyriac/NotoSansSyriac-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansOlChiki": {
+      "sources": [
+        {
+          "file": "NotoSansOlChiki/NotoSansOlChiki-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansMeeteiMayek": {
+      "sources": [
+        {
+          "file": "NotoSansMeeteiMayek/NotoSansMeeteiMayek-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansNKo": {
+      "sources": [
+        {
+          "file": "NotoSansNKo/NotoSansNKo-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansAdlam": {
+      "sources": [
+        {
+          "file": "NotoSansAdlam/NotoSansAdlam-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansTifinagh": {
+      "sources": [
+        {
+          "file": "NotoSansTifinagh/NotoSansTifinagh-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansCherokee": {
+      "sources": [
+        {
+          "file": "NotoSansCherokee/NotoSansCherokee-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansCanadianAboriginal": {
+      "sources": [
+        {
+          "file": "NotoSansCanadianAboriginal/NotoSansCanadianAboriginal-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansYi": {
+      "sources": [
+        {
+          "file": "NotoSansYi/NotoSansYi-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansJavanese": {
+      "sources": [
+        {
+          "file": "NotoSansJavanese/NotoSansJavanese-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansBalinese": {
+      "sources": [
+        {
+          "file": "NotoSansBalinese/NotoSansBalinese-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansSundanese": {
+      "sources": [
+        {
+          "file": "NotoSansSundanese/NotoSansSundanese-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 400,
+            "maximum": 700
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansChakma": {
+      "sources": [
+        {
+          "file": "NotoSansChakma/NotoSansChakma-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansSymbols": {
+      "sources": [
+        {
+          "file": "NotoSansSymbols/NotoSansSymbols-VariableFont_wght.ttf",
+          "faceIndex": 0,
+          "weightAxis": {
+            "tag": "wght",
+            "minimum": 100,
+            "maximum": 900
+          }
+        }
+      ],
+      "syntheticWeight": false
+    },
+    "NotoSansSymbols2": {
+      "sources": [
+        {
+          "file": "NotoSansSymbols2/NotoSansSymbols2-Regular.ttf",
+          "faceIndex": 0,
+          "weight": 400
         }
       ],
       "syntheticWeight": false
@@ -152,22 +698,58 @@
   },
   "defaultLocale": "en",
   "designs": {
+    "fallbacks": [
+      "Roboto",
+      "NotoSans",
+      "NotoSansKR",
+      "NotoSansCJK",
+      "NotoSansArabic",
+      "NotoSansDevanagari",
+      "NotoSansThai",
+      "NotoSansBengali",
+      "NotoSansHebrew",
+      "NotoSansTamil",
+      "NotoSansTelugu",
+      "NotoSansKannada",
+      "NotoSansMalayalam",
+      "NotoSansGujarati",
+      "NotoSansGurmukhi",
+      "NotoSansOriya",
+      "NotoSansSinhala",
+      "NotoSansKhmer",
+      "NotoSansLao",
+      "NotoSansMyanmar",
+      "NotoSansArmenian",
+      "NotoSansGeorgian",
+      "NotoSansEthiopic",
+      "NotoSerifTibetan",
+      "NotoSansThaana",
+      "NotoSansMongolian",
+      "NotoSansSyriac",
+      "NotoSansOlChiki",
+      "NotoSansMeeteiMayek",
+      "NotoSansNKo",
+      "NotoSansAdlam",
+      "NotoSansTifinagh",
+      "NotoSansCherokee",
+      "NotoSansCanadianAboriginal",
+      "NotoSansYi",
+      "NotoSansJavanese",
+      "NotoSansBalinese",
+      "NotoSansSundanese",
+      "NotoSansChakma",
+      "NotoSansSymbols",
+      "NotoSansSymbols2"
+    ],
     "default": {
       "systemFont": "Roboto",
       "locales": {
-        "en": ["Roboto", "NotoSansCJK"],
-        "ko": ["NanumSquareNeo", "NotoSansCJK"],
-        "ja": ["NotoSansCJK", "Roboto"],
-        "zh-Hans": ["NotoSansCJK", "Roboto"],
-        "zh-Hant": ["NotoSansCJK", "Roboto"],
-        "zh-HK": ["NotoSansCJK", "Roboto"]
+        "ko": ["NanumSquareNeo"]
       }
     },
     "monospaced": {
       "systemFont": "RobotoMono",
-      "locales": {
-        "en": ["RobotoMono", "NotoSansMonoCJK"]
-      }
+      "fallbacks": ["RobotoMono", "NotoSansMono", "NotoSansMonoCJK"]
     }
   },
   "missingGlyphFont": "LastResort",

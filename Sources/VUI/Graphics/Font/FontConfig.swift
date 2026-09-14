@@ -135,6 +135,8 @@ enum FontFallbackConfigurationError: Error, Equatable {
     case emptyLocale(String)
     case duplicateFont(String, BundledFontID)
     case terminalFontInLocale(String)
+    case duplicateFallbackFont(String, BundledFontID)
+    case terminalFontInFallbacks(String)
     case invalidEmojiPreset(String)
     case invalidDefaultEmojiPreset(String)
     case emptyEmojiPreset(String)
@@ -165,14 +167,43 @@ struct FontFallbackConfiguration: Sendable {
 
     private struct DesignSource: Decodable {
         let systemFont: String
-        let locales: [String: [String]]
+        let fallbacks: [String]?
+        let locales: [String: [String]]?
+    }
+
+    private struct DesignsSource: Decodable {
+        private struct Key: CodingKey {
+            let stringValue: String
+            var intValue: Int? { nil }
+
+            init(stringValue: String) {
+                self.stringValue = stringValue
+            }
+
+            init?(intValue: Int) { return nil }
+        }
+
+        let fallbacks: [String]
+        let profiles: [String: DesignSource]
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: Key.self)
+            self.fallbacks = try container.decodeIfPresent(
+                [String].self, forKey: Key(stringValue: "fallbacks")
+            ) ?? []
+            self.profiles = try Dictionary(uniqueKeysWithValues:
+                container.allKeys.filter { $0.stringValue != "fallbacks" }.map { key in
+                    (key.stringValue, try container.decode(DesignSource.self, forKey: key))
+                }
+            )
+        }
     }
 
     private struct Source: Decodable {
         let version: Int
         let fonts: [String: FontFamilySource]
         let defaultLocale: String
-        let designs: [String: DesignSource]
+        let designs: DesignsSource
         let missingGlyphFont: String
         let emoji: EmojiSource?
     }
@@ -340,10 +371,32 @@ struct FontFallbackConfiguration: Sendable {
             )
         }
 
+        func resolveFallbackFonts(_ identifiers: [String], scope: String) throws -> [BundledFontID] {
+            var unique: Set<BundledFontID> = []
+            return try identifiers.map { identifier in
+                let font = BundledFontID(identifier)
+                guard fontDescriptors[font] != nil else {
+                    throw FontFallbackConfigurationError.undefinedFont(font)
+                }
+                guard font != missingGlyphFont else {
+                    throw FontFallbackConfigurationError.terminalFontInFallbacks(scope)
+                }
+                guard unique.insert(font).inserted else {
+                    throw FontFallbackConfigurationError.duplicateFallbackFont(scope, font)
+                }
+                return font
+            }
+        }
+        let sharedFonts = try resolveFallbackFonts(source.designs.fallbacks, scope: "designs")
+
         let defaultLocale = Self.canonicalIdentifier(source.defaultLocale)
+        guard !defaultLocale.isEmpty,
+              Locale(identifier: source.defaultLocale).language.languageCode != nil else {
+            throw FontFallbackConfigurationError.invalidDefaultLocale(source.defaultLocale)
+        }
         var systemFonts: [Font.Design: BundledFontID] = [:]
         var designLocales: [Font.Design: [String: [BundledFontID]]] = [:]
-        for (identifier, designSource) in source.designs {
+        for (identifier, designSource) in source.designs.profiles {
             guard let design = Self.design(for: identifier) else {
                 throw FontFallbackConfigurationError.invalidDesign(identifier)
             }
@@ -354,8 +407,12 @@ struct FontFallbackConfiguration: Sendable {
                 )
             }
 
+            let designFonts = try resolveFallbackFonts(designSource.fallbacks ?? [], scope: identifier)
+            var uniqueFallbackFonts = Set(designFonts)
+            let fallbackFonts = designFonts + sharedFonts.filter { uniqueFallbackFonts.insert($0).inserted }
+
             var locales: [String: [BundledFontID]] = [:]
-            for (localeIdentifier, fonts) in designSource.locales {
+            for (localeIdentifier, fonts) in designSource.locales ?? [:] {
                 let canonical = Self.canonicalIdentifier(localeIdentifier)
                 guard !canonical.isEmpty,
                       Locale(identifier: localeIdentifier)
@@ -385,8 +442,10 @@ struct FontFallbackConfiguration: Sendable {
                         font
                     )
                 }
+                // Resolve shared fallbacks once while retaining locale-specific priority.
+                let cascade = fontIDs + fallbackFonts.filter { unique.insert($0).inserted }
                 guard locales.updateValue(
-                    fontIDs,
+                    cascade,
                     forKey: canonical
                 ) == nil else {
                     throw FontFallbackConfigurationError.invalidLocale(
@@ -394,10 +453,11 @@ struct FontFallbackConfiguration: Sendable {
                     )
                 }
             }
-            guard locales[defaultLocale] != nil else {
-                throw FontFallbackConfigurationError.invalidDefaultLocale(
-                    source.defaultLocale
-                )
+            if locales[defaultLocale] == nil {
+                guard !fallbackFonts.isEmpty else {
+                    throw FontFallbackConfigurationError.invalidDefaultLocale(source.defaultLocale)
+                }
+                locales[defaultLocale] = fallbackFonts
             }
             systemFonts[design] = systemFont
             designLocales[design] = locales
