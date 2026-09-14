@@ -106,6 +106,95 @@ final class TextProxyTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS textStringDrawingScaleSelectionObserved textStringDrawingScaledFontQuantizationObserved
+    func testSingleLineFontFittingMeasuresResizedGlyphsWithoutChangingTheSource() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        var environment = EnvironmentValues()
+        environment.font = .file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23)
+        environment.defaultFontRenderingMode = .vector()
+        environment.displayScale = 2
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            func engine(_ minimum: CGFloat) throws -> StyledTextLayoutEngine {
+                environment.minimumScaleFactor = minimum
+                environment.lineLimit = 1
+                let outputs = Text._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: Text(verbatim: "A"))),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                return try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+            }
+            for (minimum, height, baseline, pointSize): (CGFloat, CGFloat, CGFloat, CGFloat) in [
+                (0.25, 18, 14, 15.25), (0.6, 18, 14, 15.25),
+                (0.8, 22, 17, 18.5), (0.9999, 27, 21, 23)
+            ] {
+                let layout = try engine(minimum)
+                let original = try XCTUnwrap(layout.text.resolvedText)
+                let originalLines = original.unwrappedGlyphLines()
+                let request = CGSize(width: 10, height: 81)
+                let measured = layout.sizeThatFits(_ProposedSize(request))
+                XCTAssertEqual(measured.height, height, "minimum=\(minimum)")
+                XCTAssertEqual(layout.text.firstBaseline(in: request), baseline)
+                XCTAssertEqual(layout.text.lastBaseline(in: request), baseline)
+                let selected = try XCTUnwrap(layout.text.drawingSource(in: request))
+                XCTAssertEqual(selected.uniformFont?.pointSize, pointSize)
+                XCTAssertEqual(original.uniformFont?.pointSize, 23)
+                let item = DisplayList.Content.TextValue(
+                    view: StyledTextContentView(text: layout.text, renderer: nil), size: request,
+                    frame: layout.text.frame(in: request, renderer: nil), shading: .color(.black),
+                    transform: .identity, command: .closure(bounds: nil))
+                let drawing = try XCTUnwrap(item.makeDrawing())
+                let expected = selected.makeDrawing(in: request, layoutProperties: layout.text.layoutProperties)
+                XCTAssertFalse(drawing.vectorBatches.isEmpty)
+                XCTAssertEqual(drawing.vectorBatches.map { $0.path.boundingRect },
+                               expected.vectorBatches.map { $0.path.boundingRect })
+                XCTAssertEqual(try XCTUnwrap(item.glyphAtoms()).map(\.bounds),
+                    selected.glyphAtoms(in: request, layoutProperties: layout.text.layoutProperties).map {
+                        $0.bounds.offsetBy(dx: item.frame.minX + layout.text.drawingMargins.leading,
+                                           dy: item.frame.minY + layout.text.drawingMargins.top)
+                    })
+                if pointSize != 23 {
+                    XCTAssertNotEqual(drawing.vectorBatches.map { $0.path.boundingRect },
+                        original.makeDrawing(in: request, layoutProperties: layout.text.layoutProperties)
+                            .vectorBatches.map { $0.path.boundingRect })
+                }
+                XCTAssertEqual(layout.sizeThatFits(_ProposedSize(request)), measured)
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
+                XCTAssertEqual(original.unwrappedGlyphLines().first?.width, originalLines.first?.width)
+                XCTAssertEqual(original.unwrappedGlyphLines().first?.height, originalLines.first?.height)
+            }
+            let heightConstrained = try engine(0.25)
+            let request = CGSize(width: 50, height: 8)
+            XCTAssertEqual(heightConstrained.sizeThatFits(_ProposedSize(request)), CGSize(width: 5, height: 8))
+            XCTAssertEqual(heightConstrained.text.firstBaseline(in: request), 6)
+            XCTAssertEqual(heightConstrained.text.drawingSource(in: request)?.uniformFont?.pointSize, 7)
+
+            for (width, height, baseline, pointSize): (CGFloat, CGFloat, CGFloat, CGFloat) in [
+                (7, 13, 10, 10.5), (0, 6, 5, 5.75)
+            ] {
+                let layout = try engine(0.25)
+                let request = CGSize(width: width, height: 81)
+                XCTAssertEqual(layout.sizeThatFits(_ProposedSize(request)), CGSize(width: width, height: height))
+                XCTAssertEqual(layout.text.firstBaseline(in: request), baseline)
+                XCTAssertEqual(layout.text.lastBaseline(in: request), baseline)
+                XCTAssertEqual(layout.text.drawingSource(in: request)?.uniformFont?.pointSize, pointSize)
+            }
+
+            let nearOne = try engine(0.99999999)
+            let ordinary = try engine(1)
+            let narrow = CGSize(width: 10, height: 81)
+            let natural = try XCTUnwrap(nearOne.text.resolvedText).layoutMetrics(
+                in: CGSize(width: 9_000_000, height: 9_000_000))
+            XCTAssertEqual(nearOne.sizeThatFits(_ProposedSize(narrow)).width, natural.size.width)
+            XCTAssertEqual(ordinary.sizeThatFits(_ProposedSize(narrow)).width, 10)
+        }
+    }
+
     // ASSERTIONS textIntrinsicBackendSelectionObserved textIntrinsicZeroWidthNormalizationObserved
     // ASSERTIONS textStringDrawingEmptyMetricProducerObserved
     func testRealTextHostsMeasureEmptyBaselinesAndNarrowWidthsThroughTheirOwner() throws {

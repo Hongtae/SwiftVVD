@@ -225,6 +225,67 @@ final class TextDrawingMarginTests: XCTestCase {
             transform: .identity, command: .closure(bounds: nil))
     }
 
+    // ASSERTIONS textStringDrawingScaleSelectionObserved textStringDrawingScaledFontQuantizationObserved
+    func testFittedTextUsesTheSelectedFontForPreparedDrawingAndReplayInBothModes() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for (minimum, selectedSize): (CGFloat, CGFloat) in [(0.25, 15.25), (0.8, 18.5)] {
+                    var environment = EnvironmentValues()
+                    environment.font = .file(file, size: 23)
+                    environment.defaultFontRenderingMode = mode
+                    environment._contentScaleFactor = scale
+                    environment.displayScale = 2
+                    environment.lineLimit = 1
+                    environment.minimumScaleFactor = minimum
+                    let source = try resolve(Text(verbatim: "A"), environment: environment)
+                    let owner = ResolvedStyledText.StringDrawing(
+                        layoutProperties: TextLayoutProperties(from: environment), resolvedText: source)
+                    let request = CGSize(width: 10, height: 81)
+                    let item = DisplayList.Content.TextValue(
+                        view: StyledTextContentView(text: owner, renderer: nil), size: request,
+                        frame: owner.frame(in: request, renderer: nil), shading: .color(.black),
+                        transform: .identity, command: .closure(bounds: nil))
+                    XCTAssertEqual(owner.drawingSource(in: request)?.uniformFont?.pointSize, selectedSize)
+                    var referenceEnvironment = environment
+                    referenceEnvironment.font = .file(file, size: selectedSize)
+                    referenceEnvironment.minimumScaleFactor = 1
+                    let reference = try resolve(Text(verbatim: "A"), environment: referenceEnvironment)
+                    let referenceDrawing = reference.makeDrawing(in: request,
+                        layoutProperties: TextLayoutProperties(from: referenceEnvironment),
+                        origin: CGPoint(x: owner.drawingMargins.leading, y: owner.drawingMargins.top))
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black))
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    let prepared = try XCTUnwrap(item.makeDrawing())
+                    for operation in 0..<3 {
+                        let actual = try render(device: device, environment: environment) { context in
+                            if operation == 0 {
+                                item.draw(in: context)
+                            } else if operation == 1 {
+                                item.draw(prepared, in: context)
+                            } else {
+                                let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                                item.draw(in: recording)
+                                recording.recording!.draw(in: context)
+                            }
+                        }
+                        XCTAssertTrue(actual == expected,
+                            "\(mode) scale=\(scale) minimum=\(minimum) operation=\(operation)")
+                    }
+                    XCTAssertEqual(source.uniformFont?.pointSize, 23)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textDrawingFrameCompensationObserved
     // ASSERTIONS textDrawingRendererLocalContextObserved
     // ASSERTIONS textDrawingOutsetSelectionGatesObserved

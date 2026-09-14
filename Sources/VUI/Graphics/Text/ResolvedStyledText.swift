@@ -488,6 +488,7 @@ class ResolvedStyledText: InterpolatableContent {
     fileprivate struct MeasurementEntry {
         var requestedSize: CGSize
         var metrics: GraphicsContext.ResolvedText.LayoutMetrics
+        var scale: CGFloat = 1
 
         func canReuse(for size: CGSize) -> Bool {
             let minimumWidth = min(metrics.size.width, requestedSize.width)
@@ -702,6 +703,10 @@ class ResolvedStyledText: InterpolatableContent {
         fatalError("ResolvedStyledText measurement requires a concrete owner")
     }
 
+    func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
+        resolvedText
+    }
+
     var needsDynamicRenderingInArchive: Bool {
         if storage?._isDynamicText == true {
             return true
@@ -757,6 +762,15 @@ extension ResolvedStyledText {
 
         override var metricsCacheEntryCount: Int { measurements.count }
 
+        override func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
+            guard let resolvedText else { return nil }
+            _ = cachedLayoutMetrics(in: size)
+            guard let entry = measurements.first(where: { $0.canReuse(for: size) }),
+                  entry.scale != 1, let font = resolvedText.uniformFont else { return resolvedText }
+            let pointSize = (font.pointSize * entry.scale * 4).rounded() * 0.25
+            return resolvedText.resizingUniformFont(to: pointSize)
+        }
+
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             guard proposal != .zero else { return .zero }
             return cachedLayoutMetrics(in: CGSize(
@@ -780,10 +794,11 @@ extension ResolvedStyledText {
             let normalizedHeight = drawingDimension(available.height)
             let drawingSize = CGSize(width: normalizedWidth, height: normalizedHeight)
             let sources = resolvedText.unwrappedGlyphLines()
-            var metrics = separatorMetrics(in: drawingSize, sources: sources)
+            let fitted = fontFittingMetrics(in: drawingSize, source: resolvedText)
+            var metrics = fitted?.metrics ?? separatorMetrics(in: drawingSize, sources: sources)
                 ?? trailingParagraphMetrics(in: drawingSize, sources: sources)
                 ?? resolvedText.unroundedLayoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
-            let clippedWidth = min(metrics.size.width, normalizedWidth)
+            let clippedWidth = fitted == nil ? min(metrics.size.width, normalizedWidth) : metrics.size.width
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
             let height = metrics.size.height == .leastNonzeroMagnitude ? 0 : metrics.size.height
             let pixelLength = 1 / resolvedText.displayScale
@@ -798,8 +813,68 @@ extension ResolvedStyledText {
             let adjustment = metrics.firstBaseline - firstBaseline
             metrics.lastBaseline = ceil((layoutMargins.top + metrics.lastBaseline + adjustment)
                 / pixelLength) * pixelLength
-            measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics))
+            measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics, scale: fitted?.scale ?? 1))
             return metrics
+        }
+
+        private func fontFittingMetrics(
+            in size: CGSize, source: GraphicsContext.ResolvedText
+        ) -> (metrics: GraphicsContext.ResolvedText.LayoutMetrics, scale: CGFloat)? {
+            let minimum = layoutProperties.minScaleFactor
+            guard layoutProperties.lineLimit == 1, minimum > 0, minimum < 1,
+                  let font = source.uniformFont, source.fontResolutionContext != nil else { return nil }
+            // Single-line fitting measures natural candidate dimensions before
+            // the final constrained layout. Every candidate starts at the original font.
+            let naturalSize = CGSize(width: 9_000_000, height: 9_000_000)
+            let original = source.unroundedLayoutMetrics(in: naturalSize, layoutProperties: layoutProperties)
+            var ratio = size.width / original.size.width
+            if ratio > 1 { ratio = size.height / original.size.height }
+            if max(minimum, min(1, ratio)) >= 1 || abs(1 - minimum) < CGFloat(Float.ulpOfOne) {
+                return (original, 1)
+            }
+            func resized(_ scale: CGFloat) -> GraphicsContext.ResolvedText? {
+                source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
+            }
+            func oversized(_ candidate: GraphicsContext.ResolvedText) -> Bool {
+                let measured = candidate.unroundedLayoutMetrics(in: naturalSize, layoutProperties: layoutProperties)
+                return measured.size.width > size.width || measured.size.height > size.height
+            }
+            func finish(_ candidate: GraphicsContext.ResolvedText, scale: CGFloat)
+                -> (GraphicsContext.ResolvedText.LayoutMetrics, CGFloat) {
+                var metrics = candidate.unroundedLayoutMetrics(in: size, layoutProperties: layoutProperties)
+                // Restore the logical constraint after backend pixel quantization.
+                metrics.size.width = min(metrics.size.width, size.width)
+                return (metrics, scale)
+            }
+            var low = minimum
+            var high: CGFloat = 1
+            if minimum > 0.01 {
+                guard let candidate = resized(minimum) else { return nil }
+                if candidate.uniformFont?.pointSize != font.pointSize, oversized(candidate) {
+                    return finish(candidate, scale: minimum)
+                }
+            }
+            var sawFit = false
+            var lastScale = minimum
+            var lastCandidate = source
+            for attempt in 0..<20 {
+                let mid = high + (high - low) * -0.5
+                guard let candidate = resized(mid) else { return nil }
+                lastScale = mid
+                lastCandidate = candidate
+                if oversized(candidate) {
+                    high = mid
+                } else {
+                    low = mid
+                    sawFit = true
+                }
+                if attempt == 19 || (sawFit && high - low < 0.01) { break }
+            }
+            if lastScale != low {
+                guard let accepted = resized(low) else { return nil }
+                lastCandidate = accepted
+            }
+            return finish(lastCandidate, scale: low)
         }
 
         private func separatorMetrics(

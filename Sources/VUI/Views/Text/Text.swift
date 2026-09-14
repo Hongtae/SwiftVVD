@@ -1612,6 +1612,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         }
         properties.markParagraphBoundary(at: string.utf16.count, in: string, environment: context.environment)
         resolved.resolvedProperties = properties
+        resolved.fontResolutionContext = GraphTextResolutionContext(
+            environment: context.environment.untrackedCopy(), sceneResources: context.sceneResources)
         return resolved
     }
 

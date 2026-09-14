@@ -53,6 +53,41 @@ final class FontResource: Hashable, @unchecked Sendable {
                        languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
     }
 
+    /// Creates an independent font request while retaining the original traits.
+    func fontWithSize(_ requestedSize: CGFloat) -> FontResource? {
+        let size = requestedSize == 0 ? pointSize : requestedSize
+        guard size.isFinite, size > 0 else { return nil }
+        if size == pointSize { return self }
+        let resizedSource: FontDescriptor.Source
+        if case let .typeface(provider) = source {
+            let resized: any TypefaceProvider
+            switch provider {
+            case let value as SystemFontProvider:
+                resized = SystemFontProvider(size: size, weight: value.weight, design: value.design,
+                    renderingMode: value.renderingMode, isItalic: value.isItalic, width: value.width)
+            case let value as BundledFontProvider:
+                resized = BundledFontProvider(resource: value.resource, size: size, weight: value.weight,
+                    renderingMode: value.renderingMode, variations: value.variations,
+                    appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex)
+            case let value as ExternalFontProvider:
+                resized = ExternalFontProvider(source: value.source, size: size, weight: value.weight,
+                    design: value.design, faceIndex: value.faceIndex, renderingMode: value.renderingMode)
+            default:
+                // A supplied face has no request from which to create another size.
+                return nil
+            }
+            resizedSource = .typeface(resized)
+        } else {
+            resizedSource = source
+        }
+        let descriptor = FontDescriptor(source: resizedSource, pointSize: size,
+            shapingFeatures: shapingFeatures, renderingMode: renderingMode, language: language,
+            languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = renderingMode
+        return FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
+    }
+
     var requestedPointSize: CGFloat? {
         if case let .typeface(provider) = source, provider is FixedFontProvider { return nil }
         return pointSize

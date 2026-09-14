@@ -14,6 +14,9 @@ extension GraphicsContext {
         var resolvedProperties: Text.ResolvedProperties?
         // Default metrics affect placement, not the cached source glyphs.
         var defaultLineMetrics: FontLineMetrics?
+        // Backend font requests reuse the resolved cascade environment without
+        // retaining a graph dependency tracker during measurement or replay.
+        var fontResolutionContext: GraphTextResolutionContext?
         enum Run {
             case text([Typeface], String)
             case attachment([Typeface], ImageDrawing)
@@ -42,6 +45,7 @@ extension GraphicsContext {
             let outsetData: FontOutsetData?
             let outsetLanguageGroup: Int
             let hasOversizedScalars: Bool
+            let preferredLanguages: [String]
 
             init(
                 runs: [Run],
@@ -56,6 +60,7 @@ extension GraphicsContext {
                 self.displayScale = displayScale
                 self.drawMissingGlyphs = drawMissingGlyphs
                 self.outsetData = outsetData
+                self.preferredLanguages = preferredLanguages
                 self.outsetLanguageGroup = outsetData?.preferredGroup(for: preferredLanguages) ?? 0
                 self.hasOversizedScalars = outsetData.map { data in
                     runs.contains { run in
@@ -161,6 +166,42 @@ extension GraphicsContext {
         var scaleFactor: CGFloat { storage.scaleFactor }
         var displayScale: CGFloat { storage.displayScale }
         fileprivate var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
+
+        var uniformFont: FontResource? {
+            guard runs.count == 1,
+                  case let .styledText(_, text, _, attributes) = runs[0],
+                  !text.isEmpty,
+                  !text.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) }),
+                  (attributes.baselineOffset ?? 0) == 0,
+                  (attributes.paragraphStyle?.firstLineHeadIndent ?? 0) == 0,
+                  (attributes.paragraphStyle?.lineSpacing ?? 0) == 0,
+                  attributes.paragraphStyle?.allowsTightening != true,
+                  let resource = attributes.fontResource,
+                  resource.requestedPointSize != nil else { return nil }
+            return resource
+        }
+
+        func resizingUniformFont(to pointSize: CGFloat) -> Self? {
+            guard let original = uniformFont, let context = fontResolutionContext,
+                  case let .styledText(_, text, custom, originalAttributes) = runs[0],
+                  let resized = original.fontWithSize(pointSize) else { return nil }
+            if resized === original { return self }
+            var attributes = originalAttributes
+            attributes.fontResource = resized
+            let font = Font(provider: FontBox(Font.PlatformFontProvider(font: resized)))
+            attributes.font = font
+            let faces = font.typefaceCascade(in: context.environment, forContext: context.sceneResources,
+                contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces
+            guard !faces.isEmpty else { return nil }
+            var result = Self(runs: [.styledText(faces, text, custom, attributes)],
+                scaleFactor: scaleFactor, displayScale: displayScale, drawMissingGlyphs: drawMissingGlyphs,
+                outsetData: storage.outsetData, preferredLanguages: storage.preferredLanguages)
+            result.defaultLineMetrics = defaultLineMetrics
+            result.resolvedProperties = resolvedProperties
+            result.fontResolutionContext = context
+            result.shading = shading
+            return result
+        }
 
         var attributedStorage: NSAttributedString {
             let result = NSMutableAttributedString(string: "")

@@ -23,6 +23,43 @@ private struct CountingFontProvider: FontProvider {
 }
 
 final class FontResourceCacheTests: XCTestCase {
+    // ASSERTIONS textFontResizeResourceCopyObserved
+    func testResizingResolvedFontsPreservesTheirRequestAndOriginalSize() throws {
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let named = Font.custom("Roboto-Regular", fixedSize: 23).platformFont(in: context)
+        let fonts: [Font] = [
+            .system(.body).leading(.tight).monospacedDigit(),
+            .system(size: 23).weight(.semibold).italic().width(.condensed),
+            .file(file, size: 23),
+            .custom("Roboto-Regular", fixedSize: 23),
+            Font(typefaceProvider: named.provider),
+            Font(typefaceProvider: SystemFontProvider(size: 23, weight: .bold, design: .monospaced))
+        ]
+        for font in fonts {
+            let resource = font.platformFont(in: context)
+            let originalSize = resource.pointSize
+            for size: CGFloat in [0, 0.25, 6, 15.25, 23] {
+                let resized = try XCTUnwrap(resource.fontWithSize(size))
+                let expectedSize = size == 0 ? originalSize : size
+                XCTAssertEqual(resized.pointSize, expectedSize)
+                XCTAssertEqual(resized.provider.pointSize, expectedSize)
+                XCTAssertEqual(resource.pointSize, originalSize)
+                XCTAssertEqual(resource.provider.pointSize, originalSize)
+                XCTAssertEqual(resized.textStyle, resource.textStyle)
+                XCTAssertEqual(resized.stylePolicy, resource.stylePolicy)
+                XCTAssertEqual(resized.shapingFeatures, resource.shapingFeatures)
+                XCTAssertEqual(resized.descriptor().resolvedWeight, resource.descriptor().resolvedWeight)
+                XCTAssertEqual(resized.descriptor().renderingMode, resource.descriptor().renderingMode)
+                XCTAssertEqual(resized.fontWithSize(originalSize), resource)
+            }
+        }
+    }
+
     // ASSERTIONS fontResolvedLazyCacheBoundaryObserved
     func testExistingResolutionConsumerUsesTheSharedRequestCache() throws {
         let counter = ResolutionCounter()

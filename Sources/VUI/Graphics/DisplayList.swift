@@ -1263,7 +1263,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
                 guard view.renderer == nil else { return nil }
                 let margins = view.text.drawingMargins
-                return view.text.resolvedText?.makeDrawing(
+                return view.text.drawingSource(in: size)?.makeDrawing(
                     in: size,
                     layoutProperties: view.text.layoutProperties,
                     origin: CGPoint(x: margins.leading, y: margins.top)
@@ -1272,7 +1272,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
             func glyphAtoms() -> [GraphicsContext.ResolvedText.GlyphAtom]? {
                 guard view.renderer == nil,
-                      let resolvedText = view.text.resolvedText else {
+                      let resolvedText = view.text.drawingSource(in: size) else {
                     return nil
                 }
                 let margins = view.text.drawingMargins
@@ -1291,7 +1291,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             }
 
             func draw(in context: GraphicsContext) {
-                guard let resolvedText = view.text.resolvedText else { return }
+                guard let resolvedText = view.text.drawingSource(in: size) else { return }
                 var context = context
                 if !transform.isIdentity {
                     context.concatenate(transform)
