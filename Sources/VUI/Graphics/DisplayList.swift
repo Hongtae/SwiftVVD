@@ -1263,23 +1263,20 @@ struct DisplayList: Equatable, CustomStringConvertible {
             func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
                 guard view.renderer == nil else { return nil }
                 let margins = view.text.drawingMargins
-                return view.text.drawingSource(in: size)?.makeDrawing(
-                    in: size,
-                    layoutProperties: view.text.layoutProperties,
+                guard let prepared = view.text.drawingGlyphs(in: size) else { return nil }
+                return prepared.source.makeDrawing(
+                    lineGlyphs: prepared.lines,
                     origin: CGPoint(x: margins.leading, y: margins.top)
                 )
             }
 
             func glyphAtoms() -> [GraphicsContext.ResolvedText.GlyphAtom]? {
                 guard view.renderer == nil,
-                      let resolvedText = view.text.drawingSource(in: size) else {
+                      let prepared = view.text.drawingGlyphs(in: size) else {
                     return nil
                 }
                 let margins = view.text.drawingMargins
-                return resolvedText.glyphAtoms(
-                    in: size,
-                    layoutProperties: view.text.layoutProperties
-                ).map { atom in
+                return prepared.source.glyphAtoms(lineGlyphs: prepared.lines, in: size).map { atom in
                     var atom = atom
                     atom.bounds = atom.bounds
                         .offsetBy(dx: frame.minX + margins.leading,

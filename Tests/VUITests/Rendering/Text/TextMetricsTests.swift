@@ -200,7 +200,135 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textStringDrawingKitCacheOwnershipObserved textStringDrawingMetricsCacheReuseObserved
+    func testPreparedLayoutSurvivesConstraintAndCountMissesAndDrawing() throws {
+        for text in ["A", "A\n", "A A A A A A"] {
+            try withOwner(text) { owner in
+                XCTAssertNil(owner.preparedLayout)
+                let large = CGSize(width: 300, height: 81)
+                _ = owner.cachedMetrics(in: large)
+                let prepared = try XCTUnwrap(owner.preparedLayout)
+                let count = owner.metricsCacheEntryCount
+                _ = owner.metrics(in: large, layoutMargins: nil)
+                XCTAssertEqual(owner.metricsCacheEntryCount, count + 1)
+                XCTAssertTrue(owner.preparedLayout === prepared)
+                _ = owner.cachedMetrics(in: CGSize(width: 50, height: 60))
+                _ = owner.cachedMetrics(in: CGSize(width: 400, height: 120))
+                let beforeDraw = owner.metricsCacheEntryCount
+                let drawing = try XCTUnwrap(owner.drawingGlyphs(in: large))
+                XCTAssertFalse(drawing.lines.flatMap(\.glyphs).isEmpty)
+                XCTAssertEqual(owner.metricsCacheEntryCount, beforeDraw)
+                XCTAssertTrue(owner.preparedLayout === prepared)
+                let independent = ResolvedStyledText.StringDrawing(resolvedText: owner.resolvedText)
+                XCTAssertNil(independent.preparedLayout)
+                XCTAssertEqual(independent.metricsCacheEntryCount, 0)
+                _ = independent.cachedMetrics(in: large)
+                XCTAssertFalse(independent.preparedLayout === prepared)
+                XCTAssertTrue(owner.preparedLayout === prepared)
+            }
+        }
+        for text in ["", "\n\n"] {
+            try withOwner(text) { owner in
+                _ = owner.metrics(in: CGSize(width: 300, height: 81), layoutMargins: nil)
+                _ = owner.drawingGlyphs(in: CGSize(width: 300, height: 81))
+                XCTAssertEqual(owner.metricsCacheEntryCount, 1)
+                XCTAssertNil(owner.preparedLayout)
+            }
+        }
+    }
+
+    // ASSERTIONS textStringDrawingCacheInvalidationObserved textStringDrawingScaleOverrideReconstructionObserved
+    func testOverrideRebuildsOriginalFontsAndResetsEvenForEqualAssignments() throws {
+        for (text, halfHeight): (String, CGFloat) in [("A", 14), ("A\n", 28), ("\n\n", 42), ("", 14)] {
+            try withOwner(text) { owner in
+                let size = CGSize(width: 300, height: 81)
+                let original = owner.metrics(in: size, layoutMargins: nil)
+                let storage = owner.storage
+                for scale: CGFloat? in [0.5, 0.5, 0.333, 0.75, 1, nil] {
+                    weak var oldLayout = owner.preparedLayout
+                    XCTAssertGreaterThan(owner.metricsCacheEntryCount, 0)
+                    owner.scaleFactorOverride = scale
+                    XCTAssertEqual(owner.metricsCacheEntryCount, 0)
+                    XCTAssertNil(owner.preparedLayout)
+                    XCTAssertNil(oldLayout)
+                    XCTAssertTrue(owner.storage === storage)
+                    let result = owner.metrics(in: size, layoutMargins: nil)
+                    XCTAssertEqual(result.scale, 1)
+                    if scale == 0.5 { XCTAssertEqual(result.size.height, halfHeight) }
+                    if scale == 1 || scale == nil { XCTAssertEqual(result, original) }
+                    XCTAssertEqual(owner.drawingScale(size: size), scale ?? 1)
+                    let source = try XCTUnwrap(owner.drawingSource(in: size))
+                    if !text.isEmpty {
+                        XCTAssertEqual(source.uniformFont?.pointSize,
+                            scale == 0.5 ? 11.5 : scale == 0.333 ? 7.75 : scale == 0.75 ? 17.25 : 23)
+                        XCTAssertEqual(owner.resolvedText?.uniformFont?.pointSize, 23)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textStringDrawingScaleOverrideReconstructionObserved textStringDrawingScaledDrawingCacheGateObserved
+    func testOverrideDisablesFittingAndManagerResetRemainsIndependent() throws {
+        try withOwner("A A A A A A", configure: { $0.minimumScaleFactor = 0.25 }) { owner in
+            let size = CGSize(width: 50, height: 30)
+            let original = owner.metrics(in: size, layoutMargins: nil)
+            XCTAssertEqual(original.scale, 0.578125)
+            XCTAssertNil(owner.preparedLayout)
+            _ = owner.drawingGlyphs(in: size)
+            XCTAssertNil(owner.preparedLayout)
+            let manager = ResolvedStyledText.TextLayoutManager(resolvedText: owner.resolvedText)
+            let managerMetrics = manager.cachedLayoutMetrics(in: size)
+            manager.scaleFactorOverride = 0.5
+            XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+            XCTAssertEqual(manager.cachedLayoutMetrics(in: size), managerMetrics)
+            owner.scaleFactorOverride = 0.5
+            let small = CGSize(width: 20, height: 10)
+            let fixed = owner.metrics(in: small, layoutMargins: nil)
+            XCTAssertEqual(fixed.scale, 1)
+            XCTAssertEqual(fixed.size.height, 14)
+            XCTAssertNotNil(owner.preparedLayout)
+            XCTAssertEqual(owner.drawingScale(size: small), 0.5)
+            owner.scaleFactorOverride = nil
+            XCTAssertEqual(owner.metrics(in: size, layoutMargins: nil), original)
+            XCTAssertNil(owner.preparedLayout)
+            _ = owner.metrics(in: CGSize(width: 300, height: 81), layoutMargins: nil)
+            XCTAssertNil(owner.preparedLayout)
+        }
+    }
+
+    // ASSERTIONS textStringDrawingScaleOverrideReconstructionObserved
+    func testMixedFontOverridePreservesRunAttributesAndOriginalStorage() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let text = Text(verbatim: "A").baselineOffset(3).kerning(1.7)
+            + Text(verbatim: "B").font(.file(file, size: 15)).tracking(2.3)
+        try withOwner(text) { owner in
+            let size = CGSize(width: 300, height: 81)
+            let original = owner.storage
+            for (scale, sizes): (CGFloat?, [CGFloat]) in [(0.333, [7.75, 5]), (0.75, [17.25, 11.25]), (nil, [23, 15])] {
+                owner.scaleFactorOverride = scale
+                let source = try XCTUnwrap(owner.drawingSource(in: size))
+                let attributes = source.runs.compactMap { run -> _ResolvedTextRunAttributes? in
+                    if case let .styledText(_, _, _, attributes) = run { return attributes }
+                    return nil
+                }
+                XCTAssertEqual(attributes.compactMap { $0.fontResource?.pointSize }, sizes)
+                XCTAssertEqual(attributes[0].baselineOffset, 3)
+                XCTAssertEqual(attributes[0].kern, 1.7)
+                XCTAssertEqual(attributes[1].tracking, 2.3)
+                XCTAssertTrue(owner.storage === original)
+            }
+        }
+    }
+
     private func withOwner(_ text: String, configure: (inout EnvironmentValues) -> Void = { _ in },
+                           _ body: (ResolvedStyledText.StringDrawing) throws -> Void) throws {
+        try withOwner(Text(verbatim: text), configure: configure, body)
+    }
+
+    private func withOwner(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
                            _ body: (ResolvedStyledText.StringDrawing) throws -> Void) throws {
         let previous = appContext
         appContext = MetricsTestAppContext()
@@ -232,7 +360,7 @@ final class TextMetricsTests: XCTestCase {
                 containerPosition: graph.makeInput(value: CGPoint.zero),
                 size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
                 safeAreaInsets: OptionalAttribute(), containerSize: OptionalAttribute(), stackOrientation: nil)
-            let outputs = Text._makeView(view: _GraphValue(_attribute: graph.makeInput(value: Text(verbatim: text))),
+            let outputs = Text._makeView(view: _GraphValue(_attribute: graph.makeInput(value: text)),
                                          inputs: inputs)
             let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
             let engine = try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine

@@ -152,6 +152,63 @@ final class TextDrawingMarginTests: XCTestCase {
 
     // ASSERTIONS fontStyleLinePlacementObserved
     // ASSERTIONS textComponentFontLanguageAndRatioObserved
+    // ASSERTIONS textStringDrawingCacheInvalidationObserved textStringDrawingScaledDrawingCacheGateObserved
+    func testScaleOverrideResetPreservesImmediatePreparedAndRecordedPixels() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for renderScale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.font = .file(file, size: 23)
+                environment.defaultFontRenderingMode = mode
+                environment._contentScaleFactor = renderScale
+                environment.displayScale = 2
+                let text = Text(verbatim: "A A A A A A")
+                let source = try resolve(text, environment: environment)
+                let owner = ResolvedStyledText.StringDrawing(resolvedText: source)
+                let size = CGSize(width: 50, height: 60)
+                for (override, pointSize): (CGFloat?, CGFloat) in [(nil, 23), (0.5, 11.5), (0.5, 11.5), (0.333, 7.75), (nil, 23)] {
+                    owner.scaleFactorOverride = override
+                    let item = DisplayList.Content.TextValue(
+                        view: StyledTextContentView(text: owner, renderer: nil), size: size,
+                        frame: owner.frame(in: size, renderer: nil), shading: .color(.black),
+                        transform: .identity, command: .closure(bounds: nil))
+                    var referenceEnvironment = environment
+                    referenceEnvironment.font = .file(file, size: pointSize)
+                    let reference = try resolve(text, environment: referenceEnvironment)
+                    let referenceDrawing = reference.makeDrawing(in: size,
+                        origin: CGPoint(x: owner.drawingMargins.leading, y: owner.drawingMargins.top))
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black))
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    let preparedLayout = try XCTUnwrap(owner.preparedLayout)
+                    let drawing = try XCTUnwrap(item.makeDrawing())
+                    for operation in 0..<3 {
+                        let actual = try render(device: device, environment: environment) { context in
+                            if operation == 0 { item.draw(in: context) }
+                            else if operation == 1 { item.draw(drawing, in: context) }
+                            else {
+                                let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                                item.draw(in: recording)
+                                recording.recording!.draw(in: context)
+                            }
+                        }
+                        XCTAssertTrue(actual == expected,
+                            "\(mode) renderScale=\(renderScale) override=\(String(describing: override)) operation=\(operation)")
+                    }
+                    XCTAssertTrue(owner.preparedLayout === preparedLayout)
+                    XCTAssertEqual(source.uniformFont?.pointSize, 23)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textDrawingFrameCompensationObserved
     func testStyleLeadingPreservesPreparedAndRendererPixelsInBothModes() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }

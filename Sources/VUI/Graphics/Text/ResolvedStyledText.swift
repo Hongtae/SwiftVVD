@@ -503,7 +503,9 @@ class ResolvedStyledText: InterpolatableContent {
 
     var layoutProperties: TextLayoutProperties
     var layoutMargins: EdgeInsets
-    var scaleFactorOverride: CGFloat?
+    var scaleFactorOverride: CGFloat? {
+        didSet { resetCache() }
+    }
     var stylePadding: EdgeInsets
     var archiveOptions: ArchivedViewInput.Value
     var isCollapsible: Bool
@@ -611,6 +613,10 @@ class ResolvedStyledText: InterpolatableContent {
         0
     }
 
+    func resetCache() {
+        fatalError("ResolvedStyledText cache reset requires a concrete owner")
+    }
+
     /// Drawing padding is independent of typographic height and baselines.
     var drawingMargins: EdgeInsets {
         let outsets = maxFontMetrics?.outsets ?? EdgeInsets()
@@ -715,6 +721,12 @@ class ResolvedStyledText: InterpolatableContent {
         resolvedText
     }
 
+    func drawingGlyphs(in size: CGSize) -> (source: GraphicsContext.ResolvedText,
+                                          lines: [GraphicsContext.ResolvedText.LineGlyphs])? {
+        guard let source = drawingSource(in: size) else { return nil }
+        return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties).lines)
+    }
+
     var needsDynamicRenderingInArchive: Bool {
         if storage?._isDynamicText == true {
             return true
@@ -756,6 +768,18 @@ class ResolvedStyledText: InterpolatableContent {
 
 extension ResolvedStyledText {
     final class StringDrawing: ResolvedStyledText {
+        /// Retains prepared source lines across constraint changes. The arrays
+        /// share immutable glyph data with the resource's existing storage.
+        final class PreparedLayout {
+            let source: GraphicsContext.ResolvedText
+            let lines: [GraphicsContext.ResolvedText.LineGlyphs]
+
+            init(source: GraphicsContext.ResolvedText, lines: [GraphicsContext.ResolvedText.LineGlyphs]) {
+                self.source = source
+                self.lines = lines
+            }
+        }
+
         private struct Fragment {
             var lineRect: CGRect
             var usedRect: CGRect
@@ -767,15 +791,35 @@ extension ResolvedStyledText {
 
         // Retained proxies and the host share this owner's measurement entries.
         private var measurements: [(requestedSize: CGSize, metrics: NSAttributedString.Metrics)] = []
+        private var measurementSource: GraphicsContext.ResolvedText?
+        private(set) var preparedLayout: PreparedLayout?
 
         override var metricsCacheEntryCount: Int { measurements.count }
 
+        override func resetCache() {
+            measurementSource = resolvedText?.scalingFonts(by: scaleFactorOverride ?? 1)
+            preparedLayout = nil
+            measurements.removeAll()
+        }
+
         override func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
             guard let resolvedText else { return nil }
-            let metrics = cachedMetrics(in: size)
-            guard metrics.scale != 1, let font = resolvedText.uniformFont else { return resolvedText }
-            let pointSize = (font.pointSize * metrics.scale * 4).rounded() * 0.25
-            return resolvedText.resizingUniformFont(to: pointSize)
+            _ = cachedMetrics(in: size)
+            let scale = drawingScale(size: size)
+            if scale == 1, let preparedLayout { return preparedLayout.source }
+            return resolvedText.scalingFonts(by: scale)
+        }
+
+        func drawingScale(size: CGSize) -> CGFloat {
+            scaleFactorOverride ?? (layoutProperties.minScaleFactor == 1 ? 1 : cachedMetrics(in: size).scale)
+        }
+
+        override func drawingGlyphs(in size: CGSize) -> (source: GraphicsContext.ResolvedText,
+                                                        lines: [GraphicsContext.ResolvedText.LineGlyphs])? {
+            guard let source = drawingSource(in: size) else { return nil }
+            let prepared = drawingScale(size: size) == 1 ? preparedLayout : nil
+            return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties,
+                                                   sourceLines: prepared?.lines).lines)
         }
 
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
@@ -798,7 +842,10 @@ extension ResolvedStyledText {
 
         func cachedMetrics(in size: CGSize, layoutMargins: EdgeInsets? = nil,
                            wantsNumberOfLineFragments: Bool = false) -> NSAttributedString.Metrics {
-            guard let resolvedText else {
+            if measurementSource == nil {
+                measurementSource = resolvedText?.scalingFonts(by: scaleFactorOverride ?? 1)
+            }
+            guard let resolvedText = measurementSource else {
                 fatalError("StringDrawing metrics require resolved text")
             }
             if let entry = measurements.first(where: { entry in
@@ -821,9 +868,22 @@ extension ResolvedStyledText {
             let normalizedWidth = drawingDimension(requestedWidth)
             let normalizedHeight = drawingDimension(available.height)
             let drawingSize = CGSize(width: normalizedWidth, height: normalizedHeight)
-            let fitted = fontFittingMetrics(in: drawingSize, source: resolvedText)
-            let measurement = fitted?.measurement ?? fittingMeasurement(in: drawingSize, source: resolvedText,
-                                                                        layoutProperties: layoutProperties)
+            let fitted = scaleFactorOverride == nil ? fontFittingMetrics(in: drawingSize, source: resolvedText) : nil
+            let measurement: FittingMeasurement
+            if let fitted {
+                // Font fitting measures independent candidates with layout
+                // retention disabled, including a natural-size early return.
+                preparedLayout = nil
+                measurement = fitted.measurement
+            } else {
+                let sources = preparedLayout?.lines ?? resolvedText.unwrappedGlyphLines()
+                if preparedLayout == nil, !resolvedText.hasAttachments,
+                   sources.contains(where: { !$0.glyphs.isEmpty }) {
+                    preparedLayout = PreparedLayout(source: resolvedText, lines: sources)
+                }
+                measurement = fittingMeasurement(in: drawingSize, source: resolvedText,
+                    layoutProperties: layoutProperties, sourceLines: sources)
+            }
             var metrics = measurement.metrics
             let clippedWidth = fitted == nil ? min(metrics.size.width, normalizedWidth) : metrics.size.width
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
@@ -937,9 +997,10 @@ extension ResolvedStyledText {
         }
 
         private func fittingMeasurement(
-            in size: CGSize, source: GraphicsContext.ResolvedText, layoutProperties: TextLayoutProperties
+            in size: CGSize, source: GraphicsContext.ResolvedText, layoutProperties: TextLayoutProperties,
+            sourceLines: [GraphicsContext.ResolvedText.LineGlyphs]? = nil
         ) -> FittingMeasurement {
-            let sources = source.unwrappedGlyphLines()
+            let sources = sourceLines ?? source.unwrappedGlyphLines()
             if let measured = separatorMeasurement(in: size, source: source, sources: sources,
                                                     layoutProperties: layoutProperties)
                 ?? trailingParagraphMeasurement(in: size, source: source, sources: sources,
@@ -950,7 +1011,8 @@ extension ResolvedStyledText {
             let layout = source.makeGlyphLayout(
                 maxWidth: width >= CGFloat(Int.max) ? .max : Int(ceil(width)),
                 maximumHeight: size.height * source.scaleFactor,
-                lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+                lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode,
+                sourceLines: sources)
             return .init(metrics: source.unroundedLayoutMetrics(lineGlyphs: layout.lines), lineCount: layout.lineCount,
                          forcedClusterBreak: layout.forcedClusterBreak, truncatedRanges: layout.truncatedRanges)
         }
@@ -1075,9 +1137,9 @@ extension ResolvedStyledText {
                   layoutProperties.truncationMode == .tail,
                   layoutProperties.lineLimit.map({ $0 >= 2 }) ?? true else { return nil }
             let pixelWidth = size.width * resolvedText.scaleFactor
-            let lines = resolvedText.makeGlyphs(
+            let lines = resolvedText.makeGlyphLayout(
                 maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
-                maximumHeight: .infinity)
+                maximumHeight: .infinity, sourceLines: sources).lines
             // A completed single content line admits its trailing fragment only
             // when that complete rectangle fits. It does not truncate the line
             // merely because the final empty fragment failed the height check.
@@ -1093,6 +1155,8 @@ extension ResolvedStyledText {
         private var measurements: [MeasurementEntry] = []
 
         override var metricsCacheEntryCount: Int { measurements.count }
+
+        override func resetCache() {}
 
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             guard proposal != .zero else { return .zero }

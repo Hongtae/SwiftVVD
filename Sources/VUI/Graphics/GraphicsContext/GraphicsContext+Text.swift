@@ -207,6 +207,37 @@ extension GraphicsContext {
             return result
         }
 
+        /// Rebuilds font attributes from the original requests. Spacing,
+        /// baseline offsets, attachments and custom attributes keep their units.
+        func scalingFonts(by scale: CGFloat) -> Self {
+            guard scale != 1 else { return self }
+            let scaledRuns = runs.map { run -> Run in
+                guard case let .styledText(_, text, custom, originalAttributes) = run,
+                      let original = originalAttributes.fontResource else { return run }
+                guard let resized = original.fontWithSize((original.pointSize * scale * 4).rounded() * 0.25) else {
+                    return run
+                }
+                guard let context = fontResolutionContext else {
+                    preconditionFailure("Scaling resolved font attributes requires their resolution context")
+                }
+                var attributes = originalAttributes
+                attributes.fontResource = resized
+                let font = Font(provider: FontBox(Font.PlatformFontProvider(font: resized)))
+                attributes.font = font
+                let faces = font.typefaceCascade(in: context.environment, forContext: context.sceneResources,
+                    contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces
+                return .styledText(faces, text, custom, attributes)
+            }
+            var result = Self(runs: scaledRuns, scaleFactor: scaleFactor, displayScale: displayScale,
+                drawMissingGlyphs: drawMissingGlyphs, outsetData: storage.outsetData,
+                preferredLanguages: storage.preferredLanguages)
+            result.defaultLineMetrics = defaultLineMetrics
+            result.resolvedProperties = resolvedProperties
+            result.fontResolutionContext = fontResolutionContext
+            result.shading = shading
+            return result
+        }
+
         var attributedStorage: NSAttributedString {
             let result = NSMutableAttributedString(string: "")
             for run in runs {
@@ -529,6 +560,11 @@ extension GraphicsContext {
                 lineLimit: layoutProperties?.lineLimit,
                 truncationMode: layoutProperties?.truncationMode ?? .tail
             )
+            return glyphAtoms(lineGlyphs: lines, in: size)
+        }
+
+        func glyphAtoms(lineGlyphs lines: [LineGlyphs], in size: CGSize) -> [GlyphAtom] {
+            let width = max(size.width, 0) * scaleFactor
             let scale = 1 / scaleFactor
             var atoms: [GlyphAtom] = []
             for line in lines {
@@ -972,15 +1008,23 @@ extension GraphicsContext {
             maxWidth: Int,
             maximumHeight: CGFloat,
             lineLimit: Int? = nil,
-            truncationMode: Text.TruncationMode = .tail
+            truncationMode: Text.TruncationMode = .tail,
+            sourceLines: [LineGlyphs]? = nil
         ) -> GlyphLayout {
             _lineWrap(
-                unwrappedGlyphLines(),
+                sourceLines ?? unwrappedGlyphLines(),
                 maxWidth: maxWidth,
                 maxHeight: maximumHeight,
                 lineLimit: lineLimit,
                 truncationMode: truncationMode
             )
+        }
+
+        func makeGlyphLayout(in size: CGSize, layoutProperties: TextLayoutProperties,
+                             sourceLines: [LineGlyphs]? = nil) -> GlyphLayout {
+            makeGlyphLayout(maxWidth: Self.pixelLimit(max(size.width, 0) * scaleFactor),
+                maximumHeight: max(size.height, 0) * scaleFactor, lineLimit: layoutProperties.lineLimit,
+                truncationMode: layoutProperties.truncationMode, sourceLines: sourceLines)
         }
 
         func unwrappedGlyphLines() -> [LineGlyphs] {
