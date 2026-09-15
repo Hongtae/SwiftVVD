@@ -731,10 +731,21 @@ class ResolvedStyledText: InterpolatableContent {
         resolvedText
     }
 
-    func drawingGlyphs(in size: CGSize) -> (source: ResolvedTextSource,
-                                          lines: [ResolvedTextSource.LineGlyphs])? {
+    func drawingGlyphs(in size: CGSize, layoutSize: CGSize? = nil,
+                       containsResolvable: Bool = false)
+        -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs])? {
         guard let source = drawingSource(in: size) else { return nil }
-        return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties).lines)
+        return (source, source.makeGlyphLayout(in: layoutSize ?? size, layoutProperties: layoutProperties).lines)
+    }
+
+    func prepareDrawing(in rect: CGRect, with size: CGSize,
+                        applyingMarginOffsets: Bool, containsResolvable: Bool = false)
+        -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+        guard let prepared = drawingGlyphs(in: size, containsResolvable: containsResolvable) else { return nil }
+        let margins = applyingMarginOffsets ? drawingMargins : EdgeInsets()
+        return (prepared.source, prepared.lines,
+                CGRect(x: rect.origin.x + margins.leading, y: rect.origin.y + margins.top,
+                       width: size.width, height: size.height))
     }
 
     var needsDynamicRenderingInArchive: Bool {
@@ -824,12 +835,72 @@ extension ResolvedStyledText {
             scaleFactorOverride ?? (layoutProperties.minScaleFactor == 1 ? 1 : cachedMetrics(in: size).scale)
         }
 
-        override func drawingGlyphs(in size: CGSize) -> (source: ResolvedTextSource,
-                                                        lines: [ResolvedTextSource.LineGlyphs])? {
+        override func drawingGlyphs(in size: CGSize, layoutSize: CGSize? = nil,
+                                    containsResolvable: Bool = false)
+            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs])? {
             guard let source = drawingSource(in: size) else { return nil }
-            let prepared = drawingScale(size: size) == 1 ? preparedLayout : nil
-            return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties,
-                                                   sourceLines: prepared?.lines).lines)
+            let prepared = drawingScale(size: size) == 1 && !containsResolvable ? preparedLayout : nil
+            return (source, source.makeGlyphLayout(in: layoutSize ?? size, layoutProperties: layoutProperties,
+                                                  sourceLines: prepared?.lines).lines)
+        }
+
+        func drawingBounds(in rect: CGRect, with size: CGSize, applyingMarginOffsets: Bool) -> CGRect {
+            let metrics = cachedMetrics(in: size)
+            var bounds = CGRect(x: rect.origin.x, y: rect.origin.y + metrics.baselineAdjustment,
+                                width: metrics.size.width + layoutProperties.bodyHeadOutdent,
+                                height: metrics.size.height)
+            if applyingMarginOffsets {
+                if !bounds.isNull {
+                    bounds = bounds.standardized
+                    bounds.origin.x += layoutMargins.leading
+                    bounds.origin.y += layoutMargins.top
+                    bounds.size.width -= layoutMargins.leading + layoutMargins.trailing
+                    bounds.size.height -= layoutMargins.top + layoutMargins.bottom
+                    if bounds.width < 0 || bounds.height < 0 { bounds = .null }
+                }
+                let margins = drawingMargins
+                bounds.origin.x += margins.leading - layoutMargins.leading
+                bounds.origin.y += margins.top - layoutMargins.top
+            }
+            if layoutProperties.hyphenationFactor != 0, metrics.requestedWidth != .infinity {
+                let adjustment = bounds.size.width - metrics.requestedWidth
+                switch layoutProperties.multilineTextAlignment {
+                case .center: bounds.origin.x += adjustment * 0.5
+                case .leading:
+                    if layoutProperties.layoutDirection == .rightToLeft { bounds.origin.x += adjustment }
+                case .trailing:
+                    if layoutProperties.layoutDirection == .leftToRight { bounds.origin.x += adjustment }
+                }
+                bounds.size.width = metrics.requestedWidth
+            }
+            return bounds
+        }
+
+        override func prepareDrawing(in rect: CGRect, with size: CGSize,
+                                     applyingMarginOffsets: Bool, containsResolvable: Bool = false)
+            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+            guard resolvedText != nil else { return nil }
+            let bounds = drawingBounds(in: rect, with: size, applyingMarginOffsets: applyingMarginOffsets)
+            // A zero drawing extent leaves that axis unconstrained. Measurement
+            // keeps its separate narrow-proposal normalization and cached result.
+            let layoutSize = CGSize(width: bounds.size.width == 0 ? .infinity : bounds.size.width,
+                                    height: bounds.size.height == 0 ? .infinity : bounds.size.height)
+            guard var prepared = drawingGlyphs(in: size, layoutSize: layoutSize,
+                                               containsResolvable: containsResolvable) else { return nil }
+            let width = bounds.size.width == 0
+                ? prepared.lines.map(\.width).max() ?? 0
+                : bounds.size.width * prepared.source.scaleFactor
+            for index in prepared.lines.indices {
+                let extra = width - prepared.lines[index].width
+                switch layoutProperties.multilineTextAlignment {
+                case .center: prepared.lines[index].originX = extra * 0.5
+                case .leading:
+                    prepared.lines[index].originX = layoutProperties.layoutDirection == .rightToLeft ? extra : 0
+                case .trailing:
+                    prepared.lines[index].originX = layoutProperties.layoutDirection == .leftToRight ? extra : 0
+                }
+            }
+            return (prepared.source, prepared.lines, bounds)
         }
 
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {

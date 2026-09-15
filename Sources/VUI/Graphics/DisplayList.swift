@@ -1262,25 +1262,26 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
             func makeDrawing() -> ResolvedTextSource.Drawing? {
                 guard view.renderer == nil else { return nil }
-                let margins = view.text.drawingMargins
-                guard let prepared = view.text.drawingGlyphs(in: size) else { return nil }
+                guard let prepared = view.text.prepareDrawing(in: frame, with: size,
+                                                              applyingMarginOffsets: true) else { return nil }
                 return prepared.source.makeDrawing(
                     lineGlyphs: prepared.lines,
-                    origin: CGPoint(x: margins.leading, y: margins.top)
+                    origin: CGPoint(x: prepared.bounds.origin.x - frame.origin.x,
+                                    y: prepared.bounds.origin.y - frame.origin.y)
                 )
             }
 
             func glyphAtoms() -> [ResolvedTextSource.GlyphAtom]? {
                 guard view.renderer == nil,
-                      let prepared = view.text.drawingGlyphs(in: size) else {
+                      let prepared = view.text.prepareDrawing(in: frame, with: size,
+                                                               applyingMarginOffsets: true) else {
                     return nil
                 }
-                let margins = view.text.drawingMargins
                 return prepared.source.glyphAtoms(lineGlyphs: prepared.lines, in: size).map { atom in
                     var atom = atom
                     atom.bounds = atom.bounds
-                        .offsetBy(dx: frame.minX + margins.leading,
-                                  dy: frame.minY + margins.top)
+                        .offsetBy(dx: prepared.bounds.origin.x,
+                                  dy: prepared.bounds.origin.y)
                         .applying(transform)
                         .standardized
                     return atom

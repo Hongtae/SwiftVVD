@@ -4,6 +4,125 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textStringDrawingHorizontalLinePlacementObserved textStringDrawingDrawGeometryObserved
+    func testAlignedLinesMoveGlyphsBackgroundsDecorationsAndAtomsTogether() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for (alignment, direction): (TextAlignment, LayoutDirection) in [
+                (.leading, .leftToRight), (.center, .leftToRight), (.trailing, .leftToRight),
+                (.leading, .rightToLeft), (.center, .rightToLeft), (.trailing, .rightToLeft)
+            ] {
+                var environment = EnvironmentValues()
+                environment.font = .system(size: 23)
+                environment.defaultFontRenderingMode = mode
+                environment.displayScale = 2
+                environment.multilineTextAlignment = alignment
+                environment.layoutDirection = direction
+                var attributed = AttributedString("HHH\nH")
+                attributed.backgroundColor = VUI.Color.blue
+                let text = Text(attributed).foregroundColor(.red).underline(true, color: .green)
+                let source = try resolve(text, environment: environment)
+                let properties = TextLayoutProperties(from: environment)
+                let owner = ResolvedStyledText.StringDrawing(layoutProperties: properties, resolvedText: source)
+                let size = CGSize(width: 100, height: 81)
+                let metrics = owner.cachedMetrics(in: size)
+                let rect = CGRect(x: 10, y: 10, width: 100, height: 81)
+                let lines = source.makeGlyphLayout(in: size, layoutProperties: properties).lines
+                XCTAssertEqual(lines.count, 2)
+                let fraction: CGFloat = alignment == .center ? 0.5
+                    : (alignment == .leading) == (direction == .leftToRight) ? 0 : 1
+                let offsets = lines.map { (metrics.size.width - $0.width / source.scaleFactor) * fraction }
+                XCTAssertGreaterThan(offsets[1] - offsets[0], fraction == 0 ? -1 : 0)
+                let expected = try render(device: device, environment: environment) { context in
+                    for (line, x) in zip(lines, offsets) {
+                        let drawing = source.makeDrawing(lineGlyphs: [line], origin: CGPoint(x: x, y: metrics.baselineAdjustment))
+                        context.draw(drawing, in: rect, shading: .color(.red),
+                                     snappingOrigin: CGPoint(x: rect.minX, y: rect.minY + metrics.baselineAdjustment),
+                                     clipBounds: false)
+                    }
+                }
+                XCTAssertTrue(expected.contains { $0 != 0 })
+                for record in [false, true] {
+                    let actual = try render(device: device, environment: environment) { context in
+                        let drawing = record ? context.recordingContext(size: CGSize(width: 128, height: 128)) : context
+                        drawing.draw(drawing.resolve(text), in: rect)
+                        if record { drawing.recording!.draw(in: context) }
+                    }
+                    XCTAssertTrue(actual == expected, "Canvas \(mode) \(alignment) \(direction) replay=\(record)")
+                }
+                let item = DisplayList.Content.TextValue(
+                    view: StyledTextContentView(text: owner, renderer: nil), size: size, frame: rect,
+                    shading: .color(.red), transform: .identity, command: .closure(bounds: nil))
+                let atoms = try XCTUnwrap(item.glyphAtoms())
+                let rawAtoms = source.glyphAtoms(lineGlyphs: lines, in: size)
+                XCTAssertEqual(atoms.count, rawAtoms.count)
+                for (atom, raw) in zip(atoms, rawAtoms) {
+                    let line = raw.bounds.minY == 0 ? 0 : 1
+                    XCTAssertEqual(atom.bounds.minX, raw.bounds.minX + rect.minX + owner.drawingMargins.leading + offsets[line], accuracy: 1e-10)
+                    XCTAssertEqual(atom.bounds.minY, raw.bounds.minY + rect.minY + owner.drawingMargins.top + metrics.baselineAdjustment, accuracy: 1e-10)
+                }
+                let displayExpected = try render(device: device, environment: environment) { context in
+                    for (line, x) in zip(lines, offsets) {
+                        let drawing = source.makeDrawing(lineGlyphs: [line], origin: CGPoint(
+                            x: x + owner.drawingMargins.leading,
+                            y: metrics.baselineAdjustment + owner.drawingMargins.top))
+                        context.draw(drawing, in: rect, shading: .color(.red), snappingOrigin: CGPoint(
+                            x: rect.minX + owner.drawingMargins.leading,
+                            y: rect.minY + metrics.baselineAdjustment + owner.drawingMargins.top))
+                    }
+                }
+                let prepared = try XCTUnwrap(item.makeDrawing())
+                for operation in 0..<3 {
+                    let actual = try render(device: device, environment: environment) { context in
+                        if operation == 0 { item.draw(in: context) }
+                        else if operation == 1 { item.draw(prepared, in: context) }
+                        else {
+                            let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                            item.draw(in: recording)
+                            recording.recording!.draw(in: context)
+                        }
+                    }
+                    XCTAssertTrue(actual == displayExpected, "DisplayList \(mode) \(alignment) \(direction) operation=\(operation)")
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textStringDrawingDrawGeometryObserved
+    func testCanvasDrawingKeepsOriginForZeroAndNegativeProposals() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            var environment = EnvironmentValues()
+            environment.font = .system(size: 23)
+            environment.defaultFontRenderingMode = mode
+            environment.displayScale = 2
+            let text = Text(verbatim: "HHH").foregroundColor(.red)
+            let source = try resolve(text, environment: environment)
+            let origin = CGPoint(x: 30, y: 30)
+            let reference = try render(device: device, environment: environment) {
+                $0.draw(source, in: CGRect(origin: origin, size: CGSize(width: 100, height: 81)))
+            }
+            XCTAssertTrue(reference.contains { $0 != 0 })
+            for size in [CGSize(width: 100, height: 0), CGSize(width: 100, height: -20),
+                         CGSize(width: 0, height: 81), CGSize(width: -50, height: 81), .zero] {
+                for record in [false, true] {
+                    let actual = try render(device: device, environment: environment) { context in
+                        let drawing = record ? context.recordingContext(size: CGSize(width: 128, height: 128)) : context
+                        drawing.draw(drawing.resolve(text), in: CGRect(origin: origin, size: size))
+                        if record { drawing.recording!.draw(in: context) }
+                    }
+                    XCTAssertTrue(actual == reference, "\(mode) proposal=\(size) replay=\(record)")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS canvasTextForegroundKeyColorObserved canvasTextForegroundShadingObserved
     func testCanvasShadingPreservesExplicitRunsAndDecorationColorsThroughReplay() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }

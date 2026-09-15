@@ -526,6 +526,7 @@ struct ResolvedTextSource {
         var isTruncated: Bool = false
         var forcedClusterBreak: Bool = false
         // Placement is resolved after wrapping and shared by all consumers.
+        var originX: CGFloat = 0
         var originY: CGFloat = 0
         var spacing: CGFloat = 0
         var paragraphStartSpacing: CGFloat = 0
@@ -573,7 +574,7 @@ struct ResolvedTextSource {
             let fallbackAdvance = line.width > 0 || line.glyphs.isEmpty
                 ? CGFloat.zero
                 : width / CGFloat(clusterCount)
-            var glyphOriginX: CGFloat = 0
+            var glyphOriginX = line.originX
             var pendingAtom: GlyphAtom?
             for (index, glyph) in line.glyphs.enumerated() {
                 let continuesCluster = index > 0 &&
@@ -1286,7 +1287,7 @@ struct ResolvedTextSource {
         }
 
         for line in lineGlyphs {
-            var cellOriginX: CGFloat = 0
+            var cellOriginX = line.originX
             for (index, glyph) in line.glyphs.enumerated() {
                 let kerning = index == 0 ? 0 : glyph.kerning.x
                 let cellWidth = kerning + glyph.advance.width
@@ -1389,9 +1390,9 @@ struct ResolvedTextSource {
     ) {
         var offset: CGPoint = .zero
         for line in lineGlyphs {
-            offset = CGPoint(x: 0, y: line.originY)
+            offset = CGPoint(x: line.originX, y: line.originY)
             for glyph in line.glyphs {
-                let kerning: CGPoint = offset.x > 0
+                let kerning: CGPoint = offset.x > line.originX
                     ? glyph.kerning
                     : .zero
                 offset += kerning

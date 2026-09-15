@@ -4,6 +4,100 @@ import VVD
 @testable import VUI
 
 final class GraphicsContextTextTests: XCTestCase {
+    // ASSERTIONS textParagraphDirectionalAlignmentAggregationObserved
+    func testCanvasPreservesLogicalAndExplicitPhysicalAlignment() throws {
+        try withContext { original in
+            for direction: LayoutDirection in [.leftToRight, .rightToLeft] {
+                for alignment: TextAlignment in [.leading, .center, .trailing] {
+                    var context = original
+                    context.environment.layoutDirection = direction
+                    context.environment.multilineTextAlignment = alignment
+                    let plain = context.resolve(Text(verbatim: "HHH\nH"))
+                    XCTAssertEqual(plain.resolved.layoutProperties.multilineTextAlignment, alignment)
+                    XCTAssertEqual(plain.resolved.layoutProperties.layoutDirection, direction)
+                    for (physical, expected): (TextParagraphAlignment, TextAlignment) in [
+                        (.left, direction == .leftToRight ? .leading : .trailing), (.center, .center),
+                        (.right, direction == .leftToRight ? .trailing : .leading)
+                    ] {
+                        var attributed = AttributedString("HHH\nH")
+                        attributed[TextParagraphAlignmentAttribute.self] = physical
+                        let text = context.resolve(Text(attributed))
+                        XCTAssertEqual(text.resolved.layoutProperties.multilineTextAlignment, expected)
+                        XCTAssertEqual(text.resolved.layoutProperties.layoutDirection, direction)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textStringDrawingDrawGeometryObserved textStringDrawingRequestedDrawingWidthObserved
+    func testDrawingBoundsKeepTheMeasurementProposalAndCachedWidthSeparate() throws {
+        try withContext { context in
+            let owner = try XCTUnwrap(context.resolve(Text(verbatim: "HHH")).resolved as? ResolvedStyledText.StringDrawing)
+            owner.layoutMargins = .init(top: 1.25, leading: 2.5, bottom: 3.75, trailing: 4.5)
+            owner.layoutProperties.bodyHeadOutdent = 6
+            let metrics = owner.cachedMetrics(in: CGSize(width: 300, height: 81))
+            let request = CGSize(width: 100, height: 60)
+            let rect = CGRect(x: 32.25, y: 32.25, width: 1000, height: 1000)
+            let ordinary = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: false)
+            XCTAssertEqual(ordinary.origin.x, 32.25)
+            XCTAssertEqual(ordinary.origin.y, 32.25 + metrics.baselineAdjustment)
+            XCTAssertEqual(ordinary.size.width, metrics.size.width + 6)
+            XCTAssertEqual(ordinary.size.height, metrics.size.height)
+            XCTAssertEqual(ordinary, owner.drawingBounds(in: CGRect(origin: rect.origin, size: .zero),
+                                                        with: request, applyingMarginOffsets: false))
+            let inset = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: true)
+            XCTAssertEqual(inset.origin.x - ordinary.origin.x, owner.drawingMargins.leading)
+            XCTAssertEqual(inset.origin.y - ordinary.origin.y, owner.drawingMargins.top)
+            XCTAssertEqual(ordinary.size.width - inset.size.width, 7)
+            XCTAssertEqual(ordinary.size.height - inset.size.height, 5)
+            owner.layoutProperties.hyphenationFactor = 0.7
+            for direction: LayoutDirection in [.leftToRight, .rightToLeft] {
+                owner.layoutProperties.layoutDirection = direction
+                for alignment: TextAlignment in [.leading, .center, .trailing] {
+                    owner.layoutProperties.multilineTextAlignment = alignment
+                    for margins in [false, true] {
+                        let drawing = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: margins)
+                        let reference = margins ? inset : ordinary
+                        XCTAssertEqual(drawing.size.width, 299)
+                        XCTAssertEqual(drawing.origin.y, reference.origin.y)
+                        XCTAssertEqual(drawing.size.height, reference.size.height)
+                        if alignment == .center { XCTAssertEqual(drawing.midX, reference.midX) }
+                        else if (alignment == .leading) == (direction == .leftToRight) {
+                            XCTAssertEqual(drawing.minX, reference.minX)
+                        } else { XCTAssertEqual(drawing.maxX, reference.maxX) }
+                    }
+                }
+            }
+            XCTAssertEqual(owner.cachedMetrics(in: request).requestedWidth, 299)
+            XCTAssertEqual(owner.metricsCacheEntryCount, 1)
+        }
+    }
+
+    // ASSERTIONS textStringDrawingResolvableLayoutGateObserved
+    func testResolvableDrawingKeepsTheOwnersPreparedLayoutAndMeasurements() throws {
+        XCTAssertNil(ResolvedStyledText.StringDrawing().prepareDrawing(in: .zero, with: .zero,
+                                                                      applyingMarginOffsets: false))
+        try withContext { context in
+            let owner = try XCTUnwrap(context.resolve(Text(verbatim: "HHH\nH")).resolved as? ResolvedStyledText.StringDrawing)
+            let request = CGSize(width: 160, height: 81)
+            let measurement = owner.cachedMetrics(in: request)
+            let cache = try XCTUnwrap(owner.preparedLayout)
+            let rect = CGRect(x: 12, y: 7, width: 160, height: 81)
+            let ordinary = try XCTUnwrap(owner.prepareDrawing(in: rect, with: request, applyingMarginOffsets: false))
+            for flag in [true, false, true] {
+                let drawing = try XCTUnwrap(owner.prepareDrawing(in: rect, with: request,
+                    applyingMarginOffsets: false, containsResolvable: flag))
+                XCTAssertEqual(drawing.bounds, ordinary.bounds)
+                XCTAssertEqual(drawing.lines.map(\.width), ordinary.lines.map(\.width))
+                XCTAssertEqual(drawing.lines.map(\.baseline), ordinary.lines.map(\.baseline))
+                XCTAssertTrue(owner.preparedLayout === cache)
+                XCTAssertEqual(owner.cachedMetrics(in: request).size, measurement.size)
+                XCTAssertEqual(owner.metricsCacheEntryCount, 1)
+            }
+        }
+    }
+
     // ASSERTIONS canvasTextForegroundKeyColorObserved
     func testCanvasForegroundOptionsReachNestedAttributedAndLocalizedRuns() throws {
         try withContext { context in

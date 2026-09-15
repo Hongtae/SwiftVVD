@@ -32,11 +32,11 @@ extension GraphicsContext {
     }
 
     public func draw(_ text: ResolvedText, in rect: CGRect) {
-        let rect = rect.standardized
-        guard !rect.isEmpty, !rect.isNull,
-              let prepared = text.resolved.drawingGlyphs(in: rect.size) else { return }
+        guard !rect.isNull,
+              let prepared = text.resolved.prepareDrawing(in: rect, with: rect.size,
+                                                           applyingMarginOffsets: false) else { return }
         let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines)
-        draw(drawing, in: rect, shading: text.shading, clipBounds: false)
+        draw(drawing, in: prepared.bounds, shading: text.shading, clipBounds: false)
     }
 
     func draw(_ text: ResolvedTextSource, in rect: CGRect) {

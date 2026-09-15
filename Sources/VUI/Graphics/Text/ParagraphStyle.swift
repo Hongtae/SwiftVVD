@@ -119,10 +119,12 @@ final class TextParagraphStyle: Codable, Equatable {
     /// Keeps logical leading/trailing separate from physical left/right alignment.
     enum HorizontalAlignment: Int, Codable {
         case leading, trailing, left, right, center
-        var textAlignment: TextAlignment {
+        func textAlignment(for layoutDirection: LayoutDirection) -> TextAlignment {
             switch self {
-            case .leading, .left: .leading
-            case .trailing, .right: .trailing
+            case .leading: .leading
+            case .trailing: .trailing
+            case .left: layoutDirection == .leftToRight ? .leading : .trailing
+            case .right: layoutDirection == .leftToRight ? .trailing : .leading
             case .center: .center
             }
         }
@@ -274,7 +276,7 @@ extension Text.ResolvedProperties {
         let cached = paragraph.markParagraphBoundary(at: index, in: text, environment: environment)
         guard let cached else { return }
         if oldStart > 0 && multilineTextAlignment == nil { return }
-        let alignment = cached.horizontalAlignment.textAlignment
+        let alignment = cached.horizontalAlignment.textAlignment(for: environment.layoutDirection)
         if oldStart == 0 { multilineTextAlignment = alignment }
         else if multilineTextAlignment != alignment { multilineTextAlignment = nil }
     }
