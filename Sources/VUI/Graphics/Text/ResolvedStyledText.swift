@@ -229,6 +229,12 @@ extension Text {
         var paragraph: Paragraph
         var multilineTextAlignment: TextAlignment?
 
+        mutating func addColor(_ color: Color.ResolvedHDR) {
+            if color.base.linearRed == -1 && color.base.linearGreen == -1 {
+                features.insert(.keyColor)
+            }
+        }
+
         init(
             insets: EdgeInsets = EdgeInsets(),
             features: Features = [],

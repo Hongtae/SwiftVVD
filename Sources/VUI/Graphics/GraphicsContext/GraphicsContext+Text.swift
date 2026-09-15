@@ -82,6 +82,17 @@ extension GraphicsContext {
                     snappingOrigin: snappingOrigin, clipBounds: clipBounds)
         }) { return }
 
+        func runShading(_ color: Color?) -> Shading {
+            guard let color else { return shading }
+            let resolved = color.resolve(in: environment)
+            // Foreground placeholders select the caller's shading without
+            // changing explicit run colors or decoration colors.
+            if resolved.linearRed == -1 && resolved.linearGreen == -1 && resolved.linearBlue == -1 {
+                return shading
+            }
+            return .color(color)
+        }
+
         var scissorRect: ScissorRect? = nil
         if snapOrigin || clipBounds {
             let transform = self.transform
@@ -156,7 +167,7 @@ extension GraphicsContext {
             ) {
                 self.encodeShadingBoxCommand(
                     renderPass: renderPass,
-                    shading: batch.foregroundColor.map(Shading.color) ?? shading,
+                    shading: runShading(batch.foregroundColor),
                     stencil: .testNonZero,
                     blendState: .opaque,
                     bounds: rect
@@ -188,9 +199,9 @@ extension GraphicsContext {
                                        colorGlyphs: false,
                                        foregroundColor: foregroundColor,
                                        filtersForegroundColor: true)
-            let runShading = foregroundColor.map(Shading.color) ?? shading
+            let shading = runShading(foregroundColor)
             self.encodeShadingBoxCommand(renderPass: renderPass,
-                                         shading: runShading,
+                                         shading: shading,
                                          stencil: .ignore,
                                          blendState: .multiply,
                                          bounds: rect)
@@ -232,8 +243,7 @@ extension GraphicsContext {
             path.addLine(to: end)
             self.stroke(
                 path,
-                with: decoration.foregroundColor.map(Shading.color) ??
-                    shading,
+                with: runShading(decoration.foregroundColor),
                 style: StrokeStyle(
                     lineWidth: lineWidth,
                     lineCap: .butt,
@@ -247,7 +257,7 @@ extension GraphicsContext {
     public func resolve(_ text: Text) -> ResolvedText {
         guard let resolved = text._resolveStyledText(
             context: self, referenceDate: Date(), archiveOptions: .init(),
-            features: [], sizeFitting: false
+            features: [], sizeFitting: false, options: .foregroundKeyColor
         ) else {
             fatalError("A graphics text context must resolve every attachment.")
         }

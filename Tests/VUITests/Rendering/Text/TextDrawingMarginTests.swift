@@ -4,6 +4,108 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS canvasTextForegroundKeyColorObserved canvasTextForegroundShadingObserved
+    func testCanvasShadingPreservesExplicitRunsAndDecorationColorsThroughReplay() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        let red = Color(.sRGB, red: 1, green: 0, blue: 0)
+        let blue = Color(.sRGB, red: 0, green: 0, blue: 1)
+        let green = Color(.sRGB, red: 0, green: 1, blue: 0)
+        let rect = CGRect(x: 0, y: 0, width: 110, height: 48)
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.font = .system(size: 32)
+                environment.defaultFontRenderingMode = mode
+                environment._contentScaleFactor = scale
+                environment.displayScale = 2
+                environment.foregroundStyleLevels = .init(primary: AnyShapeStyle(green))
+                let samples: [(Text, Text)] = [
+                    (Text(verbatim: "HHH"), Text(verbatim: "HHH").foregroundColor(blue)),
+                    (Text(verbatim: "HHH").foregroundColor(nil), Text(verbatim: "HHH").foregroundColor(blue)),
+                    (Text(verbatim: "HHH").foregroundColor(red), Text(verbatim: "HHH").foregroundColor(red)),
+                    (Text(verbatim: "H") + Text(verbatim: "H").foregroundColor(red) + Text(verbatim: "H"),
+                     Text(verbatim: "H").foregroundColor(blue) + Text(verbatim: "H").foregroundColor(red) + Text(verbatim: "H").foregroundColor(blue)),
+                    (Text(verbatim: "HHH").underline(), Text(verbatim: "HHH").foregroundColor(blue).underline()),
+                    (Text(verbatim: "HHH").underline(true, color: red), Text(verbatim: "HHH").foregroundColor(blue).underline(true, color: red)),
+                    (Text(verbatim: "HHH").strikethrough(true, color: red), Text(verbatim: "HHH").foregroundColor(blue).strikethrough(true, color: red)),
+                    (Text(verbatim: "HHH").foregroundColor(.clear), Text(verbatim: "HHH").foregroundColor(.clear))
+                ]
+                for (input, expectedText) in samples {
+                    var resolved: GraphicsContext.ResolvedText?
+                    _ = try render(device: device, environment: environment) { resolved = $0.resolve(input) }
+                    let original = try XCTUnwrap(resolved)
+                    var copy = original
+                    copy.shading = .color(blue)
+                    let expectedSource = try resolve(expectedText, environment: environment)
+                    let expected = try render(device: device, environment: environment) { $0.draw(expectedSource, in: rect) }
+                    for record in [false, true] {
+                        let actual = try render(device: device, environment: environment) { context in
+                            if record {
+                                let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                                recording.draw(copy, in: rect)
+                                recording.recording!.draw(in: context)
+                            } else { context.draw(copy, in: rect) }
+                        }
+                        XCTAssertEqual(actual, expected, "\(mode) scale=\(scale) replay=\(record)")
+                    }
+                    XCTAssertTrue(original.resolved === copy.resolved)
+                    if case .foreground = original.shading.properties.first { }
+                    else { XCTFail("Copy changed original shading") }
+                }
+                var resolved: GraphicsContext.ResolvedText?
+                _ = try render(device: device, environment: environment) { resolved = $0.resolve(Text(verbatim: "HHH")) }
+                var receiver = environment
+                receiver.foregroundStyleLevels = .init(primary: AnyShapeStyle(red))
+                let source = try resolve(Text(verbatim: "HHH").foregroundColor(red), environment: receiver)
+                let expected = try render(device: device, environment: receiver) { $0.draw(source, in: rect) }
+                let actual = try render(device: device, environment: receiver) { $0.draw(resolved!, in: rect) }
+                XCTAssertEqual(actual, expected, "Foreground resolves in the receiving context")
+
+                var shaded = try XCTUnwrap(resolved)
+                shaded.shading = .linearGradient(Gradient(colors: [red, blue]), startPoint: .zero,
+                                                endPoint: CGPoint(x: rect.width, y: 0))
+                let raw = try resolve(Text(verbatim: "HHH"), environment: environment)
+                let maskRuns = raw.runs.map { run -> ResolvedTextSource.Run in
+                    guard case let .styledText(faces, string, custom, attributes) = run else { return run }
+                    var uncolored = attributes
+                    uncolored.foregroundColor = nil
+                    return .styledText(faces, string, custom, uncolored)
+                }
+                let mask = ResolvedTextSource(runs: maskRuns, scaleFactor: raw.scaleFactor, displayScale: raw.displayScale)
+                let gradientExpected = try render(device: device, environment: environment) {
+                    $0.draw(mask, in: rect, shading: shaded.shading)
+                }
+                XCTAssertTrue(gradientExpected.contains { $0 != 0 })
+                for record in [false, true] {
+                    let gradientActual = try render(device: device, environment: environment) { context in
+                        if record {
+                            let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                            recording.draw(shaded, in: rect)
+                            recording.recording!.draw(in: context)
+                        } else { context.draw(shaded, in: rect) }
+                    }
+                    XCTAssertTrue(gradientActual == gradientExpected, "Gradient glyph mask \(mode) \(scale) replay=\(record)")
+                }
+
+                var sourceEnvironment = environment
+                sourceEnvironment.colorScheme = .light
+                var explicit: GraphicsContext.ResolvedText?
+                _ = try render(device: device, environment: sourceEnvironment) {
+                    explicit = $0.resolve(Text(verbatim: "HHH").foregroundColor(.primary))
+                }
+                let frozenColor = VUI.Color(VUI.Color.primary.resolveHDR(in: sourceEnvironment))
+                receiver.colorScheme = .dark
+                let frozen = try resolve(Text(verbatim: "HHH").foregroundColor(frozenColor), environment: receiver)
+                let frozenExpected = try render(device: device, environment: receiver) { $0.draw(frozen, in: rect) }
+                let frozenActual = try render(device: device, environment: receiver) { $0.draw(explicit!, in: rect) }
+                XCTAssertTrue(frozenActual == frozenExpected, "Explicit dynamic colors retain the resolving environment")
+            }
+        }
+    }
+
     // ASSERTIONS canvasResolvedTextOwnerDispatchObserved textStringDrawingScaledDrawingCacheGateObserved
     // ASSERTIONS textStringDrawingMultilineFittingObserved textStringDrawingCacheInvalidationObserved
     func testCanvasDrawingAndRecordingConsumeTheCopiedOwnerScale() throws {
@@ -25,7 +127,7 @@ final class TextDrawingMarginTests: XCTestCase {
                 environment.minimumScaleFactor = 0.25
                 environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
                 let text = Text(verbatim: "A A A A A A")
-                let raw = try resolve(text, environment: environment)
+                let raw = try resolve(text.foregroundColor(.black), environment: environment)
                 var resolved: GraphicsContext.ResolvedText?
                 _ = try render(device: device, environment: environment) { context in
                     resolved = context.resolve(text)

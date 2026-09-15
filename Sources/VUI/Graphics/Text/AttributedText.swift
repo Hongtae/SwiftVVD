@@ -260,6 +260,7 @@ private func _resolvedAttributedRuns(
     style: Text.Style,
     properties: inout Text.ResolvedProperties,
     text: inout String,
+    options: Text.ResolveOptions = .includeTransitions,
     context: any TextResolutionContext
 ) -> [ResolvedTextSource.Run] {
     var result: [ResolvedTextSource.Run] = []
@@ -286,7 +287,7 @@ private func _resolvedAttributedRuns(
         if let language = run.languageIdentifier { attributes[.init("NSLanguage")] = language }
         var childStyle = style
         attributes.transferAttributedStringStyles(to: &childStyle)
-        if let resolved = childStyle.resolveRun(string, context: context, properties: &properties, text: &text) {
+        if let resolved = childStyle.resolveRun(string, context: context, properties: &properties, text: &text, options: options) {
             result.append(resolved)
         }
     }
@@ -304,12 +305,13 @@ final class AttributedStringTextStorage: AnyTextStorage {
         style: Text.Style,
         properties: inout Text.ResolvedProperties,
         text: inout String,
+        options: Text.ResolveOptions,
         context: any TextResolutionContext
     ) -> ResolvedTextSource? {
         ResolvedTextSource(
             runs: _resolvedAttributedRuns(
                 str,
-                style: style, properties: &properties, text: &text,
+                style: style, properties: &properties, text: &text, options: options,
                 context: context
             ),
             scaleFactor: context.contentScaleFactor,
@@ -349,12 +351,13 @@ func _resolvedAttributedText(
     style: Text.Style,
     properties: inout Text.ResolvedProperties,
     text: inout String,
+    options: Text.ResolveOptions = .includeTransitions,
     context: any TextResolutionContext
 ) -> ResolvedTextSource {
     ResolvedTextSource(
         runs: _resolvedAttributedRuns(
             value,
-            style: style, properties: &properties, text: &text,
+            style: style, properties: &properties, text: &text, options: options,
             context: context
         ),
         scaleFactor: context.contentScaleFactor,

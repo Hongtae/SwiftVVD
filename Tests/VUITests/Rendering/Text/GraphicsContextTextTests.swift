@@ -4,6 +4,71 @@ import VVD
 @testable import VUI
 
 final class GraphicsContextTextTests: XCTestCase {
+    // ASSERTIONS canvasTextForegroundKeyColorObserved
+    func testCanvasForegroundOptionsReachNestedAttributedAndLocalizedRuns() throws {
+        try withContext { context in
+            let red = Color(.sRGB, red: 1, green: 0, blue: 0)
+            var attributed = AttributedString("H")
+            attributed.foregroundColor = red
+            attributed.append(AttributedString("H"))
+            let samples: [(Text, [Bool])] = [
+                (Text(verbatim: "H"), [true]),
+                (Text(verbatim: "H").foregroundColor(nil), [true]),
+                (Text(verbatim: "H").foregroundColor(red), [false]),
+                ((Text(verbatim: "H") + Text(verbatim: "H").foregroundColor(nil)).foregroundColor(red), [false, true]),
+                (Text(verbatim: "H") + Text(verbatim: "H").foregroundColor(red) + Text(verbatim: "H"), [true, false, true]),
+                (Text(attributed), [false, true]),
+                (Text("\(Text(verbatim: "H").foregroundColor(red))\(Text(verbatim: "H"))"), [false, true])
+            ]
+            for (text, expected) in samples {
+                let canvas = context.resolve(text)
+                let source = try XCTUnwrap(canvas.resolved.resolvedText)
+                let colors = try source.runs.map { run -> VUI.Color.Resolved in
+                    guard case let .styledText(_, _, _, attributes) = run else {
+                        throw NSError(domain: "Expected a styled text run", code: 1)
+                    }
+                    return try XCTUnwrap(attributes.foregroundColor).resolve(in: context.environment)
+                }
+                XCTAssertEqual(colors.map { $0.linearRed == -1 && $0.linearGreen == -1 && $0.linearBlue == -1 }, expected)
+                XCTAssertEqual(canvas.resolved.features.contains(.keyColor), expected.contains(true))
+                XCTAssertTrue(canvas.resolved.styles.isEmpty)
+                XCTAssertEqual(canvas.resolved.needsStyledRendering, expected.contains(true))
+                for (color, key) in zip(colors, expected) where !key {
+                    XCTAssertEqual(color, red.resolve(in: context.environment))
+                }
+                let attributes = try XCTUnwrap(canvas.resolved.storage)
+                var storedColors: [VUI.Color.Resolved] = []
+                attributes.enumerateAttributes(in: NSRange(location: 0, length: attributes.length)) { values, _, _ in
+                    if let color = values[.coreForegroundColor] as? VUI.Color {
+                        storedColors.append(color.resolve(in: context.environment))
+                    }
+                }
+                XCTAssertEqual(storedColors, colors)
+            }
+            let plain = Text(verbatim: "H")
+            let ordinary = plain._resolve(context: context)
+            XCTAssertFalse(ordinary.resolvedFeatures.contains(.keyColor))
+            let empty = context.resolve(Text(verbatim: ""))
+            XCTAssertTrue(empty.resolved.features.contains(.keyColor))
+            XCTAssertTrue(empty.resolved.resolvedText?.runs.isEmpty == true)
+            var properties = Text.ResolvedProperties()
+            let omitted = Text.Style().nsAttributes(in: context.environment, properties: &properties,
+                options: .foregroundKeyColor, includeDefaultAttributes: false)
+            XCTAssertNil(omitted.foregroundColor)
+            XCTAssertFalse(properties.features.contains(.keyColor))
+            var explicit = Text.Style()
+            explicit.color = .explicit(AnyShapeStyle(red))
+            let included = explicit.nsAttributes(in: context.environment, properties: &properties,
+                options: .foregroundKeyColor, includeDefaultAttributes: false)
+            XCTAssertEqual(included.foregroundColor?.resolve(in: context.environment), red.resolve(in: context.environment))
+            var environment = context.environment
+            environment.foregroundStyleLevels = .init(primary: AnyShapeStyle(red))
+            explicit.color = .explicit(AnyShapeStyle(EmptyTextStyle()))
+            let fallback = explicit.nsAttributes(in: environment, properties: &properties, options: .foregroundKeyColor)
+            XCTAssertEqual(fallback.foregroundColor?.resolve(in: environment), red.resolve(in: environment))
+        }
+    }
+
     // ASSERTIONS canvasResolvedTextOwnerDispatchObserved textStringDrawingKitCacheOwnershipObserved
     // ASSERTIONS textStringDrawingMetricsCacheReuseObserved textStringDrawingCountConsumerObserved
     func testCopiesShareTheOwnerAndSeparateResolvesKeepIndependentCaches() throws {
@@ -29,7 +94,7 @@ final class GraphicsContextTextTests: XCTestCase {
             XCTAssertTrue(copy.shared === original.shared)
             if case let .color(color) = copy.shading.properties.first { XCTAssertEqual(color, .red) }
             else { XCTFail("Expected copied shading") }
-            if case let .color(color) = original.shading.properties.first { XCTAssertEqual(color, .black) }
+            if case .foreground = original.shading.properties.first { }
             else { XCTFail("Expected original foreground shading") }
             XCTAssertEqual(copy.measure(in: measured), measured)
             XCTAssertEqual(copy.firstBaseline(in: request), original.firstBaseline(in: request))
@@ -132,6 +197,11 @@ final class GraphicsContextTextTests: XCTestCase {
             resolution: CGSize(width: 128, height: 128), commandBuffer: commands))
         try body(context)
     }
+}
+
+private struct EmptyTextStyle: ShapeStyle {
+    func _apply(to shape: inout _ShapeStyle_Shape) {}
+    static func _apply(to type: inout _ShapeStyle_ShapeType) {}
 }
 
 private final class CanvasTextTestAppContext: AppContext {

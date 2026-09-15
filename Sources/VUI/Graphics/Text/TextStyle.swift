@@ -32,6 +32,26 @@ extension Text {
                 case .default: environment.defaultForegroundStyle ?? Self.primary
                 }
             }
+            func resolve(in environment: EnvironmentValues, with options: ResolveOptions,
+                         properties: inout ResolvedProperties,
+                         includeDefaultAttributes: Bool) -> Color.ResolvedHDR? {
+                switch self {
+                case .implicit, .default:
+                    guard includeDefaultAttributes else { return nil }
+                    if options.contains(.foregroundKeyColor) {
+                        return Color.ResolvedHDR(.init(colorSpace: .sRGBLinear,
+                            red: -1, green: -1, blue: -1, opacity: 1))
+                    }
+                case .explicit, .foregroundKeyColor:
+                    break
+                }
+                var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
+                baseStyle(in: environment)._apply(to: &shape)
+                if case let .color(color) = shape.result { return color.resolveHDR(in: environment) }
+                ForegroundStyle()._apply(to: &shape)
+                if case let .color(color) = shape.result { return color.resolveHDR(in: environment) }
+                return Color.primary.resolveHDR(in: environment)
+            }
             private static let primary = AnyShapeStyle(HierarchicalShapeStyle.primary)
         }
         /// Preserves an explicit decoration, inheritance, or an explicit reset.
@@ -125,9 +145,17 @@ extension Text {
             }
             attributes.paragraphStyle = properties.paragraph.style(environment: environment,
                 alignment: alignment, writingDirection: writingDirection, lineHeight: lineHeight)
-            var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
-            color.baseStyle(in: environment)._apply(to: &shape)
-            if case let .color(color) = shape.result { attributes.foregroundColor = color }
+            if options.contains(.foregroundKeyColor) {
+                if let resolved = color.resolve(in: environment, with: options, properties: &properties,
+                                                includeDefaultAttributes: includeDefaultAttributes) {
+                    attributes.foregroundColor = Color(resolved)
+                    properties.addColor(resolved)
+                }
+            } else {
+                var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
+                color.baseStyle(in: environment)._apply(to: &shape)
+                if case let .color(color) = shape.result { attributes.foregroundColor = color }
+            }
             attributes.backgroundColor = backgroundColor
             attributes.baselineOffset = baselineOffset
             attributes.kern = kerning
@@ -156,9 +184,9 @@ extension Text {
         }
 
         func resolveRun(_ string: String, context: any TextResolutionContext,
-                        properties: inout ResolvedProperties, text: inout String) -> ResolvedTextSource.Run? {
+                        properties: inout ResolvedProperties, text: inout String, options: ResolveOptions = .includeTransitions) -> ResolvedTextSource.Run? {
+            let attributes = nsAttributes(in: context.environment, properties: &properties, options: options)
             guard !string.isEmpty else { return nil }
-            let attributes = nsAttributes(in: context.environment, properties: &properties, options: .includeTransitions)
             let faces = typefaces(attributes: attributes, context: context)
             guard !faces.isEmpty else { return nil }
             var custom = _TextAttributeValues()
@@ -200,8 +228,8 @@ extension Text.Modifier {
 
 extension Text.Style {
     func resolve(_ string: String, context: any TextResolutionContext,
-                 properties: inout Text.ResolvedProperties, text: inout String) -> ResolvedTextSource {
-        let run = resolveRun(string, context: context, properties: &properties, text: &text)
+                 properties: inout Text.ResolvedProperties, text: inout String, options: Text.ResolveOptions = .includeTransitions) -> ResolvedTextSource {
+        let run = resolveRun(string, context: context, properties: &properties, text: &text, options: options)
         return ResolvedTextSource(runs: run.map { [$0] } ?? [],
             scaleFactor: context.contentScaleFactor, displayScale: context.displayScale, drawMissingGlyphs: true)
     }

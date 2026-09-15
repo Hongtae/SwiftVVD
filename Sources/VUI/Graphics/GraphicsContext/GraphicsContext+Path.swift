@@ -233,6 +233,7 @@ extension GraphicsContext {
 
     public struct Shading {
         enum Property {
+            case foreground
             case color(color: Color)
             case style(style: any ShapeStyle)
             case linearGradient(gradient: Gradient, startPoint: CGPoint, endPoint: CGPoint, options: GradientOptions)
@@ -253,7 +254,7 @@ extension GraphicsContext {
         }
 
         public static var backdrop: Shading     { .color(.black) }
-        public static var foreground: Shading   { .color(.black) }
+        public static var foreground: Shading   { .init(property: .foreground) }
 
         public static func palette(_ array: [Shading]) -> Shading {
             Shading(palette: array)
@@ -960,6 +961,9 @@ extension GraphicsContext {
         var shader: _Shader = .vertexColor
 
         var property = shading.properties.first
+        if case .foreground = property {
+            property = .style(style: ForegroundStyle())
+        }
         if case let .style(style) = property {
             var shape = _ShapeStyle_Shape(
                 operation: .resolveStyle(name: .foreground, levels: 0..<1),
@@ -972,6 +976,8 @@ extension GraphicsContext {
 
         if let property {
             switch property {
+            case .foreground:
+                break
             case let .resolvedPaint(paint, paintBounds, opacity):
                 guard let shading = paint.renderingShading(in: paintBounds ?? bounds, opacity: opacity) else {
                     return

@@ -269,7 +269,9 @@ struct ResolvedTextSource {
     }
 
     var resolvedFeatures: Text.ResolvedProperties.Features {
-        hasAttachments ? .attachments : []
+        var features = resolvedProperties?.features ?? []
+        if hasAttachments { features.insert(.attachments) }
+        return features
     }
 
     var maximumFontMetrics: ResolvedFontMetrics? {
