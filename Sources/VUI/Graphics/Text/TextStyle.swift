@@ -156,7 +156,7 @@ extension Text {
         }
 
         func resolveRun(_ string: String, context: any TextResolutionContext,
-                        properties: inout ResolvedProperties, text: inout String) -> GraphicsContext.ResolvedText.Run? {
+                        properties: inout ResolvedProperties, text: inout String) -> ResolvedTextSource.Run? {
             guard !string.isEmpty else { return nil }
             let attributes = nsAttributes(in: context.environment, properties: &properties, options: .includeTransitions)
             let faces = typefaces(attributes: attributes, context: context)
@@ -200,9 +200,9 @@ extension Text.Modifier {
 
 extension Text.Style {
     func resolve(_ string: String, context: any TextResolutionContext,
-                 properties: inout Text.ResolvedProperties, text: inout String) -> GraphicsContext.ResolvedText {
+                 properties: inout Text.ResolvedProperties, text: inout String) -> ResolvedTextSource {
         let run = resolveRun(string, context: context, properties: &properties, text: &text)
-        return GraphicsContext.ResolvedText(runs: run.map { [$0] } ?? [],
+        return ResolvedTextSource(runs: run.map { [$0] } ?? [],
             scaleFactor: context.contentScaleFactor, displayScale: context.displayScale, drawMissingGlyphs: true)
     }
 }

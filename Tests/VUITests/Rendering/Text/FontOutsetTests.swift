@@ -16,7 +16,7 @@ final class FontOutsetTests: XCTestCase {
         return font
     }
 
-    private func run(_ text: String, font: VVD.Font, size: CGFloat, scale: CGFloat = 1) -> GraphicsContext.ResolvedText.Run {
+    private func run(_ text: String, font: VVD.Font, size: CGFloat, scale: CGFloat = 1) -> ResolvedTextSource.Run {
         let face = VectorTypeface(font: font, layoutFont: font, renderScale: scale)
         let resource = VUI.Font.file(resource(), size: size).platformFont(in: EnvironmentValues().fontResolutionContext)
         var attributes = _ResolvedTextRunAttributes()
@@ -93,9 +93,9 @@ final class FontOutsetTests: XCTestCase {
     func testWholeStringGateAppliesToEveryPrimaryAttributeFont() throws {
         let large = try font(size: 26)
         let small = try font(size: 13)
-        let ordinary = GraphicsContext.ResolvedText(runs: [run("Hg", font: large, size: 26), run("Hg", font: small, size: 13)],
+        let ordinary = ResolvedTextSource(runs: [run("Hg", font: large, size: 26), run("Hg", font: small, size: 13)],
             scaleFactor: 1, preferredLanguages: ["en"])
-        let oversized = GraphicsContext.ResolvedText(runs: [run("Hg", font: large, size: 26), run("Å", font: small, size: 13)],
+        let oversized = ResolvedTextSource(runs: [run("Hg", font: large, size: 26), run("Å", font: small, size: 13)],
             scaleFactor: 1, preferredLanguages: ["en"])
         XCTAssertEqual(try XCTUnwrap(ordinary.maximumFontMetrics).outsets.leading, 0)
         let metrics = try XCTUnwrap(oversized.maximumFontMetrics)
@@ -111,12 +111,12 @@ final class FontOutsetTests: XCTestCase {
     func testSuccessfulZeroReplacesClippingWhileUnavailablePreservesIt() throws {
         let font = try font()
         let source = [run("Å", font: font, size: 13)]
-        let unavailable = GraphicsContext.ResolvedText(runs: source, scaleFactor: 1, outsetData: nil)
-        let zero = GraphicsContext.ResolvedText(runs: source, scaleFactor: 1, outsetData: try fixture([0, 0, 0, 0]))
+        let unavailable = ResolvedTextSource(runs: source, scaleFactor: 1, outsetData: nil)
+        let zero = ResolvedTextSource(runs: source, scaleFactor: 1, outsetData: try fixture([0, 0, 0, 0]))
         XCTAssertGreaterThan(try XCTUnwrap(unavailable.maximumFontMetrics).outsets.top, 0)
         XCTAssertEqual(try XCTUnwrap(zero.maximumFontMetrics).outsets, EdgeInsets())
-        let first = GraphicsContext.ResolvedText(runs: source, scaleFactor: 1, outsetData: try fixture([1, 2, 3, 4]))
-        let second = GraphicsContext.ResolvedText(runs: source, scaleFactor: 1, outsetData: try fixture([4, 3, 2, 1]))
+        let first = ResolvedTextSource(runs: source, scaleFactor: 1, outsetData: try fixture([1, 2, 3, 4]))
+        let second = ResolvedTextSource(runs: source, scaleFactor: 1, outsetData: try fixture([4, 3, 2, 1]))
         XCTAssertEqual(try XCTUnwrap(first.maximumFontMetrics).outsets, EdgeInsets(top: 26, leading: 13, bottom: 52, trailing: 39))
         XCTAssertEqual(try XCTUnwrap(second.maximumFontMetrics).outsets, EdgeInsets(top: 39, leading: 52, bottom: 13, trailing: 26))
         XCTAssertEqual(try XCTUnwrap(first.maximumFontMetrics).outsets.leading, 13)
@@ -128,8 +128,8 @@ final class FontOutsetTests: XCTestCase {
         let font = try font(size: 15.625)
         for scale: CGFloat in [1, 1.5, 2] {
             let runs = [run("Ågj", font: font, size: 15.625, scale: scale)]
-            let normal = GraphicsContext.ResolvedText(runs: runs, scaleFactor: scale, displayScale: 2, preferredLanguages: ["ar", "ur"])
-            let extended = GraphicsContext.ResolvedText(runs: runs, scaleFactor: scale, displayScale: 2, preferredLanguages: ["ur", "ar"])
+            let normal = ResolvedTextSource(runs: runs, scaleFactor: scale, displayScale: 2, preferredLanguages: ["ar", "ur"])
+            let extended = ResolvedTextSource(runs: runs, scaleFactor: scale, displayScale: 2, preferredLanguages: ["ur", "ar"])
             let ordinary = try XCTUnwrap(normal.maximumFontMetrics).outsets
             let other = try XCTUnwrap(extended.maximumFontMetrics).outsets
             XCTAssertEqual(ordinary.top, 0.142579 * 15.625, accuracy: 1e-10)

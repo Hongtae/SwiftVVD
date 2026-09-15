@@ -4,6 +4,69 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS canvasResolvedTextOwnerDispatchObserved textStringDrawingScaledDrawingCacheGateObserved
+    // ASSERTIONS textStringDrawingMultilineFittingObserved textStringDrawingCacheInvalidationObserved
+    func testCanvasDrawingAndRecordingConsumeTheCopiedOwnerScale() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let rect = CGRect(x: 0, y: 0, width: 50, height: 30)
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.font = .file(file, size: 23)
+                environment.defaultFontRenderingMode = mode
+                environment._contentScaleFactor = scale
+                environment.displayScale = 2
+                environment.minimumScaleFactor = 0.25
+                environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
+                let text = Text(verbatim: "A A A A A A")
+                let raw = try resolve(text, environment: environment)
+                var resolved: GraphicsContext.ResolvedText?
+                _ = try render(device: device, environment: environment) { context in
+                    resolved = context.resolve(text)
+                }
+                var copy = try XCTUnwrap(resolved)
+                copy.shading = .color(.black)
+                let owner = try XCTUnwrap(copy.resolved as? ResolvedStyledText.StringDrawing)
+                for (override, pointSize): (CGFloat?, CGFloat) in [
+                    (nil, 13.25), (0.5, 11.5), (0.5, 11.5), (0.75, 17.25), (1, 23), (nil, 13.25)
+                ] {
+                    owner.scaleFactorOverride = override
+                    let expectedSource = raw.scalingFonts(by: pointSize / 23)
+                    let expected = try render(device: device, environment: environment) {
+                        $0.draw(expectedSource, in: rect)
+                    }
+                    XCTAssertTrue(expected.contains { $0 != 0 })
+                    for record in [false, true] {
+                        let actual = try render(device: device, environment: environment) { context in
+                            if record {
+                                let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                                recording.draw(copy, in: rect)
+                                recording.recording!.draw(in: context)
+                            } else { context.draw(copy, in: rect) }
+                        }
+                        XCTAssertEqual(actual, expected, "\(mode) scale=\(scale) override=\(String(describing: override)) replay=\(record)")
+                        XCTAssertEqual(owner.drawingSource(in: rect.size)?.uniformFont?.pointSize, pointSize)
+                        XCTAssertEqual(owner.metricsCacheEntryCount, 1)
+                    }
+                }
+                owner.scaleFactorOverride = 0.5
+                let measured = copy.measure()
+                let point = CGPoint(x: 60, y: 60)
+                let anchored = CGRect(x: point.x - measured.width, y: point.y - measured.height,
+                                      width: measured.width, height: measured.height)
+                let expected = try render(device: device, environment: environment) { $0.draw(copy, in: anchored) }
+                let actual = try render(device: device, environment: environment) { $0.draw(copy, at: point, anchor: .bottomTrailing) }
+                XCTAssertEqual(actual, expected)
+            }
+        }
+    }
+
     // ASSERTIONS textProxyRetainedLayoutPropertiesObserved
     // ASSERTIONS textProxyRetainedOwnerAndCacheObserved
     func testRendererBoundsRetainStyledSizingThroughDrawingAndReplay() throws {
@@ -268,7 +331,7 @@ final class TextDrawingMarginTests: XCTestCase {
         return Array(UnsafeRawBufferPointer(start: pointer, count: Int(extent.width * extent.height) * 4))
     }
 
-    private func resolve(_ text: Text, environment: EnvironmentValues) throws -> GraphicsContext.ResolvedText {
+    private func resolve(_ text: Text, environment: EnvironmentValues) throws -> ResolvedTextSource {
         try XCTUnwrap(text._resolve(context: GraphTextResolutionContext(
             environment: environment, sceneResources: SceneResources()), referenceDate: Date(timeIntervalSince1970: 0)))
     }
@@ -443,7 +506,7 @@ final class TextDrawingMarginTests: XCTestCase {
                 environment._contentScaleFactor = renderScale
                 let source = try resolve(Text(verbatim: "Ågj"), environment: environment)
                 for language in ["en", "ur"] {
-                    let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                    let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                         displayScale: 2, preferredLanguages: [language])
                     let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                     XCTAssertEqual(styled.drawingMargins.leading, language == "en" ? 4.5 : 1)
@@ -533,7 +596,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     environment.displayScale = 2
                     environment._contentScaleFactor = renderScale
                     let source = try resolve(Text(verbatim: "Hg\nHg"), environment: environment)
-                    let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                    let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                         displayScale: 2, preferredLanguages: ["en"])
                     let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                     XCTAssertEqual(styled.drawingMargins.top, expectedTop)

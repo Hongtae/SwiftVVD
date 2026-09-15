@@ -817,13 +817,13 @@ struct TextEditorSelectionLayout: Equatable {
     }
 
     private static func clusters(
-        in line: GraphicsContext.ResolvedText.LineGlyphs,
+        in line: ResolvedTextSource.LineGlyphs,
         scale: CGFloat,
         sourceMap: SourceMap
     ) -> [Cluster] {
         var result: [Cluster] = []
         var x: CGFloat = 0
-        for range in GraphicsContext.ResolvedText.clusterRanges(
+        for range in ResolvedTextSource.clusterRanges(
             in: line.glyphs
         ) {
             let glyphs = line.glyphs[range]

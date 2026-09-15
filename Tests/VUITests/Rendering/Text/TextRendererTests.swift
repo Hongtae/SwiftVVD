@@ -36,7 +36,7 @@ final class TextRendererTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<Text.Layout.DrawingOptions>.size, 4)
         XCTAssertEqual(Text.Layout.DrawingOptions.disablesSubpixelQuantization.rawValue, 1)
 
-        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)
         let layout = resolved.makeLayout(in: .zero, layoutDirection: .leftToRight)
         XCTAssertEqual(layout.startIndex, 0)
         XCTAssertEqual(layout.endIndex, 0)
@@ -84,7 +84,7 @@ final class TextRendererTests: XCTestCase {
 
             let rendererAttribute = try XCTUnwrap(inputs[TextRendererInput.self].attribute)
             let box = rendererAttribute.value
-            let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+            let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)
             XCTAssertEqual(
                 box.sizeThatFits(proposal: .unspecified, text: TextProxy(ResolvedStyledText.TextLayoutManager(resolvedText: resolved))),
                 CGSize(width: 11, height: 7)

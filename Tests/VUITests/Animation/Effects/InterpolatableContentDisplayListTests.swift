@@ -8569,7 +8569,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         numericValue: Float
     ) throws -> DisplayList {
         let face = NumericTransitionTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], text)],
             scaleFactor: 1
         )

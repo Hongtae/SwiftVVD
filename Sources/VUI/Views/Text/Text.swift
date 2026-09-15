@@ -130,7 +130,7 @@ class AnyTextStorage: CustomDebugStringConvertible {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         fatalError("This method should be overridden by subclasses.")
     }
     func resolveText(in environment: EnvironmentValues) -> String {
@@ -148,7 +148,7 @@ class AnyTextStorage: CustomDebugStringConvertible {
         text: inout String,
         context: any TextResolutionContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         resolve(style: style, properties: &properties, text: &text, context: context)
     }
     func resolveTransitionText(in environment: EnvironmentValues) -> String? {
@@ -235,7 +235,7 @@ private class AnyFormatStyleBox {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         fatalError("This method should be overridden by subclasses.")
     }
 
@@ -264,7 +264,7 @@ where Style: FormatStyle, Style.FormatInput: Equatable {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         let output = format.locale(locale).format(input)
         if let string = output as? String {
             return style.resolve(string, context: context, properties: &properties, text: &text)
@@ -313,7 +313,7 @@ private final class FormatStyleStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         storage.resolve(
             locale: context.environment.locale,
             style: style, properties: &properties, text: &text,
@@ -349,7 +349,7 @@ private final class LocalizedStringResourceStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         _resolvedAttributedText(
             resource.resolve(in: context.environment),
             style: style, properties: &properties, text: &text,
@@ -389,7 +389,7 @@ private final class DateTextStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         style.resolve(resolveText(in: context.environment), context: context, properties: &properties, text: &text)
     }
 
@@ -538,7 +538,7 @@ private protocol _TimeDataFormat: Equatable {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText?
+    ) -> ResolvedTextSource?
     func plainText(_ output: Output) -> String
     func nextUpdateDelay(
         for input: Input,
@@ -555,7 +555,7 @@ private extension _TimeDataFormat where Output == String {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         style.resolve(output, context: context, properties: &properties, text: &text)
     }
 
@@ -761,7 +761,7 @@ where Format: DiscreteFormatStyle, Format.FormatOutput == AttributedString {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         _resolvedAttributedText(
             output,
             style: style, properties: &properties, text: &text,
@@ -806,7 +806,7 @@ where Source: _TimeDataFormattingSource,
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         resolve(style: style, properties: &properties, text: &text, context: context, referenceDate: Date())
     }
 
@@ -816,7 +816,7 @@ where Source: _TimeDataFormattingSource,
         text: inout String,
         context: any TextResolutionContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         let value = source.value(referenceDate: referenceDate)
         let output = format.format(
             value,
@@ -935,9 +935,9 @@ class LocalizedTextStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         let segments = resolve(in: context.environment)
-        var runs: [GraphicsContext.ResolvedText.Run] = []
+        var runs: [ResolvedTextSource.Run] = []
         for segment in segments {
             switch segment {
             case let .attributedString(value):
@@ -1044,7 +1044,7 @@ class ConcatenatedTextStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         guard let first = first._resolve(context: context, referenceDate: Date(), style: style, properties: &properties, text: &text),
               let second = second._resolve(context: context, referenceDate: Date(), style: style, properties: &properties, text: &text) else {
             return nil
@@ -1102,7 +1102,7 @@ class AttachmentTextStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         var imageContext = context
         imageContext.environment = context.environment.untrackedCopy()
         imageContext.environment.font = style.baseFont.resolve(in: context.environment, includeDefaultAttributes: true)
@@ -1575,14 +1575,14 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         return nil
     }
 
-    func _resolve(context: GraphicsContext) -> GraphicsContext.ResolvedText {
+    func _resolve(context: GraphicsContext) -> ResolvedTextSource {
         _resolve(context: context, referenceDate: Date())
     }
 
     func _resolve(
         context: GraphicsContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText {
+    ) -> ResolvedTextSource {
         guard let resolved = _resolve(
             context: context as any TextResolutionContext,
             referenceDate: referenceDate
@@ -1595,7 +1595,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
     func _resolve(
         context: any TextResolutionContext,
         referenceDate: Date
-    ) -> GraphicsContext.ResolvedText? {
+    ) -> ResolvedTextSource? {
         var properties = ResolvedProperties()
         var string = String()
         var style = Style()
@@ -1619,7 +1619,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
 
     func _resolve(context: any TextResolutionContext, referenceDate: Date,
                   style parentStyle: Style, properties: inout ResolvedProperties,
-                  text: inout String) -> GraphicsContext.ResolvedText? {
+                  text: inout String) -> ResolvedTextSource? {
         var style = parentStyle
         for modifier in modifiers.reversed() { modifier.modify(style: &style) }
         switch storage {
@@ -1745,7 +1745,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         )
 
         func makeStyledText(
-            _ source: GraphicsContext.ResolvedText,
+            _ source: ResolvedTextSource,
             additionalFeatures: ResolvedProperties.Features = []
         ) -> ResolvedStyledText {
             var resolved = source
@@ -1810,7 +1810,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
     func _resolveSizeVariants(
         context: any TextResolutionContext,
         referenceDate: Date = Date()
-    ) -> [(TextSizeVariant, GraphicsContext.ResolvedText)]? {
+    ) -> [(TextSizeVariant, ResolvedTextSource)]? {
         guard let variants = _sizeVariantTexts(
             in: context.environment,
             referenceDate: referenceDate

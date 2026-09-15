@@ -232,7 +232,7 @@ struct Spacing: Equatable, CustomStringConvertible {
 
     static func textSpacing(
         maxFontMetrics: ResolvedFontMetrics,
-        idealMetrics: GraphicsContext.ResolvedText.LayoutMetrics,
+        idealMetrics: ResolvedTextSource.LayoutMetrics,
         layoutProperties: TextLayoutProperties
     ) -> Spacing {
         let beforeEdge: AbsoluteEdge

@@ -115,7 +115,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
         let face = VectorTypeface(font: font)
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "office")],
             scaleFactor: 1
         )
@@ -138,7 +138,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertEqual(run.count, 4)
         XCTAssertEqual(run.characterIndices.map(\.value), [0, 1, 4, 5])
 
-        let combining = GraphicsContext.ResolvedText(
+        let combining = ResolvedTextSource(
             runs: [.text([face], "e\u{301}x")],
             scaleFactor: 1
         )
@@ -165,7 +165,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
         )
         let face = VectorTypeface(font: font)
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "Ae\u{301}\u{323}B")],
             scaleFactor: 1
         )
@@ -329,7 +329,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
 
         XCTAssertFalse(face.hasGlyph(for: scalar))
 
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], String(scalar))],
             scaleFactor: 1,
             drawMissingGlyphs: false
@@ -358,7 +358,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             identifier: "cjk",
             supported: [UnicodeScalar("漢")]
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([latin, korean, cjk], "Aㄱ漢")],
             scaleFactor: 1
         )
@@ -388,7 +388,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             ascender: 14,
             descender: -5
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([primary, fallback], "Aㄱ")],
             scaleFactor: 1
         )
@@ -434,7 +434,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             ascender: 18,
             descender: -6
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [
                 .text([primary, fallback], "ㄱ"),
                 .text([explicitlyLarge], "B"),
@@ -461,7 +461,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             ascender: 14,
             descender: -5
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([primary, fallback], "ㄱㄱㄱ")],
             scaleFactor: 1
         )
@@ -1319,7 +1319,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             forContext: SceneResources(),
             contentScaleFactor: 1
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text(cascade.runFaces, "A")],
             scaleFactor: 1,
             drawMissingGlyphs: true
@@ -1382,7 +1382,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 in: environment, forContext: SceneResources(), contentScaleFactor: 1
             )
             let text = "A" + samples.map(\.0).joined()
-            let resolved = GraphicsContext.ResolvedText(
+            let resolved = ResolvedTextSource(
                 runs: [.text(cascade.runFaces, text)], scaleFactor: 1, drawMissingGlyphs: true
             )
             let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
@@ -1437,7 +1437,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertNotNil(cascade.missingGlyphFace)
 
         let faces = cascade.runFaces
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text(faces, "Aㄱ漢")],
             scaleFactor: 1
         )
@@ -1781,7 +1781,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             "deferred:NotoSansMonoCJK:1"
         )
 
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text(cascade.runFaces, "A한A")],
             scaleFactor: 1
         )
@@ -1792,11 +1792,11 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertEqual(glyphs[0].advance.width, glyphs[2].advance.width)
         XCTAssertNotEqual(glyphs[1].advance.width, glyphs[0].advance.width)
 
-        let latinText = GraphicsContext.ResolvedText(
+        let latinText = ResolvedTextSource(
             runs: [.text(cascade.runFaces, "A")],
             scaleFactor: 1
         )
-        let fallbackText = GraphicsContext.ResolvedText(
+        let fallbackText = ResolvedTextSource(
             runs: [.text(cascade.runFaces, "한")],
             scaleFactor: 1
         )
@@ -1841,11 +1841,11 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 primary.descender != fallback.descender
         )
 
-        let latin = try XCTUnwrap(GraphicsContext.ResolvedText(
+        let latin = try XCTUnwrap(ResolvedTextSource(
             runs: [.text(cascade.runFaces, "A")],
             scaleFactor: 1
         ).makeGlyphs().first)
-        let fallbackLine = try XCTUnwrap(GraphicsContext.ResolvedText(
+        let fallbackLine = try XCTUnwrap(ResolvedTextSource(
             runs: [.text(cascade.runFaces, String(scalar))],
             scaleFactor: 1
         ).makeGlyphs().first)
@@ -1891,7 +1891,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         XCTAssertTrue(fallback.hasGlyph(for: scalar))
         XCTAssertFalse(terminal.hasGlyph(for: scalar))
 
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text(cascade.runFaces, String(scalar))],
             scaleFactor: 1,
             drawMissingGlyphs: true
@@ -1927,7 +1927,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             contentScaleFactor: 1
         )
         let scalar = UnicodeScalar("\u{0378}")
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text(cascade.runFaces, String(scalar))],
             scaleFactor: 1,
             drawMissingGlyphs: false
@@ -1962,7 +1962,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         ).runFaces
 
         for scalar in [UnicodeScalar("\u{200B}"), UnicodeScalar("\u{200D}")] {
-            let resolved = GraphicsContext.ResolvedText(
+            let resolved = ResolvedTextSource(
                 runs: [.text(faces, String(scalar))],
                 scaleFactor: 1,
                 drawMissingGlyphs: true

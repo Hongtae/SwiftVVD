@@ -6,7 +6,7 @@ import XCTest
 final class VectorTextRenderingTests: XCTestCase {
     func testDrawingBatchesGlyphPathsByForegroundColor() {
         let face = VectorTextTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [
                 .styledText(
                     [face],

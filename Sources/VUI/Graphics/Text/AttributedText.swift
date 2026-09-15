@@ -261,8 +261,8 @@ private func _resolvedAttributedRuns(
     properties: inout Text.ResolvedProperties,
     text: inout String,
     context: any TextResolutionContext
-) -> [GraphicsContext.ResolvedText.Run] {
-    var result: [GraphicsContext.ResolvedText.Run] = []
+) -> [ResolvedTextSource.Run] {
+    var result: [ResolvedTextSource.Run] = []
 #if os(Windows)
     let runs = AnySequence(value.runs)
 #else
@@ -305,8 +305,8 @@ final class AttributedStringTextStorage: AnyTextStorage {
         properties: inout Text.ResolvedProperties,
         text: inout String,
         context: any TextResolutionContext
-    ) -> GraphicsContext.ResolvedText? {
-        GraphicsContext.ResolvedText(
+    ) -> ResolvedTextSource? {
+        ResolvedTextSource(
             runs: _resolvedAttributedRuns(
                 str,
                 style: style, properties: &properties, text: &text,
@@ -350,8 +350,8 @@ func _resolvedAttributedText(
     properties: inout Text.ResolvedProperties,
     text: inout String,
     context: any TextResolutionContext
-) -> GraphicsContext.ResolvedText {
-    GraphicsContext.ResolvedText(
+) -> ResolvedTextSource {
+    ResolvedTextSource(
         runs: _resolvedAttributedRuns(
             value,
             style: style, properties: &properties, text: &text,

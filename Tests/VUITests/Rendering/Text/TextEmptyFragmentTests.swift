@@ -24,7 +24,7 @@ final class TextEmptyFragmentTests: XCTestCase {
         return .file(root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: size)
     }
 
-    private func resolve(_ text: Text, scale: CGFloat = 1, spacing: CGFloat = 0) throws -> GraphicsContext.ResolvedText {
+    private func resolve(_ text: Text, scale: CGFloat = 1, spacing: CGFloat = 0) throws -> ResolvedTextSource {
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = .vector()
         environment.displayScale = 2

@@ -31,11 +31,11 @@ final class TextStyleConsumerTests {
         result.defaultFontRenderingMode = .vector()
         return result
     }
-    private func resolve(_ text: Text, environment: EnvironmentValues? = nil) throws -> GraphicsContext.ResolvedText {
+    private func resolve(_ text: Text, environment: EnvironmentValues? = nil) throws -> ResolvedTextSource {
         return try #require(text._resolve(context: GraphTextResolutionContext(
             environment: environment ?? self.environment(), sceneResources: SceneResources()), referenceDate: Date(timeIntervalSince1970: 0)))
     }
-    private func attributes(_ resolved: GraphicsContext.ResolvedText) -> [_ResolvedTextRunAttributes] {
+    private func attributes(_ resolved: ResolvedTextSource) -> [_ResolvedTextRunAttributes] {
         resolved.runs.compactMap { if case let .styledText(_, _, _, attributes) = $0 { attributes } else { nil } }
     }
 
@@ -60,7 +60,7 @@ final class TextStyleConsumerTests {
                 ("en", [4.290052, 3.279317, 2.576023, 6.487472]),
                 ("ur", [0.831082, 4.756745, 2.576023, 7.574843])
             ] {
-                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                     displayScale: 2, preferredLanguages: [language])
                 let metrics = try #require(text.maximumFontMetrics)
                 let observed = [metrics.outsets.leading, metrics.outsets.top, metrics.outsets.trailing, metrics.outsets.bottom]
@@ -109,7 +109,7 @@ final class TextStyleConsumerTests {
                 let source = try resolve(Text(verbatim: "Ågj").font(copy))
                 let resource = try #require(attributes(source).first?.fontResource)
                 #expect(resource.selectedWeight == CGFloat(weight))
-                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                     preferredLanguages: ["en"])
                 let edges = try #require(text.maximumFontMetrics).outsets
                 let actual = [edges.leading, edges.top, edges.trailing, edges.bottom]
@@ -142,7 +142,7 @@ final class TextStyleConsumerTests {
                     continue
                 }
                 #expect(faces.first?.outsetAttributes?.weight == CGFloat(weight))
-                let text = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: source.scaleFactor,
+                let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                     preferredLanguages: ["en"])
                 let edges = try #require(text.maximumFontMetrics).outsets
                 let actual = [edges.leading, edges.top, edges.trailing, edges.bottom]
@@ -561,7 +561,7 @@ final class TextStyleConsumerTests {
         var env = environment()
         env.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
         let context = GraphTextResolutionContext(environment: env, sceneResources: SceneResources())
-        func resolve(_ font: VUI.Font) throws -> GraphicsContext.ResolvedText {
+        func resolve(_ font: VUI.Font) throws -> ResolvedTextSource {
             try #require(Text(verbatim: "A한").font(font)._resolve(context: context,
                 referenceDate: Date(timeIntervalSince1970: 0)))
         }

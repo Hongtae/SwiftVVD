@@ -86,7 +86,7 @@ fileprivate struct _TextLayoutRunStorage: Equatable {
 }
 
 fileprivate struct _TextLayoutLineStorage {
-    var glyphs: [GraphicsContext.ResolvedText.Glyph]
+    var glyphs: [ResolvedTextSource.Glyph]
     var runs: [_TextLayoutRunStorage]
     var origin: CGPoint
     var width: CGFloat
@@ -95,14 +95,14 @@ fileprivate struct _TextLayoutLineStorage {
 }
 
 fileprivate final class _TextLayoutStorage {
-    var source: GraphicsContext.ResolvedText
+    var source: ResolvedTextSource
     var lines: [_TextLayoutLineStorage]
     var origin: CGPoint
     var layoutDirection: LayoutDirection
     var isTruncated: Bool
 
     init(
-        source: GraphicsContext.ResolvedText,
+        source: ResolvedTextSource,
         lines: [_TextLayoutLineStorage],
         origin: CGPoint,
         layoutDirection: LayoutDirection,
@@ -149,7 +149,7 @@ fileprivate final class _TextLayoutStorage {
         )
     }
 
-    func lineGlyphs(line lineIndex: Int, glyphRange: Range<Int>) -> GraphicsContext.ResolvedText.LineGlyphs? {
+    func lineGlyphs(line lineIndex: Int, glyphRange: Range<Int>) -> ResolvedTextSource.LineGlyphs? {
         guard !glyphRange.isEmpty else { return nil }
         let line = lines[lineIndex]
         var glyphs = Array(line.glyphs[glyphRange])
@@ -159,7 +159,7 @@ fileprivate final class _TextLayoutStorage {
         let width = glyphs.enumerated().reduce(CGFloat.zero) { partial, item in
             partial + item.element.advance.width + (item.offset == 0 ? 0 : item.element.kerning.x)
         }
-        return GraphicsContext.ResolvedText.LineGlyphs(
+        return ResolvedTextSource.LineGlyphs(
             glyphs: glyphs,
             ascender: ascent,
             descender: descender,
@@ -464,7 +464,7 @@ extension Text {
     }
 }
 
-extension GraphicsContext.ResolvedText {
+extension ResolvedTextSource {
     func makeLayout(
         in size: CGSize,
         layoutDirection: LayoutDirection,

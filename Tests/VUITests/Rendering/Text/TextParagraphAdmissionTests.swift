@@ -19,7 +19,7 @@ final class TextParagraphAdmissionTests: XCTestCase {
     }
 
     private func resolve(_ string: String, size: CGFloat = 23, scale: CGFloat = 1,
-                         spacing: CGFloat = 0) throws -> GraphicsContext.ResolvedText {
+                         spacing: CGFloat = 0) throws -> ResolvedTextSource {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let font = VUI.Font.file(root.appendingPathComponent(

@@ -135,13 +135,13 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         input.transferAttributedStringStyles(to: &textStyle)
         var properties = Text.ResolvedProperties()
         let style = textStyle.nsAttributes(in: EnvironmentValues(), properties: &properties)
-        let modified = GraphicsContext.ResolvedText.Run.styledText([face], "AB", _TextAttributeValues(), style)
+        let modified = ResolvedTextSource.Run.styledText([face], "AB", _TextAttributeValues(), style)
         XCTAssertEqual(style.kern, 2)
         XCTAssertEqual(style.tracking, 4)
         XCTAssertEqual(style.baselineOffset, 3)
         XCTAssertNil(style.underlineStyle)
 
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [modified],
             scaleFactor: 1
         )
@@ -160,7 +160,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testSpacingAppliesToEveryGlyphAdvanceIncludingFinalGlyph() throws {
         let face = CoreVisualTestTypeface()
-        let tracking = GraphicsContext.ResolvedText(
+        let tracking = ResolvedTextSource(
             runs: [
                 .styledText(
                     [face],
@@ -176,7 +176,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         XCTAssertEqual(line.glyphs.map(\.advance.width), [11, 11])
         XCTAssertEqual(line.width, 22)
 
-        let kern = GraphicsContext.ResolvedText(
+        let kern = ResolvedTextSource(
             runs: [
                 .styledText(
                     [face],
@@ -192,7 +192,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testBaselineOffsetsExpandLineAndKeepAbsoluteRunBaselines() throws {
         let face = CoreVisualTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [
                 .styledText(
                     [face],
@@ -238,7 +238,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         let face = CoreVisualTestTypeface()
         let underline = Text.LineStyle(pattern: .dash, color: .green)
         let strikethrough = Text.LineStyle(pattern: .dot)
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [
                 .styledText(
                     [face],
@@ -289,7 +289,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testDecorationDashPatternsUseObservedThicknessRatios() {
         func pattern(_ pattern: Text.LineStyle.Pattern) -> [CGFloat] {
-            GraphicsContext.ResolvedText.Drawing.Decoration(
+            ResolvedTextSource.Drawing.Decoration(
                 start: .zero,
                 end: CGPoint(x: 10, y: 0),
                 lineWidth: 2,
@@ -308,7 +308,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
     func testHeadMiddleAndTailTruncationPreserveObservedCharacterIndices()
         throws {
         let face = CoreVisualTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "ABCDEFGHIJKLMN")],
             scaleFactor: 1
         )
@@ -369,7 +369,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         properties.lineLimit = 1
 
         properties.truncationMode = .tail
-        let tail = GraphicsContext.ResolvedText(
+        let tail = ResolvedTextSource(
             runs: [
                 .styledText([face], "AB", _TextAttributeValues(), blue),
                 .styledText(
@@ -392,7 +392,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         )
 
         properties.truncationMode = .head
-        let head = GraphicsContext.ResolvedText(
+        let head = ResolvedTextSource(
             runs: [
                 .styledText([face], "A", _TextAttributeValues(), red),
                 .styledText(
@@ -415,7 +415,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         )
 
         properties.truncationMode = .middle
-        let middle = GraphicsContext.ResolvedText(
+        let middle = ResolvedTextSource(
             runs: [
                 .styledText([face], "A", _TextAttributeValues(), green),
                 .styledText([face], "B", _TextAttributeValues(), red),
@@ -439,7 +439,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         )
 
         properties.truncationMode = .tail
-        let newline = GraphicsContext.ResolvedText(
+        let newline = ResolvedTextSource(
             runs: [
                 .styledText([face], "AB", _TextAttributeValues(), red),
                 .styledText([face], "\nCD", _TextAttributeValues(), blue),
@@ -459,7 +459,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testLineLimitTruncatesRemainingParagraphOnLastVisibleLine() throws {
         let face = CoreVisualTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "ABCDEFGHIJKLMN")],
             scaleFactor: 1
         )
@@ -497,7 +497,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
     func testExplicitNewlineUsesTailOnlySuffixAndDoesNotSetTruncatedFlag()
         throws {
         let face = CoreVisualTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "AB\nCD")],
             scaleFactor: 1
         )
@@ -536,7 +536,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
     func testTooNarrowTruncationKeepsSourceGlyphsAndClampsLineWidth()
         throws {
         let face = CoreVisualTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "ABCDEFGHIJKLMN")],
             scaleFactor: 1
         )
@@ -557,7 +557,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
 
     func testGlyphAtomsApplyPairKerningBeforeFollowingGlyph() throws {
         let face = CoreVisualTestTypeface(pairKerning: 2)
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "AB")],
             scaleFactor: 1
         )
@@ -639,7 +639,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
     }
 
     private func glyphScalars(
-        _ resolved: GraphicsContext.ResolvedText,
+        _ resolved: ResolvedTextSource,
         width: Int,
         properties: TextLayoutProperties
     ) -> [String] {

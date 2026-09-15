@@ -25,7 +25,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         XCTAssertEqual(Text.Layout.DrawingOptions.disablesSubpixelQuantization.rawValue, 1)
 
         let face = TextRendererTestTypeface()
-        var first = GraphicsContext.ResolvedText.Glyph(
+        var first = ResolvedTextSource.Glyph(
             scalar: "A".unicodeScalars.first!,
             face: face
         )
@@ -36,7 +36,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         attributes.set(_AnyTextAttribute(TextRendererTestAttribute(value: 7)))
         first.attributes = attributes
 
-        var second = GraphicsContext.ResolvedText.Glyph(
+        var second = ResolvedTextSource.Glyph(
             scalar: "B".unicodeScalars.first!,
             face: face
         )
@@ -45,9 +45,9 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
         second.descender = -2
         second.attributes = attributes
 
-        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 2)
+        let resolved = ResolvedTextSource(runs: [], scaleFactor: 2)
         let layout = resolved.makeLayout(
-            lineGlyphs: [GraphicsContext.ResolvedText.LineGlyphs(
+            lineGlyphs: [ResolvedTextSource.LineGlyphs(
                 glyphs: [first, second],
                 ascender: 8,
                 descender: -2,
@@ -88,7 +88,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
     }
 
     func testCustomRendererTextUsesDisplayPaddingAndBypassesStaticDrawingCache() throws {
-        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)
         let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
         let box = TextRendererTestBox()
         let view = StyledTextContentView(text: styledText, renderer: box)
@@ -123,7 +123,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
 
     func testDynamicTextProducesPlaceholderAndBypassesStaticDrawingCache() throws {
         let face = TextRendererTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "dynamic")],
             scaleFactor: 1
         )
@@ -224,7 +224,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
     }
 
     func testGraphicsRendererPromotesReusesAndEvictsTextCallbacks() throws {
-        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)
         let styledText = ResolvedStyledText.StringDrawing(
             resolvedText: resolved,
             version: 1
@@ -284,7 +284,7 @@ final class DisplayListGraphicsRendererTests: XCTestCase {
     }
 
     func testTextCallbackReplaysThroughCurrentStateWithinRoundedScaleBucket() throws {
-        let resolved = GraphicsContext.ResolvedText(runs: [], scaleFactor: 1)
+        let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)
         let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
         let view = StyledTextContentView(text: styledText, renderer: nil)
         let seed = DisplayList.Seed(DisplayList.Version(forUpdate: ()))

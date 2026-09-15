@@ -487,7 +487,7 @@ extension StyledTextContentView: ShapeStyledLeafView {
 class ResolvedStyledText: InterpolatableContent {
     fileprivate struct MeasurementEntry {
         var requestedSize: CGSize
-        var metrics: GraphicsContext.ResolvedText.LayoutMetrics
+        var metrics: ResolvedTextSource.LayoutMetrics
 
         func canReuse(for size: CGSize) -> Bool {
             let minimumWidth = min(metrics.size.width, requestedSize.width)
@@ -513,7 +513,7 @@ class ResolvedStyledText: InterpolatableContent {
     var styles: [_ShapeStyle_Pack.Style]
     var transitions: [Text.ResolvedProperties.Transition]
     var links: Text.ResolvedProperties.Links
-    let resolvedText: GraphicsContext.ResolvedText?
+    let resolvedText: ResolvedTextSource?
     var version: Int
     var transitionText: String?
     var needsDrawingGroup: Bool
@@ -533,7 +533,7 @@ class ResolvedStyledText: InterpolatableContent {
         styles: [_ShapeStyle_Pack.Style] = [],
         transitions: [Text.ResolvedProperties.Transition] = [],
         links: Text.ResolvedProperties.Links = Text.ResolvedProperties.Links(),
-        resolvedText: GraphicsContext.ResolvedText? = nil,
+        resolvedText: ResolvedTextSource? = nil,
         version: Int = 0,
         transitionText: String? = nil,
         needsDrawingGroup: Bool = false
@@ -675,6 +675,10 @@ class ResolvedStyledText: InterpolatableContent {
         fatalError("ResolvedStyledText sizing requires a concrete owner")
     }
 
+    func size(in size: CGSize) -> CGSize {
+        fatalError("ResolvedStyledText measurement requires a concrete owner")
+    }
+
     func firstBaseline(in size: CGSize) -> CGFloat {
         cachedLayoutMetrics(in: size)?.firstBaseline ?? .zero
     }
@@ -703,7 +707,7 @@ class ResolvedStyledText: InterpolatableContent {
 
     func cachedLayoutMetrics(
         in requestedSize: CGSize
-    ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+    ) -> ResolvedTextSource.LayoutMetrics? {
         guard resolvedText != nil else { return nil }
         fatalError("ResolvedStyledText measurement requires a concrete owner")
     }
@@ -717,12 +721,12 @@ class ResolvedStyledText: InterpolatableContent {
         return (value.numberOfLines, value.size)
     }
 
-    func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
+    func drawingSource(in size: CGSize) -> ResolvedTextSource? {
         resolvedText
     }
 
-    func drawingGlyphs(in size: CGSize) -> (source: GraphicsContext.ResolvedText,
-                                          lines: [GraphicsContext.ResolvedText.LineGlyphs])? {
+    func drawingGlyphs(in size: CGSize) -> (source: ResolvedTextSource,
+                                          lines: [ResolvedTextSource.LineGlyphs])? {
         guard let source = drawingSource(in: size) else { return nil }
         return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties).lines)
     }
@@ -771,10 +775,10 @@ extension ResolvedStyledText {
         /// Retains prepared source lines across constraint changes. The arrays
         /// share immutable glyph data with the resource's existing storage.
         final class PreparedLayout {
-            let source: GraphicsContext.ResolvedText
-            let lines: [GraphicsContext.ResolvedText.LineGlyphs]
+            let source: ResolvedTextSource
+            let lines: [ResolvedTextSource.LineGlyphs]
 
-            init(source: GraphicsContext.ResolvedText, lines: [GraphicsContext.ResolvedText.LineGlyphs]) {
+            init(source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs]) {
                 self.source = source
                 self.lines = lines
             }
@@ -791,7 +795,7 @@ extension ResolvedStyledText {
 
         // Retained proxies and the host share this owner's measurement entries.
         private var measurements: [(requestedSize: CGSize, metrics: NSAttributedString.Metrics)] = []
-        private var measurementSource: GraphicsContext.ResolvedText?
+        private var measurementSource: ResolvedTextSource?
         private(set) var preparedLayout: PreparedLayout?
 
         override var metricsCacheEntryCount: Int { measurements.count }
@@ -802,7 +806,7 @@ extension ResolvedStyledText {
             measurements.removeAll()
         }
 
-        override func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
+        override func drawingSource(in size: CGSize) -> ResolvedTextSource? {
             guard let resolvedText else { return nil }
             _ = cachedMetrics(in: size)
             let scale = drawingScale(size: size)
@@ -814,8 +818,8 @@ extension ResolvedStyledText {
             scaleFactorOverride ?? (layoutProperties.minScaleFactor == 1 ? 1 : cachedMetrics(in: size).scale)
         }
 
-        override func drawingGlyphs(in size: CGSize) -> (source: GraphicsContext.ResolvedText,
-                                                        lines: [GraphicsContext.ResolvedText.LineGlyphs])? {
+        override func drawingGlyphs(in size: CGSize) -> (source: ResolvedTextSource,
+                                                        lines: [ResolvedTextSource.LineGlyphs])? {
             guard let source = drawingSource(in: size) else { return nil }
             let prepared = drawingScale(size: size) == 1 ? preparedLayout : nil
             return (source, source.makeGlyphLayout(in: size, layoutProperties: layoutProperties,
@@ -830,10 +834,14 @@ extension ResolvedStyledText {
             ))?.size ?? .zero
         }
 
-        override func cachedLayoutMetrics(in size: CGSize) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+        override func cachedLayoutMetrics(in size: CGSize) -> ResolvedTextSource.LayoutMetrics? {
             guard resolvedText != nil else { return nil }
             let metrics = cachedMetrics(in: size)
             return .init(size: metrics.size, firstBaseline: metrics.firstBaseline, lastBaseline: metrics.lastBaseline)
+        }
+
+        override func size(in size: CGSize) -> CGSize {
+            cachedMetrics(in: size).size
         }
 
         override func metrics(in size: CGSize, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
@@ -911,7 +919,7 @@ extension ResolvedStyledText {
         }
 
         private func fontFittingMetrics(
-            in size: CGSize, source: GraphicsContext.ResolvedText
+            in size: CGSize, source: ResolvedTextSource
         ) -> (measurement: FittingMeasurement, scale: CGFloat)? {
             let minimum = layoutProperties.minScaleFactor
             guard minimum > 0, minimum < 1, let font = source.uniformFont,
@@ -939,10 +947,10 @@ extension ResolvedStyledText {
                 || abs(1 - minimum) < CGFloat(Float.ulpOfOne) {
                 return (original, 1)
             }
-            func resized(_ scale: CGFloat) -> GraphicsContext.ResolvedText? {
+            func resized(_ scale: CGFloat) -> ResolvedTextSource? {
                 source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
             }
-            func oversized(_ candidate: GraphicsContext.ResolvedText) -> Bool {
+            func oversized(_ candidate: ResolvedTextSource) -> Bool {
                 let measured = fittingMeasurement(in: naturalSize, source: candidate, layoutProperties: fittingProperties)
                 if limit == 1 {
                     return measured.metrics.size.width > size.width || measured.metrics.size.height > size.height
@@ -951,7 +959,7 @@ extension ResolvedStyledText {
                     || limit.map { measured.lineCount > $0 } == true
                     || (string.utf16.count <= 512 && measured.forcedClusterBreak)
             }
-            func finish(_ candidate: GraphicsContext.ResolvedText, scale: CGFloat)
+            func finish(_ candidate: ResolvedTextSource, scale: CGFloat)
                 -> (FittingMeasurement, CGFloat) {
                 var measured = fittingMeasurement(in: size, source: candidate, layoutProperties: layoutProperties)
                 // Restore the logical constraint after backend pixel quantization.
@@ -990,15 +998,15 @@ extension ResolvedStyledText {
         }
 
         private struct FittingMeasurement {
-            var metrics: GraphicsContext.ResolvedText.LayoutMetrics
+            var metrics: ResolvedTextSource.LayoutMetrics
             var lineCount: Int
             var forcedClusterBreak: Bool
             var truncatedRanges: [Range<Int>]
         }
 
         private func fittingMeasurement(
-            in size: CGSize, source: GraphicsContext.ResolvedText, layoutProperties: TextLayoutProperties,
-            sourceLines: [GraphicsContext.ResolvedText.LineGlyphs]? = nil
+            in size: CGSize, source: ResolvedTextSource, layoutProperties: TextLayoutProperties,
+            sourceLines: [ResolvedTextSource.LineGlyphs]? = nil
         ) -> FittingMeasurement {
             let sources = sourceLines ?? source.unwrappedGlyphLines()
             if let measured = separatorMeasurement(in: size, source: source, sources: sources,
@@ -1019,8 +1027,8 @@ extension ResolvedStyledText {
 
         private func separatorMeasurement(
             in size: CGSize,
-            source resolvedText: GraphicsContext.ResolvedText,
-            sources: [GraphicsContext.ResolvedText.LineGlyphs],
+            source resolvedText: ResolvedTextSource,
+            sources: [ResolvedTextSource.LineGlyphs],
             layoutProperties: TextLayoutProperties
         ) -> FittingMeasurement? {
             guard let extra = sources.last,
@@ -1127,8 +1135,8 @@ extension ResolvedStyledText {
 
         private func trailingParagraphMeasurement(
             in size: CGSize,
-            source resolvedText: GraphicsContext.ResolvedText,
-            sources: [GraphicsContext.ResolvedText.LineGlyphs],
+            source resolvedText: ResolvedTextSource,
+            sources: [ResolvedTextSource.LineGlyphs],
             layoutProperties: TextLayoutProperties
         ) -> FittingMeasurement? {
             guard sources.count == 2,
@@ -1158,6 +1166,10 @@ extension ResolvedStyledText {
 
         override func resetCache() {}
 
+        override func size(in size: CGSize) -> CGSize {
+            cachedLayoutMetrics(in: size)?.size ?? .zero
+        }
+
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             guard proposal != .zero else { return .zero }
             return cachedLayoutMetrics(in: CGSize(
@@ -1166,7 +1178,7 @@ extension ResolvedStyledText {
             ))?.size ?? .zero
         }
 
-        override func cachedLayoutMetrics(in size: CGSize) -> GraphicsContext.ResolvedText.LayoutMetrics? {
+        override func cachedLayoutMetrics(in size: CGSize) -> ResolvedTextSource.LayoutMetrics? {
             guard let resolvedText else { return nil }
             if let entry = measurements.first(where: { $0.canReuse(for: size) }) {
                 return entry.metrics

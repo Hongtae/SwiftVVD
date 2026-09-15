@@ -37,7 +37,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             textureTransform: .identity,
             scaleFactor: 1
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [
                 .text([face], "A "),
                 .attachment([face], image),
@@ -86,7 +86,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             tracking: 1,
             baselineOffset: 3
         )
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.styledText([face], "styled", _TextAttributeValues(), style)],
             scaleFactor: 1
         )
@@ -138,7 +138,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             foregroundColor: .purple,
             kern: 4
         )
-        let storage = GraphicsContext.ResolvedText(
+        let storage = ResolvedTextSource(
             runs: [
                 .styledText([face], "A", _TextAttributeValues(), firstStyle),
                 .styledText([face], "😀B", _TextAttributeValues(), secondStyle)
@@ -192,7 +192,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<ResolvedFontMetrics>.stride, 64)
 
         let face = ResolvedStorageTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "metrics")],
             scaleFactor: 2
         )
@@ -224,7 +224,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
     func testResolvedStyledTextReusesMetricsWithinMeasuredProposalRange() {
         let face = ResolvedMetricsCacheTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
@@ -262,7 +262,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
     func testResolvedStyledTextNormalizesUnspecifiedProposalToInfinity() {
         let face = ResolvedMetricsCacheTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
@@ -284,7 +284,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
             let face = FractionalWidthTestTypeface(
                 advance: 7.3 * scale
             )
-            let resolved = GraphicsContext.ResolvedText(
+            let resolved = ResolvedTextSource(
                 runs: [.text([face], "AAAA")],
                 scaleFactor: scale
             )
@@ -476,7 +476,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
                 } else {
                     XCTFail("Unexpected \(modeName) typeface")
                 }
-                let resolved = GraphicsContext.ResolvedText(
+                let resolved = ResolvedTextSource(
                     runs: [
                         .text([typeface], "TestApp1 Labs"),
                     ],
@@ -524,7 +524,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
     func testResolvedStyledTextPreservesZeroWidthProposalSemantics() {
         let face = ResolvedMetricsCacheTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "metrics")],
             scaleFactor: 1
         )
@@ -545,7 +545,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         let face = ResolvedMetricsCacheTestTypeface()
 
         let singleLine = ResolvedStyledText.StringDrawing(
-            resolvedText: GraphicsContext.ResolvedText(
+            resolvedText: ResolvedTextSource(
                 runs: [.text([face], "metrics")],
                 scaleFactor: 1
             )
@@ -562,7 +562,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         )
 
         let explicitLines = ResolvedStyledText.StringDrawing(
-            resolvedText: GraphicsContext.ResolvedText(
+            resolvedText: ResolvedTextSource(
                 runs: [.text([face], "AA\nBB")],
                 scaleFactor: 1
             )
@@ -581,7 +581,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         )
 
         let wrappedLine = ResolvedStyledText.StringDrawing(
-            resolvedText: GraphicsContext.ResolvedText(
+            resolvedText: ResolvedTextSource(
                 runs: [.text([face], "AAAA")],
                 scaleFactor: 1
             )
@@ -739,11 +739,11 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
 
     func testResolvedSuffixAndShapeStyleDefaultsMatchObservedSurface() throws {
         let face = ResolvedStorageTestTypeface()
-        let resolved = GraphicsContext.ResolvedText(
+        let resolved = ResolvedTextSource(
             runs: [.text([face], "suffix")],
             scaleFactor: 1
         )
-        var glyph = GraphicsContext.ResolvedText.Glyph(
+        var glyph = ResolvedTextSource.Glyph(
             scalar: UnicodeScalar("s"),
             face: face
         )
@@ -753,7 +753,7 @@ final class ResolvedStyledTextStorageTests: XCTestCase {
         let line = try XCTUnwrap(
             resolved.makeLayout(
                 lineGlyphs: [
-                    GraphicsContext.ResolvedText.LineGlyphs(
+                    ResolvedTextSource.LineGlyphs(
                         glyphs: [glyph],
                         ascender: 8,
                         descender: -2,

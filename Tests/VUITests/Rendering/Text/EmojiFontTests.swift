@@ -179,7 +179,7 @@ final class EmojiFontTests: XCTestCase {
                 in: environment, forContext: resources, dpi: 72
             )
             for text in ["A", "1", "❤︎", "❤️", "👍🏽", "👩🏽‍💻"] {
-                let resolved = GraphicsContext.ResolvedText(runs: [.text(cascade.runFaces, text)], scaleFactor: 1)
+                let resolved = ResolvedTextSource(runs: [.text(cascade.runFaces, text)], scaleFactor: 1)
                 let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
                 let first = try XCTUnwrap(glyphs.first)
                 if ["A", "1"].contains(text) {
@@ -237,7 +237,7 @@ final class EmojiFontTests: XCTestCase {
             ))
             context.clear(with: .clear)
             context.opacity = opacity
-            let text = GraphicsContext.ResolvedText(runs: [.text([face], "😀")], scaleFactor: 1)
+            let text = ResolvedTextSource(runs: [.text([face], "😀")], scaleFactor: 1)
             context.draw(text, in: rect, shading: .color(color))
             let completed = expectation(description: "Emoji GPU completion")
             buffer.addCompletedHandler { _ in completed.fulfill() }

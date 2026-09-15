@@ -350,7 +350,7 @@ final class ViewSpacingTests: XCTestCase {
             descender: -3,
             leading: 4
         )
-        let ideal = GraphicsContext.ResolvedText.LayoutMetrics(
+        let ideal = ResolvedTextSource.LayoutMetrics(
             size: CGSize(width: 10, height: 15),
             firstBaseline: 11,
             lastBaseline: 11
@@ -424,7 +424,7 @@ final class ViewSpacingTests: XCTestCase {
                 descender: -2.7421875,
                 leading: 0
             ),
-            idealMetrics: GraphicsContext.ResolvedText.LayoutMetrics(
+            idealMetrics: ResolvedTextSource.LayoutMetrics(
                 size: CGSize(width: 9, height: 16),
                 firstBaseline: 13,
                 lastBaseline: 13

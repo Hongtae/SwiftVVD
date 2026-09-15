@@ -1260,7 +1260,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             var transform: CGAffineTransform
             var command: ItemCommand
 
-            func makeDrawing() -> GraphicsContext.ResolvedText.Drawing? {
+            func makeDrawing() -> ResolvedTextSource.Drawing? {
                 guard view.renderer == nil else { return nil }
                 let margins = view.text.drawingMargins
                 guard let prepared = view.text.drawingGlyphs(in: size) else { return nil }
@@ -1270,7 +1270,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 )
             }
 
-            func glyphAtoms() -> [GraphicsContext.ResolvedText.GlyphAtom]? {
+            func glyphAtoms() -> [ResolvedTextSource.GlyphAtom]? {
                 guard view.renderer == nil,
                       let prepared = view.text.drawingGlyphs(in: size) else {
                     return nil
@@ -1324,7 +1324,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             }
 
             func draw(
-                _ drawing: GraphicsContext.ResolvedText.Drawing,
+                _ drawing: ResolvedTextSource.Drawing,
                 in context: GraphicsContext
             ) {
                 var context = context
@@ -3249,7 +3249,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         private struct Cache {
-            var callbacks: [CallbackKey: GraphicsContext.ResolvedText.Drawing] = [:]
+            var callbacks: [CallbackKey: ResolvedTextSource.Drawing] = [:]
             var animators: [AnimatorKey: any _DisplayList_AnyEffectAnimator] = [:]
         }
 
@@ -3505,7 +3505,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             _ text: Content.TextValue,
             seed: Seed,
             scale: CGFloat
-        ) -> GraphicsContext.ResolvedText.Drawing? {
+        ) -> ResolvedTextSource.Drawing? {
             guard !text.view.text.needsDynamicRenderingInArchive else {
                 return nil
             }

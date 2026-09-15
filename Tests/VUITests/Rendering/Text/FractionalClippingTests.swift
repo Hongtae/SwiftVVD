@@ -37,7 +37,7 @@ final class FractionalClippingTests: XCTestCase {
                                 let source = try XCTUnwrap(Text(verbatim: string).font(font)._resolve(context:
                                     GraphTextResolutionContext(environment: environment, sceneResources: SceneResources()),
                                     referenceDate: Date(timeIntervalSince1970: 0)))
-                                let resolved = GraphicsContext.ResolvedText(runs: source.runs, scaleFactor: 1,
+                                let resolved = ResolvedTextSource(runs: source.runs, scaleFactor: 1,
                                     displayScale: scale, preferredLanguages: ["en"])
                                 let metrics = try XCTUnwrap(resolved.maximumFontMetrics)
                                 let styled = ResolvedStyledText.TextLayoutManager(resolvedText: resolved)

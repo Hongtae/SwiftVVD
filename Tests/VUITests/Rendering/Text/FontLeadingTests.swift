@@ -47,13 +47,13 @@ final class FontLeadingTests: XCTestCase {
     }
 
     private func text(_ string: String, font: VUI.Font, face: Typeface, scale: CGFloat = 1,
-                      spacing: CGFloat = 0, language: String = "en", ratio: Double? = nil) -> GraphicsContext.ResolvedText {
+                      spacing: CGFloat = 0, language: String = "en", ratio: Double? = nil) -> ResolvedTextSource {
         var attributes = _ResolvedTextRunAttributes()
         attributes.fontResource = request(font, language: language, ratio: ratio)
         var paragraph = TextParagraphStyle()
         paragraph.lineSpacing = spacing
         attributes.paragraphStyle = paragraph
-        return GraphicsContext.ResolvedText(runs: [.styledText([face], string, .init(), attributes)],
+        return ResolvedTextSource(runs: [.styledText([face], string, .init(), attributes)],
             scaleFactor: scale, displayScale: 2, preferredLanguages: ["en"])
     }
 
@@ -200,7 +200,7 @@ final class FontLeadingTests: XCTestCase {
         for (reversed, expected): (Bool, [CGFloat]) in [(false, [13, 31.689453125, 49.689453125]), (true, [13, 29, 47])] {
             let style = text("Hg", font: .body.leading(.loose), face: system)
             let file = text("Hg", font: .file(resource(), size: 13), face: ordinary)
-            var runs: [GraphicsContext.ResolvedText.Run] = []
+            var runs: [ResolvedTextSource.Run] = []
             for i in 0..<3 {
                 let first = reversed ? file : style
                 let second = reversed ? style : file
@@ -208,7 +208,7 @@ final class FontLeadingTests: XCTestCase {
                 guard case let .styledText(faces, _, attributes, values) = second.runs[0] else { return XCTFail() }
                 runs.append(.styledText(faces, i == 2 ? "Hg" : "Hg\n", attributes, values))
             }
-            let source = GraphicsContext.ResolvedText(runs: runs, scaleFactor: 1)
+            let source = ResolvedTextSource(runs: runs, scaleFactor: 1)
             let lines = source.makeGlyphs()
             XCTAssertEqual(lines.count, 3)
             for i in lines.indices { XCTAssertEqual(lines[i].baseline, expected[i], accuracy: 1e-10) }
