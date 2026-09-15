@@ -79,6 +79,12 @@ final class TextProxyTests: XCTestCase {
                 _ = layout.sizeThatFits(.init(width: 30, height: 120))
                 XCTAssertEqual(layout.text.metricsCacheEntryCount, 2)
             }
+            // ASSERTIONS textManagerMetricsCacheAndCountObserved
+            let complete = custom.text.metrics(in: CGSize(width: 100, height: 120), layoutMargins: nil)
+            XCTAssertEqual(complete.numberOfLines, 2)
+            XCTAssertFalse(complete.hasTruncatedRanges)
+            XCTAssertEqual(custom.text.textSizeCacheMetrics(in: CGSize(width: 100, height: 120)).0, 2)
+            XCTAssertEqual(custom.text.metricsCacheEntryCount, 2)
             let independent = try engine(text)
             XCTAssertFalse(independent.text === bare.text)
             XCTAssertEqual(independent.text.metricsCacheEntryCount, 0)

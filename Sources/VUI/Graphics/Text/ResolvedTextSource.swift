@@ -541,6 +541,7 @@ struct ResolvedTextSource {
         var lineCount: Int
         var forcedClusterBreak: Bool
         var truncatedRanges: [Range<Int>]
+        var hasUnlaidText: Bool
     }
 
     struct GlyphAtom {
@@ -1621,9 +1622,24 @@ struct ResolvedTextSource {
             visibleLines.append(line)
             if countsAsLine { processedLineCount += 1 }
         }
+        func textEnd(in lines: [LineGlyphs]) -> Int {
+            var end = 0
+            func include(_ glyph: Glyph?) {
+                guard let glyph else { return }
+                end = max(end, glyph.sourceRange?.upperBound ?? glyph.characterIndex + 1)
+            }
+            for line in lines {
+                for glyph in line.glyphs { include(glyph) }
+                include(line.trailingBoundary)
+                if case let .extra(boundary) = line.kind { include(boundary) }
+            }
+            return end
+        }
+        let sourceEnd = textEnd(in: wrappedLines)
         func result() -> GlyphLayout {
             GlyphLayout(lines: visibleLines, lineCount: processedLineCount,
-                        forcedClusterBreak: forcedClusterBreak, truncatedRanges: truncatedRanges)
+                        forcedClusterBreak: forcedClusterBreak, truncatedRanges: truncatedRanges,
+                        hasUnlaidText: !visibleLines.isEmpty && textEnd(in: visibleLines) < sourceEnd)
         }
         let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
         let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight

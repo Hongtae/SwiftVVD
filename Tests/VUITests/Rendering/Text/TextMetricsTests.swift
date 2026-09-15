@@ -323,6 +323,124 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerMetricsPublicationObserved
+    func testManagerRoundsBaselinesAfterApplyingItsOwnMargins() throws {
+        try withManager(Text(verbatim: "A").baselineOffset(0.2)) { manager in
+            let size = CGSize(width: 7, height: 81)
+            XCTAssertEqual(manager.size(in: size), CGSize(width: 7, height: 27.5))
+            XCTAssertEqual(manager.firstBaseline(in: size), 21)
+            XCTAssertEqual(manager.lastBaseline(in: size), 21)
+        }
+        try withManager(Text(verbatim: "A").baselineOffset(0.2)) { manager in
+            manager.layoutMargins = EdgeInsets(top: 0.1, leading: 2.25, bottom: 3.5, trailing: 4.125)
+            let size = CGSize(width: 6.375, height: 81)
+            XCTAssertEqual(manager.size(in: size), CGSize(width: 6.875, height: 31.1))
+            XCTAssertEqual(manager.firstBaseline(in: size), 21.5)
+            XCTAssertEqual(manager.lastBaseline(in: size), 21.5)
+        }
+    }
+
+    // ASSERTIONS textManagerMetricsCacheAndCountObserved textManagerLayoutInfoObserved
+    func testManagerPublishesCountsWithItsFirstMeasurement() throws {
+        for (text, count, height, first, last): (String, UInt, CGFloat, CGFloat, CGFloat) in [
+            ("", 0, 14, 0, 0), ("A", 1, 27, 21, 21), ("\n", 2, 28, 21, 25),
+            ("\n\n", 3, 55, 21, 52), ("A\n", 2, 54, 21, 48), ("A\nB", 2, 54, 21, 48)
+        ] {
+            try withManager(Text(verbatim: text)) { manager in
+                let request = CGSize(width: 300, height: 81)
+                let measured = manager.size(in: request)
+                XCTAssertEqual(measured.height, height, text.debugDescription)
+                XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+                let counted = manager.textSizeCacheMetrics(in: request)
+                XCTAssertEqual(counted.0, count, text.debugDescription)
+                XCTAssertEqual(counted.1, measured)
+                let complete = manager.metrics(in: request, layoutMargins: nil)
+                XCTAssertEqual(complete.numberOfLines, count)
+                XCTAssertEqual(complete.firstBaseline, first)
+                XCTAssertEqual(complete.lastBaseline, last)
+                XCTAssertEqual(complete.baselineAdjustment, 0)
+                XCTAssertEqual(complete.scale, 1)
+                XCTAssertEqual(complete.requestedWidth, 300)
+                XCTAssertFalse(complete.hasTruncatedRanges)
+                XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+                manager.scaleFactorOverride = 0.5
+                XCTAssertEqual(manager.textSizeCacheMetrics(in: request).0, count)
+                manager.scaleFactorOverride = nil
+                XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+            }
+        }
+    }
+
+    // ASSERTIONS textManagerMetricsCacheAndCountObserved textManagerMetricsPublicationObserved
+    func testManagerReusesCompleteFirstIntervalAndIgnoresSuppliedMargins() throws {
+        try withManager(Text(verbatim: "A").baselineOffset(0.2)) { manager in
+            let firstRequest = CGSize(width: 100, height: 81)
+            let ignored = EdgeInsets(top: 10, leading: 20, bottom: 30, trailing: 40)
+            let first = manager.metrics(in: firstRequest, layoutMargins: ignored)
+            XCTAssertEqual(first.numberOfLines, 1)
+            XCTAssertEqual(first.firstBaseline, 21)
+            XCTAssertEqual(first.baselineAdjustment, -0.2, accuracy: 1e-12)
+            XCTAssertEqual(first.requestedWidth, 100)
+            XCTAssertEqual(first.size.height, 27.5)
+            let second = manager.metrics(in: CGSize(width: 300, height: 120), layoutMargins: nil)
+            XCTAssertEqual(second.requestedWidth, 300)
+            let overlap = manager.metrics(in: CGSize(width: 50, height: 54), layoutMargins: ignored)
+            XCTAssertEqual(overlap.requestedWidth, 100)
+            XCTAssertEqual(overlap.baselineAdjustment, first.baselineAdjustment)
+            XCTAssertEqual(manager.metrics(in: first.size, layoutMargins: nil).requestedWidth, 100)
+            XCTAssertEqual(manager.metricsCacheEntryCount, 2)
+        }
+    }
+
+    // ASSERTIONS textManagerLayoutInfoObserved textManagerMetricsCacheAndCountObserved
+    func testManagerCountsExtraFragmentsAndUnlaidParagraphs() throws {
+        for (text, height, limit, count, truncated): (String, CGFloat, Int?, UInt, Bool) in [
+            ("", 14, 1, 0, false), ("\n", 14, 1, 2, false),
+            ("\n\n", 0, nil, 1, true), ("\n\n", 14, 2, 1, true),
+            ("\n\n", 54, 1, 1, true), ("\n\n", 54, 2, 3, false),
+            ("A\n", 0, nil, 1, false), ("A\n", 14, nil, 2, false),
+            ("A\n", 14, 1, 1, false), ("A\n", 54, 2, 2, false),
+            ("A\nB", 0, nil, 1, true), ("A\nB", 14, 2, 1, true),
+            ("A\nB", 54, 1, 1, true), ("A\nB", 54, 2, 2, false)
+        ] {
+            try withManager(Text(verbatim: text), configure: { $0.lineLimit = limit }) { manager in
+                let request = CGSize(width: 300, height: height)
+                let complete = manager.metrics(in: request, layoutMargins: nil)
+                XCTAssertEqual(complete.numberOfLines, count, "\(text.debugDescription), \(height), \(String(describing: limit))")
+                XCTAssertEqual(complete.hasTruncatedRanges, truncated, text.debugDescription)
+                XCTAssertEqual(manager.textSizeCacheMetrics(in: request).0, count)
+                XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+            }
+        }
+        for width: CGFloat in [0, 0.01, 1, 50] {
+            for (text, truncated): (String, Bool) in [("A\n", false), ("A\nB", true), ("A A A A A A", width == 50)] {
+                try withManager(Text(verbatim: text), configure: { $0.lineLimit = 1 }) { manager in
+                    let complete = manager.metrics(in: CGSize(width: width, height: 81), layoutMargins: nil)
+                    XCTAssertEqual(complete.numberOfLines, 1)
+                    XCTAssertEqual(complete.hasTruncatedRanges, truncated, "\(text.debugDescription), \(width)")
+                    if width <= 1 { XCTAssertEqual(complete.size.width, width == 1 ? 1 : 0.5) }
+                }
+            }
+        }
+        try withManager(Text(verbatim: "A")) { manager in
+            XCTAssertEqual(manager.sizeThatFits(.zero), .zero)
+            XCTAssertEqual(manager.metricsCacheEntryCount, 0)
+            let count = manager.textSizeCacheMetrics(in: .zero)
+            XCTAssertEqual(count.0, 1)
+            XCTAssertEqual(count.1, CGSize(width: 0.5, height: 27))
+            XCTAssertEqual(manager.metricsCacheEntryCount, 1)
+        }
+    }
+
+    private func withManager(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
+                             _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
+        try withOwner(text, configure: configure) { source in
+            let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: source.layoutProperties,
+                layoutMargins: source.layoutMargins, resolvedText: source.resolvedText)
+            try body(manager)
+        }
+    }
+
     private func withOwner(_ text: String, configure: (inout EnvironmentValues) -> Void = { _ in },
                            _ body: (ResolvedStyledText.StringDrawing) throws -> Void) throws {
         try withOwner(Text(verbatim: text), configure: configure, body)

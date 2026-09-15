@@ -493,7 +493,7 @@ extension StyledTextContentView: ShapeStyledLeafView {
 class ResolvedStyledText: InterpolatableContent {
     fileprivate struct MeasurementEntry {
         var requestedSize: CGSize
-        var metrics: ResolvedTextSource.LayoutMetrics
+        var metrics: NSAttributedString.Metrics
 
         func canReuse(for size: CGSize) -> Bool {
             let minimumWidth = min(metrics.size.width, requestedSize.width)
@@ -1256,24 +1256,41 @@ extension ResolvedStyledText {
         }
 
         override func cachedLayoutMetrics(in size: CGSize) -> ResolvedTextSource.LayoutMetrics? {
-            guard let resolvedText else { return nil }
+            guard resolvedText != nil else { return nil }
+            let value = metrics(in: size, layoutMargins: nil)
+            return .init(size: value.size, firstBaseline: value.firstBaseline, lastBaseline: value.lastBaseline)
+        }
+
+        override func metrics(in size: CGSize, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
+            guard let resolvedText else {
+                fatalError("TextLayoutManager metrics require resolved text")
+            }
             if let entry = measurements.first(where: { $0.canReuse(for: size) }) {
                 return entry.metrics
             }
+            // The manager uses its retained margins for every measurement.
+            // The optional argument belongs to the shared dispatch contract.
+            let layoutMargins = self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let pixelWidth = width * resolvedText.scaleFactor
-            let lines = resolvedText.makeGlyphs(
+            let layout = resolvedText.makeGlyphLayout(
                 maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
                 maximumHeight: available.height * resolvedText.scaleFactor,
                 lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
-            var metrics = resolvedText.layoutMetrics(lineGlyphs: lines)
-            if lines.isEmpty {
-                metrics.firstBaseline = 0
-                metrics.lastBaseline = 0
+            var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
+            if layout.lines.isEmpty {
+                raw.firstBaseline = 0
+                raw.lastBaseline = 0
             }
-            metrics.size.width = ceil(min(metrics.size.width, width) * resolvedText.displayScale) / resolvedText.displayScale
+            raw.size.width = ceil(min(raw.size.width, width) * resolvedText.displayScale) / resolvedText.displayScale
+            var metrics = NSAttributedString.Metrics(size: raw.size, scale: 1,
+                firstBaseline: raw.firstBaseline, lastBaseline: raw.lastBaseline,
+                baselineAdjustment: 0, requestedWidth: available.width,
+                numberOfLines: UInt(layout.lines.count),
+                hasTruncatedRanges: !layout.truncatedRanges.isEmpty || layout.hasUnlaidText)
+            metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
             measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics))
             return metrics
         }
