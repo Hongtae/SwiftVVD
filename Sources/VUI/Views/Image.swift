@@ -2527,8 +2527,8 @@ extension Image: View {
 
         // 2. Resource pass (Resource Rule)
         // Evaluated before drawing (in updateView) to upload the image texture to the GPU.
-        // The graph owns this rule, so the rule must not retain its graph.
-        let resourceAttr: Attribute<ResourceList> = graph.makeRule { [unowned graph] in
+        let resourceAttr: Attribute<ResourceList> = graph.makeRule { graphRef in
+            let graph = graphRef.graph
             let image = view._attribute.value // Dependency: image provider changes
 
             if !image.provider.requiresBackendResolution {
@@ -2567,9 +2567,9 @@ extension Image: View {
             let renderEnvironment = environment.untrackedCopy()
             var list = ResourceList()
 
-            list.items.append(ResourceList.Task(transaction: resourceTransaction) { [weak graph] context in
-                // A retained resource list can outlive the host that requested it.
-                guard let graph else { return }
+            let weakGraph = _AGGraphWeakRef(graph)
+            list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
+                guard let graph = weakGraph.graph else { return }
                 var context = context
                 context.copyOnWrite()
                 context.environment = renderEnvironment

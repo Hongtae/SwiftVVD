@@ -1058,16 +1058,16 @@ struct PreferencesOutputs {
         let value: AGAttribute      // type-erased raw node ID
         /// Builds a new AG rule that reduces `nodes` into a single value using
         /// the concrete `PreferenceKey.reduce` implementation captured at append time.
-        let _makeReduceRule: (_ nodes: [AGAttribute], _ graph: _AGGraph) -> AGAttribute
+        let _makeReduceRule: (_ nodes: [AGAttribute], _ graph: _AGGraphRef) -> AGAttribute
         /// Points the indirect placeholder at the matching concrete attr in `concrete`.
         /// Non-placeholder outputs leave this nil.
-        let _attachIndirect: ((_ concrete: PreferencesOutputs, _ graph: _AGGraph) -> Void)?
+        let _attachIndirect: ((_ concrete: PreferencesOutputs, _ graph: _AGGraphRef) -> Void)?
         /// Detaches the indirect placeholder (points it to nil for the default value).
         /// Non-placeholder outputs leave this nil.
-        let _detachIndirect: ((_ graph: _AGGraph) -> Void)?
+        let _detachIndirect: ((_ graph: _AGGraphRef) -> Void)?
         /// Registers a permanent AG dependency on `dep` so this placeholder is
         /// invalidated whenever `dep` changes. Non-placeholder outputs leave this nil.
-        let _setIndirectDependency: ((_ dep: AGAttribute, _ graph: _AGGraph) -> Void)?
+        let _setIndirectDependency: ((_ dep: AGAttribute, _ graph: _AGGraphRef) -> Void)?
     }
 
     var preferences: [KeyValue] = []
@@ -1077,10 +1077,10 @@ struct PreferencesOutputs {
         preferences.append(KeyValue(
             key: keyType,
             value: node,
-            _makeReduceRule: { nodes, graph in
-                let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-                // The graph owns the reducer and must not be retained by it.
-                let attr: Attribute<K.Value> = graph.makeRule { [unowned graph] in
+            _makeReduceRule: { nodes, graphRef in
+                let weakNodes = nodes.compactMap { graphRef.graph.weakAttributeIfValid(for: $0) }
+                let attr: Attribute<K.Value> = graphRef.graph.makeRule { graphRef in
+                    let graph = graphRef.graph
                     var combined = K.defaultValue
                     var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -1117,7 +1117,7 @@ struct PreferencesOutputs {
         }
         var result = PreferencesOutputs()
         for (_, entry) in grouped {
-            let reducedNode = entry.representative._makeReduceRule(entry.nodes, graph)
+            let reducedNode = entry.representative._makeReduceRule(entry.nodes, _AGGraphRef(graph))
             result.preferences.append(KeyValue(
                 key: entry.representative.key,
                 value: reducedNode,
@@ -1196,9 +1196,10 @@ extension PreferencesInputs {
         outputs.preferences.append(PreferencesOutputs.KeyValue(
             key: K.self,
             value: indirectAttr.identifier,
-            _makeReduceRule: { nodes, graph in
-                let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-                let reduced: Attribute<K.Value> = graph.makeRule { [unowned graph] in
+            _makeReduceRule: { nodes, graphRef in
+                let weakNodes = nodes.compactMap { graphRef.graph.weakAttributeIfValid(for: $0) }
+                let reduced: Attribute<K.Value> = graphRef.graph.makeRule { graphRef in
+                    let graph = graphRef.graph
                     var combined = K.defaultValue
                     var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -1214,17 +1215,18 @@ extension PreferencesInputs {
                 }
                 return reduced.identifier
             },
-            _attachIndirect: { concrete, graph in
+            _attachIndirect: { concrete, graphRef in
                 let matches = concrete.preferences.filter { $0.key == K.self }
                 switch matches.count {
                 case 0:
-                    graph.setIndirectTarget(indirectAttr.identifier, to: nil)
+                    graphRef.graph.setIndirectTarget(indirectAttr.identifier, to: nil)
                 case 1:
                     let concreteKV = matches[0]
-                    graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
+                    graphRef.graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
                 default:
-                    let weakMatches = matches.compactMap { graph.weakAttributeIfValid(for: $0.value) }
-                    let reduced: Attribute<K.Value> = graph.makeRule { [unowned graph] in
+                    let weakMatches = matches.compactMap { graphRef.graph.weakAttributeIfValid(for: $0.value) }
+                    let reduced: Attribute<K.Value> = graphRef.graph.makeRule { graphRef in
+                        let graph = graphRef.graph
                         var combined = K.defaultValue
                         var hasValue = false
                         for weakNode in weakMatches where weakNode.isValid(in: graph) {
@@ -1238,14 +1240,14 @@ extension PreferencesInputs {
                         }
                         return combined
                     }
-                    graph.setIndirectTarget(indirectAttr.identifier, to: reduced.identifier)
+                    graphRef.graph.setIndirectTarget(indirectAttr.identifier, to: reduced.identifier)
                 }
             },
-            _detachIndirect: { graph in
-                graph.setIndirectTarget(indirectAttr.identifier, to: nil)
+            _detachIndirect: { graphRef in
+                graphRef.graph.setIndirectTarget(indirectAttr.identifier, to: nil)
             },
-            _setIndirectDependency: { dep, graph in
-                graph.setIndirectDependency(indirectAttr.identifier, dependsOn: dep)
+            _setIndirectDependency: { dep, graphRef in
+                graphRef.graph.setIndirectDependency(indirectAttr.identifier, dependsOn: dep)
             }
         ))
     }
@@ -1258,7 +1260,7 @@ extension PreferencesOutputs {
             fatalError("PreferencesOutputs.attachIndirectOutputs called outside AG context.")
         }
         for placeholder in placeholders.preferences {
-            placeholder._attachIndirect?(self, graph)
+            placeholder._attachIndirect?(self, _AGGraphRef(graph))
         }
     }
 
@@ -1269,7 +1271,7 @@ extension PreferencesOutputs {
             fatalError("PreferencesOutputs.setIndirectDependency called outside AG context.")
         }
         for kv in preferences {
-            kv._setIndirectDependency?(dep, graph)
+            kv._setIndirectDependency?(dep, _AGGraphRef(graph))
         }
     }
 
@@ -1279,7 +1281,7 @@ extension PreferencesOutputs {
             fatalError("PreferencesOutputs.detachIndirectOutputs called outside AG context.")
         }
         for kv in preferences {
-            kv._detachIndirect?(graph)
+            kv._detachIndirect?(_AGGraphRef(graph))
         }
     }
 }
@@ -1376,6 +1378,6 @@ extension PreferencesOutputs {
               let representative = preferences.first(where: {
                   ObjectIdentifier($0.key) == ObjectIdentifier(key)
               }) else { return nil }
-        return Attribute(representative._makeReduceRule(nodes, graph))
+        return Attribute(representative._makeReduceRule(nodes, _AGGraphRef(graph)))
     }
 }

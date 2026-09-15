@@ -30,6 +30,22 @@ protocol _AnyOffsetProjection {
     func publishValue(to graph: _AGGraph, for attribute: AGAttribute)
 }
 
+/// A non-owning graph reference for work bounded by the graph's lifetime.
+/// Capture this value and access its graph inside the stored closure.
+struct _AGGraphRef {
+    unowned let graph: _AGGraph
+
+    init(_ graph: _AGGraph) { self.graph = graph }
+}
+
+/// A weak graph reference for work that can outlive its requesting graph.
+/// The target cannot be reassigned; it becomes nil when the graph is destroyed.
+struct _AGGraphWeakRef {
+    weak let graph: _AGGraph?
+
+    init(_ graph: _AGGraph) { self.graph = graph }
+}
+
 // Single-threaded design: no internal synchronization.
 // The caller is responsible for ensuring that all operations on a given
 // _AGGraph instance occur on a single thread (or equivalent serial context).

@@ -18,7 +18,7 @@ enum _OpacityEffectSupport {
             fatalError("\(Modifier.self)._makeView called outside an active _AGGraph context.")
         }
         var outputs = body(_Graph(), inputs)
-        applyOpacity(to: &outputs.preferences, opacity: opacity, graph: graph)
+        applyOpacity(to: &outputs.preferences, opacity: opacity, graph: _AGGraphRef(graph))
         return outputs
     }
 
@@ -38,14 +38,15 @@ enum _OpacityEffectSupport {
     private static func applyOpacity(
         to preferences: inout PreferencesOutputs,
         opacity: _GraphValue<Double>,
-        graph: _AGGraph
+        graph graphRef: _AGGraphRef
     ) {
         let displayNodes = preferences.values(for: DisplayList.Key.self)
         guard !displayNodes.isEmpty else { return }
 
-        let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
+        let weakNodes = displayNodes.compactMap { graphRef.graph.weakAttributeIfValid(for: $0) }
         let opacityAttr: Attribute<Double> = opacity._attribute
-        let transformedAttr: Attribute<DisplayList> = graph.makeRule { [unowned graph] in
+        let transformedAttr: Attribute<DisplayList> = graphRef.graph.makeRule { graphRef in
+            let graph = graphRef.graph
             var combined = DisplayList.Key.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
                 let list = Attribute<DisplayList>(weakNode.toStrong()).value

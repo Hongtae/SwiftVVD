@@ -528,6 +528,12 @@ extension _AGGraph {
         return attr
     }
 
+    /// Creates a computed node whose rule receives a non-owning graph reference.
+    func makeRule<Value>(rule: @escaping (_AGGraphRef) -> Value) -> Attribute<Value> {
+        let graphRef = _AGGraphRef(self)
+        return makeRule { rule(graphRef) }
+    }
+
     /// Creates a computed node backed by a Rule value.
     func makeRule<R: Rule>(_ rule: R) -> Attribute<R.Value> {
         makeRule(rule, initialValue: R.initialValue)

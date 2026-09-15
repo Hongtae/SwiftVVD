@@ -3,6 +3,35 @@ import XCTest
 @testable import VUI
 
 final class GraphOwnershipLifetimeTests: XCTestCase {
+    func testGraphReferenceRuleUpdatesWithoutKeepingItsGraphAlive() {
+        weak var graphReference: _AGGraph?
+        func evaluate() {
+            let graph = _AGGraph()
+            graphReference = graph
+            _AGGraph.withCurrent(graph) {
+                let graphID = ObjectIdentifier(graph)
+                let input = graph.makeInput(value: 3)
+                var evaluations = 0
+                let output: Attribute<Int> = graph.makeRule { graphRef in
+                    XCTAssertEqual(ObjectIdentifier(graphRef.graph), graphID)
+                    evaluations += 1
+                    return input.value * 2
+                }
+
+                XCTAssertEqual(evaluations, 0)
+                XCTAssertEqual(output.value, 6)
+                XCTAssertEqual(output.value, 6)
+                XCTAssertEqual(evaluations, 1)
+
+                input.setValue(7)
+                XCTAssertEqual(output.value, 14)
+                XCTAssertEqual(evaluations, 2)
+            }
+        }
+        evaluate()
+        XCTAssertNil(graphReference)
+    }
+
     // ASSERTIONS statePropertyBoxHostSignalObserved
     func testMountedStateBufferDoesNotKeepItsHostOrGraphAlive() {
         weak var hostReference: TestViewRendererHost?
