@@ -507,6 +507,7 @@ extension GraphicsContext {
             var lines: [LineGlyphs]
             var lineCount: Int
             var forcedClusterBreak: Bool
+            var truncatedRanges: [Range<Int>]
         }
 
         struct GlyphAtom {
@@ -1569,13 +1570,14 @@ extension GraphicsContext {
             var visibleLines: [LineGlyphs] = []
             var processedLineCount = 0
             var forcedClusterBreak = false
+            var truncatedRanges: [Range<Int>] = []
             func publish(_ line: LineGlyphs, countsAsLine: Bool = true) {
                 visibleLines.append(line)
                 if countsAsLine { processedLineCount += 1 }
             }
             func result() -> GlyphLayout {
                 GlyphLayout(lines: visibleLines, lineCount: processedLineCount,
-                            forcedClusterBreak: forcedClusterBreak)
+                            forcedClusterBreak: forcedClusterBreak, truncatedRanges: truncatedRanges)
             }
             let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
             let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight
@@ -1720,13 +1722,18 @@ extension GraphicsContext {
             let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex
             var paragraphGlyphs = visibleLines[lastVisibleIndex].glyphs
             var continuationIndex = nextLineIndex
-            while continuationIndex < wrappedLines.count,
+            while visibleLines[lastVisibleIndex].trailingBoundary == nil,
+                  continuationIndex < wrappedLines.count,
                   wrappedLines[continuationIndex].paragraphIndex ==
                     lastParagraph {
                 paragraphGlyphs.append(
                     contentsOf: wrappedLines[continuationIndex].glyphs
                 )
+                let reachesBoundary = wrappedLines[continuationIndex].trailingBoundary != nil
                 continuationIndex += 1
+                // A hard line break ends the truncation source even when the
+                // following line belongs to the same paragraph.
+                if reachesBoundary { break }
             }
 
             let hasParagraphOverflow =
@@ -1796,10 +1803,17 @@ extension GraphicsContext {
                 return glyph
             }
 
+            func truncatedRange(_ clusters: ArraySlice<[Glyph]>) -> Range<Int>? {
+                guard let lower = clusters.first?.first?.sourceRange?.lowerBound,
+                      let upper = clusters.last?.last?.sourceRange?.upperBound,
+                      lower < upper else { return nil }
+                return lower..<upper
+            }
+
             func tailTruncation(
                 _ glyphs: [Glyph],
                 explicitBoundary: Glyph?
-            ) -> [Glyph]? {
+            ) -> (glyphs: [Glyph], range: Range<Int>?)? {
                 if let explicitBoundary,
                    let source = glyphs.last {
                     var prefix = Self.clusterRanges(in: glyphs).map {
@@ -1819,7 +1833,7 @@ extension GraphicsContext {
                             candidate[0].kerning = .zero
                         }
                         if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                            return candidate
+                            return (candidate, nil)
                         }
                         guard !prefix.isEmpty else { return nil }
                         prefix.removeLast()
@@ -1850,13 +1864,13 @@ extension GraphicsContext {
                     prefix.append(ellipsis)
                     prefix[0].kerning = .zero
                     if Int(ceil(getGlyphsWidth(prefix))) <= maxWidth {
-                        return prefix
+                        return (prefix, truncatedRange(clusters[prefixCount...]))
                     }
                 }
                 return nil
             }
 
-            func headTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
+            func headTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
                 let clusters = Self.clusterRanges(in: glyphs).map {
                     Array(glyphs[$0])
                 }
@@ -1883,13 +1897,13 @@ extension GraphicsContext {
                     }
                     let candidate = [ellipsis] + suffix
                     if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                        return candidate
+                        return (candidate, truncatedRange(clusters.dropLast(suffixCount)))
                     }
                 }
                 return nil
             }
 
-            func middleTruncation(_ glyphs: [Glyph]) -> [Glyph]? {
+            func middleTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
                 let clusters = Self.clusterRanges(in: glyphs).map {
                     Array(glyphs[$0])
                 }
@@ -1931,7 +1945,7 @@ extension GraphicsContext {
                           Int(ceil(getGlyphsWidth([ellipsis]))) <= maxWidth else {
                         return nil
                     }
-                    return [ellipsis]
+                    return ([ellipsis], truncatedRange(clusters[...]))
                 }
 
                 let maximumSuffixCount =
@@ -1952,7 +1966,7 @@ extension GraphicsContext {
                     var candidate = prefix + [ellipsis] + suffix
                     candidate[0].kerning = .zero
                     if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                        return candidate
+                        return (candidate, truncatedRange(clusters[selectedPrefixCount..<(clusters.count - suffixCount)]))
                     }
                 }
                 return nil
@@ -1961,22 +1975,22 @@ extension GraphicsContext {
             let explicitBoundary = hasExplicitLineOverflow
                 ? visibleLines[lastVisibleIndex].trailingBoundary
                 : nil
-            let truncatedGlyphs: [Glyph]?
+            let truncated: (glyphs: [Glyph], range: Range<Int>?)?
             if explicitBoundary != nil, truncationMode != .tail {
                 return result()
             } else if explicitBoundary != nil {
-                truncatedGlyphs = tailTruncation(
+                truncated = tailTruncation(
                     visibleLines[lastVisibleIndex].glyphs,
                     explicitBoundary: explicitBoundary
                 )
             } else {
                 switch truncationMode {
                 case .head:
-                    truncatedGlyphs = headTruncation(paragraphGlyphs)
+                    truncated = headTruncation(paragraphGlyphs)
                 case .middle:
-                    truncatedGlyphs = middleTruncation(paragraphGlyphs)
+                    truncated = middleTruncation(paragraphGlyphs)
                 case .tail:
-                    truncatedGlyphs = tailTruncation(
+                    truncated = tailTruncation(
                         paragraphGlyphs,
                         explicitBoundary: nil
                     )
@@ -1986,7 +2000,7 @@ extension GraphicsContext {
             // Remeasuring the final line must preserve its admitted origin,
             // including an empty continuation that shares the same rectangle.
             let admittedOriginY = visibleLines[lastVisibleIndex].originY
-            guard let truncatedGlyphs else {
+            guard let truncated else {
                 if hasParagraphOverflow {
                     visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
                     updateMetrics(&visibleLines[lastVisibleIndex])
@@ -2000,7 +2014,10 @@ extension GraphicsContext {
                 }
                 return result()
             }
-            visibleLines[lastVisibleIndex].glyphs = truncatedGlyphs
+            // A token or omitted content alone does not record truncation. Only
+            // an accepted line with a nonempty removed source range contributes.
+            if let range = truncated.range { truncatedRanges.append(range) }
+            visibleLines[lastVisibleIndex].glyphs = truncated.glyphs
             visibleLines[lastVisibleIndex].trailingBoundary = nil
             visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
             updateMetrics(&visibleLines[lastVisibleIndex])

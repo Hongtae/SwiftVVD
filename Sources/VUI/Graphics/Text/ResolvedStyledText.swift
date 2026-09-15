@@ -488,7 +488,6 @@ class ResolvedStyledText: InterpolatableContent {
     fileprivate struct MeasurementEntry {
         var requestedSize: CGSize
         var metrics: GraphicsContext.ResolvedText.LayoutMetrics
-        var scale: CGFloat = 1
 
         func canReuse(for size: CGSize) -> Bool {
             let minimumWidth = min(metrics.size.width, requestedSize.width)
@@ -703,6 +702,15 @@ class ResolvedStyledText: InterpolatableContent {
         fatalError("ResolvedStyledText measurement requires a concrete owner")
     }
 
+    func metrics(in size: CGSize, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
+        fatalError("ResolvedStyledText metrics require a concrete producer")
+    }
+
+    func textSizeCacheMetrics(in size: CGSize) -> (UInt?, CGSize) {
+        let value = metrics(in: size, layoutMargins: nil)
+        return (value.numberOfLines, value.size)
+    }
+
     func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
         resolvedText
     }
@@ -758,16 +766,15 @@ extension ResolvedStyledText {
         }
 
         // Retained proxies and the host share this owner's measurement entries.
-        private var measurements: [MeasurementEntry] = []
+        private var measurements: [(requestedSize: CGSize, metrics: NSAttributedString.Metrics)] = []
 
         override var metricsCacheEntryCount: Int { measurements.count }
 
         override func drawingSource(in size: CGSize) -> GraphicsContext.ResolvedText? {
             guard let resolvedText else { return nil }
-            _ = cachedLayoutMetrics(in: size)
-            guard let entry = measurements.first(where: { $0.canReuse(for: size) }),
-                  entry.scale != 1, let font = resolvedText.uniformFont else { return resolvedText }
-            let pointSize = (font.pointSize * entry.scale * 4).rounded() * 0.25
+            let metrics = cachedMetrics(in: size)
+            guard metrics.scale != 1, let font = resolvedText.uniformFont else { return resolvedText }
+            let pointSize = (font.pointSize * metrics.scale * 4).rounded() * 0.25
             return resolvedText.resizingUniformFont(to: pointSize)
         }
 
@@ -780,26 +787,44 @@ extension ResolvedStyledText {
         }
 
         override func cachedLayoutMetrics(in size: CGSize) -> GraphicsContext.ResolvedText.LayoutMetrics? {
-            guard let resolvedText else { return nil }
-            if let entry = measurements.first(where: { $0.canReuse(for: size) }) {
+            guard resolvedText != nil else { return nil }
+            let metrics = cachedMetrics(in: size)
+            return .init(size: metrics.size, firstBaseline: metrics.firstBaseline, lastBaseline: metrics.lastBaseline)
+        }
+
+        override func metrics(in size: CGSize, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
+            cachedMetrics(in: size, layoutMargins: layoutMargins, wantsNumberOfLineFragments: true)
+        }
+
+        func cachedMetrics(in size: CGSize, layoutMargins: EdgeInsets? = nil,
+                           wantsNumberOfLineFragments: Bool = false) -> NSAttributedString.Metrics {
+            guard let resolvedText else {
+                fatalError("StringDrawing metrics require resolved text")
+            }
+            if let entry = measurements.first(where: { entry in
+                (!wantsNumberOfLineFragments || entry.metrics.numberOfLines != nil)
+                    && size.width >= min(entry.requestedSize.width, entry.metrics.size.width)
+                    && size.width <= max(entry.requestedSize.width, entry.metrics.size.width)
+                    && size.height >= min(entry.requestedSize.height, entry.metrics.size.height)
+                    && size.height <= max(entry.requestedSize.height, entry.metrics.size.height)
+            }) {
                 return entry.metrics
             }
+            let layoutMargins = layoutMargins ?? self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
             func drawingDimension(_ value: CGFloat) -> CGFloat {
                 if value <= 0 { return .leastNonzeroMagnitude }
                 return value == .infinity ? .greatestFiniteMagnitude : value
             }
-            let normalizedWidth = drawingDimension(available.width)
+            let requestedWidth = available.width + layoutProperties.bodyHeadOutdent
+            let normalizedWidth = drawingDimension(requestedWidth)
             let normalizedHeight = drawingDimension(available.height)
             let drawingSize = CGSize(width: normalizedWidth, height: normalizedHeight)
-            let sources = resolvedText.unwrappedGlyphLines()
             let fitted = fontFittingMetrics(in: drawingSize, source: resolvedText)
-            var metrics = fitted?.metrics ?? separatorMeasurement(in: drawingSize, source: resolvedText,
-                    sources: sources, layoutProperties: layoutProperties)?.metrics
-                ?? trailingParagraphMeasurement(in: drawingSize, source: resolvedText,
-                    sources: sources, layoutProperties: layoutProperties)?.metrics
-                ?? resolvedText.unroundedLayoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
+            let measurement = fitted?.measurement ?? fittingMeasurement(in: drawingSize, source: resolvedText,
+                                                                        layoutProperties: layoutProperties)
+            var metrics = measurement.metrics
             let clippedWidth = fitted == nil ? min(metrics.size.width, normalizedWidth) : metrics.size.width
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
             let height = metrics.size.height == .leastNonzeroMagnitude ? 0 : metrics.size.height
@@ -815,13 +840,19 @@ extension ResolvedStyledText {
             let adjustment = metrics.firstBaseline - firstBaseline
             metrics.lastBaseline = ceil((layoutMargins.top + metrics.lastBaseline + adjustment)
                 / pixelLength) * pixelLength
-            measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics, scale: fitted?.scale ?? 1))
-            return metrics
+            let result = NSAttributedString.Metrics(size: metrics.size, scale: fitted?.scale ?? 1,
+                firstBaseline: metrics.firstBaseline, lastBaseline: metrics.lastBaseline,
+                baselineAdjustment: adjustment, requestedWidth: requestedWidth,
+                numberOfLines: wantsNumberOfLineFragments || layoutProperties.bodyHeadOutdent > 0
+                    ? UInt(measurement.lineCount) : nil,
+                hasTruncatedRanges: !measurement.truncatedRanges.isEmpty)
+            measurements.append((requestedSize: size, metrics: result))
+            return result
         }
 
         private func fontFittingMetrics(
             in size: CGSize, source: GraphicsContext.ResolvedText
-        ) -> (metrics: GraphicsContext.ResolvedText.LayoutMetrics, scale: CGFloat)? {
+        ) -> (measurement: FittingMeasurement, scale: CGFloat)? {
             let minimum = layoutProperties.minScaleFactor
             guard minimum > 0, minimum < 1, let font = source.uniformFont,
                   let string = source.uniformString, source.fontResolutionContext != nil else { return nil }
@@ -846,7 +877,7 @@ extension ResolvedStyledText {
             let countOverflow = limit.map { $0 > 1 && original.lineCount > $0 } ?? false
             if (max(minimum, min(1, ratio)) >= 1 && !countOverflow)
                 || abs(1 - minimum) < CGFloat(Float.ulpOfOne) {
-                return (original.metrics, 1)
+                return (original, 1)
             }
             func resized(_ scale: CGFloat) -> GraphicsContext.ResolvedText? {
                 source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
@@ -861,11 +892,11 @@ extension ResolvedStyledText {
                     || (string.utf16.count <= 512 && measured.forcedClusterBreak)
             }
             func finish(_ candidate: GraphicsContext.ResolvedText, scale: CGFloat)
-                -> (GraphicsContext.ResolvedText.LayoutMetrics, CGFloat) {
-                var metrics = fittingMeasurement(in: size, source: candidate, layoutProperties: layoutProperties).metrics
+                -> (FittingMeasurement, CGFloat) {
+                var measured = fittingMeasurement(in: size, source: candidate, layoutProperties: layoutProperties)
                 // Restore the logical constraint after backend pixel quantization.
-                metrics.size.width = min(metrics.size.width, size.width)
-                return (metrics, scale)
+                measured.metrics.size.width = min(measured.metrics.size.width, size.width)
+                return (measured, scale)
             }
             var low = minimum
             var high: CGFloat = 1
@@ -898,9 +929,12 @@ extension ResolvedStyledText {
             return finish(lastCandidate, scale: low)
         }
 
-        private typealias FittingMeasurement = (
-            metrics: GraphicsContext.ResolvedText.LayoutMetrics, lineCount: Int, forcedClusterBreak: Bool
-        )
+        private struct FittingMeasurement {
+            var metrics: GraphicsContext.ResolvedText.LayoutMetrics
+            var lineCount: Int
+            var forcedClusterBreak: Bool
+            var truncatedRanges: [Range<Int>]
+        }
 
         private func fittingMeasurement(
             in size: CGSize, source: GraphicsContext.ResolvedText, layoutProperties: TextLayoutProperties
@@ -917,7 +951,8 @@ extension ResolvedStyledText {
                 maxWidth: width >= CGFloat(Int.max) ? .max : Int(ceil(width)),
                 maximumHeight: size.height * source.scaleFactor,
                 lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
-            return (source.unroundedLayoutMetrics(lineGlyphs: layout.lines), layout.lineCount, layout.forcedClusterBreak)
+            return .init(metrics: source.unroundedLayoutMetrics(lineGlyphs: layout.lines), lineCount: layout.lineCount,
+                         forcedClusterBreak: layout.forcedClusterBreak, truncatedRanges: layout.truncatedRanges)
         }
 
         private func separatorMeasurement(
@@ -1024,7 +1059,8 @@ extension ResolvedStyledText {
                 }
             }
             let count = fragments.lazy.filter { !$0.glyphRange.isEmpty }.count
-            return (.init(size: usedExtent, firstBaseline: firstBaseline, lastBaseline: lastBaseline), count, false)
+            return .init(metrics: .init(size: usedExtent, firstBaseline: firstBaseline, lastBaseline: lastBaseline),
+                         lineCount: count, forcedClusterBreak: false, truncatedRanges: [])
         }
 
         private func trailingParagraphMeasurement(
@@ -1048,7 +1084,8 @@ extension ResolvedStyledText {
             guard lines.count == 2, case .extra = lines[1].kind else { return nil }
             let admitsExtra = lines[1].maxY / resolvedText.scaleFactor <= size.height
             let admitted = admitsExtra ? lines : [lines[0]]
-            return (resolvedText.unroundedLayoutMetrics(lineGlyphs: admitted), admitsExtra ? 2 : 1, false)
+            return .init(metrics: resolvedText.unroundedLayoutMetrics(lineGlyphs: admitted),
+                         lineCount: admitsExtra ? 2 : 1, forcedClusterBreak: false, truncatedRanges: [])
         }
     }
 
