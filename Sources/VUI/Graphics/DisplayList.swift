@@ -1289,7 +1289,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             }
 
             func draw(in context: GraphicsContext) {
-                guard let resolvedText = view.text.drawingSource(in: size) else { return }
+                guard view.text.resolvedText != nil else { return }
                 var context = context
                 if !transform.isIdentity {
                     context.concatenate(transform)
@@ -1306,17 +1306,9 @@ struct DisplayList: Equatable, CustomStringConvertible {
                         width: clipExtent, height: clipExtent
                     )
                     local.environment = renderer.environment
-                    var source = resolvedText
-                    source.shading = shading
                     let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(view.text))
-                    let margins = view.text.drawingMargins
-                    let layout = source.makeLayout(
-                        in: bounds.size,
-                        layoutDirection: local.environment.layoutDirection,
-                        layoutProperties: view.text.layoutProperties,
-                        origin: CGPoint(x: bounds.minX + margins.leading,
-                                        y: bounds.minY + margins.top)
-                    )
+                    guard let layout = view.text.makeLayout(in: bounds, with: bounds.size,
+                        shading: shading, layoutDirection: local.environment.layoutDirection) else { return }
                     renderer.draw(layout: layout, in: &local)
                     local.recording!.draw(in: context)
                 } else if let drawing = makeDrawing() {

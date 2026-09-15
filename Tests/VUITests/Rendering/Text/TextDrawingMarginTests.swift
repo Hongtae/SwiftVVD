@@ -288,6 +288,54 @@ final class TextDrawingMarginTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerMeasuredSizeLookupObserved
+    // ASSERTIONS textManagerPreparedDrawingRequestObserved
+    func testManagerRendererKeepsMeasuredAlignmentThroughImmediateAndRecordedDrawing() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for alignment: TextAlignment in [.leading, .center, .trailing] {
+                var environment = EnvironmentValues()
+                environment.font = .system(size: 23)
+                environment.defaultFontRenderingMode = mode
+                environment.multilineTextAlignment = alignment
+                environment.displayScale = 2
+                let source = try resolve(Text(verbatim: "A\nBB"), environment: environment)
+                let manager = ResolvedStyledText.TextLayoutManager(
+                    layoutProperties: TextLayoutProperties(from: environment), resolvedText: source)
+                let measured = manager.metrics(in: CGSize(width: 80, height: 120), layoutMargins: nil)
+                _ = manager.metrics(in: CGSize(width: 120, height: 160), layoutMargins: nil)
+                let renderer = MarginRenderer(environment: environment, operation: .line)
+                let item = DisplayList.Content.TextValue(
+                    view: StyledTextContentView(text: manager, renderer: renderer), size: measured.size,
+                    frame: manager.frame(in: measured.size, renderer: renderer), shading: .color(.black),
+                    transform: .identity, command: .closure(bounds: nil))
+                let first = try XCTUnwrap(source.unwrappedGlyphLines().first)
+                let factor: CGFloat = alignment == .leading ? 0 : (alignment == .center ? 0.5 : 1)
+                let expectedX = manager.drawingMargins.leading +
+                    (measured.size.width - first.width / source.scaleFactor) * factor
+                var immediate: [UInt8]?
+                for record in [false, true] {
+                    let pixels = try render(device: device, environment: environment) { context in
+                        if record {
+                            let recording = context.recordingContext(size: CGSize(width: 128, height: 128))
+                            item.draw(in: recording)
+                            recording.recording!.draw(in: context)
+                        } else { item.draw(in: context) }
+                    }
+                    XCTAssertTrue(pixels.contains { $0 != 0 })
+                    XCTAssertEqual(try XCTUnwrap(renderer.origin).x, expectedX, accuracy: 1e-9)
+                    XCTAssertEqual(renderer.layoutLineCount, 2)
+                    XCTAssertEqual(manager.cache.entries.count, 2)
+                    XCTAssertNil(manager.cache.ideal)
+                    if let immediate { XCTAssertEqual(pixels, immediate) } else { immediate = pixels }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textProxyRetainedLayoutPropertiesObserved
     // ASSERTIONS textProxyRetainedOwnerAndCacheObserved
     func testRendererBoundsRetainStyledSizingThroughDrawingAndReplay() throws {

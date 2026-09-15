@@ -537,7 +537,7 @@ extension ResolvedTextSource {
             let result = _TextLayoutLineStorage(
                 glyphs: line.glyphs,
                 runs: runs,
-                origin: CGPoint(x: origin.x, y: origin.y + line.baseline * scale),
+                origin: CGPoint(x: origin.x + line.originX * scale, y: origin.y + line.baseline * scale),
                 width: line.width * scale,
                 ascent: line.ascender * scale,
                 descent: -line.descender * scale

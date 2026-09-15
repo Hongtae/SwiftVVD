@@ -383,6 +383,92 @@ final class TextMetricsTests: XCTestCase {
         XCTAssertTrue(unresolved.cache.entries.isEmpty)
     }
 
+    // ASSERTIONS textManagerMeasuredSizeLookupObserved
+    func testManagerMeasuredSizeLookupUsesExactDimensionsAndFirstEntry() throws {
+        typealias Cache = ResolvedStyledText.TextLayoutManager.Cache
+        let metrics = NSAttributedString.Metrics(size: CGSize(width: 20, height: 30), scale: 1,
+            firstBaseline: 21, lastBaseline: 21, baselineAdjustment: 0, requestedWidth: 80,
+            numberOfLines: 1, hasTruncatedRanges: false)
+        var cache = Cache(entries: [], ideal: metrics)
+        XCTAssertNil(cache.find(measuredSize: metrics.size))
+        cache.entries = [.init(request: CGSize(width: 80, height: 100), metrics: metrics),
+                         .init(request: CGSize(width: 120, height: 160), metrics: metrics)]
+        XCTAssertEqual(try XCTUnwrap(cache.find(measuredSize: metrics.size)).request, CGSize(width: 80, height: 100))
+        XCTAssertNil(cache.find(measuredSize: CGSize(width: 20.25, height: 30)))
+        XCTAssertNil(cache.find(measuredSize: CGSize(width: 20, height: 30.25)))
+        XCTAssertNil(cache.find(measuredSize: CGSize(width: 80, height: 100)))
+        cache.entries.reverse()
+        XCTAssertEqual(try XCTUnwrap(cache.find(measuredSize: metrics.size)).request, CGSize(width: 120, height: 160))
+    }
+
+    // ASSERTIONS textManagerMeasuredSizeLookupObserved
+    // ASSERTIONS textManagerPreparedDrawingRequestObserved
+    func testManagerDrawingRestoresTheFirstMeasuredRequestWithoutAddingEntries() throws {
+        for alignment: TextAlignment in [.leading, .center, .trailing] {
+            for direction: LayoutDirection in [.leftToRight, .rightToLeft] {
+                try withManager(Text(verbatim: "A\nBB").baselineOffset(0.2), configure: {
+                    $0.multilineTextAlignment = alignment
+                    $0.layoutDirection = direction
+                }) { manager in
+                    let first = manager.metrics(in: CGSize(width: 80, height: 120), layoutMargins: nil)
+                    let second = manager.metrics(in: CGSize(width: 120, height: 160), layoutMargins: nil)
+                    XCTAssertEqual(first.size, second.size)
+                    XCTAssertEqual(manager.cache.entries.count, 2)
+                    let rect = CGRect(origin: CGPoint(x: 11, y: 13), size: first.size)
+                    let factor: CGFloat = alignment == .center ? 0.5 :
+                        ((alignment == .leading) == (direction == .rightToLeft) ? 1 : 0)
+                    for _ in 0..<2 {
+                        let prepared = try XCTUnwrap(manager.prepareDrawing(in: rect, with: first.size,
+                            applyingMarginOffsets: false))
+                        XCTAssertEqual(prepared.bounds.width, 80)
+                        XCTAssertEqual(prepared.bounds.height, first.size.height)
+                        XCTAssertEqual(prepared.bounds.minX, 11 - (80 - first.size.width) * factor)
+                        XCTAssertEqual(prepared.bounds.minY, 13 + first.baselineAdjustment, accuracy: 1e-9)
+                        XCTAssertEqual(prepared.lines.count, 2)
+                        for line in prepared.lines {
+                            XCTAssertEqual(line.originX, (80 * prepared.source.scaleFactor - line.width) * factor)
+                        }
+                        let layout = try XCTUnwrap(manager.makeLayout(in: rect, with: first.size,
+                            shading: .color(.black), layoutDirection: direction))
+                        XCTAssertEqual(layout.count, 2)
+                        for (line, glyphs) in zip(layout, prepared.lines) {
+                            XCTAssertEqual(line.origin.x,
+                                11 + manager.drawingMargins.leading +
+                                    (first.size.width - glyphs.width / prepared.source.scaleFactor) * factor,
+                                accuracy: 1e-9)
+                        }
+                        XCTAssertEqual(manager.cache.entries.count, 2)
+                        XCTAssertNil(manager.cache.ideal)
+                    }
+                    let missedSize = CGSize(width: first.size.width + 0.25, height: first.size.height)
+                    let missed = try XCTUnwrap(manager.prepareDrawing(in: rect, with: missedSize,
+                        applyingMarginOffsets: false))
+                    XCTAssertEqual(missed.bounds.width, missedSize.width)
+                    XCTAssertEqual(missed.bounds.minX, 11)
+                    XCTAssertEqual(manager.cache.entries.count, 2)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textManagerPreparedDrawingRequestObserved
+    func testManagerDrawingDoesNotSelectIdealOrRestoreAnInfiniteRequest() throws {
+        try withManager(Text(verbatim: "A\nBB")) { manager in
+            _ = manager.spacing()
+            let ideal = try XCTUnwrap(manager.cache.ideal)
+            let rect = CGRect(origin: .zero, size: ideal.size)
+            let cold = try XCTUnwrap(manager.prepareDrawing(in: rect, with: ideal.size, applyingMarginOffsets: true))
+            XCTAssertEqual(cold.bounds.size, ideal.size)
+            XCTAssertEqual(cold.bounds.origin.x, manager.drawingMargins.leading)
+            XCTAssertTrue(manager.cache.entries.isEmpty)
+            let ordinary = manager.metrics(in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity), layoutMargins: nil)
+            let prepared = try XCTUnwrap(manager.prepareDrawing(in: rect, with: ordinary.size, applyingMarginOffsets: true))
+            XCTAssertEqual(prepared.bounds.size, ordinary.size)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            XCTAssertEqual(manager.cache.ideal, ideal)
+        }
+    }
+
     // ASSERTIONS textManagerMetricsPublicationObserved
     func testManagerRoundsBaselinesAfterApplyingItsOwnMargins() throws {
         try withManager(Text(verbatim: "A").baselineOffset(0.2)) { manager in

@@ -732,6 +732,16 @@ class ResolvedStyledText: InterpolatableContent {
                        width: size.width, height: size.height))
     }
 
+    func makeLayout(in rect: CGRect, with size: CGSize, shading: GraphicsContext.Shading,
+                    layoutDirection: LayoutDirection) -> Text.Layout? {
+        guard var source = drawingSource(in: size) else { return nil }
+        source.shading = shading
+        let margins = drawingMargins
+        return source.makeLayout(in: size, layoutDirection: layoutDirection,
+            layoutProperties: layoutProperties,
+            origin: CGPoint(x: rect.origin.x + margins.leading, y: rect.origin.y + margins.top))
+    }
+
     var needsDynamicRenderingInArchive: Bool {
         if storage?._isDynamicText == true {
             return true
@@ -1229,6 +1239,13 @@ extension ResolvedStyledText {
 
             var entries: [Entry] = []
             var ideal: NSAttributedString.Metrics?
+
+            func find(measuredSize: CGSize) -> Entry? {
+                entries.first {
+                    $0.metrics.size.width == measuredSize.width &&
+                        $0.metrics.size.height == measuredSize.height
+                }
+            }
         }
 
         private(set) var cache = Cache()
@@ -1242,13 +1259,59 @@ extension ResolvedStyledText {
             if cache.ideal == nil {
                 // Spacing uses unit-scale unconstrained metrics independently of size requests.
                 cache.ideal = measureGlyphLayout(resolvedText,
-                    in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+                    in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).metrics
             }
             guard let ideal = cache.ideal, let maxFontMetrics else { return Spacing() }
             return Spacing.textSpacing(maxFontMetrics: maxFontMetrics,
                 idealMetrics: .init(size: ideal.size, firstBaseline: ideal.firstBaseline,
                                     lastBaseline: ideal.lastBaseline),
                 layoutProperties: layoutProperties)
+        }
+
+        override func prepareDrawing(in rect: CGRect, with size: CGSize,
+                                     applyingMarginOffsets: Bool, containsResolvable: Bool = false)
+            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+            guard let prepared = prepareGlyphLayout(in: rect, with: size,
+                applyingMarginOffsets: applyingMarginOffsets) else { return nil }
+            return (prepared.source, prepared.layout.lines, prepared.bounds)
+        }
+
+        override func makeLayout(in rect: CGRect, with size: CGSize, shading: GraphicsContext.Shading,
+                                 layoutDirection: LayoutDirection) -> Text.Layout? {
+            guard var prepared = prepareGlyphLayout(in: rect, with: size,
+                applyingMarginOffsets: true) else { return nil }
+            prepared.source.shading = shading
+            return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines, layoutDirection: layoutDirection,
+                isTruncated: !prepared.layout.truncatedRanges.isEmpty || prepared.layout.hasUnlaidText,
+                origin: prepared.bounds.origin)
+        }
+
+        private func prepareGlyphLayout(in rect: CGRect, with size: CGSize, applyingMarginOffsets: Bool)
+            -> (source: ResolvedTextSource, layout: ResolvedTextSource.GlyphLayout, bounds: CGRect)? {
+            guard let source = resolvedText else { return nil }
+            var request = size
+            if let entry = cache.find(measuredSize: size), entry.request.width.isFinite {
+                request.width = entry.request.width
+            }
+            var measured = measureGlyphLayout(source, in: request)
+            let factor: CGFloat
+            switch layoutProperties.multilineTextAlignment {
+            case .center: factor = 0.5
+            case .leading: factor = layoutProperties.layoutDirection == .rightToLeft ? 1 : 0
+            case .trailing: factor = layoutProperties.layoutDirection == .leftToRight ? 1 : 0
+            }
+            let margins = applyingMarginOffsets ? drawingMargins : EdgeInsets()
+            let displacement = factor == 0 ? 0 : (request.width - size.width) * factor
+            let bounds = CGRect(
+                x: rect.origin.x + margins.leading - displacement,
+                y: rect.origin.y + margins.top + measured.metrics.baselineAdjustment,
+                width: request.width, height: request.height)
+            let width = measured.metrics.requestedWidth * source.scaleFactor
+            for index in measured.layout.lines.indices {
+                measured.layout.lines[index].originX = factor == 0 ? 0 :
+                    (width - measured.layout.lines[index].width) * factor
+            }
+            return (source, measured.layout, bounds)
         }
 
         override func size(in size: CGSize) -> CGSize {
@@ -1281,13 +1344,14 @@ extension ResolvedStyledText {
             }) {
                 return entry.metrics
             }
-            let metrics = measureGlyphLayout(resolvedText, in: size)
+            let metrics = measureGlyphLayout(resolvedText, in: size).metrics
             cache.entries.append(Cache.Entry(request: size, metrics: metrics))
             return metrics
         }
 
         private func measureGlyphLayout(_ resolvedText: ResolvedTextSource,
-                                        in size: CGSize) -> NSAttributedString.Metrics {
+                                        in size: CGSize)
+            -> (metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
             // The manager uses its retained margins for every measurement.
             let layoutMargins = self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
@@ -1310,7 +1374,7 @@ extension ResolvedStyledText {
                 numberOfLines: UInt(layout.lines.count),
                 hasTruncatedRanges: !layout.truncatedRanges.isEmpty || layout.hasUnlaidText)
             metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
-            return metrics
+            return (metrics, layout)
         }
     }
 }
