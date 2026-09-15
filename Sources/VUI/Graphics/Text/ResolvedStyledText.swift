@@ -795,8 +795,10 @@ extension ResolvedStyledText {
             let drawingSize = CGSize(width: normalizedWidth, height: normalizedHeight)
             let sources = resolvedText.unwrappedGlyphLines()
             let fitted = fontFittingMetrics(in: drawingSize, source: resolvedText)
-            var metrics = fitted?.metrics ?? separatorMetrics(in: drawingSize, sources: sources)
-                ?? trailingParagraphMetrics(in: drawingSize, sources: sources)
+            var metrics = fitted?.metrics ?? separatorMeasurement(in: drawingSize, source: resolvedText,
+                    sources: sources, layoutProperties: layoutProperties)?.metrics
+                ?? trailingParagraphMeasurement(in: drawingSize, source: resolvedText,
+                    sources: sources, layoutProperties: layoutProperties)?.metrics
                 ?? resolvedText.unroundedLayoutMetrics(in: drawingSize, layoutProperties: layoutProperties)
             let clippedWidth = fitted == nil ? min(metrics.size.width, normalizedWidth) : metrics.size.width
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
@@ -821,27 +823,46 @@ extension ResolvedStyledText {
             in size: CGSize, source: GraphicsContext.ResolvedText
         ) -> (metrics: GraphicsContext.ResolvedText.LayoutMetrics, scale: CGFloat)? {
             let minimum = layoutProperties.minScaleFactor
-            guard layoutProperties.lineLimit == 1, minimum > 0, minimum < 1,
-                  let font = source.uniformFont, source.fontResolutionContext != nil else { return nil }
-            // Single-line fitting measures natural candidate dimensions before
-            // the final constrained layout. Every candidate starts at the original font.
-            let naturalSize = CGSize(width: 9_000_000, height: 9_000_000)
-            let original = source.unroundedLayoutMetrics(in: naturalSize, layoutProperties: layoutProperties)
-            var ratio = size.width / original.size.width
-            if ratio > 1 { ratio = size.height / original.size.height }
-            if max(minimum, min(1, ratio)) >= 1 || abs(1 - minimum) < CGFloat(Float.ulpOfOne) {
-                return (original, 1)
+            guard minimum > 0, minimum < 1, let font = source.uniformFont,
+                  let string = source.uniformString, source.fontResolutionContext != nil else { return nil }
+            let limit = layoutProperties.lineLimit
+            // Explicit separators in a one-line request retain their ordinary
+            // paragraph path until that path supplies its own fitting producer.
+            if limit == 1, string.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) }) {
+                return nil
+            }
+            let naturalSize = CGSize(width: limit == 1 ? 9_000_000 : size.width, height: 9_000_000)
+            var fittingProperties = layoutProperties
+            var original = fittingMeasurement(in: naturalSize, source: source, layoutProperties: fittingProperties)
+            if let limit, limit > 1, limit < Int.max {
+                fittingProperties.lineLimit = limit + 1
+                original = fittingMeasurement(in: naturalSize, source: source, layoutProperties: fittingProperties)
+            }
+            var ratio = size.height / original.metrics.size.height
+            if limit == 1 {
+                ratio = size.width / original.metrics.size.width
+                if ratio > 1 { ratio = size.height / original.metrics.size.height }
+            }
+            let countOverflow = limit.map { $0 > 1 && original.lineCount > $0 } ?? false
+            if (max(minimum, min(1, ratio)) >= 1 && !countOverflow)
+                || abs(1 - minimum) < CGFloat(Float.ulpOfOne) {
+                return (original.metrics, 1)
             }
             func resized(_ scale: CGFloat) -> GraphicsContext.ResolvedText? {
                 source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
             }
             func oversized(_ candidate: GraphicsContext.ResolvedText) -> Bool {
-                let measured = candidate.unroundedLayoutMetrics(in: naturalSize, layoutProperties: layoutProperties)
-                return measured.size.width > size.width || measured.size.height > size.height
+                let measured = fittingMeasurement(in: naturalSize, source: candidate, layoutProperties: fittingProperties)
+                if limit == 1 {
+                    return measured.metrics.size.width > size.width || measured.metrics.size.height > size.height
+                }
+                return measured.metrics.size.height > size.height
+                    || limit.map { measured.lineCount > $0 } == true
+                    || (string.utf16.count <= 512 && measured.forcedClusterBreak)
             }
             func finish(_ candidate: GraphicsContext.ResolvedText, scale: CGFloat)
                 -> (GraphicsContext.ResolvedText.LayoutMetrics, CGFloat) {
-                var metrics = candidate.unroundedLayoutMetrics(in: size, layoutProperties: layoutProperties)
+                var metrics = fittingMeasurement(in: size, source: candidate, layoutProperties: layoutProperties).metrics
                 // Restore the logical constraint after backend pixel quantization.
                 metrics.size.width = min(metrics.size.width, size.width)
                 return (metrics, scale)
@@ -877,11 +898,35 @@ extension ResolvedStyledText {
             return finish(lastCandidate, scale: low)
         }
 
-        private func separatorMetrics(
+        private typealias FittingMeasurement = (
+            metrics: GraphicsContext.ResolvedText.LayoutMetrics, lineCount: Int, forcedClusterBreak: Bool
+        )
+
+        private func fittingMeasurement(
+            in size: CGSize, source: GraphicsContext.ResolvedText, layoutProperties: TextLayoutProperties
+        ) -> FittingMeasurement {
+            let sources = source.unwrappedGlyphLines()
+            if let measured = separatorMeasurement(in: size, source: source, sources: sources,
+                                                    layoutProperties: layoutProperties)
+                ?? trailingParagraphMeasurement(in: size, source: source, sources: sources,
+                                                layoutProperties: layoutProperties) {
+                return measured
+            }
+            let width = size.width * source.scaleFactor
+            let layout = source.makeGlyphLayout(
+                maxWidth: width >= CGFloat(Int.max) ? .max : Int(ceil(width)),
+                maximumHeight: size.height * source.scaleFactor,
+                lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+            return (source.unroundedLayoutMetrics(lineGlyphs: layout.lines), layout.lineCount, layout.forcedClusterBreak)
+        }
+
+        private func separatorMeasurement(
             in size: CGSize,
-            sources: [GraphicsContext.ResolvedText.LineGlyphs]
-        ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
-            guard let resolvedText, let extra = sources.last,
+            source resolvedText: GraphicsContext.ResolvedText,
+            sources: [GraphicsContext.ResolvedText.LineGlyphs],
+            layoutProperties: TextLayoutProperties
+        ) -> FittingMeasurement? {
+            guard let extra = sources.last,
                   case .extra = extra.kind, sources.count > 1,
                   layoutProperties.truncationMode == .tail else { return nil }
             let paragraphs = sources.dropLast()
@@ -978,14 +1023,17 @@ extension ResolvedStyledText {
                     CGSize(width: max($0.width, $1.usedRect.maxX), height: max($0.height, $1.usedRect.maxY))
                 }
             }
-            return .init(size: usedExtent, firstBaseline: firstBaseline, lastBaseline: lastBaseline)
+            let count = fragments.lazy.filter { !$0.glyphRange.isEmpty }.count
+            return (.init(size: usedExtent, firstBaseline: firstBaseline, lastBaseline: lastBaseline), count, false)
         }
 
-        private func trailingParagraphMetrics(
+        private func trailingParagraphMeasurement(
             in size: CGSize,
-            sources: [GraphicsContext.ResolvedText.LineGlyphs]
-        ) -> GraphicsContext.ResolvedText.LayoutMetrics? {
-            guard let resolvedText, sources.count == 2,
+            source resolvedText: GraphicsContext.ResolvedText,
+            sources: [GraphicsContext.ResolvedText.LineGlyphs],
+            layoutProperties: TextLayoutProperties
+        ) -> FittingMeasurement? {
+            guard sources.count == 2,
                   !sources[0].glyphs.isEmpty, sources[0].trailingBoundary != nil,
                   case .extra = sources[1].kind,
                   layoutProperties.truncationMode == .tail,
@@ -998,8 +1046,9 @@ extension ResolvedStyledText {
             // when that complete rectangle fits. It does not truncate the line
             // merely because the final empty fragment failed the height check.
             guard lines.count == 2, case .extra = lines[1].kind else { return nil }
-            let admitted = lines[1].maxY / resolvedText.scaleFactor <= size.height ? lines : [lines[0]]
-            return resolvedText.unroundedLayoutMetrics(lineGlyphs: admitted)
+            let admitsExtra = lines[1].maxY / resolvedText.scaleFactor <= size.height
+            let admitted = admitsExtra ? lines : [lines[0]]
+            return (resolvedText.unroundedLayoutMetrics(lineGlyphs: admitted), admitsExtra ? 2 : 1, false)
         }
     }
 

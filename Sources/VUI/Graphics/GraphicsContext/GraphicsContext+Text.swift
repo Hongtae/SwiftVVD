@@ -171,7 +171,6 @@ extension GraphicsContext {
             guard runs.count == 1,
                   case let .styledText(_, text, _, attributes) = runs[0],
                   !text.isEmpty,
-                  !text.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) }),
                   (attributes.baselineOffset ?? 0) == 0,
                   (attributes.paragraphStyle?.firstLineHeadIndent ?? 0) == 0,
                   (attributes.paragraphStyle?.lineSpacing ?? 0) == 0,
@@ -179,6 +178,11 @@ extension GraphicsContext {
                   let resource = attributes.fontResource,
                   resource.requestedPointSize != nil else { return nil }
             return resource
+        }
+
+        var uniformString: String? {
+            guard uniformFont != nil, case let .styledText(_, text, _, _) = runs[0] else { return nil }
+            return text
         }
 
         func resizingUniformFont(to pointSize: CGFloat) -> Self? {
@@ -488,6 +492,7 @@ extension GraphicsContext {
             var kind: Kind = .content
             var isSimpleParagraph: Bool = false
             var isTruncated: Bool = false
+            var forcedClusterBreak: Bool = false
             // Placement is resolved after wrapping and shared by all consumers.
             var originY: CGFloat = 0
             var spacing: CGFloat = 0
@@ -496,6 +501,12 @@ extension GraphicsContext {
             var height: CGFloat { ascender - descender }
             var baseline: CGFloat { originY + ascender }
             var maxY: CGFloat { originY + height }
+        }
+
+        struct GlyphLayout {
+            var lines: [LineGlyphs]
+            var lineCount: Int
+            var forcedClusterBreak: Bool
         }
 
         struct GlyphAtom {
@@ -952,6 +963,16 @@ extension GraphicsContext {
             lineLimit: Int? = nil,
             truncationMode: Text.TruncationMode = .tail
         ) -> [LineGlyphs] {
+            makeGlyphLayout(maxWidth: maxWidth, maximumHeight: maximumHeight,
+                lineLimit: lineLimit, truncationMode: truncationMode).lines
+        }
+
+        func makeGlyphLayout(
+            maxWidth: Int,
+            maximumHeight: CGFloat,
+            lineLimit: Int? = nil,
+            truncationMode: Text.TruncationMode = .tail
+        ) -> GlyphLayout {
             _lineWrap(
                 unwrappedGlyphLines(),
                 maxWidth: maxWidth,
@@ -1346,7 +1367,7 @@ extension GraphicsContext {
             maxHeight: CGFloat,
             lineLimit: Int?,
             truncationMode: Text.TruncationMode
-        ) -> [LineGlyphs] {
+        ) -> GlyphLayout {
             let breakables = CharacterSet.whitespaces.union(.init(charactersIn: "-/?!}|"))
             let decimalNumbers = CharacterSet.decimalDigits
             // No wrap if character is followed by a decimal number
@@ -1358,6 +1379,10 @@ extension GraphicsContext {
                 glyphs.reduce(CGFloat.zero) { result, glyph in
                     result + glyph.advance.width + glyph.kerning.x
                 } - (glyphs.first?.kerning.x ?? 0) // ignore first kerning
+            }
+            let wrappingWidth = { (glyphs: [Glyph]) -> CGFloat in
+                let trailing = glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }.count
+                return getGlyphsWidth(Array(glyphs.dropLast(trailing)))
             }
             // Returns the glyph index immediately after a breakable cluster.
             let getBreakableSplitIndex = { (glyphs: [Glyph]) -> Int? in
@@ -1392,10 +1417,11 @@ extension GraphicsContext {
             // Wrap long lines to satisfy line break conditions.
             let splitLineGlyphs = {
                 (glyphs: [Glyph], maxWidth: Int) -> (first: [Glyph], second: [Glyph]) in
-                var first = glyphs
-                var second: [Glyph] = []
+                let trailing = glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }.count
+                var first = Array(glyphs.dropLast(trailing))
+                var second = Array(glyphs.suffix(trailing))
                 while Self.clusterRanges(in: first).count > 1 &&
-                        Int(ceil(getGlyphsWidth(first))) > maxWidth {
+                        Int(ceil(wrappingWidth(first))) > maxWidth {
                     if let splitIndex = getBreakableSplitIndex(first),
                        splitIndex != first.endIndex {
                         second.insert(
@@ -1431,7 +1457,7 @@ extension GraphicsContext {
             for sourceLine in lines {
                 var line = sourceLine
                 while Self.clusterRanges(in: line.glyphs).count > 1,
-                      Int(ceil(line.width)) > maxWidth {
+                      Int(ceil(wrappingWidth(line.glyphs))) > maxWidth {
                     let split = splitLineGlyphs(line.glyphs, maxWidth)
                     guard !split.second.isEmpty else { break }
 
@@ -1439,11 +1465,24 @@ extension GraphicsContext {
                     first.glyphs = split.first
                     first.trailingBoundary = nil
                     first.isParagraphEnd = false
+                    // Retain the fallback used for this particular split. A
+                    // later, unprocessed line must not affect fitting decisions.
+                    let boundary = getBreakableSplitIndex(first.glyphs)
+                    first.forcedClusterBreak = boundary != first.glyphs.endIndex &&
+                        !CharacterSet.whitespaces.contains(split.second[0].scalar)
                     updateMetrics(&first)
+                    if Int(ceil(wrappingWidth(first.glyphs))) <= maxWidth {
+                        first.width = min(first.width, CGFloat(maxWidth))
+                    }
                     wrappedLines.append(first)
 
                     line.glyphs = split.second
                     updateMetrics(&line)
+                }
+                // Trailing whitespace stays in the glyph range even when it
+                // extends beyond the wrapping width. Clip its reported extent.
+                if Int(ceil(wrappingWidth(line.glyphs))) <= maxWidth {
+                    line.width = min(line.width, CGFloat(maxWidth))
                 }
                 wrappedLines.append(line)
             }
@@ -1528,6 +1567,16 @@ extension GraphicsContext {
             }
 
             var visibleLines: [LineGlyphs] = []
+            var processedLineCount = 0
+            var forcedClusterBreak = false
+            func publish(_ line: LineGlyphs, countsAsLine: Bool = true) {
+                visibleLines.append(line)
+                if countsAsLine { processedLineCount += 1 }
+            }
+            func result() -> GlyphLayout {
+                GlyphLayout(lines: visibleLines, lineCount: processedLineCount,
+                            forcedClusterBreak: forcedClusterBreak)
+            }
             let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
             let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight
             let heightEpsilon = 0.001 * scaleFactor
@@ -1548,16 +1597,17 @@ extension GraphicsContext {
 
                 if wrappedLines[start].isSimpleParagraph {
                     let line = place(wrappedLines[start], after: visibleLines.last)
+                    forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
                     // Simple paragraphs test the font height before adding the
                     // paragraph's starting spacing to the published rectangle.
                     let height = line.height - line.paragraphStartSpacing
                     if start != 0, height > remainingHeight + heightEpsilon { break }
-                    visibleLines.append(line)
+                    publish(line)
                     nextLineIndex = start + 1
                     // A simple paragraph publishes its missing-attribute extra
                     // outside both its height check and its ordinary line budget.
                     if nextLineIndex < end, case .extra(nil) = wrappedLines[nextLineIndex].kind {
-                        visibleLines.append(place(wrappedLines[nextLineIndex], after: visibleLines.last))
+                        publish(place(wrappedLines[nextLineIndex], after: visibleLines.last))
                         nextLineIndex += 1
                     }
                     continue
@@ -1583,7 +1633,7 @@ extension GraphicsContext {
                    Int(ceil(candidates[0].width)) <= maxWidth {
                     // A complete line that fits a rectangular container uses
                     // the paragraph-origin gate, without a second height test.
-                    visibleLines.append(place(candidates[0], after: visibleLines.last))
+                    publish(place(candidates[0], after: visibleLines.last))
                     nextLineIndex = end
                     continue
                 }
@@ -1593,13 +1643,14 @@ extension GraphicsContext {
                 for (offset, source) in candidates.enumerated() {
                     if let budget, admitted >= budget {
                         if let pending, !pending.line.glyphs.isEmpty {
-                            visibleLines.append(pending.line)
+                            publish(pending.line)
                             nextLineIndex = pending.index + 1
                             needsTruncation = true
                         }
                         break paragraphLoop
                     }
                     let line = place(source, after: pending?.line ?? visibleLines.last)
+                    forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
                     let isExtra: Bool
                     if case .extra = source.kind { isExtra = true } else { isExtra = false }
                     let enforcesMinimum = start == 0 && admitted == 0
@@ -1615,11 +1666,11 @@ extension GraphicsContext {
                                 empty.width = 0
                                 empty.trailingBoundary = nil
                                 empty.kind = source.kind
-                                visibleLines.append(empty)
-                                if !pending.line.glyphs.isEmpty { visibleLines.append(pending.line) }
+                                publish(empty, countsAsLine: false)
+                                if !pending.line.glyphs.isEmpty { publish(pending.line) }
                                 nextLineIndex = end
                             } else if !pending.line.glyphs.isEmpty {
-                                visibleLines.append(pending.line)
+                                publish(pending.line)
                                 nextLineIndex = pending.index + 1
                                 // Finalization tests two pending line heights,
                                 // excluding interline spacing and the admission
@@ -1637,13 +1688,13 @@ extension GraphicsContext {
                         break paragraphLoop
                     }
                     if let pending {
-                        visibleLines.append(pending.line)
+                        publish(pending.line)
                         nextLineIndex = pending.index + 1
                     }
                     admitted += 1
                     pending = (line, start + offset)
                     if isExtra {
-                        if hasFinalExtra { visibleLines.append(line) }
+                        if hasFinalExtra { publish(line) }
                         pending = nil
                         nextLineIndex = end
                     }
@@ -1651,7 +1702,7 @@ extension GraphicsContext {
                 if let pending {
                     // A shaped line can finalize without a following candidate.
                     // A separator-only candidate has no such text line to flush.
-                    if !pending.line.glyphs.isEmpty { visibleLines.append(pending.line) }
+                    if !pending.line.glyphs.isEmpty { publish(pending.line) }
                     nextLineIndex = end
                 }
                 if nextLineIndex != end {
@@ -1660,10 +1711,10 @@ extension GraphicsContext {
             }
 
             guard let lastVisibleIndex = visibleLines.indices.last else {
-                return []
+                return result()
             }
             if !needsTruncation, Int(ceil(visibleLines[lastVisibleIndex].width)) <= maxWidth {
-                return visibleLines
+                return result()
             }
 
             let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex
@@ -1688,7 +1739,7 @@ extension GraphicsContext {
                 visibleLines[lastVisibleIndex].trailingBoundary != nil
 
             guard hasParagraphOverflow || hasExplicitLineOverflow else {
-                return visibleLines
+                return result()
             }
 
             func adjacencyKerning(
@@ -1912,7 +1963,7 @@ extension GraphicsContext {
                 : nil
             let truncatedGlyphs: [Glyph]?
             if explicitBoundary != nil, truncationMode != .tail {
-                return visibleLines
+                return result()
             } else if explicitBoundary != nil {
                 truncatedGlyphs = tailTruncation(
                     visibleLines[lastVisibleIndex].glyphs,
@@ -1947,7 +1998,7 @@ extension GraphicsContext {
                         after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
                     visibleLines[lastVisibleIndex].originY = admittedOriginY
                 }
-                return visibleLines
+                return result()
             }
             visibleLines[lastVisibleIndex].glyphs = truncatedGlyphs
             visibleLines[lastVisibleIndex].trailingBoundary = nil
@@ -1958,7 +2009,7 @@ extension GraphicsContext {
                 after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
             )
             visibleLines[lastVisibleIndex].originY = admittedOriginY
-            return visibleLines
+            return result()
         }
 
         private static func _makeGlyphs(

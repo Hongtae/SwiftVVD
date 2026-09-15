@@ -226,6 +226,7 @@ final class TextDrawingMarginTests: XCTestCase {
     }
 
     // ASSERTIONS textStringDrawingScaleSelectionObserved textStringDrawingScaledFontQuantizationObserved
+    // ASSERTIONS textStringDrawingMultilineFittingObserved
     func testFittedTextUsesTheSelectedFontForPreparedDrawingAndReplayInBothModes() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
@@ -236,18 +237,24 @@ final class TextDrawingMarginTests: XCTestCase {
         let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
         for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
             for scale: CGFloat in [1, 2] {
-                for (minimum, selectedSize): (CGFloat, CGFloat) in [(0.25, 15.25), (0.8, 18.5)] {
+                for (text, limit, minimum, request, selectedSize): (String, Int?, CGFloat, CGSize, CGFloat) in [
+                    ("A", 1, 0.25, CGSize(width: 10, height: 81), 15.25),
+                    ("A", 1, 0.8, CGSize(width: 10, height: 81), 18.5),
+                    ("A A A A A A", nil, 0.25, CGSize(width: 50, height: 30), 13.25),
+                    ("A A A A A A", 2, 0.25, CGSize(width: 50, height: 81), 20.25),
+                    ("A\nB", nil, 0.25, CGSize(width: 50, height: 30), 13.25),
+                    ("A\n", nil, 0.25, CGSize(width: 50, height: 30), 13.25),
+                ] {
                     var environment = EnvironmentValues()
                     environment.font = .file(file, size: 23)
                     environment.defaultFontRenderingMode = mode
                     environment._contentScaleFactor = scale
                     environment.displayScale = 2
-                    environment.lineLimit = 1
+                    environment.lineLimit = limit
                     environment.minimumScaleFactor = minimum
-                    let source = try resolve(Text(verbatim: "A"), environment: environment)
+                    let source = try resolve(Text(verbatim: text), environment: environment)
                     let owner = ResolvedStyledText.StringDrawing(
                         layoutProperties: TextLayoutProperties(from: environment), resolvedText: source)
-                    let request = CGSize(width: 10, height: 81)
                     let item = DisplayList.Content.TextValue(
                         view: StyledTextContentView(text: owner, renderer: nil), size: request,
                         frame: owner.frame(in: request, renderer: nil), shading: .color(.black),
@@ -256,7 +263,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     var referenceEnvironment = environment
                     referenceEnvironment.font = .file(file, size: selectedSize)
                     referenceEnvironment.minimumScaleFactor = 1
-                    let reference = try resolve(Text(verbatim: "A"), environment: referenceEnvironment)
+                    let reference = try resolve(Text(verbatim: text), environment: referenceEnvironment)
                     let referenceDrawing = reference.makeDrawing(in: request,
                         layoutProperties: TextLayoutProperties(from: referenceEnvironment),
                         origin: CGPoint(x: owner.drawingMargins.leading, y: owner.drawingMargins.top))

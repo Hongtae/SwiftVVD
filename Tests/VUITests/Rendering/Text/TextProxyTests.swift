@@ -195,6 +195,97 @@ final class TextProxyTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textStringDrawingMultilineFittingObserved textStringDrawingScaleSelectionObserved
+    // ASSERTIONS textStringDrawingForcedClusterBreakObserved textStringDrawingTrailingWhitespaceBreakObserved
+    func testMultilineFontFittingUsesHeightAndLineCountWithResizedParagraphs() throws {
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let fontURL = root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            func engine(_ text: String, minimum: CGFloat, limit: Int?, pointSize: CGFloat = 23)
+                throws -> StyledTextLayoutEngine {
+                var environment = EnvironmentValues()
+                environment.font = .file(fontURL, size: pointSize)
+                environment.defaultFontRenderingMode = .vector()
+                environment.displayScale = 2
+                environment.minimumScaleFactor = minimum
+                environment.lineLimit = limit
+                let outputs = Text._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: Text(verbatim: text))),
+                    inputs: makeInputs(graph: graph, environment: environment))
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
+                return try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+            }
+            for (text, limit, minimum, height, expectedHeight, first, last, pointSize):
+                (String, Int?, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) in [
+                ("A A A A A A", nil, 0.25, 14, 11, 9, 9, 9.5),
+                ("A A A A A A", nil, 0.25, 30, 30, 12, 27, 13.25),
+                ("A A A A A A", 2, 0.25, 30, 30, 12, 27, 13.25),
+                ("A A A A A A", 1, 0.25, 30, 11, 9, 9, 9.5),
+                ("A A A A A A", nil, 0.25, 45, 44, 17, 39, 18.75),
+                ("A A A A A A", 2, 0.25, 81, 48, 19, 43, 20.25),
+                ("A A A A A A", nil, 0.25, 81, 81, 21, 75, 23),
+                ("A A A A A A", nil, 0.6, 30, 16, 13, 13, 13.75),
+                ("A A A A A A", 2, 0.6, 30, 16, 13, 13, 13.75),
+                ("A\nB", nil, 0.25, 30, 30, 12, 27, 13.25),
+                ("A\nB", 2, 0.25, 30, 30, 12, 27, 13.25),
+                ("A\nB", 1, 0.25, 30, 27, 21, 21, 23),
+                ("\n\n", 1, 0.25, 30, 27, 21, 21, 23),
+                ("\n\n", nil, 0.25, 30, 30, 8, 20, 9),
+                ("\n\n", 2, 0.25, 30, 30, 8, 20, 9),
+                ("\n\n", 2, 0.25, 81, 81, 21, 54, 23),
+                ("A\n", nil, 0.25, 30, 30, 12, 27, 13.25),
+                ("A\n", 2, 0.25, 30, 30, 12, 27, 13.25),
+                ("A\n", nil, 0.25, 14, 14, 6, 13, 6),
+                ("A\n", nil, 0.25, 54, 54, 21, 48, 23),
+                ("AAAAAAAA", nil, 0.25, 30, 11, 9, 9, 9.5),
+                ("AAAAAAAA" + String(repeating: " ", count: 504), nil, 0.25, 30, 11, 9, 9, 9.5),
+                ("AAAAAAAA" + String(repeating: " ", count: 505), nil, 0.25, 30, 30, 12, 27, 13.25),
+            ] {
+                let layout = try engine(text, minimum: minimum, limit: limit)
+                let size = CGSize(width: 50, height: height)
+                let label = "\(text.debugDescription) limit=\(String(describing: limit)) minimum=\(minimum) height=\(height)"
+                let measured = layout.sizeThatFits(_ProposedSize(size))
+                XCTAssertEqual(measured.height, expectedHeight, label)
+                XCTAssertEqual(layout.text.firstBaseline(in: size), first, label)
+                XCTAssertEqual(layout.text.lastBaseline(in: size), last, label)
+                let selected = try XCTUnwrap(layout.text.drawingSource(in: size))
+                XCTAssertEqual(selected.uniformFont?.pointSize, pointSize, label)
+                XCTAssertEqual(layout.text.resolvedText?.uniformFont?.pointSize, 23, label)
+                let reference = try engine(text, minimum: 1, limit: limit, pointSize: pointSize)
+                let expected = try XCTUnwrap(reference.text.resolvedText)
+                XCTAssertEqual(selected.makeDrawing(in: size, layoutProperties: layout.text.layoutProperties)
+                    .vectorBatches.map { $0.path.boundingRect },
+                    expected.makeDrawing(in: size, layoutProperties: reference.text.layoutProperties)
+                        .vectorBatches.map { $0.path.boundingRect }, label)
+                XCTAssertEqual(layout.sizeThatFits(_ProposedSize(size)), measured)
+                XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
+            }
+            let trailing = try XCTUnwrap(engine("A\n", minimum: 1, limit: nil).text.resolvedText)
+            for (height, count): (CGFloat, Int) in [(14, 1), (54, 2)] {
+                let layout = trailing.makeGlyphLayout(maxWidth: 50,
+                    maximumHeight: height * trailing.scaleFactor)
+                XCTAssertEqual(layout.lineCount, count)
+                if height == 14 {
+                    XCTAssertEqual(layout.lines.count, 2)
+                }
+            }
+            let words = try XCTUnwrap(engine("A A A A A A", minimum: 1, limit: 1).text.resolvedText)
+            let truncated = words.makeGlyphLayout(maxWidth: 50, maximumHeight: 81, lineLimit: 1)
+            XCTAssertFalse(truncated.forcedClusterBreak)
+            XCTAssertTrue(truncated.lines.contains { $0.isTruncated })
+            let word = try XCTUnwrap(engine("AAAAAAAA", minimum: 1, limit: nil).text.resolvedText)
+            let wrapped = word.makeGlyphLayout(maxWidth: 50, maximumHeight: 81)
+            XCTAssertTrue(wrapped.forcedClusterBreak)
+            XCTAssertFalse(wrapped.lines.contains { $0.isTruncated })
+        }
+    }
+
     // ASSERTIONS textIntrinsicBackendSelectionObserved textIntrinsicZeroWidthNormalizationObserved
     // ASSERTIONS textStringDrawingEmptyMetricProducerObserved
     func testRealTextHostsMeasureEmptyBaselinesAndNarrowWidthsThroughTheirOwner() throws {
