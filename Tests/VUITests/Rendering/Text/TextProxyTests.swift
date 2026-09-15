@@ -85,6 +85,12 @@ final class TextProxyTests: XCTestCase {
             XCTAssertFalse(complete.hasTruncatedRanges)
             XCTAssertEqual(custom.text.textSizeCacheMetrics(in: CGSize(width: 100, height: 120)).0, 2)
             XCTAssertEqual(custom.text.metricsCacheEntryCount, 2)
+            // ASSERTIONS textManagerIdealCacheIsolationObserved textManagerSpacingIdealLifecycleObserved
+            let spacing = custom.spacing()
+            XCTAssertFalse(spacing.minima.isEmpty)
+            XCTAssertEqual(custom.text.metricsCacheEntryCount, 2)
+            XCTAssertEqual(custom.spacing(), spacing)
+            XCTAssertEqual(custom.text.metricsCacheEntryCount, 2)
             let independent = try engine(text)
             XCTAssertFalse(independent.text === bare.text)
             XCTAssertEqual(independent.text.metricsCacheEntryCount, 0)

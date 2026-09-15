@@ -491,22 +491,6 @@ extension StyledTextContentView: ShapeStyledLeafView {
 }
 
 class ResolvedStyledText: InterpolatableContent {
-    fileprivate struct MeasurementEntry {
-        var requestedSize: CGSize
-        var metrics: NSAttributedString.Metrics
-
-        func canReuse(for size: CGSize) -> Bool {
-            let minimumWidth = min(metrics.size.width, requestedSize.width)
-            let maximumWidth = max(metrics.size.width, requestedSize.width)
-            let minimumHeight = min(metrics.size.height, requestedSize.height)
-            let maximumHeight = max(metrics.size.height, requestedSize.height)
-            return size.width >= minimumWidth &&
-                size.width <= maximumWidth &&
-                size.height >= minimumHeight &&
-                size.height <= maximumHeight
-        }
-    }
-
     var layoutProperties: TextLayoutProperties
     var layoutMargins: EdgeInsets
     var scaleFactorOverride: CGFloat? {
@@ -1237,11 +1221,35 @@ extension ResolvedStyledText {
     }
 
     final class TextLayoutManager: ResolvedStyledText {
-        private var measurements: [MeasurementEntry] = []
+        struct Cache {
+            struct Entry {
+                var request: CGSize
+                var metrics: NSAttributedString.Metrics
+            }
 
-        override var metricsCacheEntryCount: Int { measurements.count }
+            var entries: [Entry] = []
+            var ideal: NSAttributedString.Metrics?
+        }
+
+        private(set) var cache = Cache()
+
+        override var metricsCacheEntryCount: Int { cache.entries.count }
 
         override func resetCache() {}
+
+        override func spacing() -> Spacing {
+            guard let resolvedText else { return Spacing() }
+            if cache.ideal == nil {
+                // Spacing uses unit-scale unconstrained metrics independently of size requests.
+                cache.ideal = measureGlyphLayout(resolvedText,
+                    in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity))
+            }
+            guard let ideal = cache.ideal, let maxFontMetrics else { return Spacing() }
+            return Spacing.textSpacing(maxFontMetrics: maxFontMetrics,
+                idealMetrics: .init(size: ideal.size, firstBaseline: ideal.firstBaseline,
+                                    lastBaseline: ideal.lastBaseline),
+                layoutProperties: layoutProperties)
+        }
 
         override func size(in size: CGSize) -> CGSize {
             cachedLayoutMetrics(in: size)?.size ?? .zero
@@ -1265,11 +1273,22 @@ extension ResolvedStyledText {
             guard let resolvedText else {
                 fatalError("TextLayoutManager metrics require resolved text")
             }
-            if let entry = measurements.first(where: { $0.canReuse(for: size) }) {
+            if let entry = cache.entries.first(where: { entry in
+                size.width >= min(entry.metrics.size.width, entry.request.width) &&
+                    size.width <= max(entry.metrics.size.width, entry.request.width) &&
+                    size.height >= min(entry.metrics.size.height, entry.request.height) &&
+                    size.height <= max(entry.metrics.size.height, entry.request.height)
+            }) {
                 return entry.metrics
             }
+            let metrics = measureGlyphLayout(resolvedText, in: size)
+            cache.entries.append(Cache.Entry(request: size, metrics: metrics))
+            return metrics
+        }
+
+        private func measureGlyphLayout(_ resolvedText: ResolvedTextSource,
+                                        in size: CGSize) -> NSAttributedString.Metrics {
             // The manager uses its retained margins for every measurement.
-            // The optional argument belongs to the shared dispatch contract.
             let layoutMargins = self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
@@ -1291,7 +1310,6 @@ extension ResolvedStyledText {
                 numberOfLines: UInt(layout.lines.count),
                 hasTruncatedRanges: !layout.truncatedRanges.isEmpty || layout.hasUnlaidText)
             metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
-            measurements.append(MeasurementEntry(requestedSize: size, metrics: metrics))
             return metrics
         }
     }

@@ -323,6 +323,66 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerIdealCacheIsolationObserved textManagerSpacingIdealLifecycleObserved
+    func testManagerSpacingKeepsOrdinaryMeasurementsSeparate() throws {
+        for text in ["", "A", "A\nB"] {
+            for order in 0..<3 {
+                try withManager(Text(verbatim: text)) { manager in
+                    let request = CGSize(width: 50, height: 30)
+                    let ideal = CGSize(width: CGFloat.infinity, height: CGFloat.infinity)
+                    if order == 1 { _ = manager.metrics(in: request, layoutMargins: nil) }
+                    if order == 2 { _ = manager.metrics(in: ideal, layoutMargins: nil) }
+                    let originalCount = manager.metricsCacheEntryCount
+                    let spacing = manager.spacing()
+                    XCTAssertEqual(manager.metricsCacheEntryCount, originalCount)
+                    XCTAssertEqual(manager.spacing(), spacing)
+                    XCTAssertEqual(manager.metricsCacheEntryCount, originalCount)
+
+                    let measured = manager.metrics(in: request, layoutMargins: nil)
+                    let measuredCount = manager.metricsCacheEntryCount
+                    XCTAssertEqual(manager.spacing(), spacing)
+                    XCTAssertEqual(manager.metricsCacheEntryCount, measuredCount)
+                    XCTAssertEqual(manager.metrics(in: request, layoutMargins: nil), measured)
+                    manager.scaleFactorOverride = 0.5
+                    XCTAssertEqual(manager.spacing(), spacing)
+                    manager.scaleFactorOverride = nil
+                    XCTAssertEqual(manager.spacing(), spacing)
+                    XCTAssertEqual(manager.metricsCacheEntryCount, measuredCount)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textManagerSpacingUnitScaleObserved textManagerSpacingIdealLifecycleObserved
+    func testManagerIdealMetricsStayAtUnitScaleAndSurviveReset() throws {
+        for text in ["", "A", "\n", "A\n", "A\nB", "A A A A A A"] {
+            try withManager(Text(verbatim: text), configure: { $0.minimumScaleFactor = 0.25 }) { manager in
+                XCTAssertNil(manager.cache.ideal)
+                manager.scaleFactorOverride = 0.5
+                let spacing = manager.spacing()
+                let ideal = try XCTUnwrap(manager.cache.ideal)
+                XCTAssertEqual(ideal.scale, 1)
+                XCTAssertEqual(ideal.requestedWidth, .infinity)
+                XCTAssertNotNil(ideal.numberOfLines)
+                XCTAssertTrue(manager.cache.entries.isEmpty)
+
+                let measured = manager.metrics(in: CGSize(width: 50, height: 30), layoutMargins: nil)
+                XCTAssertEqual(measured.requestedWidth, 50)
+                XCTAssertEqual(manager.cache.entries.count, 1)
+                XCTAssertEqual(manager.cache.ideal, ideal)
+                manager.scaleFactorOverride = nil
+                manager.resetCache()
+                XCTAssertEqual(manager.spacing(), spacing)
+                XCTAssertEqual(manager.cache.ideal, ideal)
+                XCTAssertEqual(manager.cache.entries.count, 1)
+            }
+        }
+        let unresolved = ResolvedStyledText.TextLayoutManager()
+        XCTAssertTrue(unresolved.spacing().minima.isEmpty)
+        XCTAssertNil(unresolved.cache.ideal)
+        XCTAssertTrue(unresolved.cache.entries.isEmpty)
+    }
+
     // ASSERTIONS textManagerMetricsPublicationObserved
     func testManagerRoundsBaselinesAfterApplyingItsOwnMargins() throws {
         try withManager(Text(verbatim: "A").baselineOffset(0.2)) { manager in
