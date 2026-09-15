@@ -1079,7 +1079,8 @@ struct PreferencesOutputs {
             value: node,
             _makeReduceRule: { nodes, graph in
                 let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-                let attr: Attribute<K.Value> = graph.makeRule {
+                // The graph owns the reducer and must not be retained by it.
+                let attr: Attribute<K.Value> = graph.makeRule { [unowned graph] in
                     var combined = K.defaultValue
                     var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -1197,7 +1198,7 @@ extension PreferencesInputs {
             value: indirectAttr.identifier,
             _makeReduceRule: { nodes, graph in
                 let weakNodes = nodes.compactMap { graph.weakAttributeIfValid(for: $0) }
-                let reduced: Attribute<K.Value> = graph.makeRule {
+                let reduced: Attribute<K.Value> = graph.makeRule { [unowned graph] in
                     var combined = K.defaultValue
                     var hasValue = false
                     for weakNode in weakNodes where weakNode.isValid(in: graph) {
@@ -1223,7 +1224,7 @@ extension PreferencesInputs {
                     graph.setIndirectTarget(indirectAttr.identifier, to: concreteKV.value)
                 default:
                     let weakMatches = matches.compactMap { graph.weakAttributeIfValid(for: $0.value) }
-                    let reduced: Attribute<K.Value> = graph.makeRule {
+                    let reduced: Attribute<K.Value> = graph.makeRule { [unowned graph] in
                         var combined = K.defaultValue
                         var hasValue = false
                         for weakNode in weakMatches where weakNode.isValid(in: graph) {

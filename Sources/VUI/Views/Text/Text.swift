@@ -2316,7 +2316,8 @@ extension Text: View {
 
         // 2. Resource pass (Resource Rule)
         // Evaluated before drawing (in updateView) to upload resources to the GPU.
-        let resourceAttr: Attribute<ResourceList> = graph.makeRule {
+        // The graph owns this rule, so the rule must not retain its graph.
+        let resourceAttr: Attribute<ResourceList> = graph.makeRule { [unowned graph] in
             let text = view._attribute.value // Dependency 1: Text content and modifiers
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
             let referenceDate = Date()
@@ -2369,7 +2370,9 @@ extension Text: View {
             // If loading is required, create a new ResourceList(Task) to propagate upwards.
             var list = ResourceList()
 
-            list.items.append(ResourceList.Task(transaction: resourceTransaction) { context in
+            list.items.append(ResourceList.Task(transaction: resourceTransaction) { [weak graph] context in
+                // A retained resource list can outlive the host that requested it.
+                guard let graph else { return }
                 var context = context
                 context.copyOnWrite()
                 context.environment = renderEnvironment

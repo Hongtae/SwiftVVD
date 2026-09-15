@@ -2005,6 +2005,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
     // ASSERTIONS matchedGeometryMidflightRetainedRegistrationReinsertObserved
     // ASSERTIONS matchedGeometryMidflightIncomingFrameAnimationObserved
     // ASSERTIONS matchedGeometryMidflightActivationTransactionObserved
+    // ASSERTIONS dynamicViewItemUnmanagedInvalidationObserved
     @MainActor
     func testMidflightSourceThenReverseSeparatesRetainedAndReinsertedPresentations() throws {
         let probe = MatchedGeometryNonSourceRuntimeProbe()

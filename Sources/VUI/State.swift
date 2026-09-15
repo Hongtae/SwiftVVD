@@ -94,7 +94,6 @@ extension State {
         // Capture the active AGSubgraph at wiring time so the state node is registered
         // to the correct subgraph (e.g. the one created by Optional._makeView).
         let wiringSubgraph = AGSubgraph.current
-        let host = GraphHost.currentHost
         let signal: Attribute<Void> = AGSubgraph.withCurrent(wiringSubgraph) {
             graph.makeInput(value: ())
         }
@@ -119,12 +118,12 @@ extension State {
                 return
             }
 
-            // First body evaluation: mount the location against the host and signal
-            // captured while the property buffer was wired.
+            // Resolve the host on first mount so the stored update closure does
+            // not retain it. The signal still belongs to the wiring subgraph.
             let initialValue = currentState._value
             let location = StoredLocation<Value>(
                 initialValue: initialValue,
-                host: host,
+                host: GraphHost.currentHost,
                 signal: signal.asWeak().base
             )
             mountedLocation.value = location

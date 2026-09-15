@@ -45,7 +45,7 @@ enum _OpacityEffectSupport {
 
         let weakNodes = displayNodes.compactMap { graph.weakAttributeIfValid(for: $0) }
         let opacityAttr: Attribute<Double> = opacity._attribute
-        let transformedAttr: Attribute<DisplayList> = graph.makeRule {
+        let transformedAttr: Attribute<DisplayList> = graph.makeRule { [unowned graph] in
             var combined = DisplayList.Key.defaultValue
             for weakNode in weakNodes where weakNode.isValid(in: graph) {
                 let list = Attribute<DisplayList>(weakNode.toStrong()).value

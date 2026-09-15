@@ -568,8 +568,10 @@ private struct DynamicViewList<V: DynamicView>: StatefulRule, AsyncAttribute {
         }
 
         override func invalidate() {
+            let identity = Unmanaged.passUnretained(self).toOpaque()
             allItems.value.removeAll { entry in
-                entry.takeUnretainedValue() === self
+                // Graph teardown can destroy sibling items before their registry.
+                entry.toOpaque() == identity
             }
         }
     }
