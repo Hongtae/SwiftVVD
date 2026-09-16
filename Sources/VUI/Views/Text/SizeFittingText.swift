@@ -545,6 +545,40 @@ struct ResolvedTextFilter: StatefulRule, AsyncAttribute {
     }
 }
 
+struct ResolvedOptionalTextFilter: StatefulRule, AsyncAttribute {
+    typealias Value = ResolvedStyledText?
+
+    var _text: Attribute<Text?>
+    var _environment: Attribute<EnvironmentValues>
+    var helper: ResolvedTextHelper
+
+    mutating func updateValue() {
+        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph else {
+            fatalError("ResolvedOptionalTextFilter.updateValue requires an active ViewGraph.")
+        }
+        let text = _text.changedValue(options: [])
+        let environment = _environment.changedValue(options: [])
+        // An initialized nil output is distinct from a rule with no output yet.
+        var needsResolution = _AGGraph.currentStatefulOutput(Value.self) == nil
+        if text.changed, helper.lastText != text.value {
+            needsResolution = true
+        }
+        if environment.changed,
+           helper.tracker.hasDifferentUsedValues(environment.value._plist) {
+            needsResolution = true
+        }
+        if !needsResolution, case let .time(deadline) = helper.nextUpdate {
+            needsResolution = helper._time.value >= deadline
+        }
+        if needsResolution {
+            _AGGraph.setStatefulOutput(helper.resolve(text.value, with: environment.value, sizeFitting: false))
+        }
+        if case let .time(deadline) = helper.nextUpdate, helper._time.value < deadline {
+            viewGraph.nextUpdate.views.at(deadline)
+        }
+    }
+}
+
 /// Measures resolved styled text and answers its baseline alignment guides.
 struct StyledTextLayoutEngine: LayoutEngine {
     var text: ResolvedStyledText
