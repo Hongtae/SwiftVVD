@@ -53,11 +53,8 @@ final class MetalGraphicsDeviceLifetimeTests: XCTestCase {
         }
         let taskID = try XCTUnwrap(
             Set(detachedServiceTasks.keys).subtracting(existingTasks).first)
-#if compiler(>=6.4)
         let task = try XCTUnwrap(detachedServiceTasks[taskID])
-#else
-        let task = try XCTUnwrap(detachedServiceTasks[taskID]?.task)
-#endif
+        XCTAssertEqual(task.name, "MetalGraphicsDevice Debug Shutdown Blocker")
 
         device = nil
         try await Task.sleep(for: .milliseconds(50))

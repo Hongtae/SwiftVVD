@@ -14,14 +14,14 @@ Cross-Platform Game Engine for swift programming language.
 ---
 ## Things that require pre-installation
 * Windows 10/11 x64
-  * [Swift 6.0 or later](https://www.swift.org/)
+  * [Swift 6.4 or later](https://www.swift.org/)
   * [GIT (with LFS)](https://git-scm.com/)
   * [Vulkan SDK](https://vulkan.lunarg.com/)
     * Requires a graphics driver installed that supports Vulkan 1.3 or later.
 
 * Mac
-  * macOS 15.0 (Sequoia) or later (as a build target)
-  * [Xcode 16 or later](https://developer.apple.com/xcode/)
+  * [Xcode 27 or later](https://developer.apple.com/xcode/) (Swift 6.4 or later)
+  * Deployment targets: macOS 27.0, iOS 27.0, and Mac Catalyst 27.0 or later.
  
     > **Note**  
     > When cloning this project, you must use a **GIT client that supports LFS.**
@@ -29,9 +29,8 @@ Cross-Platform Game Engine for swift programming language.
 * Linux / WSL2
   * [Vulkan SDK](https://vulkan.lunarg.com/)
     * Requires a graphics driver installed that supports Vulkan 1.3 or later.
-  * [Swift 6.0 or later](https://www.swift.org/)
+  * [Swift 6.4 or later](https://www.swift.org/)
   * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org/)
-  * [ALSA for Audio (libasound2-dev)](https://www.alsa-project.org/)
 
     > **Note**  
     > Using devcontainer(Docker) is recommended.  

@@ -37,11 +37,7 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         self.shutdownBlockingDebugTask = task
         Task { @MainActor in
             let uuid = UUID()
-#if compiler(>=6.4)
             detachedServiceTasks[uuid] = task
-#else
-            detachedServiceTasks[uuid] = (task, "MetalGraphicsDevice Debug Shutdown Blocker")
-#endif
             await task.value
             detachedServiceTasks.removeValue(forKey: uuid)
         }

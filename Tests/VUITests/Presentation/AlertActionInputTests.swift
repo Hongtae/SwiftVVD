@@ -147,7 +147,7 @@ final class AlertActionInputTests: XCTestCase {
             for x in stride(from: 0.0, through: size.width, by: 2.0) {
                 let point = CGPoint(x: x, y: y)
                 guard let responder = controller.gestureEnvironment
-                    .eventBinding(at: point, accepting: MouseEvent.self)?
+                    .eventBinding(at: point, accepting: VUI.MouseEvent.self)?
                     .responder as? any AnyGestureResponder else {
                     continue
                 }

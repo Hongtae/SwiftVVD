@@ -109,11 +109,7 @@ extension AttributedString {
                 run.link != nil
         }
 
-#if os(Windows)
-        return AnySequence(runs).contains(where: hasSupportedAttribute)
-#else
         return runs.contains(where: hasSupportedAttribute)
-#endif
     }
 }
 
@@ -267,11 +263,7 @@ private func _resolvedAttributedRuns(
     context: any TextResolutionContext
 ) -> [ResolvedTextSource.Run] {
     var result: [ResolvedTextSource.Run] = []
-#if os(Windows)
-    let runs = AnySequence(value.runs)
-#else
     let runs = value.runs
-#endif
     for run in runs {
         let string = String(value.characters[run.range])
         guard !string.isEmpty else { continue }

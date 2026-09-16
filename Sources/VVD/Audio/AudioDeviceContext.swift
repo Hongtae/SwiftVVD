@@ -67,11 +67,7 @@ public final class AudioDeviceContext: @unchecked Sendable {
         }
         Task { @MainActor in
             let uuid = UUID()
-#if compiler(>=6.4)
             detachedServiceTasks[uuid] = task
-#else
-            detachedServiceTasks[uuid] = (task, "AudioDeviceContext Playback")
-#endif
             await task.value
             detachedServiceTasks.removeValue(forKey: uuid)
         }

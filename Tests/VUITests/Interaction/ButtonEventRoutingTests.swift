@@ -831,11 +831,11 @@ final class ButtonEventRoutingTests: XCTestCase {
 
         let firstBinding = controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 130, y: 120),
-            accepting: MouseEvent.self
+            accepting: VUI.MouseEvent.self
         )
         let secondBinding = controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 290, y: 120),
-            accepting: MouseEvent.self
+            accepting: VUI.MouseEvent.self
         )
         XCTAssertNotNil(firstBinding)
         XCTAssertNotNil(secondBinding)
@@ -871,7 +871,7 @@ final class ButtonEventRoutingTests: XCTestCase {
 
         XCTAssertNotNil(controller.gestureEnvironment.eventBinding(
             at: CGPoint(x: 210, y: 120),
-            accepting: MouseEvent.self
+            accepting: VUI.MouseEvent.self
         ))
 
         click(controller, at: CGPoint(x: 210, y: 120))

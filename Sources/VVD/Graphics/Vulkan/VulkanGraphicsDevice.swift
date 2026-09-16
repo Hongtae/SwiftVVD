@@ -343,11 +343,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         }
         Task { @MainActor in
             let uuid = UUID()
-#if compiler(>=6.4)
             detachedServiceTasks[uuid] = task
-#else
-            detachedServiceTasks[uuid] = (task, "VulkanGraphicsDevice Helper")
-#endif
             await task.value
             detachedServiceTasks.removeValue(forKey: uuid)
         }
