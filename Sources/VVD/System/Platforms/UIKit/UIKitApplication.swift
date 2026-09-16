@@ -99,6 +99,8 @@ final class UIKitApplication: Application, @unchecked Sendable {
     var isActive: Bool { true }
 
     func terminate(exitCode : Int) {
+        let code = Int32(clamping: exitCode)
+
         if self.initialized {
             Task { @MainActor in
                 self.delegate?.finalize(application: self)
@@ -106,12 +108,12 @@ final class UIKitApplication: Application, @unchecked Sendable {
                 self.initialized = false
 
                 DispatchQueue.main.async {
-                    exit(exitCode)
+                    exit(code)
                 }
             }
         } else {
             DispatchQueue.main.async {
-                exit(exitCode)
+                exit(code)
             }
         }
     }

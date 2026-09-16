@@ -17,6 +17,7 @@ let package = Package(
             path: "miniaudio",
             sources: [
                 "miniaudio.c",
+                "miniaudio.m",
             ],
             publicHeadersPath: ".",
             cSettings: [
