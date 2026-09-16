@@ -160,6 +160,7 @@ struct _ResolvedTextRunAttributes: Equatable {
     var superscript: Text.Superscript?
     var shadow: _ShadowEffect?
     var transitionIndex: Int?
+    var customAttachment: AnyCustomTextAttachment?
 
     init(
         font: Font? = nil,
@@ -184,7 +185,7 @@ struct _ResolvedTextRunAttributes: Equatable {
     var isEmpty: Bool {
         font == nil && foregroundColor == nil && backgroundColor == nil &&
             strikethroughStyle == nil && underlineStyle == nil && kern == nil &&
-            tracking == nil && baselineOffset == nil
+            tracking == nil && baselineOffset == nil && customAttachment == nil
     }
 
     var nsAttributes: [NSAttributedString.Key: Any] {
@@ -216,6 +217,7 @@ struct _ResolvedTextRunAttributes: Equatable {
         if let superscript { result[NSAttributedString.Key("VUI.Superscript")] = superscript }
         if let shadow { result[NSAttributedString.Key("VUI.TextShadow")] = shadow }
         if let transitionIndex { result[NSAttributedString.Key("VUI.TextTransition")] = transitionIndex }
+        if let customAttachment { result[.customTextAttachment] = customAttachment }
         return result
     }
 
@@ -229,6 +231,7 @@ struct _ResolvedTextRunAttributes: Equatable {
         kern = nsAttributes[.coreKern] as? CGFloat
         tracking = nsAttributes[.coreTracking] as? CGFloat
         baselineOffset = nsAttributes[.coreBaselineOffset] as? CGFloat
+        customAttachment = nsAttributes[.customTextAttachment] as? AnyCustomTextAttachment
     }
 }
 

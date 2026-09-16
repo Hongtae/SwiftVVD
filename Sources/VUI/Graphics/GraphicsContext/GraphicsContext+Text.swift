@@ -234,6 +234,14 @@ extension GraphicsContext {
             self.drawSource()
         }
 
+        for item in drawing.customAttachments {
+            var context = self
+            if clipBounds { context.clip(to: Path(rect)) }
+            var bounds = item.bounds
+            bounds.origin += offset
+            item.attachment.draw(with: bounds, in: &context)
+        }
+
         for decoration in drawing.decorations {
             let start = decoration.start.applying(transform)
             let end = decoration.end.applying(transform)

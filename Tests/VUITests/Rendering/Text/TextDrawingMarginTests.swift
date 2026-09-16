@@ -4,6 +4,60 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textSuffixCustomAttachmentObserved
+    func testLineSuffixDrawsItsOwnFontAndColorThroughPreparedAndRecordedDrawing() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.font = .system(size: 23)
+                environment.defaultFontRenderingMode = mode
+                environment.displayScale = 2
+                environment._contentScaleFactor = scale
+                let payload = try resolve(Text(verbatim: " more").font(.system(size: 11)).foregroundColor(.red),
+                                          environment: environment)
+                let suffixOwner = ResolvedStyledText.TextLayoutManager(resolvedText: payload)
+                let suffix = Text.Suffix.alwaysVisible(Text(" more")).resolve(text: suffixOwner)
+                let originalLine = try XCTUnwrap(suffix.line)
+                environment[TextSuffixKey.self] = suffix
+                let context = GraphTextResolutionContext(environment: environment, sceneResources: SceneResources())
+                let owner = try XCTUnwrap(Text(verbatim: "AB").foregroundColor(.green)._resolveStyledText(
+                    context: context, referenceDate: Date(), archiveOptions: .init(), features: [], sizeFitting: false,
+                    options: [.allowsKeyColors, .allowsTextSuffix]))
+                // Leave room for bitmap ink beyond the final advance when comparing renderer routes.
+                owner.stylePadding.trailing = 2
+                let item = try value(owner)
+                let prepared = try XCTUnwrap(item.makeDrawing())
+                XCTAssertEqual(prepared.customAttachments.count, 1)
+                let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
+                XCTAssertTrue(immediate.contains { $0 != 0 })
+                let withoutSuffix = try resolve(Text(verbatim: "AB").foregroundColor(.green), environment: environment)
+                let body = try render(device: device, environment: environment) {
+                    $0.draw(withoutSuffix, in: CGRect(origin: .zero, size: item.size))
+                }
+                XCTAssertNotEqual(immediate, body)
+                let cached = try render(device: device, environment: environment) { item.draw(prepared, in: $0) }
+                XCTAssertTrue(cached == immediate)
+                let replay = try render(device: device, environment: environment) { target in
+                    let recording = target.recordingContext(size: CGSize(width: 128, height: 128))
+                    item.draw(in: recording)
+                    recording.recording!.draw(in: target)
+                }
+                XCTAssertTrue(replay == immediate)
+                let renderer = MarginRenderer(environment: environment, operation: .line)
+                let custom = try value(owner, renderer: renderer)
+                let rendered = try render(device: device, environment: environment) { custom.draw(in: $0) }
+                XCTAssertTrue(rendered == immediate, "\(mode) \(scale)")
+                // Drawing the attachment relocates a copy, preserving the retained suffix value.
+                XCTAssertEqual(suffix.line, originalLine)
+                XCTAssertEqual(originalLine.drawingOptions.rawValue, 0)
+            }
+        }
+    }
+
     // ASSERTIONS textStringDrawingHorizontalLinePlacementObserved textStringDrawingDrawGeometryObserved
     func testAlignedLinesMoveGlyphsBackgroundsDecorationsAndAtomsTogether() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }

@@ -166,6 +166,42 @@ struct ResolvedTextSource {
     var displayScale: CGFloat { storage.displayScale }
     var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
+    /// Keeps the attachment separate from its line while inheriting the body's final input.
+    func appending(_ attachment: AnyCustomTextAttachment, context: any TextResolutionContext) -> Self {
+        var runs = runs
+        var faces: [Typeface] = []
+        var attributes = _TextAttributeValues()
+        var style = _ResolvedTextRunAttributes()
+        switch runs.last {
+        case let .styledText(lastFaces, _, lastAttributes, lastStyle):
+            faces = lastFaces
+            attributes = lastAttributes
+            style = lastStyle
+        case let .attributedText(lastFaces, _, lastAttributes), let .attributedAttachment(lastFaces, _, lastAttributes):
+            faces = lastFaces
+            attributes = lastAttributes
+        case let .text(lastFaces, _), let .attachment(lastFaces, _):
+            faces = lastFaces
+        case nil:
+            // An empty attributed body supplies no font or color attributes.
+            // The backend still needs its independent missing-attribute face.
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            faces = Font.system(size: 12).typefaceCascade(in: environment, forContext: context.sceneResources,
+                contentScaleFactor: scaleFactor).runFaces
+        }
+        style.customAttachment = attachment
+        runs.append(.styledText(faces, "\u{fffc}", attributes, style))
+        var result = Self(runs: runs, scaleFactor: scaleFactor, displayScale: displayScale,
+            drawMissingGlyphs: drawMissingGlyphs, outsetData: storage.outsetData,
+            preferredLanguages: storage.preferredLanguages)
+        result.defaultLineMetrics = defaultLineMetrics
+        result.resolvedProperties = resolvedProperties
+        result.fontResolutionContext = fontResolutionContext
+        result.shading = shading
+        return result
+    }
+
     var uniformFont: FontResource? {
         guard runs.count == 1,
               case let .styledText(_, text, _, attributes) = runs[0],
@@ -247,10 +283,11 @@ struct ResolvedTextSource {
                  let .attributedText(_, text, _):
                 result.append(NSAttributedString(string: text))
             case let .styledText(_, text, _, style):
-                result.append(NSAttributedString(
-                    string: text,
-                    attributes: style.nsAttributes
-                ))
+                if let attachment = style.customAttachment {
+                    result.append(attachment.nsAttributedString(with: style.nsAttributes))
+                } else {
+                    result.append(NSAttributedString(string: text, attributes: style.nsAttributes))
+                }
             case .attachment, .attributedAttachment:
                 result.append(NSAttributedString(
                     string: "\u{fffc}",
@@ -432,6 +469,7 @@ struct ResolvedTextSource {
             case texture(TextureContent)
             case vector(VectorContent)
             case attachment(AttachmentContent)
+            case customAttachment(AnyCustomTextAttachment)
             case missing
         }
 
@@ -479,7 +517,7 @@ struct ResolvedTextSource {
                 return data.offset
             case .attachment(let data):
                 return data.offset
-            case .unresolved, .vector, .missing:
+            case .unresolved, .vector, .customAttachment, .missing:
                 return .zero
             }
         }
@@ -641,6 +679,11 @@ struct ResolvedTextSource {
             var foregroundColor: Color?
         }
 
+        struct CustomAttachment {
+            var attachment: AnyCustomTextAttachment
+            var bounds: Text.Layout.TypographicBounds
+        }
+
         struct Background {
             var frame: CGRect
             var color: Color
@@ -688,6 +731,7 @@ struct ResolvedTextSource {
         var batches: [Batch]
         var vectorBatches: [VectorBatch]
         var attachments: [Attachment]
+        var customAttachments: [CustomAttachment]
         var backgrounds: [Background]
         var decorations: [Decoration]
 
@@ -698,6 +742,7 @@ struct ResolvedTextSource {
             batches: [Batch],
             vectorBatches: [VectorBatch],
             attachments: [Attachment],
+            customAttachments: [CustomAttachment],
             backgrounds: [Background],
             decorations: [Decoration]
         ) {
@@ -707,6 +752,7 @@ struct ResolvedTextSource {
             self.batches = batches
             self.vectorBatches = vectorBatches
             self.attachments = attachments
+            self.customAttachments = customAttachments
             self.backgrounds = backgrounds
             self.decorations = decorations
         }
@@ -1084,6 +1130,7 @@ struct ResolvedTextSource {
         var quads: [Quad] = []
         var vectorBatches: [Drawing.VectorBatch] = []
         var attachments: [Drawing.Attachment] = []
+        var customAttachments: [Drawing.CustomAttachment] = []
         var backgrounds: [Drawing.Background] = []
         var decorations: [Drawing.Decoration] = []
 
@@ -1239,6 +1286,14 @@ struct ResolvedTextSource {
                     textureFrame: data.frame
                 ))
 
+            case let .customAttachment(attachment):
+                var bounds = Text.Layout.TypographicBounds()
+                bounds.origin = CGPoint(x: baseline.x / scaleFactor, y: baseline.y / scaleFactor)
+                bounds.width = attachment.length
+                bounds.ascent = attachment.ascent
+                bounds.descent = attachment.descent
+                customAttachments.append(.init(attachment: attachment, bounds: bounds))
+
             case .missing:
                 break
             }
@@ -1382,6 +1437,7 @@ struct ResolvedTextSource {
             batches: batches,
             vectorBatches: vectorBatches,
             attachments: attachments,
+            customAttachments: customAttachments,
             backgrounds: backgrounds,
             decorations: decorations
         )
@@ -2162,6 +2218,30 @@ struct ResolvedTextSource {
                     glyph.characterIndex = characterIndex
                     glyph.sourceRange = characterIndex..<(characterIndex + 1)
                     return glyph
+                }
+
+                if let attachment = resolvedStyle.customAttachment {
+                    var glyph = attributeGlyph("\u{fffc}")
+                    glyph.content = .customAttachment(attachment)
+                    glyph.ascender = attachment.ascent * scaleFactor
+                    glyph.descender = -attachment.descent * scaleFactor
+                    glyph.lineBoxAscender = max(glyph.lineBoxAscender, glyph.ascender)
+                    glyph.lineBoxDescender = min(glyph.lineBoxDescender, glyph.descender)
+                    glyph.advance = CGSize(width: attachment.length * scaleFactor,
+                                           height: (attachment.ascent + attachment.descent) * scaleFactor)
+                    glyph.attributes.merge(attachment.customAttributes)
+                    if paragraphInput == nil { paragraphInput = glyph }
+                    glyphs.append(glyph)
+                    offset.x += glyph.advance.width
+                    ascender = max(ascender, glyph.lineAscender)
+                    descender = min(descender, glyph.lineDescender)
+                    characterIndex += 1
+                    paragraphLength += 1
+                    lastBreak = nil
+                    previousWasCR = false
+                    face1 = nil
+                    char1 = UnicodeScalar(0)
+                    continue
                 }
 
                 var index = 0

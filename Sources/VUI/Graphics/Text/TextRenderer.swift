@@ -100,6 +100,8 @@ fileprivate final class _TextLayoutStorage {
     var origin: CGPoint
     var layoutDirection: LayoutDirection
     var isTruncated: Bool
+    // Shaping ranges use scalar offsets; public character indices use UTF-16.
+    let utf16Indices: [Int]?
 
     init(
         source: ResolvedTextSource,
@@ -113,6 +115,26 @@ fileprivate final class _TextLayoutStorage {
         self.origin = origin
         self.layoutDirection = layoutDirection
         self.isTruncated = isTruncated
+        var offsets: [Int]?
+        var scalarIndex = 0
+        var utf16Index = 0
+        for run in source.runs {
+            let text: String
+            switch run {
+            case let .text(_, value), let .attributedText(_, value, _), let .styledText(_, value, _, _):
+                text = value
+            case .attachment, .attributedAttachment:
+                text = "\u{fffc}"
+            }
+            for scalar in text.unicodeScalars {
+                let count = scalar.value > 0xffff ? 2 : 1
+                if count == 2 && offsets == nil { offsets = Array(0...scalarIndex) }
+                scalarIndex += 1
+                utf16Index += count
+                offsets?.append(utf16Index)
+            }
+        }
+        self.utf16Indices = offsets
     }
 
     func xOffsets(line index: Int) -> [CGFloat] {
@@ -337,6 +359,10 @@ extension Text {
             fileprivate var baseDrawingOptions: DrawingOptions
             fileprivate var layoutRenderer: _TextLayoutStorage
 
+            var customAttributes: _TextAttributeValues {
+                line.storage.lines[line.index].runs[index].attributes
+            }
+
             var glyphRange: Range<Int> {
                 line.storage.lines[line.index].runs[index].glyphRange
             }
@@ -394,11 +420,8 @@ extension Text {
 
             public var characterIndices: [CharacterIndex] {
                 clusterGlyphRanges.map {
-                    CharacterIndex(
-                        value: line.storage.lines[
-                            line.index
-                        ].glyphs[$0.lowerBound].characterIndex
-                    )
+                    let index = line.storage.lines[line.index].glyphs[$0.lowerBound].characterIndex
+                    return CharacterIndex(value: line.storage.utf16Indices?[index] ?? index)
                 }
             }
 

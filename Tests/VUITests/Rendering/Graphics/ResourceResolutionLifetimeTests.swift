@@ -87,6 +87,35 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         XCTAssertNil(deviceContext)
     }
 
+    func testSuffixAttachmentReleasesItsLineFontAndDeviceWithTheLastOwner() throws {
+        var owner: ResolvedStyledText.TextLayoutManager?
+        weak var artwork: TextureFont?
+        weak var deviceContext: GraphicsDeviceContext?
+        func populate() throws {
+            let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let font = try XCTUnwrap(TextureFont(deviceContext: context, path: root.appendingPathComponent(
+                "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path))
+            artwork = font
+            deviceContext = context
+            let source = ResolvedTextSource(runs: [.text([TextureTypeface(textureFont: font)], "A")], scaleFactor: 1)
+            let line = try XCTUnwrap(source.makeLayout(in: CGSize(width: 100, height: 100),
+                layoutDirection: .leftToRight).first)
+            let attachment = ConcreteCustomTextAttachment(LineAttachment(line: line, bounds: line.typographicBounds))
+            owner = ResolvedStyledText.TextLayoutManager(storage: attachment.nsAttributedString(with: [:]),
+                suffix: .alwaysVisible(line, []), attachments: .init(characterIndices: [0]))
+        }
+        try populate()
+        withExtendedLifetime(owner) {
+            XCTAssertNotNil(artwork)
+            XCTAssertNotNil(deviceContext)
+        }
+        owner = nil
+        XCTAssertNil(artwork)
+        XCTAssertNil(deviceContext)
+    }
+
     // ASSERTIONS textManagerScaledStorageLifecycleObserved
     func testManagerScaledSourcePurgeReleasesItsLastTextureFontAndDevice() throws {
         try checkManagerBackendPurge(retainsScaledSource: true)

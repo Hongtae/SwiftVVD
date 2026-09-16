@@ -521,6 +521,8 @@ class ResolvedStyledText: InterpolatableContent {
         archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),
         isCollapsible: Bool = false,
         features: Text.ResolvedProperties.Features = [],
+        suffix: ResolvedTextSuffix = .none,
+        attachments: Text.ResolvedProperties.CustomAttachments = .init(),
         styles: [_ShapeStyle_Pack.Style] = [],
         transitions: [Text.ResolvedProperties.Transition] = [],
         links: Text.ResolvedProperties.Links = Text.ResolvedProperties.Links(),
@@ -1232,6 +1234,37 @@ extension ResolvedStyledText {
     }
 
     final class TextLayoutManager: ResolvedStyledText {
+        var suffix: ResolvedTextSuffix
+        var attachments: Text.ResolvedProperties.CustomAttachments
+
+        required init(
+            storage: NSAttributedString? = nil,
+            layoutProperties: TextLayoutProperties = TextLayoutProperties(),
+            layoutMargins: EdgeInsets = EdgeInsets(),
+            scaleFactorOverride: CGFloat? = nil,
+            stylePadding: EdgeInsets = EdgeInsets(),
+            archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),
+            isCollapsible: Bool = false,
+            features: Text.ResolvedProperties.Features = [],
+            suffix: ResolvedTextSuffix = .none,
+            attachments: Text.ResolvedProperties.CustomAttachments = .init(),
+            styles: [_ShapeStyle_Pack.Style] = [],
+            transitions: [Text.ResolvedProperties.Transition] = [],
+            links: Text.ResolvedProperties.Links = .init(),
+            resolvedText: ResolvedTextSource? = nil,
+            version: Int = 0,
+            transitionText: String? = nil,
+            needsDrawingGroup: Bool = false
+        ) {
+            self.suffix = suffix
+            self.attachments = attachments
+            super.init(storage: storage, layoutProperties: layoutProperties, layoutMargins: layoutMargins,
+                scaleFactorOverride: scaleFactorOverride, stylePadding: stylePadding, archiveOptions: archiveOptions,
+                isCollapsible: isCollapsible, features: features, suffix: suffix, attachments: attachments,
+                styles: styles, transitions: transitions, links: links, resolvedText: resolvedText,
+                version: version, transitionText: transitionText, needsDrawingGroup: needsDrawingGroup)
+        }
+
         struct Size {
             struct Flags: OptionSet {
                 var rawValue: UInt8

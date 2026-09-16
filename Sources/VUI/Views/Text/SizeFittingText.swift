@@ -456,12 +456,16 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
             environment: trackedEnvironment,
             sceneResources: rendererHost.sceneResources
         )
+        var options: Text.ResolveOptions = .includeTransitions
+        if allowsKeyColors { options.insert(.allowsKeyColors) }
+        if features.contains(.useTextSuffix) { options.insert(.allowsTextSuffix) }
         let resolved = text._resolveStyledText(
             context: context,
             referenceDate: referenceDate,
             archiveOptions: archiveOptions,
             features: features,
-            sizeFitting: sizeFitting
+            sizeFitting: sizeFitting,
+            options: options
         )
 
         if let delay = text._nextUpdateDelay(

@@ -1613,6 +1613,10 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         options: ResolveOptions = .includeTransitions
     ) -> ResolvedTextSource? {
         var properties = ResolvedProperties()
+        if options.contains([.allowsKeyColors, .allowsTextSuffix]) {
+            properties.styles = context.environment[TextSuffixKey.self].styles
+            if !properties.styles.isEmpty { properties.features.insert(.keyColor) }
+        }
         var string = String()
         var style = Style()
         style.typesettingConfiguration = context.environment.typesettingConfiguration
@@ -1627,6 +1631,15 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             resolved.defaultLineMetrics = context.defaultTextLineMetrics()
         }
         properties.markParagraphBoundary(at: string.utf16.count, in: string, environment: context.environment)
+        if options.contains(.allowsTextSuffix) {
+            let suffix = context.environment[TextSuffixKey.self]
+            if case let .alwaysVisible(line, _) = suffix {
+                let attachment = ConcreteCustomTextAttachment(LineAttachment(line: line, bounds: line.typographicBounds))
+                resolved = resolved.appending(attachment, context: context)
+                properties.registerCustomAttachment(at: string.utf16.count)
+            }
+            properties.suffix = suffix
+        }
         resolved.resolvedProperties = properties
         resolved.fontResolutionContext = GraphTextResolutionContext(
             environment: context.environment.untrackedCopy(), sceneResources: context.sceneResources)
@@ -1783,7 +1796,10 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             let managerFeatures: ResolvedProperties.Features = [
                 .customRenderer, .useTextLayoutManager, .produceTextLayout, .checkInterpolationStrategy
             ]
-            let owner: ResolvedStyledText.Type = features.isDisjoint(with: managerFeatures)
+            let suffix = source.resolvedProperties?.suffix ?? .none
+            let attachments = source.resolvedProperties?.customAttachments ?? .init()
+            let owner: ResolvedStyledText.Type = features.isDisjoint(with: managerFeatures) &&
+                suffix == .none && attachments.isEmpty
                 ? ResolvedStyledText.StringDrawing.self : ResolvedStyledText.TextLayoutManager.self
             return owner.init(
                 storage: needsDynamicArchive
@@ -1796,6 +1812,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                 layoutMargins: source.resolvedProperties?.insets ?? EdgeInsets(),
                 archiveOptions: archiveOptions,
                 features: features,
+                suffix: suffix,
+                attachments: attachments,
                 styles: source.resolvedProperties?.styles ?? [],
                 transitions: source.resolvedProperties?.transitions ?? [],
                 resolvedText: resolved,
@@ -1807,7 +1825,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         guard sizeFitting,
               let variants = _resolveSizeVariants(
                 context: context,
-                referenceDate: referenceDate
+                referenceDate: referenceDate,
+                options: options
               ) else {
             return makeStyledText(resolved)
         }
@@ -1827,7 +1846,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
 
     func _resolveSizeVariants(
         context: any TextResolutionContext,
-        referenceDate: Date = Date()
+        referenceDate: Date = Date(),
+        options: ResolveOptions = .includeTransitions
     ) -> [(TextSizeVariant, ResolvedTextSource)]? {
         guard let variants = _sizeVariantTexts(
             in: context.environment,
@@ -1840,7 +1860,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         return variants.compactMap { variant, string in
             var leaf = self
             leaf.storage = .verbatim(string)
-            guard let resolved = leaf._resolve(context: context, referenceDate: referenceDate) else { return nil }
+            guard let resolved = leaf._resolve(context: context, referenceDate: referenceDate, options: options) else { return nil }
             return (variant, resolved)
         }
     }
@@ -2381,7 +2401,10 @@ extension Text: View {
                     referenceDate: referenceDate,
                     archiveOptions: archiveOptions,
                     features: resolvedTextFeatures,
-                    sizeFitting: usesSizeFittingText
+                    sizeFitting: usesSizeFittingText,
+                    options: resolvedTextFeatures.contains(.useTextSuffix)
+                        ? [.includeTransitions, .allowsKeyColors, .allowsTextSuffix]
+                        : [.includeTransitions, .allowsKeyColors]
                 ) else {
                     fatalError("A graphics text context must resolve backend attachments.")
                 }
