@@ -779,6 +779,99 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerSizeProposalFlagsObserved
+    func testManagerSizePreservesUnspecifiedMinorAxisAndPhysicalDimensions() throws {
+        typealias Size = ResolvedStyledText.TextLayoutManager.Size
+        try withManager(Text(verbatim: "A")) { manager in
+            for vertical in [false, true] {
+                manager.layoutProperties.writingMode = vertical ? .verticalRightToLeft : .horizontalTopToBottom
+                XCTAssertEqual(manager.majorAxis, vertical ? .horizontal : .vertical)
+                for width: CGFloat? in [nil, .infinity, 80] {
+                    for height: CGFloat? in [nil, .infinity, 14] {
+                        let size = Size(_ProposedSize(width: width, height: height), majorAxis: manager.majorAxis)
+                        XCTAssertEqual(size.physicalSize, CGSize(width: width ?? .infinity, height: height ?? .infinity))
+                        XCTAssertEqual(size.layoutWidth, (vertical ? height : width) ?? .infinity)
+                        XCTAssertEqual(size.layoutHeight, (vertical ? width : height) ?? .infinity)
+                        XCTAssertEqual(size.flags.contains(.minorAxisIsUnspecified), (vertical ? height : width) == nil)
+                        let explicit = Size(size.physicalSize, majorAxis: manager.majorAxis)
+                        XCTAssertTrue(explicit.flags.isEmpty)
+                        XCTAssertEqual(explicit.physicalSize, size.physicalSize)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textManagerMetricsSizeStructureObserved
+    // ASSERTIONS textManagerComputeMetricsStructureObserved
+    // ASSERTIONS textManagerFlexibleMinorAxisObserved
+    func testManagerComputeMetricsKeepsAvailableRequestAndFlexibleExtentSeparateFromCaches() throws {
+        typealias Size = ResolvedStyledText.TextLayoutManager.Size
+        try withManager(Text(verbatim: "A A A A A A A A"), configure: { $0.lineLimit = 1 }) { manager in
+            manager.layoutMargins = EdgeInsets(top: 0.2, leading: 1.1, bottom: 0.3, trailing: 2.2)
+            let request = Size(CGSize(width: 200, height: 54), majorAxis: manager.majorAxis,
+                flags: .minorAxisIsUnspecified)
+            let fixed = manager.computeMetrics(scale: 1, requestedSize: request, minorAxisIsFlexible: false)
+            let flexible = manager.computeMetrics(scale: 1, requestedSize: request, minorAxisIsFlexible: true)
+            for value in [fixed, flexible] {
+                XCTAssertEqual(value.requestedSize.layoutWidth, 196.7, accuracy: 0.000001)
+                XCTAssertEqual(value.requestedSize.layoutHeight, 53.5, accuracy: 0.000001)
+                XCTAssertEqual(value.requestedSize.majorAxis, .vertical)
+                XCTAssertEqual(value.requestedSize.flags, .minorAxisIsUnspecified)
+                XCTAssertEqual(value.base.requestedWidth, value.requestedSize.layoutWidth)
+                XCTAssertEqual(value.base.scale, 1)
+                XCTAssertEqual(value.base.numberOfLines, 1)
+                XCTAssertTrue(value.flags.isEmpty)
+                XCTAssertFalse(value.base.hasTruncatedRanges)
+                XCTAssertNil(value.layout)
+            }
+            // Extent is rounded before margins are restored; it can exceed the original request.
+            XCTAssertEqual(flexible.base.size.width, 200.3, accuracy: 0.000001)
+            XCTAssertGreaterThan(flexible.base.size.width, fixed.base.size.width)
+            XCTAssertEqual(flexible.base.size.height, fixed.base.size.height)
+            XCTAssertEqual(flexible.base.firstBaseline, fixed.base.firstBaseline)
+            XCTAssertEqual(flexible.base.lastBaseline, fixed.base.lastBaseline)
+            XCTAssertEqual(flexible.base.baselineAdjustment, fixed.base.baselineAdjustment)
+            XCTAssertTrue(manager.cache.entries.isEmpty)
+            XCTAssertNil(manager.cache.ideal)
+
+            let scalar = manager.metrics(in: request, layoutMargins: nil)
+            XCTAssertEqual(scalar.size, fixed.base.size)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            XCTAssertEqual(manager.cache.entries[0].request, CGSize(width: 200, height: 54))
+            _ = manager.spacing()
+            let ideal = try XCTUnwrap(manager.cache.ideal)
+            _ = manager.computeMetrics(scale: 0.63, requestedSize: request, minorAxisIsFlexible: true)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            XCTAssertEqual(manager.cache.entries[0].metrics.size, scalar.size)
+            XCTAssertEqual(manager.cache.ideal?.size, ideal.size)
+            XCTAssertEqual(manager.cache.ideal?.scale, 1)
+        }
+    }
+
+    // ASSERTIONS textManagerComputeMetricsStructureObserved
+    func testManagerComputedTruncationFlagsReachTheLayoutAndSurviveBackendPurge() throws {
+        typealias Size = ResolvedStyledText.TextLayoutManager.Size
+        try withManager(Text(verbatim: "A A A A A A A A"), configure: { $0.lineLimit = 1 }) { manager in
+            let size = CGSize(width: 80, height: 54)
+            let request = Size(size, majorAxis: manager.majorAxis)
+            let metrics = manager.computeMetrics(scale: 1, requestedSize: request, minorAxisIsFlexible: false)
+            XCTAssertTrue(metrics.base.hasTruncatedRanges)
+            XCTAssertEqual(metrics.flags, .isTruncated)
+            XCTAssertNil(metrics.layout)
+            let layout = try XCTUnwrap(manager.makeLayout(in: .zero, with: size,
+                shading: .color(.black), layoutDirection: .leftToRight))
+            XCTAssertEqual(layout.isTruncated, metrics.flags.contains(.isTruncated))
+            XCTAssertTrue(manager.cache.entries.isEmpty)
+            manager.glyphLayoutCache.purgeResources(reason: .lowMemory)
+            let rebuilt = manager.computeMetrics(scale: 1, requestedSize: request, minorAxisIsFlexible: false)
+            XCTAssertEqual(rebuilt.flags, metrics.flags)
+            XCTAssertEqual(rebuilt.base.size, metrics.base.size)
+            XCTAssertEqual(rebuilt.base.numberOfLines, metrics.base.numberOfLines)
+            XCTAssertTrue(manager.cache.entries.isEmpty)
+        }
+    }
+
     private func withManager(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
                              _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
         try withOwner(text, configure: configure) { source in

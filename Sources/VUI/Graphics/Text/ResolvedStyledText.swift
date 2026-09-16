@@ -1232,6 +1232,54 @@ extension ResolvedStyledText {
     }
 
     final class TextLayoutManager: ResolvedStyledText {
+        struct Size {
+            struct Flags: OptionSet {
+                var rawValue: UInt8
+
+                static let minorAxisIsUnspecified = Flags(rawValue: 1)
+            }
+
+            var layoutWidth: CGFloat
+            var layoutHeight: CGFloat
+            var majorAxis: Axis
+            var flags: Flags
+
+            init(_ size: CGSize, majorAxis: Axis, flags: Flags = []) {
+                layoutWidth = majorAxis == .vertical ? size.width : size.height
+                layoutHeight = majorAxis == .vertical ? size.height : size.width
+                self.majorAxis = majorAxis
+                self.flags = flags
+            }
+
+            init(_ proposal: _ProposedSize, majorAxis: Axis) {
+                let minor = majorAxis == .vertical ? proposal.width : proposal.height
+                let major = majorAxis == .vertical ? proposal.height : proposal.width
+                layoutWidth = minor ?? .infinity
+                layoutHeight = major ?? .infinity
+                self.majorAxis = majorAxis
+                flags = minor == nil ? .minorAxisIsUnspecified : []
+            }
+
+            var physicalSize: CGSize {
+                majorAxis == .vertical
+                    ? CGSize(width: layoutWidth, height: layoutHeight)
+                    : CGSize(width: layoutHeight, height: layoutWidth)
+            }
+        }
+
+        struct Metrics {
+            struct Flags: OptionSet {
+                var rawValue: UInt8
+
+                static let isTruncated = Flags(rawValue: 1)
+            }
+
+            var requestedSize: Size
+            var base: NSAttributedString.Metrics
+            var flags: Flags
+            var layout: Text.Layout?
+        }
+
         struct Cache {
             struct Entry {
                 var request: CGSize
@@ -1319,16 +1367,21 @@ extension ResolvedStyledText {
 
         let glyphLayoutCache = GlyphLayoutCache()
 
+        var majorAxis: Axis {
+            layoutProperties.writingMode == .verticalRightToLeft ? .horizontal : .vertical
+        }
+
         override var metricsCacheEntryCount: Int { cache.entries.count }
 
         override func resetCache() {}
 
         override func spacing() -> Spacing {
-            guard let resolvedText else { return Spacing() }
+            guard resolvedText != nil else { return Spacing() }
             if cache.ideal == nil {
                 // Spacing uses unit-scale unconstrained metrics independently of size requests.
-                cache.ideal = measureGlyphLayout(resolvedText,
-                    in: CGSize(width: CGFloat.infinity, height: CGFloat.infinity)).metrics
+                cache.ideal = computeMetrics(scale: 1,
+                    requestedSize: Size(CGSize(width: CGFloat.infinity, height: CGFloat.infinity), majorAxis: majorAxis),
+                    minorAxisIsFlexible: false).base
             }
             guard let ideal = cache.ideal, let maxFontMetrics else { return Spacing() }
             return Spacing.textSpacing(maxFontMetrics: maxFontMetrics,
@@ -1351,18 +1404,20 @@ extension ResolvedStyledText {
                 applyingMarginOffsets: true) else { return nil }
             prepared.source.shading = shading
             return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines, layoutDirection: layoutDirection,
-                isTruncated: !prepared.layout.truncatedRanges.isEmpty || prepared.layout.hasUnlaidText,
+                isTruncated: prepared.metrics.flags.contains(.isTruncated),
                 origin: prepared.bounds.origin)
         }
 
         private func prepareGlyphLayout(in rect: CGRect, with size: CGSize, applyingMarginOffsets: Bool)
-            -> (source: ResolvedTextSource, layout: ResolvedTextSource.GlyphLayout, bounds: CGRect)? {
+            -> (source: ResolvedTextSource, metrics: Metrics, layout: ResolvedTextSource.GlyphLayout, bounds: CGRect)? {
             guard let source = resolvedText else { return nil }
             var request = size
             if let entry = cache.find(measuredSize: size), entry.request.width.isFinite {
                 request.width = entry.request.width
             }
-            var measured = fittingGlyphLayout(source, in: request)
+            let metrics = fittingMetrics(in: Size(request, majorAxis: majorAxis))
+            let drawingSource = glyphLayoutCache.source(at: metrics.base.scale, original: source)
+            var layout = glyphLayout(drawingSource, in: metrics.requestedSize.physicalSize, scale: metrics.base.scale)
             let factor: CGFloat
             switch layoutProperties.multilineTextAlignment {
             case .center: factor = 0.5
@@ -1373,14 +1428,14 @@ extension ResolvedStyledText {
             let displacement = factor == 0 ? 0 : (request.width - size.width) * factor
             let bounds = CGRect(
                 x: rect.origin.x + margins.leading - displacement,
-                y: rect.origin.y + margins.top + measured.metrics.baselineAdjustment,
+                y: rect.origin.y + margins.top + metrics.base.baselineAdjustment,
                 width: request.width, height: request.height)
-            let width = measured.metrics.requestedWidth * measured.source.scaleFactor
-            for index in measured.layout.lines.indices {
-                measured.layout.lines[index].originX = factor == 0 ? 0 :
-                    (width - measured.layout.lines[index].width) * factor
+            let width = metrics.base.requestedWidth * drawingSource.scaleFactor
+            for index in layout.lines.indices {
+                layout.lines[index].originX = factor == 0 ? 0 :
+                    (width - layout.lines[index].width) * factor
             }
-            return (measured.source, measured.layout, bounds)
+            return (drawingSource, metrics, layout, bounds)
         }
 
         override func size(in size: CGSize) -> CGSize {
@@ -1389,10 +1444,8 @@ extension ResolvedStyledText {
 
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
             guard proposal != .zero else { return .zero }
-            return cachedLayoutMetrics(in: CGSize(
-                width: proposal.width ?? .infinity,
-                height: proposal.height ?? .infinity
-            ))?.size ?? .zero
+            guard resolvedText != nil else { return .zero }
+            return metrics(in: Size(proposal, majorAxis: majorAxis), layoutMargins: nil).size
         }
 
         override func cachedLayoutMetrics(in size: CGSize) -> ResolvedTextSource.LayoutMetrics? {
@@ -1402,9 +1455,14 @@ extension ResolvedStyledText {
         }
 
         override func metrics(in size: CGSize, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
-            guard let resolvedText else {
+            metrics(in: Size(size, majorAxis: majorAxis), layoutMargins: layoutMargins)
+        }
+
+        func metrics(in requestedSize: Size, layoutMargins: EdgeInsets?) -> NSAttributedString.Metrics {
+            guard resolvedText != nil else {
                 fatalError("TextLayoutManager metrics require resolved text")
             }
+            let size = requestedSize.physicalSize
             if let entry = cache.entries.first(where: { entry in
                 size.width >= min(entry.metrics.size.width, entry.request.width) &&
                     size.width <= max(entry.metrics.size.width, entry.request.width) &&
@@ -1413,30 +1471,35 @@ extension ResolvedStyledText {
             }) {
                 return entry.metrics
             }
-            let metrics = fittingGlyphLayout(resolvedText, in: size).metrics
+            let metrics = fittingMetrics(in: requestedSize).base
             cache.entries.append(Cache.Entry(request: size, metrics: metrics))
             return metrics
         }
 
-        private func fittingGlyphLayout(_ source: ResolvedTextSource, in size: CGSize)
-            -> (source: ResolvedTextSource, metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
+        private func fittingMetrics(in requestedSize: Size) -> Metrics {
+            guard let source = resolvedText else {
+                fatalError("TextLayoutManager metrics require resolved text")
+            }
             let minimum = max(layoutProperties.minScaleFactor, CGFloat.leastNonzeroMagnitude)
             // Mixed attributes and attachments retain their existing fixed-scale producer.
             guard minimum < 1, source.uniformFont != nil || storage?.length == 0 else {
-                return measureGlyphLayout(source, in: size)
+                return computeMetrics(scale: 1, requestedSize: requestedSize, minorAxisIsFlexible: false)
             }
-            let proposal = CGSize(width: size.width, height: .infinity)
+            let size = requestedSize.physicalSize
+            var proposal = requestedSize
+            proposal.layoutHeight = .infinity
+            proposal.flags = []
             func fits(_ metrics: NSAttributedString.Metrics) -> Bool {
                 !metrics.hasTruncatedRanges && metrics.size.width <= size.width && metrics.size.height <= size.height
             }
             var scale: CGFloat = 1
-            if !fits(measureGlyphLayout(source, in: proposal).metrics) {
+            if !fits(computeMetrics(scale: 1, requestedSize: proposal, minorAxisIsFlexible: false).base) {
                 var low = minimum
                 var high: CGFloat = 1
-                if fits(measureGlyphLayout(source, in: proposal, scale: low).metrics) {
+                if fits(computeMetrics(scale: low, requestedSize: proposal, minorAxisIsFlexible: false).base) {
                     repeat {
                         let candidate = high + (high - low) * -0.5
-                        if fits(measureGlyphLayout(source, in: proposal, scale: candidate).metrics) {
+                        if fits(computeMetrics(scale: candidate, requestedSize: proposal, minorAxisIsFlexible: false).base) {
                             low = candidate
                         } else {
                             high = candidate
@@ -1446,26 +1509,22 @@ extension ResolvedStyledText {
                 scale = low
             }
             // Publish the final constrained result even when the minimum still does not fit.
-            return measureGlyphLayout(source, in: size, scale: scale)
+            return computeMetrics(scale: scale, requestedSize: requestedSize, minorAxisIsFlexible: false)
         }
 
-        private func measureGlyphLayout(_ source: ResolvedTextSource,
-                                        in size: CGSize, scale: CGFloat = 1)
-            -> (source: ResolvedTextSource, metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
+        func computeMetrics(scale: CGFloat, requestedSize: Size, minorAxisIsFlexible: Bool) -> Metrics {
+            guard let source = self.resolvedText else {
+                fatalError("TextLayoutManager metrics require resolved text")
+            }
             let resolvedText = glyphLayoutCache.source(at: scale, original: source)
             // The manager uses its retained margins for every measurement.
+            let size = requestedSize.physicalSize
             let layoutMargins = self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
+            let availableSize = Size(available, majorAxis: requestedSize.majorAxis, flags: requestedSize.flags)
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
-            let pixelWidth = width * resolvedText.scaleFactor
-            let layout = glyphLayoutCache.layout(in: available, scale: scale, lineLimit: layoutProperties.lineLimit,
-                truncationMode: layoutProperties.truncationMode) {
-                resolvedText.makeGlyphLayout(
-                    maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
-                    maximumHeight: available.height * resolvedText.scaleFactor,
-                    lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
-            }
+            let layout = glyphLayout(resolvedText, in: available, scale: scale)
             var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
             if layout.lines.isEmpty {
                 raw.firstBaseline = 0
@@ -1475,14 +1534,38 @@ extension ResolvedStyledText {
                         / resolvedText.displayScale
                 }
             }
-            raw.size.width = ceil(min(raw.size.width, width) * resolvedText.displayScale) / resolvedText.displayScale
+            raw.size.width = min(raw.size.width, width)
+            if minorAxisIsFlexible {
+                if requestedSize.majorAxis == .vertical {
+                    raw.size.width = max(raw.size.width, available.width)
+                } else {
+                    raw.size.height = max(raw.size.height, available.height)
+                }
+            }
+            raw.size.width = ceil(raw.size.width * resolvedText.displayScale) / resolvedText.displayScale
+            raw.size.height = ceil(raw.size.height * resolvedText.displayScale) / resolvedText.displayScale
+            let truncated = !layout.truncatedRanges.isEmpty || layout.hasUnlaidText
             var metrics = NSAttributedString.Metrics(size: raw.size, scale: scale,
                 firstBaseline: raw.firstBaseline, lastBaseline: raw.lastBaseline,
-                baselineAdjustment: 0, requestedWidth: available.width,
+                baselineAdjustment: 0, requestedWidth: availableSize.layoutWidth,
                 numberOfLines: UInt(layout.lines.count),
-                hasTruncatedRanges: !layout.truncatedRanges.isEmpty || layout.hasUnlaidText)
+                hasTruncatedRanges: truncated)
             metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
-            return (resolvedText, metrics, layout)
+            return Metrics(requestedSize: availableSize,
+                base: metrics, flags: truncated ? .isTruncated : [], layout: nil)
+        }
+
+        private func glyphLayout(_ source: ResolvedTextSource, in available: CGSize, scale: CGFloat)
+            -> ResolvedTextSource.GlyphLayout {
+            let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
+            let pixelWidth = width * source.scaleFactor
+            return glyphLayoutCache.layout(in: available, scale: scale, lineLimit: layoutProperties.lineLimit,
+                truncationMode: layoutProperties.truncationMode) {
+                source.makeGlyphLayout(
+                    maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
+                    maximumHeight: available.height * source.scaleFactor,
+                    lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+            }
         }
     }
 }
