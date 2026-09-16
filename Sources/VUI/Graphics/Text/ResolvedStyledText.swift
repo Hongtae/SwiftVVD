@@ -727,12 +727,12 @@ class ResolvedStyledText: InterpolatableContent {
 
     func prepareDrawing(in rect: CGRect, with size: CGSize,
                         applyingMarginOffsets: Bool, containsResolvable: Bool = false)
-        -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+        -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect, layout: Text.Layout?)? {
         guard let prepared = drawingGlyphs(in: size, containsResolvable: containsResolvable) else { return nil }
         let margins = applyingMarginOffsets ? drawingMargins : EdgeInsets()
         return (prepared.source, prepared.lines,
                 CGRect(x: rect.origin.x + margins.leading, y: rect.origin.y + margins.top,
-                       width: size.width, height: size.height))
+                       width: size.width, height: size.height), nil)
     }
 
     func makeLayout(in rect: CGRect, with size: CGSize, shading: GraphicsContext.Shading,
@@ -875,7 +875,7 @@ extension ResolvedStyledText {
 
         override func prepareDrawing(in rect: CGRect, with size: CGSize,
                                      applyingMarginOffsets: Bool, containsResolvable: Bool = false)
-            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect, layout: Text.Layout?)? {
             guard resolvedText != nil else { return nil }
             let bounds = drawingBounds(in: rect, with: size, applyingMarginOffsets: applyingMarginOffsets)
             // A zero drawing extent leaves that axis unconstrained. Measurement
@@ -897,7 +897,7 @@ extension ResolvedStyledText {
                     prepared.lines[index].originX = layoutProperties.layoutDirection == .leftToRight ? extra : 0
                 }
             }
-            return (prepared.source, prepared.lines, bounds)
+            return (prepared.source, prepared.lines, bounds, nil)
         }
 
         override func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
@@ -1339,6 +1339,7 @@ extension ResolvedStyledText {
                 var scale: CGFloat
                 var lineLimit: Int?
                 var truncationMode: Text.TruncationMode
+                var hasTextSuffix: Bool
                 var layout: ResolvedTextSource.GlyphLayout
             }
 
@@ -1370,6 +1371,7 @@ extension ResolvedStyledText {
             }
 
             func layout(in size: CGSize, scale: CGFloat = 1, lineLimit: Int?, truncationMode: Text.TruncationMode,
+                        hasTextSuffix: Bool = false,
                         make: () -> ResolvedTextSource.GlyphLayout) -> ResolvedTextSource.GlyphLayout {
                 // Serialize publication with resource purging, including a cold computation.
                 state.withLock { state in
@@ -1378,12 +1380,14 @@ extension ResolvedStyledText {
                                      truncatedRanges: [], hasUnlaidText: false)
                     }
                     if let entry = state.entry, entry.size == size, entry.scale == scale,
-                       entry.lineLimit == lineLimit, entry.truncationMode == truncationMode {
+                       entry.lineLimit == lineLimit, entry.truncationMode == truncationMode,
+                       entry.hasTextSuffix == hasTextSuffix {
                         return entry.layout
                     }
                     let layout = make()
                     state.entry = Entry(size: size, scale: scale, lineLimit: lineLimit,
-                                        truncationMode: truncationMode, layout: layout)
+                                        truncationMode: truncationMode, hasTextSuffix: hasTextSuffix,
+                                        layout: layout)
                     return layout
                 }
             }
@@ -1425,20 +1429,23 @@ extension ResolvedStyledText {
 
         override func prepareDrawing(in rect: CGRect, with size: CGSize,
                                      applyingMarginOffsets: Bool, containsResolvable: Bool = false)
-            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect)? {
+            -> (source: ResolvedTextSource, lines: [ResolvedTextSource.LineGlyphs], bounds: CGRect, layout: Text.Layout?)? {
             guard let prepared = prepareGlyphLayout(in: rect, with: size,
                 applyingMarginOffsets: applyingMarginOffsets) else { return nil }
-            return (prepared.source, prepared.layout.lines, prepared.bounds)
+            return (prepared.source, prepared.layout.lines, prepared.bounds, prepared.metrics.layout)
         }
 
         override func makeLayout(in rect: CGRect, with size: CGSize, shading: GraphicsContext.Shading,
                                  layoutDirection: LayoutDirection) -> Text.Layout? {
             guard var prepared = prepareGlyphLayout(in: rect, with: size,
                 applyingMarginOffsets: true) else { return nil }
+            if let layout = prepared.metrics.layout {
+                return layout.placed(at: prepared.bounds.origin, shading: shading)
+            }
             prepared.source.shading = shading
             return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines, layoutDirection: layoutDirection,
                 isTruncated: prepared.metrics.flags.contains(.isTruncated),
-                origin: prepared.bounds.origin)
+                origin: prepared.bounds.origin, usesLineStartAttributes: true)
         }
 
         private func prepareGlyphLayout(in rect: CGRect, with size: CGSize, applyingMarginOffsets: Bool)
@@ -1559,6 +1566,31 @@ extension ResolvedStyledText {
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let layout = glyphLayout(resolvedText, in: available, scale: scale)
             var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
+            let truncated = !layout.truncatedRanges.isEmpty || layout.hasUnlaidText
+            var retainedLayout: Text.Layout?
+            if truncated, var suffixLine = suffix.line {
+                suffixLine.drawingOptions.insert(.init(rawValue: 2))
+                var lines = layout.lines
+                let factor: CGFloat
+                switch layoutProperties.multilineTextAlignment {
+                case .center: factor = 0.5
+                case .leading: factor = layoutProperties.layoutDirection == .rightToLeft ? 1 : 0
+                case .trailing: factor = layoutProperties.layoutDirection == .leftToRight ? 1 : 0
+                }
+                for index in lines.indices {
+                    lines[index].originX = factor == 0 ? 0 :
+                        (available.width * resolvedText.scaleFactor - lines[index].width) * factor
+                }
+                var value = resolvedText.makeLayout(lineGlyphs: lines,
+                    layoutDirection: layoutProperties.layoutDirection,
+                    isTruncated: !layout.truncatedRanges.isEmpty, usesLineStartAttributes: true)
+                value.truncateLast(suffixLine, width: available.width)
+                retainedLayout = value
+                // Replacement changes the horizontal used extent, not the
+                // original line count, vertical metrics or truncation ranges.
+                let bounds = value.reduce(CGRect.null) { $0.union($1.typographicBounds.rect) }
+                raw.size.width = bounds.isNull ? 0 : max(0, min(bounds.maxX, available.width) - max(bounds.minX, 0))
+            }
             if layout.lines.isEmpty {
                 raw.firstBaseline = 0
                 raw.lastBaseline = 0
@@ -1577,7 +1609,6 @@ extension ResolvedStyledText {
             }
             raw.size.width = ceil(raw.size.width * resolvedText.displayScale) / resolvedText.displayScale
             raw.size.height = ceil(raw.size.height * resolvedText.displayScale) / resolvedText.displayScale
-            let truncated = !layout.truncatedRanges.isEmpty || layout.hasUnlaidText
             var metrics = NSAttributedString.Metrics(size: raw.size, scale: scale,
                 firstBaseline: raw.firstBaseline, lastBaseline: raw.lastBaseline,
                 baselineAdjustment: 0, requestedWidth: availableSize.layoutWidth,
@@ -1585,7 +1616,7 @@ extension ResolvedStyledText {
                 hasTruncatedRanges: truncated)
             metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
             return Metrics(requestedSize: availableSize,
-                base: metrics, flags: truncated ? .isTruncated : [], layout: nil)
+                base: metrics, flags: truncated ? .isTruncated : [], layout: retainedLayout)
         }
 
         private func glyphLayout(_ source: ResolvedTextSource, in available: CGSize, scale: CGFloat)
@@ -1593,11 +1624,12 @@ extension ResolvedStyledText {
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let pixelWidth = width * source.scaleFactor
             return glyphLayoutCache.layout(in: available, scale: scale, lineLimit: layoutProperties.lineLimit,
-                truncationMode: layoutProperties.truncationMode) {
+                truncationMode: layoutProperties.truncationMode, hasTextSuffix: suffix.line != nil) {
                 source.makeGlyphLayout(
                     maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
                     maximumHeight: available.height * source.scaleFactor,
-                    lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+                    lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode,
+                    hasTextSuffix: suffix.line != nil)
             }
         }
     }

@@ -116,6 +116,43 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         XCTAssertNil(deviceContext)
     }
 
+    // ASSERTIONS textSuffixRetainedMetricsLayoutObserved
+    // ASSERTIONS textSuffixDrawingConsumersObserved
+    func testRetainedSuffixDrawingReleasesFontsAfterPurgeAndLastValueRelease() throws {
+        var drawing: ResolvedTextSource.Drawing?
+        weak var artwork: TextureFont?
+        weak var deviceContext: GraphicsDeviceContext?
+        func populate() throws {
+            let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let font = try XCTUnwrap(TextureFont(deviceContext: context, path: root.appendingPathComponent(
+                "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path))
+            artwork = font
+            deviceContext = context
+            let source = ResolvedTextSource(runs: [.text([TextureTypeface(textureFont: font)], "A\nB")], scaleFactor: 1)
+            let suffix = try XCTUnwrap(source.makeLayout(in: CGSize(width: 100, height: 100),
+                layoutDirection: .leftToRight).first)
+            var properties = TextLayoutProperties()
+            properties.lineLimit = 1
+            let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: properties,
+                suffix: .truncated(suffix, []), resolvedText: source)
+            let prepared = try XCTUnwrap(manager.prepareDrawing(in: .zero,
+                with: CGSize(width: 100, height: 100), applyingMarginOffsets: false))
+            XCTAssertNotNil(prepared.layout)
+            drawing = source.makeDrawing(lineGlyphs: prepared.lines, layout: prepared.layout)
+            manager.glyphLayoutCache.purgeResources(reason: .appTermination)
+        }
+        try populate()
+        withExtendedLifetime(drawing) {
+            XCTAssertNotNil(artwork)
+            XCTAssertNotNil(deviceContext)
+        }
+        drawing = nil
+        XCTAssertNil(artwork)
+        XCTAssertNil(deviceContext)
+    }
+
     // ASSERTIONS textManagerScaledStorageLifecycleObserved
     func testManagerScaledSourcePurgeReleasesItsLastTextureFontAndDevice() throws {
         try checkManagerBackendPurge(retainsScaledSource: true)

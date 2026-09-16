@@ -4,6 +4,54 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textSuffixDrawingConsumersObserved
+    func testRetainedSuffixLayoutDrawsThroughOrdinaryPreparedRecordedAndCustomRoutes() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for string in ["A\nB", "AA AA AA AA AA"] {
+                    var environment = EnvironmentValues()
+                    environment.font = .system(size: 23)
+                    environment.defaultFontRenderingMode = mode
+                    environment.displayScale = 2
+                    environment._contentScaleFactor = scale
+                    environment.lineLimit = 1
+                    let payload = try resolve(Text(verbatim: " more").font(.system(size: 11)).foregroundColor(.red),
+                                              environment: environment)
+                    let suffixOwner = ResolvedStyledText.TextLayoutManager(resolvedText: payload)
+                    environment[TextSuffixKey.self] = Text.Suffix.truncated(Text(" more")).resolve(text: suffixOwner)
+                    let owner = try XCTUnwrap(Text(verbatim: string).foregroundColor(.green)._resolveStyledText(
+                        context: GraphTextResolutionContext(environment: environment, sceneResources: SceneResources()),
+                        referenceDate: Date(), archiveOptions: .init(), features: [], sizeFitting: false,
+                        options: .allowsTextSuffix))
+                    owner.stylePadding.trailing = 2
+                    let size = owner.metrics(in: CGSize(width: 100, height: 120), layoutMargins: nil).size
+                    let item = DisplayList.Content.TextValue(view: StyledTextContentView(text: owner, renderer: nil),
+                        size: size, frame: owner.frame(in: size, renderer: nil), shading: .foreground,
+                        transform: .identity, command: .closure(bounds: nil))
+                    let drawing = try XCTUnwrap(item.makeDrawing())
+                    XCTAssertEqual(drawing.layout?.count, string == "A\nB" ? 3 : 2)
+                    let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
+                    XCTAssertTrue(immediate.contains { $0 != 0 })
+                    XCTAssertTrue(try render(device: device, environment: environment) { item.draw(drawing, in: $0) } == immediate)
+                    let replay = try render(device: device, environment: environment) { target in
+                        let recording = target.recordingContext(size: CGSize(width: 128, height: 128))
+                        item.draw(in: recording)
+                        recording.recording!.draw(in: target)
+                    }
+                    XCTAssertTrue(replay == immediate)
+                    var custom = item
+                    custom.view.renderer = MarginRenderer(environment: environment, operation: .line)
+                    XCTAssertTrue(try render(device: device, environment: environment) { custom.draw(in: $0) } == immediate,
+                                  "\(mode) scale=\(scale) body=\(string.debugDescription)")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textSuffixCustomAttachmentObserved
     func testLineSuffixDrawsItsOwnFontAndColorThroughPreparedAndRecordedDrawing() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }

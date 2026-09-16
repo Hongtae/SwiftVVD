@@ -92,6 +92,7 @@ fileprivate struct _TextLayoutLineStorage {
     var width: CGFloat
     var ascent: CGFloat
     var descent: CGFloat
+    var sourceStart: ResolvedTextSource.Glyph?
 }
 
 fileprivate final class _TextLayoutStorage {
@@ -135,6 +136,16 @@ fileprivate final class _TextLayoutStorage {
             }
         }
         self.utf16Indices = offsets
+    }
+
+    init(copying original: _TextLayoutStorage, shading: GraphicsContext.Shading) {
+        source = original.source
+        source.shading = shading
+        lines = original.lines
+        origin = original.origin
+        layoutDirection = original.layoutDirection
+        isTruncated = original.isTruncated
+        utf16Indices = original.utf16Indices
     }
 
     func xOffsets(line index: Int) -> [CGFloat] {
@@ -247,6 +258,68 @@ extension Text {
                 lhs.numberOfLines == rhs.numberOfLines
         }
 
+        mutating func truncateLast(_ suffix: Line, width: CGFloat) {
+            guard var last = lines.last, let token = last.truncationToken else { return }
+            let tokenWidth = token.typographicBounds.width
+            let suffixWidth = suffix.typographicBounds.width
+            let available = Swift.max(width - tokenWidth - suffixWidth, 0)
+            let bodyWidth = last.typographicBounds.width - last.trailingWhitespaceWidth
+            let alignment = last.lastRunAttributes?.paragraphStyle?.horizontalAlignment
+                .textAlignment(for: last._line.storage.layoutDirection) ?? .leading
+            let factor: CGFloat = alignment == .center ? 0.5 : alignment == .trailing ? 1 : 0
+            var suffix = suffix
+            if bodyWidth > available {
+                guard var replacement = last.truncated(to: available, token: token) else { return }
+                let used = replacement.typographicBounds.width - replacement.trailingWhitespaceWidth + suffixWidth
+                replacement.origin = CGPoint(x: (width - used) * factor, y: last.origin.y)
+                suffix.origin = CGPoint(x: replacement.origin.x + replacement.typographicBounds.width,
+                                        y: last.origin.y)
+                lines.removeLast()
+                lines.append(replacement)
+                lines.append(suffix)
+            } else {
+                let used = bodyWidth + tokenWidth + suffixWidth
+                last.origin.x = (width - used) * factor
+                var token = token
+                token.origin = CGPoint(x: last.origin.x + bodyWidth, y: last.origin.y)
+                suffix.origin = CGPoint(x: token.origin.x + tokenWidth, y: last.origin.y)
+                lines.removeLast()
+                lines.append(last)
+                lines.append(token)
+                lines.append(suffix)
+            }
+        }
+
+        func placed(at origin: CGPoint, shading: GraphicsContext.Shading? = nil) -> Layout {
+            var storageCopies: [ObjectIdentifier: _TextLayoutStorage] = [:]
+            return Layout(lines: lines.map { line in
+                var line = line
+                line.origin.x += origin.x
+                line.origin.y += origin.y
+                if let shading {
+                    let original = line._line.storage
+                    let key = ObjectIdentifier(original)
+                    if storageCopies[key] == nil {
+                        storageCopies[key] = _TextLayoutStorage(copying: original, shading: shading)
+                    }
+                    line._line.storage = storageCopies[key]!
+                }
+                return line
+            }, isTruncated: isTruncated, numberOfLines: numberOfLines)
+        }
+
+        func glyphAtoms() -> [ResolvedTextSource.GlyphAtom] {
+            lines.flatMap { line -> [ResolvedTextSource.GlyphAtom] in
+                let storage = line._line.storage
+                let index = line._line.index
+                guard var glyphs = storage.lineGlyphs(line: index,
+                    glyphRange: storage.lines[index].glyphs.indices) else { return [] }
+                glyphs.originX = line.origin.x * storage.source.scaleFactor
+                glyphs.originY = (line.origin.y - storage.lines[index].ascent) * storage.source.scaleFactor
+                return storage.source.glyphAtoms(lineGlyphs: [glyphs], in: .zero)
+            }
+        }
+
         public struct CharacterIndex: Comparable, Hashable, Strideable, Sendable {
             var value: Int
 
@@ -302,7 +375,7 @@ extension Text {
         }
 
         public struct Line: RandomAccessCollection, Equatable {
-            private var _line: _TextLayoutLine
+            fileprivate var _line: _TextLayoutLine
             public var origin: CGPoint
             var drawingOptions: DrawingOptions
 
@@ -344,6 +417,67 @@ extension Text {
                     descent: line.descent,
                     leading: 0
                 )
+            }
+
+            private var attributeSource: ResolvedTextSource.Glyph? {
+                let line = _line.storage.lines[_line.index]
+                return line.sourceStart ?? line.glyphs.last
+            }
+
+            var lastRunAttributes: _ResolvedTextRunAttributes? { attributeSource?.style }
+
+            fileprivate var trailingWhitespaceWidth: CGFloat {
+                let glyphs = _line.storage.lines[_line.index].glyphs
+                return glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }
+                    .reduce(0) { $0 + $1.advance.width + $1.kerning.x } / _line.storage.source.scaleFactor
+            }
+
+            fileprivate var truncationToken: Line? {
+                guard let input = attributeSource else { return nil }
+                let original = _line.storage.source
+                var source = ResolvedTextSource(runs: [.styledText([input.face], "…", input.attributes, input.style)],
+                    scaleFactor: original.scaleFactor, displayScale: original.displayScale)
+                source.shading = original.shading
+                guard var glyphs = source.unwrappedGlyphLines().first, !glyphs.glyphs.isEmpty else { return nil }
+                for index in glyphs.glyphs.indices { glyphs.glyphs[index].isTruncationToken = true }
+                glyphs.ascender = glyphs.glyphs.map(\.ascender).max() ?? 0
+                glyphs.descender = glyphs.glyphs.map(\.descender).min() ?? 0
+                return source.makeLayout(lineGlyphs: [glyphs], layoutDirection: _line.storage.layoutDirection).first
+            }
+
+            fileprivate func truncated(to width: CGFloat, token: Line) -> Line? {
+                let source = _line.storage.source
+                let tokenGlyphs = token._line.storage.lines[token._line.index].glyphs
+                guard token.typographicBounds.width <= width else { return nil }
+                let glyphs = _line.storage.lines[_line.index].glyphs
+                let clusters = ResolvedTextSource.clusterRanges(in: glyphs)
+                let offsets = _line.storage.xOffsets(line: _line.index)
+                let tokenAdvance = token.typographicBounds.width * source.scaleFactor
+                for count in stride(from: clusters.count, through: 0, by: -1) {
+                    let end = count == 0 ? 0 : clusters[count - 1].upperBound
+                    var tokenGlyphs = tokenGlyphs
+                    if end > 0, let first = tokenGlyphs.first {
+                        let previous = glyphs[end - 1]
+                        if previous.face.isEqual(to: first.face) {
+                            tokenGlyphs[0].kerning = first.face.kernAdvance(left: previous.scalar, right: first.scalar)
+                        }
+                    }
+                    let advance = offsets[end] + tokenAdvance + (end == 0 ? 0 : tokenGlyphs[0].kerning.x)
+                    guard advance <= width * source.scaleFactor else { continue }
+                    var selected = Array(glyphs.prefix(end))
+                    let index = selected.last?.sourceRange?.upperBound ?? glyphs.first?.characterIndex ?? 0
+                    for i in tokenGlyphs.indices {
+                        tokenGlyphs[i].characterIndex = index
+                        tokenGlyphs[i].sourceRange = index..<(index + 1)
+                    }
+                    selected += tokenGlyphs
+                    selected[0].kerning = .zero
+                    let line = ResolvedTextSource.LineGlyphs(glyphs: selected,
+                        ascender: selected.map(\.ascender).max() ?? 0,
+                        descender: selected.map(\.descender).min() ?? 0, width: advance)
+                    return source.makeLayout(lineGlyphs: [line], layoutDirection: _line.storage.layoutDirection).first
+                }
+                return nil
             }
 
             public static func == (lhs: Line, rhs: Line) -> Bool {
@@ -527,7 +661,8 @@ extension ResolvedTextSource {
         lineGlyphs: [LineGlyphs],
         layoutDirection: LayoutDirection,
         isTruncated: Bool = false,
-        origin: CGPoint = .zero
+        origin: CGPoint = .zero,
+        usesLineStartAttributes: Bool = false
     ) -> Text.Layout {
         let scale = 1 / scaleFactor
         let lines = lineGlyphs.map { line -> _TextLayoutLineStorage in
@@ -566,13 +701,19 @@ extension ResolvedTextSource {
                     return lower..<upper
                 }
             }
+            let sourceStart = usesLineStartAttributes ? line.sourceStart ?? line.glyphs.first ?? line.trailingBoundary : nil
+            let trimsTrailingSpace = sourceStart?.style.paragraphStyle?.horizontalAlignment == .right
+            let trailingSpace = trimsTrailingSpace ? line.glyphs.reversed()
+                .prefix { CharacterSet.whitespaces.contains($0.scalar) }
+                .reduce(0) { $0 + $1.advance.width + $1.kerning.x } : 0
             let result = _TextLayoutLineStorage(
                 glyphs: line.glyphs,
                 runs: runs,
                 origin: CGPoint(x: origin.x + line.originX * scale, y: origin.y + line.baseline * scale),
-                width: line.width * scale,
+                width: (line.width - trailingSpace) * scale,
                 ascent: line.ascender * scale,
-                descent: -line.descender * scale
+                descent: -line.descender * scale,
+                sourceStart: sourceStart
             )
             return result
         }

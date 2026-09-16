@@ -35,7 +35,7 @@ extension GraphicsContext {
         guard !rect.isNull,
               let prepared = text.resolved.prepareDrawing(in: rect, with: rect.size,
                                                            applyingMarginOffsets: false) else { return }
-        let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines)
+        let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines, layout: prepared.layout)
         draw(drawing, in: prepared.bounds, shading: text.shading, clipBounds: false)
     }
 
@@ -77,6 +77,14 @@ extension GraphicsContext {
             fatalError("Invalid shading property!")
         }
         if drawing.isEmpty { return }
+        if let layout = drawing.layout {
+            let layout = layout.placed(at: CGPoint(x: rect.minX + drawing.origin.x,
+                                                  y: rect.minY + drawing.origin.y), shading: shading)
+            var context = self
+            if clipBounds { context.clip(to: Path(rect)) }
+            for line in layout { context.draw(line) }
+            return
+        }
         if recording != nil, record(bounds: rect, {
             $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
                     snappingOrigin: snappingOrigin, clipBounds: clipBounds)

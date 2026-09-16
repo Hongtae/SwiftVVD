@@ -561,6 +561,8 @@ struct ResolvedTextSource {
         var trailingBoundary: Glyph? = nil
         var paragraphIndex: Int = 0
         var paragraphInput: Glyph? = nil
+        // Preserve the source attributes when the visible glyphs are truncated.
+        var sourceStart: Glyph? = nil
         var kind: Kind = .content
         var isSimpleParagraph: Bool = false
         var isTruncated: Bool = false
@@ -734,6 +736,7 @@ struct ResolvedTextSource {
         var customAttachments: [CustomAttachment]
         var backgrounds: [Background]
         var decorations: [Decoration]
+        var layout: Text.Layout?
 
         init(
             source: ResolvedTextSource,
@@ -744,7 +747,8 @@ struct ResolvedTextSource {
             attachments: [Attachment],
             customAttachments: [CustomAttachment],
             backgrounds: [Background],
-            decorations: [Decoration]
+            decorations: [Decoration],
+            layout: Text.Layout? = nil
         ) {
             self.source = source
             self.origin = origin
@@ -755,10 +759,11 @@ struct ResolvedTextSource {
             self.customAttachments = customAttachments
             self.backgrounds = backgrounds
             self.decorations = decorations
+            self.layout = layout
         }
 
         var isEmpty: Bool {
-            lineGlyphs.isEmpty
+            layout?.isEmpty ?? lineGlyphs.isEmpty
         }
     }
 
@@ -1060,14 +1065,16 @@ struct ResolvedTextSource {
         maximumHeight: CGFloat,
         lineLimit: Int? = nil,
         truncationMode: Text.TruncationMode = .tail,
-        sourceLines: [LineGlyphs]? = nil
+        sourceLines: [LineGlyphs]? = nil,
+        hasTextSuffix: Bool = false
     ) -> GlyphLayout {
         _lineWrap(
             sourceLines ?? unwrappedGlyphLines(),
             maxWidth: maxWidth,
             maxHeight: maximumHeight,
             lineLimit: lineLimit,
-            truncationMode: truncationMode
+            truncationMode: truncationMode,
+            hasTextSuffix: hasTextSuffix
         )
     }
 
@@ -1118,7 +1125,11 @@ struct ResolvedTextSource {
         return makeDrawing(lineGlyphs: lineGlyphs, origin: origin)
     }
 
-    func makeDrawing(lineGlyphs: [LineGlyphs], origin: CGPoint = .zero) -> Drawing {
+    func makeDrawing(lineGlyphs: [LineGlyphs], origin: CGPoint = .zero, layout: Text.Layout? = nil) -> Drawing {
+        if let layout {
+            return Drawing(source: self, origin: origin, lineGlyphs: [], batches: [], vectorBatches: [],
+                attachments: [], customAttachments: [], backgrounds: [], decorations: [], layout: layout)
+        }
 
         struct Quad {
             var vertices: [Drawing.Vertex]
@@ -1472,7 +1483,8 @@ struct ResolvedTextSource {
         maxWidth: Int,
         maxHeight: CGFloat,
         lineLimit: Int?,
-        truncationMode: Text.TruncationMode
+        truncationMode: Text.TruncationMode,
+        hasTextSuffix: Bool = false
     ) -> GlyphLayout {
         let breakables = CharacterSet.whitespaces.union(.init(charactersIn: "-/?!}|"))
         let decimalNumbers = CharacterSet.decimalDigits
@@ -1624,6 +1636,9 @@ struct ResolvedTextSource {
 
         func place(_ source: LineGlyphs, after previous: LineGlyphs?) -> LineGlyphs {
             var line = source
+            if line.sourceStart == nil {
+                line.sourceStart = line.glyphs.first ?? line.trailingBoundary ?? line.paragraphInput
+            }
             line.originY = previous?.maxY ?? 0
             if case .extra(nil) = line.kind {
                 guard let input = defaultLineMetrics else {
@@ -1856,6 +1871,20 @@ struct ResolvedTextSource {
             if reachesBoundary { break }
         }
 
+        if hasTextSuffix, let last = paragraphGlyphs.last,
+           case .customAttachment = last.content,
+           wrappingWidth(Array(paragraphGlyphs.dropLast())) <= CGFloat(maxWidth) {
+            // An attachment alone beyond the final line remains unlaid.
+            // It does not create a removed body range or an ordinary token.
+            let originY = visibleLines[lastVisibleIndex].originY
+            visibleLines[lastVisibleIndex].glyphs = Array(paragraphGlyphs.dropLast())
+            updateMetrics(&visibleLines[lastVisibleIndex])
+            visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
+                after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
+            visibleLines[lastVisibleIndex].originY = originY
+            return result()
+        }
+
         let hasParagraphOverflow =
             paragraphGlyphs.count >
                 visibleLines[lastVisibleIndex].glyphs.count ||
@@ -1864,6 +1893,8 @@ struct ResolvedTextSource {
             !hasParagraphOverflow &&
             nextLineIndex < wrappedLines.count &&
             visibleLines[lastVisibleIndex].trailingBoundary != nil
+
+        if hasExplicitLineOverflow && hasTextSuffix { return result() }
 
         guard hasParagraphOverflow || hasExplicitLineOverflow else {
             return result()

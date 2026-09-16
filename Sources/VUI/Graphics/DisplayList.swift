@@ -1267,7 +1267,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 return prepared.source.makeDrawing(
                     lineGlyphs: prepared.lines,
                     origin: CGPoint(x: prepared.bounds.origin.x - frame.origin.x,
-                                    y: prepared.bounds.origin.y - frame.origin.y)
+                                    y: prepared.bounds.origin.y - frame.origin.y),
+                    layout: prepared.layout
                 )
             }
 
@@ -1277,7 +1278,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                                                                applyingMarginOffsets: true) else {
                     return nil
                 }
-                return prepared.source.glyphAtoms(lineGlyphs: prepared.lines, in: size).map { atom in
+                let atoms = prepared.layout?.glyphAtoms() ?? prepared.source.glyphAtoms(lineGlyphs: prepared.lines, in: size)
+                return atoms.map { atom in
                     var atom = atom
                     atom.bounds = atom.bounds
                         .offsetBy(dx: prepared.bounds.origin.x,

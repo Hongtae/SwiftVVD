@@ -331,6 +331,207 @@ final class TextSuffixTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textSuffixRetainedMetricsLayoutObserved
+    // ASSERTIONS textSuffixLastRunAttributesObserved
+    func testTruncatedSuffixRetainsSeparateFragmentsAndStartingAttributes() throws {
+        let short = Text(verbatim: "A").foregroundColor(.blue) +
+            Text(verbatim: "\nB").font(testFont(size: 31)).foregroundColor(.green)
+        for alignment: TextAlignment in [.leading, .center, .trailing] {
+            try withSuffixManager(short, alignment: alignment) { manager in
+                let size = CGSize(width: 100, height: 120)
+                let metrics = manager.computeMetrics(scale: 1, requestedSize: .init(size, majorAxis: .vertical),
+                                                     minorAxisIsFlexible: false)
+                let layout = try XCTUnwrap(metrics.layout)
+                XCTAssertEqual(metrics.base.numberOfLines, 1)
+                XCTAssertEqual(metrics.flags, .isTruncated)
+                XCTAssertFalse(layout.isTruncated)
+                XCTAssertEqual(layout.count, 3)
+                guard layout.count == 3 else { return }
+                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
+                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+                XCTAssertEqual(layout[1].lastRunAttributes?.fontResource?.pointSize, 23)
+                XCTAssertEqual(layout[2].lastRunAttributes?.foregroundColor, .red)
+                XCTAssertEqual(layout[2].lastRunAttributes?.fontResource?.pointSize, 11)
+                XCTAssertEqual(layout[2].drawingOptions.rawValue, 2)
+                XCTAssertEqual(manager.suffix.line?.drawingOptions.rawValue, 0)
+                XCTAssertEqual(layout[0].origin.y, layout[2].origin.y)
+                XCTAssertEqual(layout[1].origin.x, layout[0].origin.x + layout[0].typographicBounds.width, accuracy: 1e-8)
+                XCTAssertEqual(layout[2].origin.x, layout[1].origin.x + layout[1].typographicBounds.width, accuracy: 1e-8)
+                let width = layout.reduce(0) { $0 + $1.typographicBounds.width }
+                let factor: CGFloat = alignment == .center ? 0.5 : alignment == .trailing ? 1 : 0
+                XCTAssertEqual(layout[0].origin.x, (100 - width) * factor, accuracy: 1e-8)
+                XCTAssertEqual(metrics.base.size.width, ceil(width * 2) / 2)
+                let placed = try XCTUnwrap(manager.makeLayout(in: CGRect(x: 17, y: 9, width: 100, height: 120),
+                    with: size, shading: .foreground, layoutDirection: .leftToRight))
+                XCTAssertEqual(placed.count, 3)
+                XCTAssertFalse(placed.isTruncated)
+                XCTAssertTrue(manager.cache.entries.isEmpty)
+                for (raw, line) in zip(layout, placed) {
+                    XCTAssertEqual(line.origin.x - raw.origin.x, 17 + manager.drawingMargins.leading, accuracy: 1e-8)
+                    XCTAssertEqual(line.origin.y - raw.origin.y, 9 + manager.drawingMargins.top, accuracy: 1e-8)
+                    XCTAssertEqual(line.drawingOptions, raw.drawingOptions)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textSuffixRetainedMetricsLayoutObserved
+    func testSuffixRetruncationFailureAndScalarCacheSeparation() throws {
+        for width: CGFloat in [8, 42, 70, 100, 150] {
+            try withSuffixManager(Text(verbatim: "A A A A A A A A").foregroundColor(.blue), suffixSize: 23) { manager in
+                let size = CGSize(width: width, height: 120)
+                let scalar = manager.metrics(in: size, layoutMargins: nil)
+                let cache = manager.cache
+                let metrics = manager.computeMetrics(scale: 1, requestedSize: .init(size, majorAxis: .vertical),
+                                                     minorAxisIsFlexible: false)
+                if width == 8 {
+                    XCTAssertNil(metrics.layout)
+                } else {
+                    let layout = try XCTUnwrap(metrics.layout)
+                    XCTAssertEqual(layout.count, width < 100 ? 1 : 2)
+                    XCTAssertTrue(layout.isTruncated)
+                    XCTAssertEqual(metrics.base.numberOfLines, 1)
+                    XCTAssertEqual(layout.last?.drawingOptions.rawValue, width < 100 ? 0 : 2)
+                    if width == 100 {
+                        XCTAssertEqual(layout[0].flatMap { $0.characterIndices }.count, 1)
+                        XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
+                    }
+                }
+                manager.resetCache()
+                manager.glyphLayoutCache.purgeResources(reason: .lowMemory)
+                let rebuilt = manager.computeMetrics(scale: 1, requestedSize: .init(size, majorAxis: .vertical),
+                                                     minorAxisIsFlexible: false)
+                XCTAssertEqual(metrics.base.size, rebuilt.base.size)
+                XCTAssertEqual(metrics.layout?.count, rebuilt.layout?.count)
+                XCTAssertEqual(manager.cache.entries.count, cache.entries.count)
+                XCTAssertEqual(manager.cache.entries.first?.metrics.size, scalar.size)
+                XCTAssertNil(manager.cache.ideal)
+            }
+        }
+        try withSuffixManager(Text(verbatim: "A")) { manager in
+            let metrics = manager.computeMetrics(scale: 1, requestedSize: .init(CGSize(width: 100, height: 120),
+                majorAxis: .vertical), minorAxisIsFlexible: false)
+            XCTAssertNil(metrics.layout)
+            XCTAssertFalse(metrics.base.hasTruncatedRanges)
+        }
+    }
+
+    // ASSERTIONS textSuffixLastRunAttributesObserved
+    func testEmptyLineSuppliesAttributesWithoutPublicRuns() throws {
+        try withSuffixManager(Text(verbatim: "\nB").foregroundColor(.blue)) { manager in
+            let layout = try XCTUnwrap(manager.computeMetrics(scale: 1,
+                requestedSize: .init(CGSize(width: 100, height: 120), majorAxis: .vertical),
+                minorAxisIsFlexible: false).layout)
+            XCTAssertEqual(layout.count, 3)
+            guard layout.count == 3 else { return }
+            XCTAssertTrue(layout[0].isEmpty)
+            XCTAssertEqual(layout[0].typographicBounds.width, 0)
+            XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
+            XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+            XCTAssertFalse(layout.isTruncated)
+        }
+    }
+
+    // ASSERTIONS textSuffixLastRunAttributesObserved
+    func testStyledTrailingSpaceAndCoreLineAttributesKeepTheirOwnSelection() throws {
+        let text = Text(verbatim: "AA").foregroundColor(.blue) +
+            Text(verbatim: " ").font(testFont(size: 31)).foregroundColor(.green) +
+            Text(verbatim: "\nB").foregroundColor(.blue)
+        for alignment: TextAlignment in [.leading, .center, .trailing] {
+            try withSuffixManager(text, alignment: alignment) { manager in
+                let layout = try XCTUnwrap(manager.computeMetrics(scale: 1,
+                    requestedSize: .init(CGSize(width: 100, height: 120), majorAxis: .vertical),
+                    minorAxisIsFlexible: false).layout)
+                XCTAssertEqual(layout.count, 3)
+                guard layout.count == 3 else { return }
+                XCTAssertEqual(layout[0].count, 2)
+                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
+                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+                let bodyWidth: CGFloat = 30.0078125
+                let spaceWidth: CGFloat = 7.689453125
+                let tokenWidth: CGFloat = 15.3857421875
+                let suffixWidth: CGFloat = 28.10693359375
+                let delta: CGFloat = (100 - bodyWidth - tokenWidth - suffixWidth) *
+                    (alignment == .center ? 0.5 : alignment == .trailing ? 1 : 0)
+                XCTAssertEqual(layout[0].typographicBounds.width,
+                    bodyWidth + (alignment == .trailing ? 0 : spaceWidth), accuracy: 1 / 64)
+                XCTAssertEqual(layout[0].origin.x, delta + (alignment == .trailing ? spaceWidth : 0), accuracy: 1 / 64)
+                XCTAssertEqual(layout[1].origin.x, bodyWidth + delta, accuracy: 1 / 64)
+                XCTAssertEqual(layout[2].origin.x, bodyWidth + tokenWidth + delta, accuracy: 1 / 64)
+            }
+        }
+        try withSuffixManager(Text(verbatim: "AA AA AA AA").foregroundColor(.blue).kerning(2).underline().baselineOffset(3)) { manager in
+            let layout = try XCTUnwrap(manager.computeMetrics(scale: 1,
+                requestedSize: .init(CGSize(width: 100, height: 120), majorAxis: .vertical),
+                minorAxisIsFlexible: false).layout)
+            XCTAssertEqual(layout[0].lastRunAttributes?.kern, 2)
+            XCTAssertEqual(layout[0].lastRunAttributes?.baselineOffset, 3)
+            XCTAssertNotNil(layout[0].lastRunAttributes?.underlineStyle)
+            XCTAssertEqual(layout.last?.lastRunAttributes?.foregroundColor, .red)
+        }
+    }
+
+    // ASSERTIONS textSuffixRetainedMetricsLayoutObserved
+    func testAlwaysVisibleContinuationKeepsLogicalCountAndUntruncatedLayoutFlag() throws {
+        try withSuffixManager(Text(verbatim: "A A A A A A A A"), suffixSize: 23,
+                              alwaysVisible: true, lineLimit: 2) { manager in
+            let metrics = manager.computeMetrics(scale: 1,
+                requestedSize: .init(CGSize(width: 100, height: 120), majorAxis: .vertical),
+                minorAxisIsFlexible: false)
+            let layout = try XCTUnwrap(metrics.layout)
+            XCTAssertEqual(metrics.base.numberOfLines, 2)
+            XCTAssertEqual(metrics.flags, .isTruncated)
+            XCTAssertEqual(layout.count, 3)
+            XCTAssertFalse(layout.isTruncated)
+            XCTAssertEqual(layout.last?.drawingOptions.rawValue, 2)
+        }
+    }
+
+    // ASSERTIONS textSuffixRetainedMetricsLayoutObserved
+    func testReplacementPreservesEarlierLineAlignmentAndSourceCacheConfiguration() throws {
+        for alignment: TextAlignment in [.center, .trailing] {
+            try withSuffixManager(Text(verbatim: "A\nBB BB BB BB BB BB"), alignment: alignment, lineLimit: 2) { manager in
+                let size = CGSize(width: 100, height: 120)
+                let suffix = manager.suffix
+                manager.suffix = .none
+                let original = try XCTUnwrap(manager.makeLayout(in: .zero, with: size,
+                    shading: .foreground, layoutDirection: .leftToRight))
+                manager.suffix = suffix
+                let layout = try XCTUnwrap(manager.makeLayout(in: .zero, with: size,
+                    shading: .foreground, layoutDirection: .leftToRight))
+                XCTAssertEqual(layout.count, 3)
+                XCTAssertEqual(layout.first?.origin, original.first?.origin)
+                XCTAssertEqual(layout.first?.typographicBounds, original.first?.typographicBounds)
+                let raw = try XCTUnwrap(manager.prepareDrawing(in: .zero, with: size, applyingMarginOffsets: true))
+                let atoms = try XCTUnwrap(raw.layout).glyphAtoms()
+                XCTAssertTrue(atoms.contains { $0.scalar == "…" })
+                XCTAssertEqual(String(String.UnicodeScalarView(atoms.suffix(5).map(\.scalar))), " more")
+                XCTAssertTrue(manager.cache.entries.isEmpty)
+            }
+        }
+    }
+
+    private func withSuffixManager(_ text: Text, alignment: TextAlignment = .leading, suffixSize: CGFloat = 11,
+                                   alwaysVisible: Bool = false, lineLimit: Int = 1,
+                                   _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
+        try withGraph { _, inputs, host in
+            var environment = inputs.cachedEnvironment.value.environment.value
+            environment.lineLimit = lineLimit
+            environment.multilineTextAlignment = alignment
+            let context = GraphTextResolutionContext(environment: environment, sceneResources: host.sceneResources)
+            let suffix = Text(verbatim: " more").font(testFont(size: suffixSize)).foregroundColor(.red)
+            let owner = try XCTUnwrap(suffix._resolveStyledText(context: context, referenceDate: Date(),
+                archiveOptions: .init(), features: .produceTextLayout, sizeFitting: false))
+            environment[TextSuffixKey.self] = (alwaysVisible ? Text.Suffix.alwaysVisible(suffix) : .truncated(suffix))
+                .resolve(text: owner)
+            let manager = try XCTUnwrap(text._resolveStyledText(context: GraphTextResolutionContext(
+                environment: environment, sceneResources: host.sceneResources), referenceDate: Date(),
+                archiveOptions: .init(), features: [], sizeFitting: false, options: .allowsTextSuffix)
+                as? ResolvedStyledText.TextLayoutManager)
+            try body(manager)
+        }
+    }
+
     private func rule<Value, Body>(_ attribute: Attribute<Value>, as type: Body.Type) throws -> Body {
         var visitor = SuffixRuleVisitor<Body>()
         attribute.visitBody(&visitor)
