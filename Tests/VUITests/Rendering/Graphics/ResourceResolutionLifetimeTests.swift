@@ -54,6 +54,41 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         XCTAssertNil(witness.deviceContext)
     }
 
+    func testManagerBackendCachePurgeReleasesItsLastTextureFontAndDevice() throws {
+        for reason: ResourcePurgeReason in [.lowMemory, .appTermination] {
+            let cache = ResolvedStyledText.TextLayoutManager.GlyphLayoutCache()
+            weak var textureFont: TextureFont?
+            weak var deviceContext: GraphicsDeviceContext?
+            weak var device: LifetimeTestDevice?
+            func populate() throws {
+                let graphics = LifetimeTestDevice()
+                let context = GraphicsDeviceContext(device: graphics)
+                var root = URL(fileURLWithPath: #filePath)
+                for _ in 0..<5 { root.deleteLastPathComponent() }
+                let font = try XCTUnwrap(TextureFont(deviceContext: context, path: root.appendingPathComponent(
+                    "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path))
+                textureFont = font
+                deviceContext = context
+                device = graphics
+                let glyph = ResolvedTextSource.Glyph(scalar: "A", face: TextureTypeface(textureFont: font))
+                _ = cache.layout(in: CGSize(width: 80, height: 120), lineLimit: nil, truncationMode: .tail) {
+                    .init(lines: [.init(glyphs: [glyph], ascender: 10, descender: -3, width: 8)],
+                          lineCount: 1, forcedClusterBreak: false, truncatedRanges: [], hasUnlaidText: false)
+                }
+            }
+            try populate()
+            XCTAssertNotNil(textureFont)
+            XCTAssertNotNil(deviceContext)
+            XCTAssertNotNil(device)
+            cache.purgeResources(reason: reason)
+            withExtendedLifetime(cache) {
+                XCTAssertNil(textureFont)
+                XCTAssertNil(deviceContext)
+                XCTAssertNil(device)
+            }
+        }
+    }
+
     func testPendingBackendResourceTaskDoesNotRetainItsGraph() throws {
         let witness = Witness()
         func capture() throws -> ResourceList.Task {

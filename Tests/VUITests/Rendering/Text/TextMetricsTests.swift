@@ -578,6 +578,78 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerBackendConfigurationReuseObserved
+    // ASSERTIONS textManagerPreparedLayoutReuseObserved
+    func testManagerBackendKeepsOnlyTheCurrentLayoutConfiguration() {
+        let cache = ResolvedStyledText.TextLayoutManager.GlyphLayoutCache()
+        var calls = 0
+        func request(_ size: CGSize = CGSize(width: 80, height: 120),
+                     limit: Int? = nil, mode: Text.TruncationMode = .tail) -> Int {
+            cache.layout(in: size, lineLimit: limit, truncationMode: mode) {
+                calls += 1
+                return .init(lines: [], lineCount: calls, forcedClusterBreak: true,
+                             truncatedRanges: [2..<7], hasUnlaidText: true)
+            }.lineCount
+        }
+        XCTAssertEqual(request(), 1)
+        XCTAssertEqual(request(), 1)
+        XCTAssertEqual(request(CGSize(width: 80.25, height: 120)), 2)
+        XCTAssertEqual(request(CGSize(width: 80.25, height: 120)), 2)
+        XCTAssertEqual(request(), 3)
+        XCTAssertEqual(request(CGSize(width: 80, height: 121)), 4)
+        XCTAssertEqual(request(limit: 1), 5)
+        XCTAssertEqual(request(limit: 1), 5)
+        XCTAssertEqual(request(limit: 2), 6)
+        XCTAssertEqual(request(limit: 2, mode: .head), 7)
+        XCTAssertEqual(request(limit: 2, mode: .head), 7)
+        XCTAssertEqual(request(limit: 2, mode: .middle), 8)
+        let cached = cache.layout(in: CGSize(width: 80, height: 120), lineLimit: 2, truncationMode: .middle) {
+            XCTFail("An unchanged backend configuration must reuse its complete layout")
+            return .init(lines: [], lineCount: 0, forcedClusterBreak: false,
+                         truncatedRanges: [], hasUnlaidText: false)
+        }
+        XCTAssertTrue(cached.forcedClusterBreak)
+        XCTAssertTrue(cached.hasUnlaidText)
+        XCTAssertEqual(cached.truncatedRanges, [2..<7])
+        cache.purgeResources(reason: .lowMemory)
+        XCTAssertEqual(request(limit: 2, mode: .middle), 9)
+        cache.purgeResources(reason: .appTermination)
+        XCTAssertEqual(request(), 0)
+        XCTAssertEqual(calls, 9)
+    }
+
+    // ASSERTIONS textManagerBackendConfigurationReuseObserved
+    // ASSERTIONS textManagerPreparedDrawingRequestObserved
+    func testManagerDrawingSharesBackendStateWithoutChangingScalarCachesOrCachedPositions() throws {
+        try withManager(Text(verbatim: "A\nBB"), configure: { $0.multilineTextAlignment = .center }) { manager in
+            let metrics = manager.metrics(in: CGSize(width: 80, height: 120), layoutMargins: nil)
+            let rect = CGRect(origin: .zero, size: metrics.size)
+            let first = try XCTUnwrap(manager.prepareDrawing(in: rect, with: metrics.size,
+                applyingMarginOffsets: true))
+            let raw = manager.glyphLayoutCache.layout(in: CGSize(width: 80, height: metrics.size.height),
+                lineLimit: nil, truncationMode: .tail) {
+                XCTFail("Drawing must publish its backend layout on the retained owner")
+                return .init(lines: [], lineCount: 0, forcedClusterBreak: false,
+                             truncatedRanges: [], hasUnlaidText: false)
+            }
+            XCTAssertEqual(raw.lines.count, first.lines.count)
+            XCTAssertTrue(raw.lines.allSatisfy { $0.originX == 0 })
+            XCTAssertTrue(first.lines.contains { $0.originX != 0 })
+            manager.resetCache()
+            let second = try XCTUnwrap(manager.prepareDrawing(in: rect, with: metrics.size,
+                applyingMarginOffsets: true))
+            XCTAssertEqual(first.lines.map(\.originX), second.lines.map(\.originX))
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            XCTAssertNil(manager.cache.ideal)
+            manager.glyphLayoutCache.purgeResources(reason: .lowMemory)
+            let rebuilt = try XCTUnwrap(manager.prepareDrawing(in: rect, with: metrics.size,
+                applyingMarginOffsets: true))
+            XCTAssertEqual(first.lines.map(\.width), rebuilt.lines.map(\.width))
+            XCTAssertEqual(first.lines.map(\.baseline), rebuilt.lines.map(\.baseline))
+            XCTAssertEqual(manager.cache.entries.count, 1)
+        }
+    }
+
     private func withManager(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
                              _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
         try withOwner(text, configure: configure) { source in

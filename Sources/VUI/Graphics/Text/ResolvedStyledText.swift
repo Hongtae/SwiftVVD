@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 
 extension NSAttributedString.Key {
     static let resolvedTextAttachment = NSAttributedString.Key(
@@ -1250,6 +1251,51 @@ extension ResolvedStyledText {
 
         private(set) var cache = Cache()
 
+        /// Holds only the current backend layout, independently of scalar measurements.
+        final class GlyphLayoutCache: AppLifetimeResource, @unchecked Sendable {
+            private struct Entry {
+                var size: CGSize
+                var lineLimit: Int?
+                var truncationMode: Text.TruncationMode
+                var layout: ResolvedTextSource.GlyphLayout
+            }
+
+            private struct State: @unchecked Sendable {
+                var entry: Entry?
+                var terminated = false
+            }
+
+            private let state = Mutex(State())
+
+            func layout(in size: CGSize, lineLimit: Int?, truncationMode: Text.TruncationMode,
+                        make: () -> ResolvedTextSource.GlyphLayout) -> ResolvedTextSource.GlyphLayout {
+                // Serialize publication with resource purging, including a cold computation.
+                state.withLock { state in
+                    guard !state.terminated else {
+                        return .init(lines: [], lineCount: 0, forcedClusterBreak: false,
+                                     truncatedRanges: [], hasUnlaidText: false)
+                    }
+                    if let entry = state.entry, entry.size == size,
+                       entry.lineLimit == lineLimit, entry.truncationMode == truncationMode {
+                        return entry.layout
+                    }
+                    let layout = make()
+                    state.entry = Entry(size: size, lineLimit: lineLimit,
+                                        truncationMode: truncationMode, layout: layout)
+                    return layout
+                }
+            }
+
+            override func purgeResources(reason: ResourcePurgeReason) {
+                state.withLock { state in
+                    state.entry = nil
+                    if reason == .appTermination { state.terminated = true }
+                }
+            }
+        }
+
+        let glyphLayoutCache = GlyphLayoutCache()
+
         override var metricsCacheEntryCount: Int { cache.entries.count }
 
         override func resetCache() {}
@@ -1358,10 +1404,13 @@ extension ResolvedStyledText {
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let pixelWidth = width * resolvedText.scaleFactor
-            let layout = resolvedText.makeGlyphLayout(
-                maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
-                maximumHeight: available.height * resolvedText.scaleFactor,
-                lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+            let layout = glyphLayoutCache.layout(in: available, lineLimit: layoutProperties.lineLimit,
+                truncationMode: layoutProperties.truncationMode) {
+                resolvedText.makeGlyphLayout(
+                    maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
+                    maximumHeight: available.height * resolvedText.scaleFactor,
+                    lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode)
+            }
             var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
             if layout.lines.isEmpty {
                 raw.firstBaseline = 0
