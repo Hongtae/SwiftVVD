@@ -15,19 +15,48 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     var name: String { device.name }
     let device: MTLDevice
 
+#if DEBUG
+    private let shutdownBlockingDebugTask: Task<Void, Never>
+#endif
+
     init(device: MTLDevice) {
         self.device = device
+
+#if DEBUG
+        // This dummy task blocks application shutdown while graphics resources retain
+        // the device, without retaining the device itself or polling.
+        let task = Task.detached(name: "MetalGraphicsDevice Debug Shutdown Blocker", priority: .background) {
+            do {
+                while true {
+                    try await Task.sleep(for: .seconds(3600))
+                }
+            } catch {
+                // Device destruction cancels the sleep.
+            }
+        }
+        self.shutdownBlockingDebugTask = task
+        Task { @MainActor in
+            let uuid = UUID()
+#if compiler(>=6.4)
+            detachedServiceTasks[uuid] = task
+#else
+            detachedServiceTasks[uuid] = (task, "MetalGraphicsDevice Debug Shutdown Blocker")
+#endif
+            await task.value
+            detachedServiceTasks.removeValue(forKey: uuid)
+        }
+#endif
     }
 
-    init?() {
+    convenience init?() {
         if let device = MTLCreateSystemDefaultDevice() {
-            self.device = device
+            self.init(device: device)
         } else {
             return nil
         }
     }
 
-    init?(_ selector: (String) -> Bool) {
+    convenience init?(_ selector: (String) -> Bool) {
         var device: MTLDevice? = nil
 
 #if os(macOS) || targetEnvironment(macCatalyst)
@@ -40,13 +69,13 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         }
 #endif
         if let device {
-            self.device = device
+            self.init(device: device)
         } else {
             return nil
         }
     }
 
-    init?(name: String) {
+    convenience init?(name: String) {
         var device: MTLDevice? = nil
 
         if name.isEmpty {
@@ -67,10 +96,16 @@ final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         }
 
         if let device {
-            self.device = device
+            self.init(device: device)
         } else {
             return nil
         }
+    }
+
+    deinit {
+#if DEBUG
+        shutdownBlockingDebugTask.cancel()
+#endif
     }
 
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? {
