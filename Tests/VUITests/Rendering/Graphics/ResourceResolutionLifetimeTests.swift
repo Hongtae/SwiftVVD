@@ -55,6 +55,15 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
     }
 
     func testManagerBackendCachePurgeReleasesItsLastTextureFontAndDevice() throws {
+        try checkManagerBackendPurge(retainsScaledSource: false)
+    }
+
+    // ASSERTIONS textManagerScaledStorageLifecycleObserved
+    func testManagerScaledSourcePurgeReleasesItsLastTextureFontAndDevice() throws {
+        try checkManagerBackendPurge(retainsScaledSource: true)
+    }
+
+    private func checkManagerBackendPurge(retainsScaledSource: Bool) throws {
         for reason: ResourcePurgeReason in [.lowMemory, .appTermination] {
             let cache = ResolvedStyledText.TextLayoutManager.GlyphLayoutCache()
             weak var textureFont: TextureFont?
@@ -70,10 +79,17 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
                 textureFont = font
                 deviceContext = context
                 device = graphics
-                let glyph = ResolvedTextSource.Glyph(scalar: "A", face: TextureTypeface(textureFont: font))
-                _ = cache.layout(in: CGSize(width: 80, height: 120), lineLimit: nil, truncationMode: .tail) {
-                    .init(lines: [.init(glyphs: [glyph], ascender: 10, descender: -3, width: 8)],
-                          lineCount: 1, forcedClusterBreak: false, truncatedRanges: [], hasUnlaidText: false)
+                let face = TextureTypeface(textureFont: font)
+                if retainsScaledSource {
+                    let source = ResolvedTextSource(runs: [.text([face], "A")], scaleFactor: 1)
+                    _ = cache.source(at: 0.5, original: source)
+                    _ = cache.source(at: 1, original: source)
+                } else {
+                    let glyph = ResolvedTextSource.Glyph(scalar: "A", face: face)
+                    _ = cache.layout(in: CGSize(width: 80, height: 120), lineLimit: nil, truncationMode: .tail) {
+                        .init(lines: [.init(glyphs: [glyph], ascender: 10, descender: -3, width: 8)],
+                              lineCount: 1, forcedClusterBreak: false, truncatedRanges: [], hasUnlaidText: false)
+                    }
                 }
             }
             try populate()

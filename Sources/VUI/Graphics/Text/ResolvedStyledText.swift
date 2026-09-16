@@ -1251,10 +1251,11 @@ extension ResolvedStyledText {
 
         private(set) var cache = Cache()
 
-        /// Holds only the current backend layout, independently of scalar measurements.
+        /// Holds the current backend layout and last scaled source, independently of scalar measurements.
         final class GlyphLayoutCache: AppLifetimeResource, @unchecked Sendable {
             private struct Entry {
                 var size: CGSize
+                var scale: CGFloat
                 var lineLimit: Int?
                 var truncationMode: Text.TruncationMode
                 var layout: ResolvedTextSource.GlyphLayout
@@ -1262,12 +1263,32 @@ extension ResolvedStyledText {
 
             private struct State: @unchecked Sendable {
                 var entry: Entry?
+                var selectedScale: CGFloat = 1
+                var scaledSource: (factor: CGFloat, source: ResolvedTextSource)?
                 var terminated = false
             }
 
             private let state = Mutex(State())
 
-            func layout(in size: CGSize, lineLimit: Int?, truncationMode: Text.TruncationMode,
+            func source(at scale: CGFloat, original: ResolvedTextSource) -> ResolvedTextSource {
+                var source = original
+                state.withLock { state in
+                    guard !state.terminated else { return }
+                    if state.selectedScale != scale {
+                        state.entry = nil
+                        state.selectedScale = scale
+                    }
+                    guard scale != 1 else { return }
+                    if state.scaledSource?.factor != scale {
+                        // Rebuild from original font requests, retaining only the last scaled source.
+                        state.scaledSource = (scale, original.scalingFonts(by: scale, toMultipleOf: nil))
+                    }
+                    source = state.scaledSource!.source
+                }
+                return source
+            }
+
+            func layout(in size: CGSize, scale: CGFloat = 1, lineLimit: Int?, truncationMode: Text.TruncationMode,
                         make: () -> ResolvedTextSource.GlyphLayout) -> ResolvedTextSource.GlyphLayout {
                 // Serialize publication with resource purging, including a cold computation.
                 state.withLock { state in
@@ -1275,12 +1296,12 @@ extension ResolvedStyledText {
                         return .init(lines: [], lineCount: 0, forcedClusterBreak: false,
                                      truncatedRanges: [], hasUnlaidText: false)
                     }
-                    if let entry = state.entry, entry.size == size,
+                    if let entry = state.entry, entry.size == size, entry.scale == scale,
                        entry.lineLimit == lineLimit, entry.truncationMode == truncationMode {
                         return entry.layout
                     }
                     let layout = make()
-                    state.entry = Entry(size: size, lineLimit: lineLimit,
+                    state.entry = Entry(size: size, scale: scale, lineLimit: lineLimit,
                                         truncationMode: truncationMode, layout: layout)
                     return layout
                 }
@@ -1289,6 +1310,8 @@ extension ResolvedStyledText {
             override func purgeResources(reason: ResourcePurgeReason) {
                 state.withLock { state in
                     state.entry = nil
+                    state.scaledSource = nil
+                    state.selectedScale = 1
                     if reason == .appTermination { state.terminated = true }
                 }
             }
@@ -1339,7 +1362,7 @@ extension ResolvedStyledText {
             if let entry = cache.find(measuredSize: size), entry.request.width.isFinite {
                 request.width = entry.request.width
             }
-            var measured = measureGlyphLayout(source, in: request)
+            var measured = fittingGlyphLayout(source, in: request)
             let factor: CGFloat
             switch layoutProperties.multilineTextAlignment {
             case .center: factor = 0.5
@@ -1352,12 +1375,12 @@ extension ResolvedStyledText {
                 x: rect.origin.x + margins.leading - displacement,
                 y: rect.origin.y + margins.top + measured.metrics.baselineAdjustment,
                 width: request.width, height: request.height)
-            let width = measured.metrics.requestedWidth * source.scaleFactor
+            let width = measured.metrics.requestedWidth * measured.source.scaleFactor
             for index in measured.layout.lines.indices {
                 measured.layout.lines[index].originX = factor == 0 ? 0 :
                     (width - measured.layout.lines[index].width) * factor
             }
-            return (source, measured.layout, bounds)
+            return (measured.source, measured.layout, bounds)
         }
 
         override func size(in size: CGSize) -> CGSize {
@@ -1390,21 +1413,53 @@ extension ResolvedStyledText {
             }) {
                 return entry.metrics
             }
-            let metrics = measureGlyphLayout(resolvedText, in: size).metrics
+            let metrics = fittingGlyphLayout(resolvedText, in: size).metrics
             cache.entries.append(Cache.Entry(request: size, metrics: metrics))
             return metrics
         }
 
-        private func measureGlyphLayout(_ resolvedText: ResolvedTextSource,
-                                        in size: CGSize)
-            -> (metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
+        private func fittingGlyphLayout(_ source: ResolvedTextSource, in size: CGSize)
+            -> (source: ResolvedTextSource, metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
+            let minimum = max(layoutProperties.minScaleFactor, CGFloat.leastNonzeroMagnitude)
+            // Mixed attributes and attachments retain their existing fixed-scale producer.
+            guard minimum < 1, source.uniformFont != nil || storage?.length == 0 else {
+                return measureGlyphLayout(source, in: size)
+            }
+            let proposal = CGSize(width: size.width, height: .infinity)
+            func fits(_ metrics: NSAttributedString.Metrics) -> Bool {
+                !metrics.hasTruncatedRanges && metrics.size.width <= size.width && metrics.size.height <= size.height
+            }
+            var scale: CGFloat = 1
+            if !fits(measureGlyphLayout(source, in: proposal).metrics) {
+                var low = minimum
+                var high: CGFloat = 1
+                if fits(measureGlyphLayout(source, in: proposal, scale: low).metrics) {
+                    repeat {
+                        let candidate = high + (high - low) * -0.5
+                        if fits(measureGlyphLayout(source, in: proposal, scale: candidate).metrics) {
+                            low = candidate
+                        } else {
+                            high = candidate
+                        }
+                    } while high - low >= 0.01
+                }
+                scale = low
+            }
+            // Publish the final constrained result even when the minimum still does not fit.
+            return measureGlyphLayout(source, in: size, scale: scale)
+        }
+
+        private func measureGlyphLayout(_ source: ResolvedTextSource,
+                                        in size: CGSize, scale: CGFloat = 1)
+            -> (source: ResolvedTextSource, metrics: NSAttributedString.Metrics, layout: ResolvedTextSource.GlyphLayout) {
+            let resolvedText = glyphLayoutCache.source(at: scale, original: source)
             // The manager uses its retained margins for every measurement.
             let layoutMargins = self.layoutMargins
             let available = CGSize(width: max(size.width - layoutMargins.leading - layoutMargins.trailing, 0),
                                    height: max(size.height - layoutMargins.top - layoutMargins.bottom, 0))
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let pixelWidth = width * resolvedText.scaleFactor
-            let layout = glyphLayoutCache.layout(in: available, lineLimit: layoutProperties.lineLimit,
+            let layout = glyphLayoutCache.layout(in: available, scale: scale, lineLimit: layoutProperties.lineLimit,
                 truncationMode: layoutProperties.truncationMode) {
                 resolvedText.makeGlyphLayout(
                     maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
@@ -1415,15 +1470,19 @@ extension ResolvedStyledText {
             if layout.lines.isEmpty {
                 raw.firstBaseline = 0
                 raw.lastBaseline = 0
+                if storage?.length == 0, available.height > 0 {
+                    raw.size.height = ceil(min(raw.size.height, available.height) * resolvedText.displayScale)
+                        / resolvedText.displayScale
+                }
             }
             raw.size.width = ceil(min(raw.size.width, width) * resolvedText.displayScale) / resolvedText.displayScale
-            var metrics = NSAttributedString.Metrics(size: raw.size, scale: 1,
+            var metrics = NSAttributedString.Metrics(size: raw.size, scale: scale,
                 firstBaseline: raw.firstBaseline, lastBaseline: raw.lastBaseline,
                 baselineAdjustment: 0, requestedWidth: available.width,
                 numberOfLines: UInt(layout.lines.count),
                 hasTruncatedRanges: !layout.truncatedRanges.isEmpty || layout.hasUnlaidText)
             metrics.update(layoutMargins: layoutMargins, pixelLength: 1 / resolvedText.displayScale)
-            return (metrics, layout)
+            return (resolvedText, metrics, layout)
         }
     }
 }

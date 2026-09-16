@@ -208,12 +208,14 @@ struct ResolvedTextSource {
 
     /// Rebuilds font attributes from the original requests. Spacing,
     /// baseline offsets, attachments and custom attributes keep their units.
-    func scalingFonts(by scale: CGFloat) -> Self {
+    func scalingFonts(by scale: CGFloat, toMultipleOf multiple: CGFloat? = 0.25) -> Self {
         guard scale != 1 else { return self }
         let scaledRuns = runs.map { run -> Run in
             guard case let .styledText(_, text, custom, originalAttributes) = run,
                   let original = originalAttributes.fontResource else { return run }
-            guard let resized = original.fontWithSize((original.pointSize * scale * 4).rounded() * 0.25) else {
+            var size = original.pointSize * scale
+            if let multiple { size = (size / multiple).rounded() * multiple }
+            guard let resized = original.fontWithSize(size) else {
                 return run
             }
             guard let context = fontResolutionContext else {

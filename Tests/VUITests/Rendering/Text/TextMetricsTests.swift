@@ -650,6 +650,135 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textManagerFittingCandidateSelectionObserved
+    // ASSERTIONS textManagerFittingPreparedDrawingObserved
+    func testManagerFitsUniformTextAndDrawsTheSelectedUnroundedFontSize() throws {
+        try withManager(Text(verbatim: "A A A A A A A A"), configure: {
+            $0.lineLimit = 1
+            $0.minimumScaleFactor = 0.25
+        }) { manager in
+            let request = CGSize(width: 80, height: 54)
+            let metrics = manager.metrics(in: request, layoutMargins: nil)
+            XCTAssertGreaterThan(metrics.scale, 0.25)
+            XCTAssertLessThan(metrics.scale, 1)
+            XCTAssertFalse(metrics.hasTruncatedRanges)
+            XCTAssertLessThanOrEqual(metrics.size.width, request.width)
+            XCTAssertEqual(metrics.numberOfLines, 1)
+            let repeated = manager.metrics(in: request, layoutMargins: nil)
+            XCTAssertEqual(repeated.scale, metrics.scale)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+
+            let prepared = try XCTUnwrap(manager.prepareDrawing(in: .zero, with: metrics.size,
+                applyingMarginOffsets: true))
+            let font = try XCTUnwrap(prepared.source.uniformFont)
+            XCTAssertEqual(font.pointSize, 23 * metrics.scale, accuracy: 0.000001)
+            XCTAssertNotEqual(font.pointSize, (font.pointSize * 4).rounded() * 0.25)
+            XCTAssertEqual(manager.resolvedText?.uniformFont?.pointSize, 23)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            let layout = try XCTUnwrap(manager.makeLayout(in: .zero, with: metrics.size,
+                shading: .color(.black), layoutDirection: .leftToRight))
+            XCTAssertFalse(layout.isTruncated)
+            XCTAssertEqual(layout.count, 1)
+            manager.glyphLayoutCache.purgeResources(reason: .lowMemory)
+            let rebuilt = try XCTUnwrap(manager.prepareDrawing(in: .zero, with: metrics.size,
+                applyingMarginOffsets: true))
+            XCTAssertEqual(rebuilt.source.uniformFont?.pointSize, font.pointSize)
+            XCTAssertEqual(rebuilt.lines.map(\.width), prepared.lines.map(\.width))
+            XCTAssertEqual(manager.cache.entries.count, 1)
+        }
+    }
+
+    // ASSERTIONS textManagerFittingCandidateSelectionObserved
+    func testManagerMinimumScaleFallbackAndExplicitLineHeightFitting() throws {
+        try withManager(Text(verbatim: "A A A A A A A A"), configure: {
+            $0.lineLimit = 1
+            $0.minimumScaleFactor = 0.75
+        }) { manager in
+            for height: CGFloat in [14, 54] {
+                let metrics = manager.metrics(in: CGSize(width: 20, height: height), layoutMargins: nil)
+                XCTAssertEqual(metrics.scale, 0.75)
+                XCTAssertTrue(metrics.hasTruncatedRanges)
+            }
+            // Clipping that cannot fit a truncation token does not publish a truncated range.
+            let clipped = manager.metrics(in: CGSize(width: 8, height: 14), layoutMargins: nil)
+            XCTAssertEqual(clipped.scale, 0.75)
+            XCTAssertFalse(clipped.hasTruncatedRanges)
+            let tall = manager.metrics(in: CGSize(width: 8, height: 54), layoutMargins: nil)
+            XCTAssertEqual(tall.scale, 1)
+            XCTAssertFalse(tall.hasTruncatedRanges)
+        }
+        try withManager(Text(verbatim: "A\nB"), configure: { $0.minimumScaleFactor = 0.25 }) { manager in
+            let metrics = manager.metrics(in: CGSize(width: 80, height: 24), layoutMargins: nil)
+            XCTAssertGreaterThan(metrics.scale, 0.25)
+            XCTAssertLessThan(metrics.scale, 1)
+            XCTAssertEqual(metrics.numberOfLines, 2)
+            XCTAssertFalse(metrics.hasTruncatedRanges)
+            XCTAssertLessThanOrEqual(metrics.size.height, 24)
+        }
+        try withManager(Text(verbatim: "A"), configure: { $0.minimumScaleFactor = 0.25 }) { manager in
+            let metrics = manager.metrics(in: CGSize(width: 80, height: 54), layoutMargins: nil)
+            XCTAssertEqual(metrics.scale, 1)
+            XCTAssertFalse(metrics.hasTruncatedRanges)
+        }
+        for minimum: CGFloat in [1, 0.25] {
+            for height: CGFloat in [-1, 0, 0.01, 8, 13.75, 14] {
+                try withManager(Text(verbatim: ""), configure: { $0.minimumScaleFactor = minimum }) { manager in
+                    let metrics = manager.metrics(in: CGSize(width: 80, height: height), layoutMargins: nil)
+                    XCTAssertEqual(metrics.scale, height < 14 ? minimum : 1)
+                    let expectedHeight = height > 0 ? ceil(min(height, 14) * 2) / 2 : 14
+                    XCTAssertEqual(metrics.size, CGSize(width: 0, height: expectedHeight))
+                    XCTAssertEqual(metrics.numberOfLines, 0)
+                    XCTAssertEqual(metrics.firstBaseline, 0)
+                    XCTAssertFalse(metrics.hasTruncatedRanges)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textManagerFittingPreparedDrawingObserved
+    // ASSERTIONS textManagerSpacingUnitScaleObserved
+    func testManagerFittingPreservesItsIndependentUnitScaleIdealAndNoOpReset() throws {
+        try withManager(Text(verbatim: "A A A A A A A A"), configure: {
+            $0.lineLimit = 1
+            $0.minimumScaleFactor = 0.25
+        }) { manager in
+            _ = manager.spacing()
+            let ideal = try XCTUnwrap(manager.cache.ideal)
+            let metrics = manager.metrics(in: CGSize(width: 80, height: 54), layoutMargins: nil)
+            XCTAssertLessThan(metrics.scale, 1)
+            _ = manager.prepareDrawing(in: .zero, with: metrics.size, applyingMarginOffsets: true)
+            manager.resetCache()
+            _ = manager.spacing()
+            XCTAssertEqual(manager.cache.ideal?.scale, 1)
+            XCTAssertEqual(manager.cache.ideal?.size, ideal.size)
+            XCTAssertEqual(manager.cache.ideal?.firstBaseline, ideal.firstBaseline)
+            XCTAssertEqual(manager.cache.entries.count, 1)
+            XCTAssertEqual(manager.cache.entries[0].metrics.scale, metrics.scale)
+        }
+    }
+
+    // ASSERTIONS textManagerScaledStorageLifecycleObserved
+    func testManagerRetainsTheLastScaledSourceAcrossUnitScaleRestoration() throws {
+        try withManager(Text(verbatim: "A")) { manager in
+            let source = try XCTUnwrap(manager.resolvedText)
+            let cache = manager.glyphLayoutCache
+            let half = try XCTUnwrap(cache.source(at: 0.5, original: source).uniformFont)
+            XCTAssertEqual(half.pointSize, 11.5)
+            XCTAssertTrue(cache.source(at: 0.5, original: source).uniformFont === half)
+            let fractional = try XCTUnwrap(cache.source(at: 0.63, original: source).uniformFont)
+            XCTAssertEqual(fractional.pointSize, 14.49, accuracy: 0.000001)
+            XCTAssertTrue(cache.source(at: 1, original: source).uniformFont === source.uniformFont)
+            XCTAssertTrue(cache.source(at: 0.63, original: source).uniformFont === fractional)
+            let halfAgain = try XCTUnwrap(cache.source(at: 0.5, original: source).uniformFont)
+            XCTAssertEqual(halfAgain.pointSize, 11.5)
+            XCTAssertFalse(halfAgain === half)
+            cache.purgeResources(reason: .lowMemory)
+            XCTAssertFalse(cache.source(at: 0.5, original: source).uniformFont === halfAgain)
+            cache.purgeResources(reason: .appTermination)
+            XCTAssertTrue(cache.source(at: 0.5, original: source).uniformFont === source.uniformFont)
+        }
+    }
+
     private func withManager(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
                              _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
         try withOwner(text, configure: configure) { source in
