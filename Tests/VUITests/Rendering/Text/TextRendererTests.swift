@@ -25,6 +25,20 @@ private struct TextRendererProbe: TextRenderer {
 }
 
 final class TextRendererTests: XCTestCase {
+    // ASSERTIONS textLayoutLineArrayValueSemanticsObserved
+    func testIndependentEmptyLayoutsCompareByTheirValues() {
+        let first = ResolvedTextSource(runs: [], scaleFactor: 1)
+            .makeLayout(in: .zero, layoutDirection: .leftToRight)
+        let second = ResolvedTextSource(runs: [], scaleFactor: 1)
+            .makeLayout(in: .zero, layoutDirection: .leftToRight)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first, Text.Layout(lines: [], isTruncated: false, numberOfLines: 0))
+        XCTAssertNotEqual(first, Text.Layout(lines: [], isTruncated: true, numberOfLines: 0))
+        XCTAssertNotEqual(first, Text.Layout(lines: [], isTruncated: false, numberOfLines: 1))
+        let lines = Mirror(reflecting: first).children.first { $0.label == "lines" }?.value
+        XCTAssertTrue(lines is [Text.Layout.Line])
+    }
+
     func testTextLayoutCarrierMatchesObservedMemoryAndCollectionSurface() {
         XCTAssertEqual(MemoryLayout<TextProxy>.size, 8)
         XCTAssertEqual(MemoryLayout<Text.Layout>.size, 24)

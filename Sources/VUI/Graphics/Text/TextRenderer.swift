@@ -186,32 +186,41 @@ fileprivate final class _TextLayoutLineReference {
 
 extension Text {
     public struct Layout: RandomAccessCollection, Equatable {
-        private var lines: _TextLayoutStorage
+        private var lines: [Line]
         public var isTruncated: Bool
         private var numberOfLines: Int
 
-        fileprivate init(storage: _TextLayoutStorage) {
-            self.lines = storage
-            self.isTruncated = storage.isTruncated
-            self.numberOfLines = storage.lines.count
+        init(lines: [Line], isTruncated: Bool, numberOfLines: Int) {
+            self.lines = lines
+            self.isTruncated = isTruncated
+            self.numberOfLines = numberOfLines
         }
 
-        public var startIndex: Int { 0 }
-        public var endIndex: Int { lines.lines.count }
-
-        public subscript(index: Int) -> Line {
-            precondition(indices.contains(index), "Text.Layout index out of range")
-            let line = lines.lines[index]
-            return Line(
-                line: _TextLayoutLine(storage: lines, index: index),
-                lineIndex: index,
-                origin: line.origin,
-                drawingOptions: []
+        fileprivate init(storage: _TextLayoutStorage) {
+            self.init(
+                lines: storage.lines.indices.map { index in
+                    Line(
+                        line: _TextLayoutLine(storage: storage, index: index),
+                        lineIndex: index,
+                        origin: storage.lines[index].origin,
+                        drawingOptions: []
+                    )
+                },
+                isTruncated: storage.isTruncated,
+                numberOfLines: storage.lines.count
             )
         }
 
+        public var startIndex: Int { 0 }
+        public var endIndex: Int { lines.count }
+
+        public subscript(index: Int) -> Line {
+            precondition(indices.contains(index), "Text.Layout index out of range")
+            return lines[index]
+        }
+
         public static func == (lhs: Layout, rhs: Layout) -> Bool {
-            lhs.lines === rhs.lines &&
+            lhs.lines == rhs.lines &&
                 lhs.isTruncated == rhs.isTruncated &&
                 lhs.numberOfLines == rhs.numberOfLines
         }

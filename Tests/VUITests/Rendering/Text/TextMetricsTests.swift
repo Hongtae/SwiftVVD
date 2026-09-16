@@ -872,6 +872,41 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textLayoutLineArrayValueSemanticsObserved
+    // ASSERTIONS textLayoutLogicalLineCountObserved
+    func testLayoutPreservesLineValuesSeparatelyFromItsLogicalLineCount() throws {
+        try withManager(Text(verbatim: "AB")) { manager in
+            let original = try XCTUnwrap(manager.makeLayout(in: .zero,
+                with: CGSize(width: 100, height: 54), shading: .color(.black), layoutDirection: .leftToRight))
+            let first = try XCTUnwrap(original.first)
+            var second = first
+            second.origin.x += first.typographicBounds.width
+            second.drawingOptions = .disablesSubpixelQuantization
+            let layout = Text.Layout(lines: [first, second], isTruncated: true, numberOfLines: 1)
+            XCTAssertEqual(layout.count, 2)
+            XCTAssertEqual(layout.endIndex, 2)
+            XCTAssertEqual(layout[0], first)
+            XCTAssertEqual(layout[1], second)
+            XCTAssertEqual(layout[1].drawingOptions, .disablesSubpixelQuantization)
+            XCTAssertEqual(layout[1][0].typographicBounds.origin.x,
+                first[0].typographicBounds.origin.x + first.typographicBounds.width)
+            XCTAssertEqual(layout[1][0].characterIndices, first[0].characterIndices)
+            let logicalCount = Mirror(reflecting: layout).children.first { $0.label == "numberOfLines" }?.value
+            XCTAssertEqual(logicalCount as? Int, 1)
+
+            var independent: [Text.Layout.Line] = []
+            independent.reserveCapacity(8)
+            independent.append(contentsOf: layout)
+            XCTAssertEqual(layout, Text.Layout(lines: independent, isTruncated: true, numberOfLines: 1))
+            XCTAssertNotEqual(layout, Text.Layout(lines: independent, isTruncated: true, numberOfLines: 2))
+            XCTAssertNotEqual(layout, Text.Layout(lines: independent, isTruncated: false, numberOfLines: 1))
+            independent[0].origin.y += 3.25
+            XCTAssertNotEqual(layout, Text.Layout(lines: independent, isTruncated: true, numberOfLines: 1))
+            XCTAssertEqual(layout[0], first)
+            XCTAssertEqual(original[0], first)
+        }
+    }
+
     private func withManager(_ text: Text, configure: (inout EnvironmentValues) -> Void = { _ in },
                              _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
         try withOwner(text, configure: configure) { source in

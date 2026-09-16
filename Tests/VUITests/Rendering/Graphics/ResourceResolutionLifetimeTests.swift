@@ -58,6 +58,35 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         try checkManagerBackendPurge(retainsScaledSource: false)
     }
 
+    func testRetainedLayoutLineReleasesItsFontAndDeviceWithTheLastValue() throws {
+        var layout: Text.Layout?
+        var line: Text.Layout.Line?
+        weak var artwork: TextureFont?
+        weak var deviceContext: GraphicsDeviceContext?
+        func populate() throws {
+            let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let font = try XCTUnwrap(TextureFont(deviceContext: context, path: root.appendingPathComponent(
+                "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path))
+            artwork = font
+            deviceContext = context
+            let face = TextureTypeface(textureFont: font)
+            let source = ResolvedTextSource(runs: [.text([face], "A")], scaleFactor: 1)
+            layout = source.makeLayout(in: CGSize(width: 100, height: 100), layoutDirection: .leftToRight)
+        }
+        try populate()
+        line = try XCTUnwrap(layout?.first)
+        layout = nil
+        withExtendedLifetime(line) {
+            XCTAssertNotNil(artwork)
+            XCTAssertNotNil(deviceContext)
+        }
+        line = nil
+        XCTAssertNil(artwork)
+        XCTAssertNil(deviceContext)
+    }
+
     // ASSERTIONS textManagerScaledStorageLifecycleObserved
     func testManagerScaledSourcePurgeReleasesItsLastTextureFontAndDevice() throws {
         try checkManagerBackendPurge(retainsScaledSource: true)
