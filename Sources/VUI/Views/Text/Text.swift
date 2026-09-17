@@ -1816,6 +1816,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                 attachments: attachments,
                 styles: source.resolvedProperties?.styles ?? [],
                 transitions: source.resolvedProperties?.transitions ?? [],
+                lineHeightMetrics: source.resolvedProperties?.lineHeightMetrics ?? .init(),
                 resolvedText: resolved,
                 version: version,
                 transitionText: transitionText

@@ -198,6 +198,29 @@ extension Text {
         struct Links: Equatable, Sendable {
         }
 
+        struct LineHeightMetrics {
+            var multiple: CGFloat?
+            var exact: CGFloat?
+            var leading: CGFloat?
+
+            var isCustomized: Bool {
+                multiple != nil || exact != nil || leading != nil
+            }
+
+            mutating func update(_ height: TextLineHeight) {
+                switch height {
+                case .variable:
+                    break
+                case let .multiple(factor):
+                    multiple = min(CGFloat(factor), multiple ?? CGFloat(factor))
+                case let .exact(points):
+                    exact = min(CGFloat(points), exact ?? CGFloat(points))
+                case let .leading(increase):
+                    leading = min(CGFloat(increase), leading ?? CGFloat(increase))
+                }
+            }
+        }
+
         /// Tracks the current paragraph's UTF-16 start, languages, and shared style.
         /// Boundary finalization releases the cache while completed runs retain it.
         struct Paragraph: Codable, Equatable {
@@ -229,6 +252,7 @@ extension Text {
         var customAttachments: CustomAttachments
         var paragraph: Paragraph
         var multilineTextAlignment: TextAlignment?
+        var lineHeightMetrics: LineHeightMetrics
 
         mutating func addColor(_ color: Color.ResolvedHDR) {
             if color.base.linearRed == -1 && color.base.linearGreen == -1 {
@@ -244,7 +268,8 @@ extension Text {
             suffix: ResolvedTextSuffix = .none,
             customAttachments: CustomAttachments = CustomAttachments(),
             paragraph: Paragraph = Paragraph(),
-            multilineTextAlignment: TextAlignment? = nil
+            multilineTextAlignment: TextAlignment? = nil,
+            lineHeightMetrics: LineHeightMetrics = .init()
         ) {
             self.insets = insets
             self.features = features
@@ -254,6 +279,7 @@ extension Text {
             self.customAttachments = customAttachments
             self.paragraph = paragraph
             self.multilineTextAlignment = multilineTextAlignment
+            self.lineHeightMetrics = lineHeightMetrics
         }
 
         mutating func registerCustomAttachment(at characterIndex: Int) {
@@ -504,6 +530,7 @@ class ResolvedStyledText: InterpolatableContent {
     var styles: [_ShapeStyle_Pack.Style]
     var transitions: [Text.ResolvedProperties.Transition]
     var links: Text.ResolvedProperties.Links
+    var lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics
     let resolvedText: ResolvedTextSource?
     var version: Int
     var transitionText: String?
@@ -526,6 +553,7 @@ class ResolvedStyledText: InterpolatableContent {
         styles: [_ShapeStyle_Pack.Style] = [],
         transitions: [Text.ResolvedProperties.Transition] = [],
         links: Text.ResolvedProperties.Links = Text.ResolvedProperties.Links(),
+        lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics = .init(),
         resolvedText: ResolvedTextSource? = nil,
         version: Int = 0,
         transitionText: String? = nil,
@@ -541,6 +569,7 @@ class ResolvedStyledText: InterpolatableContent {
         self.styles = styles
         self.transitions = transitions
         self.links = links
+        self.lineHeightMetrics = lineHeightMetrics
         self.resolvedText = resolvedText
         self.version = version
         self.transitionText = transitionText
@@ -1251,6 +1280,7 @@ extension ResolvedStyledText {
             styles: [_ShapeStyle_Pack.Style] = [],
             transitions: [Text.ResolvedProperties.Transition] = [],
             links: Text.ResolvedProperties.Links = .init(),
+            lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics = .init(),
             resolvedText: ResolvedTextSource? = nil,
             version: Int = 0,
             transitionText: String? = nil,
@@ -1261,7 +1291,8 @@ extension ResolvedStyledText {
             super.init(storage: storage, layoutProperties: layoutProperties, layoutMargins: layoutMargins,
                 scaleFactorOverride: scaleFactorOverride, stylePadding: stylePadding, archiveOptions: archiveOptions,
                 isCollapsible: isCollapsible, features: features, suffix: suffix, attachments: attachments,
-                styles: styles, transitions: transitions, links: links, resolvedText: resolvedText,
+                styles: styles, transitions: transitions, links: links, lineHeightMetrics: lineHeightMetrics,
+                resolvedText: resolvedText,
                 version: version, transitionText: transitionText, needsDrawingGroup: needsDrawingGroup)
         }
 

@@ -433,4 +433,5 @@ enum TextParagraphWritingDirectionAttribute: AttributedStringKey {
 enum TextLineHeightAttribute: AttributedStringKey {
     typealias Value = TextLineHeight
     static let name = "VUI.LineHeight"
+    static let runBoundaries: AttributedString.AttributeRunBoundaries? = .paragraph
 }

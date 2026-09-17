@@ -143,7 +143,7 @@ extension Text {
                 properties.paragraph.languageIdentifiers.insert(identifier)
                 properties.paragraph.compositionLanguage = textCompositionLanguage(identifier)
             }
-            attributes.paragraphStyle = properties.paragraph.style(environment: environment,
+            attributes.paragraphStyle = properties.style(environment: environment,
                 alignment: alignment, writingDirection: writingDirection, lineHeight: lineHeight)
             if options.contains(.foregroundKeyColor) {
                 if let resolved = color.resolve(in: environment, with: options, properties: &properties,

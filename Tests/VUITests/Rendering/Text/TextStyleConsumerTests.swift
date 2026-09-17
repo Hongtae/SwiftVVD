@@ -1312,6 +1312,162 @@ final class TextStyleConsumerTests {
         }
     }
 
+    // ASSERTIONS textResolvedLineHeightAggregationObserved
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func lineHeightMetricsKeepIndependentMinimumsAndVariableIsNeutral() {
+        var metrics = Text.ResolvedProperties.LineHeightMetrics()
+        #expect(!metrics.isCustomized)
+        metrics.update(.variable)
+        #expect(!metrics.isCustomized)
+        for height: TextLineHeight in [.exact(points: 40), .exact(points: 20), .exact(points: 50),
+                                      .multiple(factor: 2), .multiple(factor: 1), .multiple(factor: 3),
+                                      .leading(increase: -5), .leading(increase: -2), .leading(increase: -7), .variable] {
+            metrics.update(height)
+        }
+        #expect(metrics.multiple == 1)
+        #expect(metrics.exact == 20)
+        #expect(metrics.leading == -7)
+        #expect(metrics.isCustomized)
+        for (height, factor): (TextLineHeight, CGFloat) in [(.normal, 1.2), (.tight, 1), (.loose, 1.5)] {
+            var named = Text.ResolvedProperties.LineHeightMetrics()
+            named.update(height)
+            #expect(named.multiple == factor)
+            #expect(named.exact == nil)
+            #expect(named.leading == nil)
+        }
+        var zero = Text.ResolvedProperties.LineHeightMetrics()
+        zero.update(.leading(increase: 0))
+        #expect(zero.isCustomized)
+        #expect(zero.leading == 0)
+    }
+
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func lineHeightAggregationContinuesOnParagraphCacheHitsAndAcrossBoundaries() {
+        var properties = Text.ResolvedProperties()
+        let env = environment()
+        let first = properties.style(environment: env, alignment: nil,
+            writingDirection: nil, lineHeight: .exact(points: 40))
+        let second = properties.style(environment: env, alignment: nil,
+            writingDirection: nil, lineHeight: .exact(points: 20))
+        #expect(first === second)
+        #expect(second.baselineInterval == .exact(points: 40))
+        #expect(properties.lineHeightMetrics.exact == 20)
+        var copy = properties
+        _ = copy.style(environment: env, alignment: nil, writingDirection: nil, lineHeight: .leading(increase: -7))
+        #expect(copy.lineHeightMetrics.leading == -7)
+        #expect(properties.lineHeightMetrics.leading == nil)
+        properties.paragraph.markParagraphBoundary(at: 3)
+        let third = properties.style(environment: env, alignment: nil,
+            writingDirection: nil, lineHeight: .multiple(factor: 2))
+        #expect(third !== first)
+        #expect(third.baselineInterval == .multiple(factor: 2))
+        #expect(properties.lineHeightMetrics.exact == 20)
+        #expect(properties.lineHeightMetrics.multiple == 2)
+    }
+
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func lineHeightOverrideSkipsTheFallbackDependencyEvenOnCacheHits() throws {
+        var original = environment()
+        original.lineHeight = .exact(points: 40)
+        var changed = original
+        changed.lineHeight = .exact(points: 20)
+        for height: TextLineHeight? in [nil, .variable, .exact(points: 30)] {
+            var properties = Text.ResolvedProperties()
+            _ = properties.paragraph.style(environment: original, alignment: nil,
+                writingDirection: nil, lineHeight: .exact(points: 50))
+            let env = original.trackingCopy()
+            let tracker = try #require(env.tracker)
+            _ = properties.style(environment: env, alignment: nil, writingDirection: nil, lineHeight: height)
+            #expect(tracker.hasDifferentUsedValues(changed._plist) == (height == nil))
+            #expect(properties.lineHeightMetrics.exact == (height == nil ? 40 : height == .variable ? nil : 30))
+            #expect(properties.lineHeightMetrics.isCustomized == (height != .variable))
+        }
+    }
+
+    // ASSERTIONS textLineHeight27ParagraphInputObserved
+    @Test func attributedLineHeightIsNormalizedBeforeTextResolution() throws {
+        #expect(TextLineHeightAttribute.runBoundaries == .paragraph)
+        let cases: [([TextLineHeight?], TextLineHeight?, CGFloat?, CGFloat?)] = [
+            ([nil], .exact(points: 40), 40, nil),
+            ([.exact(points: 20)], .exact(points: 40), 20, nil),
+            ([.variable], .exact(points: 40), nil, nil),
+            ([.exact(points: 40), .exact(points: 20), .exact(points: 50)], nil, 40, nil),
+            ([.multiple(factor: 2), .exact(points: 40), .leading(increase: 7)], nil, nil, 2),
+            ([.exact(points: 40), nil], .exact(points: 20), 40, nil)]
+        for (heights, fallback, exact, multiple) in cases {
+            var rich = AttributedString()
+            for height in heights {
+                var run = AttributedString("AA")
+                run[TextLineHeightAttribute.self] = height
+                rich.append(run)
+            }
+            #expect(rich.runs.count == 1)
+            #expect(rich.runs.allSatisfy { $0[TextLineHeightAttribute.self] == heights[0] })
+            var env = environment()
+            env.lineHeight = fallback
+            let source = try resolve(Text(rich), environment: env)
+            let metrics = try #require(source.resolvedProperties?.lineHeightMetrics)
+            #expect(metrics.exact == exact)
+            #expect(metrics.multiple == multiple)
+            #expect(metrics.leading == nil)
+        }
+    }
+
+    // ASSERTIONS textResolvedLineHeightAggregationObserved
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func attributedParagraphsRetainTheirHeightsAndAggregateAcrossFontScaling() throws {
+        var rich = AttributedString()
+        let heights: [TextLineHeight] = [.exact(points: 40), .exact(points: 20), .multiple(factor: 2), .leading(increase: 7)]
+        for (index, height) in heights.enumerated() {
+            var run = AttributedString(index == heights.count - 1 ? "AA" : "AA\n")
+            run[TextLineHeightAttribute.self] = height
+            rich.append(run)
+        }
+        let resolved = try resolve(Text(rich))
+        let runs = attributes(resolved)
+        #expect(runs.count == 4)
+        #expect(runs.map { $0.paragraphStyle?.baselineInterval } == heights.map(Optional.some))
+        let properties = try #require(resolved.resolvedProperties)
+        #expect(properties.paragraph.cachedStyle == nil)
+        #expect(properties.lineHeightMetrics.exact == 20)
+        #expect(properties.lineHeightMetrics.multiple == 2)
+        #expect(properties.lineHeightMetrics.leading == 7)
+        let scaled = resolved.scalingFonts(by: 0.5)
+        #expect(scaled.resolvedProperties?.lineHeightMetrics.exact == 20)
+        #expect(scaled.resolvedProperties?.lineHeightMetrics.multiple == 2)
+        #expect(scaled.resolvedProperties?.lineHeightMetrics.leading == 7)
+    }
+
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func emptyTextRetainsItsEnvironmentLineHeightWithoutRuns() throws {
+        var env = environment()
+        env.lineHeight = .exact(points: 40)
+        let source = try resolve(Text(verbatim: ""), environment: env)
+        #expect(source.runs.isEmpty)
+        #expect(source.resolvedProperties?.lineHeightMetrics.exact == 40)
+    }
+
+    // ASSERTIONS textResolvedLineHeightAggregationObserved
+    // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
+    @Test func styledTextProducersForwardLineHeightAggregatesToBothOwners() throws {
+        var env = environment()
+        env.lineHeight = .exact(points: 40)
+        let context = GraphTextResolutionContext(environment: env, sceneResources: SceneResources())
+        for features: Text.ResolvedProperties.Features in [[], .produceTextLayout] {
+            let owner = try #require(Text(verbatim: "AA")._resolveStyledText(
+                context: context, referenceDate: Date(timeIntervalSince1970: 0),
+                archiveOptions: .init(), features: features, sizeFitting: false))
+            #expect((owner is ResolvedStyledText.TextLayoutManager) == features.contains(.produceTextLayout))
+            #expect(owner.lineHeightMetrics.exact == 40)
+            #expect(owner.lineHeightMetrics.multiple == nil)
+            #expect(owner.lineHeightMetrics.leading == nil)
+            var copy = owner.resolvedText?.resolvedProperties
+            copy?.lineHeightMetrics.update(.exact(points: 20))
+            #expect(owner.lineHeightMetrics.exact == 40)
+            #expect(owner.resolvedText?.resolvedProperties?.lineHeightMetrics.exact == 40)
+        }
+    }
+
     // ASSERTIONS textParagraphStyleCacheReuseObserved
     // ASSERTIONS textParagraphBoundaryCacheFinalizationObserved
     // ASSERTIONS textParagraphAlignmentAggregationObserved

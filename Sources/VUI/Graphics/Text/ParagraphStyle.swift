@@ -211,6 +211,18 @@ func makeParagraphStyle(
     return result
 }
 
+extension Text.ResolvedProperties {
+    mutating func style(environment: EnvironmentValues, alignment: TextParagraphAlignment?,
+                        writingDirection: AttributedString.WritingDirection?, lineHeight: TextLineHeight?) -> TextParagraphStyle {
+        // Aggregate every run, including runs that reuse the paragraph's cached style.
+        if let height = lineHeight ?? environment.lineHeight {
+            lineHeightMetrics.update(height)
+        }
+        return paragraph.style(environment: environment, alignment: alignment,
+            writingDirection: writingDirection, lineHeight: lineHeight)
+    }
+}
+
 extension Text.ResolvedProperties.Paragraph {
     mutating func style(environment: EnvironmentValues, alignment: TextParagraphAlignment?,
                         writingDirection: AttributedString.WritingDirection?, lineHeight: TextLineHeight?) -> TextParagraphStyle {
