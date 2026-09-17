@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 import VVD
 @testable import VUI
@@ -33,6 +34,62 @@ final class TextParagraphAdmissionTests: XCTestCase {
         return try XCTUnwrap(Text(verbatim: string).font(font)._resolve(context:
             GraphTextResolutionContext(environment: environment, sceneResources: scene),
             referenceDate: Date(timeIntervalSince1970: 0)))
+    }
+
+    func testTextMeasurementFitsTheStackRemainingAfterHostLayout() throws {
+        // Keep a bounded text budget inside the larger window-update stack.
+        let sources = Mutex(StackMeasurementSources(settings: try resolve("Settings"),
+                             paragraph: try resolve("Alpha beta gamma delta\nNext line")))
+        let completed = DispatchSemaphore(value: 0)
+        let results = Mutex((spacingCount: 0, layouts: [ResolvedTextSource.GlyphLayout](), stackSize: 0))
+        let thread = Thread {
+            sources.withLock { sources in
+                let owner = ResolvedStyledText.StringDrawing(resolvedText: sources.settings)
+                let spacing = owner.spacing()
+                var layouts: [ResolvedTextSource.GlyphLayout] = []
+                for mode: Text.TruncationMode in [.head, .middle, .tail] {
+                    layouts.append(sources.paragraph.makeGlyphLayout(
+                        maxWidth: 80, maximumHeight: 27, lineLimit: 1, truncationMode: mode))
+                }
+                results.withLock {
+                    $0.spacingCount = spacing.minima.count
+                    $0.layouts = layouts
+#if canImport(Darwin)
+                    $0.stackSize = pthread_get_stacksize_np(pthread_self())
+#endif
+                }
+            }
+            completed.signal()
+        }
+#if canImport(Darwin)
+        thread.stackSize = 192 * 1024
+#endif
+        thread.start()
+        guard completed.wait(timeout: .now() + 10) == .success else {
+            return XCTFail("Text measurement did not finish on the bounded worker stack")
+        }
+        sources.withLock { sources in
+            results.withLock { results in
+                XCTAssertEqual(results.spacingCount, 6)
+                XCTAssertEqual(results.layouts.count, 3)
+#if canImport(Darwin)
+                XCTAssertGreaterThanOrEqual(results.stackSize, 192 * 1024)
+                XCTAssertLessThan(results.stackSize, 224 * 1024)
+#endif
+                for (mode, actual) in zip([Text.TruncationMode.head, .middle, .tail], results.layouts) {
+                    let expected = sources.paragraph.makeGlyphLayout(
+                        maxWidth: 80, maximumHeight: 27, lineLimit: 1, truncationMode: mode)
+                    XCTAssertEqual(actual.lines.map(\.glyphs).map { $0.map(\.scalar) },
+                                   expected.lines.map(\.glyphs).map { $0.map(\.scalar) })
+                    XCTAssertEqual(actual.lines.map(\.originY), expected.lines.map(\.originY))
+                    XCTAssertEqual(actual.lines.map(\.baseline), expected.lines.map(\.baseline))
+                    XCTAssertEqual(actual.lines.map(\.width), expected.lines.map(\.width))
+                    XCTAssertEqual(actual.lineCount, expected.lineCount)
+                    XCTAssertEqual(actual.truncatedRanges, expected.truncatedRanges)
+                    XCTAssertEqual(actual.hasUnlaidText, expected.hasUnlaidText)
+                }
+            }
+        }
     }
 
     // ASSERTIONS textParagraphAdmissionBudgetObserved
@@ -133,6 +190,12 @@ final class TextParagraphAdmissionTests: XCTestCase {
         XCTAssertEqual(source.measure(in: size).height, 27)
         XCTAssertEqual(TextProxy(ResolvedStyledText.TextLayoutManager(resolvedText: source)).sizeThatFits(.init(size)), source.measure(in: size))
     }
+}
+
+// Access transfers to the worker under a mutex and returns after its completion signal.
+private struct StackMeasurementSources: @unchecked Sendable {
+    let settings: ResolvedTextSource
+    let paragraph: ResolvedTextSource
 }
 
 private final class ParagraphAdmissionAppContext: AppContext {

@@ -1571,39 +1571,44 @@ struct ResolvedTextSource {
             line.width = getGlyphsWidth(line.glyphs)
         }
 
-        var wrappedLines: [LineGlyphs] = []
-        for sourceLine in lines {
-            var line = sourceLine
-            while Self.clusterRanges(in: line.glyphs).count > 1,
-                  Int(ceil(wrappingWidth(line.glyphs))) > maxWidth {
-                let split = splitLineGlyphs(line.glyphs, maxWidth)
-                guard !split.second.isEmpty else { break }
+        // Keep each phase's temporary line values in its own call frame.
+        func wrapLines() -> [LineGlyphs] {
+            var wrappedLines: [LineGlyphs] = []
+            for sourceLine in lines {
+                var line = sourceLine
+                while Self.clusterRanges(in: line.glyphs).count > 1,
+                      Int(ceil(wrappingWidth(line.glyphs))) > maxWidth {
+                    let split = splitLineGlyphs(line.glyphs, maxWidth)
+                    guard !split.second.isEmpty else { break }
 
-                var first = line
-                first.glyphs = split.first
-                first.trailingBoundary = nil
-                first.isParagraphEnd = false
-                // Retain the fallback used for this particular split. A
-                // later, unprocessed line must not affect fitting decisions.
-                let boundary = getBreakableSplitIndex(first.glyphs)
-                first.forcedClusterBreak = boundary != first.glyphs.endIndex &&
-                    !CharacterSet.whitespaces.contains(split.second[0].scalar)
-                updateMetrics(&first)
-                if Int(ceil(wrappingWidth(first.glyphs))) <= maxWidth {
-                    first.width = min(first.width, CGFloat(maxWidth))
+                    var first = line
+                    first.glyphs = split.first
+                    first.trailingBoundary = nil
+                    first.isParagraphEnd = false
+                    // Retain the fallback used for this particular split. A
+                    // later, unprocessed line must not affect fitting decisions.
+                    let boundary = getBreakableSplitIndex(first.glyphs)
+                    first.forcedClusterBreak = boundary != first.glyphs.endIndex &&
+                        !CharacterSet.whitespaces.contains(split.second[0].scalar)
+                    updateMetrics(&first)
+                    if Int(ceil(wrappingWidth(first.glyphs))) <= maxWidth {
+                        first.width = min(first.width, CGFloat(maxWidth))
+                    }
+                    wrappedLines.append(first)
+
+                    line.glyphs = split.second
+                    updateMetrics(&line)
                 }
-                wrappedLines.append(first)
-
-                line.glyphs = split.second
-                updateMetrics(&line)
+                // Trailing whitespace stays in the glyph range even when it
+                // extends beyond the wrapping width. Clip its reported extent.
+                if Int(ceil(wrappingWidth(line.glyphs))) <= maxWidth {
+                    line.width = min(line.width, CGFloat(maxWidth))
+                }
+                wrappedLines.append(line)
             }
-            // Trailing whitespace stays in the glyph range even when it
-            // extends beyond the wrapping width. Clip its reported extent.
-            if Int(ceil(wrappingWidth(line.glyphs))) <= maxWidth {
-                line.width = min(line.width, CGFloat(maxWidth))
-            }
-            wrappedLines.append(line)
+            return wrappedLines
         }
+        let wrappedLines = wrapLines()
 
         var paragraphInputs: [Int: Glyph] = [:]
         var precedingBoundary: Glyph?
@@ -1714,138 +1719,141 @@ struct ResolvedTextSource {
                         forcedClusterBreak: forcedClusterBreak, truncatedRanges: truncatedRanges,
                         hasUnlaidText: !visibleLines.isEmpty && textEnd(in: visibleLines) < sourceEnd)
         }
-        let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
-        let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight
-        let heightEpsilon = 0.001 * scaleFactor
         var nextLineIndex = 0
         var needsTruncation = false
-        paragraphLoop: while nextLineIndex < wrappedLines.count {
-            let start = nextLineIndex
-            let paragraph = wrappedLines[start].paragraphIndex
-            var end = start + 1
-            while end < wrappedLines.count, wrappedLines[end].paragraphIndex == paragraph {
-                end += 1
-            }
-            let budget = maximumLineCount.map { $0 - visibleLines.count }
-            if let budget, budget <= 0 { break }
-            let paragraphY = paragraphOrigin(after: visibleLines.last)
-            let remainingHeight = availableHeight - paragraphY
-            if paragraphY > 0, remainingHeight <= 0 { break }
-
-            if wrappedLines[start].isSimpleParagraph {
-                let line = place(wrappedLines[start], after: visibleLines.last)
-                forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
-                // Simple paragraphs test the font height before adding the
-                // paragraph's starting spacing to the published rectangle.
-                let height = line.height - line.paragraphStartSpacing
-                if start != 0, height > remainingHeight + heightEpsilon { break }
-                publish(line)
-                nextLineIndex = start + 1
-                // A simple paragraph publishes its missing-attribute extra
-                // outside both its height check and its ordinary line budget.
-                if nextLineIndex < end, case .extra(nil) = wrappedLines[nextLineIndex].kind {
-                    publish(place(wrappedLines[nextLineIndex], after: visibleLines.last))
-                    nextLineIndex += 1
+        func placeParagraphs() {
+            let maximumLineCount = maxHeight == 0 ? 1 : lineLimit.map { max($0, 1) }
+            let availableHeight = maxHeight == 0 ? CGFloat.infinity : maxHeight
+            let heightEpsilon = 0.001 * scaleFactor
+            paragraphLoop: while nextLineIndex < wrappedLines.count {
+                let start = nextLineIndex
+                let paragraph = wrappedLines[start].paragraphIndex
+                var end = start + 1
+                while end < wrappedLines.count, wrappedLines[end].paragraphIndex == paragraph {
+                    end += 1
                 }
-                continue
-            }
+                let budget = maximumLineCount.map { $0 - visibleLines.count }
+                if let budget, budget <= 0 { break }
+                let paragraphY = paragraphOrigin(after: visibleLines.last)
+                let remainingHeight = availableHeight - paragraphY
+                if paragraphY > 0, remainingHeight <= 0 { break }
 
-            var candidates = Array(wrappedLines[start..<end])
-            let hasFinalExtra: Bool
-            if case .extra = candidates.last!.kind {
-                hasFinalExtra = true
-            } else {
-                hasFinalExtra = false
-                if let boundary = candidates.last!.trailingBoundary {
-                    // A terminated paragraph must also attempt its continuation
-                    // before committing its final content line. Only the last
-                    // paragraph can expose this continuation as an extra line.
-                    candidates.append(LineGlyphs(glyphs: [], ascender: 0, descender: 0, width: 0,
-                        paragraphIndex: paragraph, paragraphInput: paragraphInputs[paragraph],
-                        kind: .extra(boundary)))
-                }
-            }
-
-            if candidates.count == 1, !hasFinalExtra,
-               Int(ceil(candidates[0].width)) <= maxWidth {
-                // A complete line that fits a rectangular container uses
-                // the paragraph-origin gate, without a second height test.
-                publish(place(candidates[0], after: visibleLines.last))
-                nextLineIndex = end
-                continue
-            }
-
-            var pending: (line: LineGlyphs, index: Int)?
-            var admitted = 0
-            for (offset, source) in candidates.enumerated() {
-                if let budget, admitted >= budget {
-                    if let pending, !pending.line.glyphs.isEmpty {
-                        publish(pending.line)
-                        nextLineIndex = pending.index + 1
-                        needsTruncation = true
+                if wrappedLines[start].isSimpleParagraph {
+                    let line = place(wrappedLines[start], after: visibleLines.last)
+                    forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
+                    // Simple paragraphs test the font height before adding the
+                    // paragraph's starting spacing to the published rectangle.
+                    let height = line.height - line.paragraphStartSpacing
+                    if start != 0, height > remainingHeight + heightEpsilon { break }
+                    publish(line)
+                    nextLineIndex = start + 1
+                    // A simple paragraph publishes its missing-attribute extra
+                    // outside both its height check and its ordinary line budget.
+                    if nextLineIndex < end, case .extra(nil) = wrappedLines[nextLineIndex].kind {
+                        publish(place(wrappedLines[nextLineIndex], after: visibleLines.last))
+                        nextLineIndex += 1
                     }
-                    break paragraphLoop
+                    continue
                 }
-                let line = place(source, after: pending?.line ?? visibleLines.last)
-                forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
-                let isExtra: Bool
-                if case .extra = source.kind { isExtra = true } else { isExtra = false }
-                let enforcesMinimum = start == 0 && admitted == 0
-                let candidateHeight = (line.originY - paragraphY) + line.height
-                if !enforcesMinimum, candidateHeight > remainingHeight + heightEpsilon {
-                    if let pending {
-                        if hasFinalExtra && isExtra {
-                            // A failed final extra retains the pending rectangle.
-                            // Publish the empty fragment there before finalizing
-                            // any text, so their bounds can overlap.
-                            var empty = pending.line
-                            empty.glyphs = []
-                            empty.width = 0
-                            empty.trailingBoundary = nil
-                            empty.kind = source.kind
-                            publish(empty, countsAsLine: false)
-                            if !pending.line.glyphs.isEmpty { publish(pending.line) }
-                            nextLineIndex = end
-                        } else if !pending.line.glyphs.isEmpty {
+
+                var candidates = Array(wrappedLines[start..<end])
+                let hasFinalExtra: Bool
+                if case .extra = candidates.last!.kind {
+                    hasFinalExtra = true
+                } else {
+                    hasFinalExtra = false
+                    if let boundary = candidates.last!.trailingBoundary {
+                        // A terminated paragraph must also attempt its continuation
+                        // before committing its final content line. Only the last
+                        // paragraph can expose this continuation as an extra line.
+                        candidates.append(LineGlyphs(glyphs: [], ascender: 0, descender: 0, width: 0,
+                            paragraphIndex: paragraph, paragraphInput: paragraphInputs[paragraph],
+                            kind: .extra(boundary)))
+                    }
+                }
+
+                if candidates.count == 1, !hasFinalExtra,
+                   Int(ceil(candidates[0].width)) <= maxWidth {
+                    // A complete line that fits a rectangular container uses
+                    // the paragraph-origin gate, without a second height test.
+                    publish(place(candidates[0], after: visibleLines.last))
+                    nextLineIndex = end
+                    continue
+                }
+
+                var pending: (line: LineGlyphs, index: Int)?
+                var admitted = 0
+                for (offset, source) in candidates.enumerated() {
+                    if let budget, admitted >= budget {
+                        if let pending, !pending.line.glyphs.isEmpty {
                             publish(pending.line)
                             nextLineIndex = pending.index + 1
-                            // Finalization tests two pending line heights,
-                            // excluding interline spacing and the admission
-                            // tolerance. A failed provisional extra can thus
-                            // finish this paragraph without truncating it.
-                            let nextHeight = (pending.line.originY - paragraphY) +
-                                pending.line.height + pending.line.height
-                            needsTruncation = !isExtra || nextHeight > remainingHeight
-                            if isExtra, !needsTruncation {
+                            needsTruncation = true
+                        }
+                        break paragraphLoop
+                    }
+                    let line = place(source, after: pending?.line ?? visibleLines.last)
+                    forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
+                    let isExtra: Bool
+                    if case .extra = source.kind { isExtra = true } else { isExtra = false }
+                    let enforcesMinimum = start == 0 && admitted == 0
+                    let candidateHeight = (line.originY - paragraphY) + line.height
+                    if !enforcesMinimum, candidateHeight > remainingHeight + heightEpsilon {
+                        if let pending {
+                            if hasFinalExtra && isExtra {
+                                // A failed final extra retains the pending rectangle.
+                                // Publish the empty fragment there before finalizing
+                                // any text, so their bounds can overlap.
+                                var empty = pending.line
+                                empty.glyphs = []
+                                empty.width = 0
+                                empty.trailingBoundary = nil
+                                empty.kind = source.kind
+                                publish(empty, countsAsLine: false)
+                                if !pending.line.glyphs.isEmpty { publish(pending.line) }
                                 nextLineIndex = end
-                                continue paragraphLoop
+                            } else if !pending.line.glyphs.isEmpty {
+                                publish(pending.line)
+                                nextLineIndex = pending.index + 1
+                                // Finalization tests two pending line heights,
+                                // excluding interline spacing and the admission
+                                // tolerance. A failed provisional extra can thus
+                                // finish this paragraph without truncating it.
+                                let nextHeight = (pending.line.originY - paragraphY) +
+                                    pending.line.height + pending.line.height
+                                needsTruncation = !isExtra || nextHeight > remainingHeight
+                                if isExtra, !needsTruncation {
+                                    nextLineIndex = end
+                                    continue paragraphLoop
+                                }
                             }
                         }
+                        break paragraphLoop
                     }
-                    break paragraphLoop
+                    if let pending {
+                        publish(pending.line)
+                        nextLineIndex = pending.index + 1
+                    }
+                    admitted += 1
+                    pending = (line, start + offset)
+                    if isExtra {
+                        if hasFinalExtra { publish(line) }
+                        pending = nil
+                        nextLineIndex = end
+                    }
                 }
                 if let pending {
-                    publish(pending.line)
-                    nextLineIndex = pending.index + 1
-                }
-                admitted += 1
-                pending = (line, start + offset)
-                if isExtra {
-                    if hasFinalExtra { publish(line) }
-                    pending = nil
+                    // A shaped line can finalize without a following candidate.
+                    // A separator-only candidate has no such text line to flush.
+                    if !pending.line.glyphs.isEmpty { publish(pending.line) }
                     nextLineIndex = end
                 }
-            }
-            if let pending {
-                // A shaped line can finalize without a following candidate.
-                // A separator-only candidate has no such text line to flush.
-                if !pending.line.glyphs.isEmpty { publish(pending.line) }
-                nextLineIndex = end
-            }
-            if nextLineIndex != end {
-                break
+                if nextLineIndex != end {
+                    break
+                }
             }
         }
+        placeParagraphs()
 
         guard let lastVisibleIndex = visibleLines.indices.last else {
             return result()
@@ -1854,330 +1862,333 @@ struct ResolvedTextSource {
             return result()
         }
 
-        let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex
-        var paragraphGlyphs = visibleLines[lastVisibleIndex].glyphs
-        var continuationIndex = nextLineIndex
-        while visibleLines[lastVisibleIndex].trailingBoundary == nil,
-              continuationIndex < wrappedLines.count,
-              wrappedLines[continuationIndex].paragraphIndex ==
-                lastParagraph {
-            paragraphGlyphs.append(
-                contentsOf: wrappedLines[continuationIndex].glyphs
-            )
-            let reachesBoundary = wrappedLines[continuationIndex].trailingBoundary != nil
-            continuationIndex += 1
-            // A hard line break ends the truncation source even when the
-            // following line belongs to the same paragraph.
-            if reachesBoundary { break }
-        }
-
-        if hasTextSuffix, let last = paragraphGlyphs.last,
-           case .customAttachment = last.content,
-           wrappingWidth(Array(paragraphGlyphs.dropLast())) <= CGFloat(maxWidth) {
-            // An attachment alone beyond the final line remains unlaid.
-            // It does not create a removed body range or an ordinary token.
-            let originY = visibleLines[lastVisibleIndex].originY
-            visibleLines[lastVisibleIndex].glyphs = Array(paragraphGlyphs.dropLast())
-            updateMetrics(&visibleLines[lastVisibleIndex])
-            visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
-                after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
-            visibleLines[lastVisibleIndex].originY = originY
-            return result()
-        }
-
-        let hasParagraphOverflow =
-            paragraphGlyphs.count >
-                visibleLines[lastVisibleIndex].glyphs.count ||
-            Int(ceil(visibleLines[lastVisibleIndex].width)) > maxWidth
-        let hasExplicitLineOverflow =
-            !hasParagraphOverflow &&
-            nextLineIndex < wrappedLines.count &&
-            visibleLines[lastVisibleIndex].trailingBoundary != nil
-
-        if hasExplicitLineOverflow && hasTextSuffix { return result() }
-
-        guard hasParagraphOverflow || hasExplicitLineOverflow else {
-            return result()
-        }
-
-        func adjacencyKerning(
-            from lhs: Glyph?,
-            to rhs: Glyph
-        ) -> CGPoint {
-            guard let lhs, lhs.face.isEqual(to: rhs.face) else {
-                return .zero
+        func truncateLastLine() -> GlyphLayout {
+            let lastParagraph = visibleLines[lastVisibleIndex].paragraphIndex
+            var paragraphGlyphs = visibleLines[lastVisibleIndex].glyphs
+            var continuationIndex = nextLineIndex
+            while visibleLines[lastVisibleIndex].trailingBoundary == nil,
+                  continuationIndex < wrappedLines.count,
+                  wrappedLines[continuationIndex].paragraphIndex ==
+                    lastParagraph {
+                paragraphGlyphs.append(
+                    contentsOf: wrappedLines[continuationIndex].glyphs
+                )
+                let reachesBoundary = wrappedLines[continuationIndex].trailingBoundary != nil
+                continuationIndex += 1
+                // A hard line break ends the truncation source even when the
+                // following line belongs to the same paragraph.
+                if reachesBoundary { break }
             }
-            return lhs.face.kernAdvance(
-                left: lhs.scalar,
-                right: rhs.scalar
-            )
-        }
 
-        func makeEllipsis(
-            inheriting source: Glyph,
-            characterIndex: Int,
-            after previous: Glyph?
-        ) -> Glyph? {
-            let generated = TextGlyphs.from(
-                unicodeScalars: "…".unicodeScalars,
-                with: [source.face],
-                drawMissingGlyphs: false,
-                prevFace: previous?.face,
-                prevChar: previous?.scalar ?? UnicodeScalar(UInt8(0)),
-                fontResource: source.style.fontResource,
-                scaleFactor: scaleFactor
-            )
-            guard var glyph = generated.glyphs.first else {
-                return nil
+            if hasTextSuffix, let last = paragraphGlyphs.last,
+               case .customAttachment = last.content,
+               wrappingWidth(Array(paragraphGlyphs.dropLast())) <= CGFloat(maxWidth) {
+                // An attachment alone beyond the final line remains unlaid.
+                // It does not create a removed body range or an ordinary token.
+                let originY = visibleLines[lastVisibleIndex].originY
+                visibleLines[lastVisibleIndex].glyphs = Array(paragraphGlyphs.dropLast())
+                updateMetrics(&visibleLines[lastVisibleIndex])
+                visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
+                    after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
+                visibleLines[lastVisibleIndex].originY = originY
+                return result()
             }
-            glyph.attributes = source.attributes
-            glyph.style = source.style
-            glyph.baselineOffset = source.baselineOffset
-            glyph.ascender = source.ascender
-            glyph.descender = source.descender
-            glyph.leading = source.leading
-            glyph.lineBoxAscender = source.lineBoxAscender
-            glyph.lineBoxDescender = source.lineBoxDescender
-            glyph.fontLineMetrics = source.fontLineMetrics
-            glyph.foregroundColor = source.foregroundColor
-            glyph.characterIndex = characterIndex
-            glyph.sourceRange = characterIndex..<(characterIndex + 1)
-            glyph.isTruncationToken = true
-            glyph.advance.width += (
-                source.style.tracking ??
-                source.style.kern ??
-                0
-            ) * scaleFactor
-            if previous == nil {
-                glyph.kerning = .zero
+
+            let hasParagraphOverflow =
+                paragraphGlyphs.count >
+                    visibleLines[lastVisibleIndex].glyphs.count ||
+                Int(ceil(visibleLines[lastVisibleIndex].width)) > maxWidth
+            let hasExplicitLineOverflow =
+                !hasParagraphOverflow &&
+                nextLineIndex < wrappedLines.count &&
+                visibleLines[lastVisibleIndex].trailingBoundary != nil
+
+            if hasExplicitLineOverflow && hasTextSuffix { return result() }
+
+            guard hasParagraphOverflow || hasExplicitLineOverflow else {
+                return result()
             }
-            return glyph
-        }
 
-        func truncatedRange(_ clusters: ArraySlice<[Glyph]>) -> Range<Int>? {
-            guard let lower = clusters.first?.first?.sourceRange?.lowerBound,
-                  let upper = clusters.last?.last?.sourceRange?.upperBound,
-                  lower < upper else { return nil }
-            return lower..<upper
-        }
+            func adjacencyKerning(
+                from lhs: Glyph?,
+                to rhs: Glyph
+            ) -> CGPoint {
+                guard let lhs, lhs.face.isEqual(to: rhs.face) else {
+                    return .zero
+                }
+                return lhs.face.kernAdvance(
+                    left: lhs.scalar,
+                    right: rhs.scalar
+                )
+            }
 
-        func tailTruncation(
-            _ glyphs: [Glyph],
-            explicitBoundary: Glyph?
-        ) -> (glyphs: [Glyph], range: Range<Int>?)? {
-            if let explicitBoundary,
-               let source = glyphs.last {
-                var prefix = Self.clusterRanges(in: glyphs).map {
+            func makeEllipsis(
+                inheriting source: Glyph,
+                characterIndex: Int,
+                after previous: Glyph?
+            ) -> Glyph? {
+                let generated = TextGlyphs.from(
+                    unicodeScalars: "…".unicodeScalars,
+                    with: [source.face],
+                    drawMissingGlyphs: false,
+                    prevFace: previous?.face,
+                    prevChar: previous?.scalar ?? UnicodeScalar(UInt8(0)),
+                    fontResource: source.style.fontResource,
+                    scaleFactor: scaleFactor
+                )
+                guard var glyph = generated.glyphs.first else {
+                    return nil
+                }
+                glyph.attributes = source.attributes
+                glyph.style = source.style
+                glyph.baselineOffset = source.baselineOffset
+                glyph.ascender = source.ascender
+                glyph.descender = source.descender
+                glyph.leading = source.leading
+                glyph.lineBoxAscender = source.lineBoxAscender
+                glyph.lineBoxDescender = source.lineBoxDescender
+                glyph.fontLineMetrics = source.fontLineMetrics
+                glyph.foregroundColor = source.foregroundColor
+                glyph.characterIndex = characterIndex
+                glyph.sourceRange = characterIndex..<(characterIndex + 1)
+                glyph.isTruncationToken = true
+                glyph.advance.width += (
+                    source.style.tracking ??
+                    source.style.kern ??
+                    0
+                ) * scaleFactor
+                if previous == nil {
+                    glyph.kerning = .zero
+                }
+                return glyph
+            }
+
+            func truncatedRange(_ clusters: ArraySlice<[Glyph]>) -> Range<Int>? {
+                guard let lower = clusters.first?.first?.sourceRange?.lowerBound,
+                      let upper = clusters.last?.last?.sourceRange?.upperBound,
+                      lower < upper else { return nil }
+                return lower..<upper
+            }
+
+            func tailTruncation(
+                _ glyphs: [Glyph],
+                explicitBoundary: Glyph?
+            ) -> (glyphs: [Glyph], range: Range<Int>?)? {
+                if let explicitBoundary,
+                   let source = glyphs.last {
+                    var prefix = Self.clusterRanges(in: glyphs).map {
+                        Array(glyphs[$0])
+                    }
+                    while true {
+                        let flattenedPrefix = prefix.flatMap { $0 }
+                        guard let ellipsis = makeEllipsis(
+                            inheriting: source,
+                            characterIndex: explicitBoundary.characterIndex,
+                            after: flattenedPrefix.last
+                        ) else {
+                            return nil
+                        }
+                        var candidate = flattenedPrefix + [ellipsis]
+                        if !candidate.isEmpty {
+                            candidate[0].kerning = .zero
+                        }
+                        if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                            return (candidate, nil)
+                        }
+                        guard !prefix.isEmpty else { return nil }
+                        prefix.removeLast()
+                    }
+                }
+
+                let clusters = Self.clusterRanges(in: glyphs).map {
                     Array(glyphs[$0])
                 }
-                while true {
-                    let flattenedPrefix = prefix.flatMap { $0 }
+                guard clusters.count > 1 else { return nil }
+                for prefixCount in stride(
+                    from: clusters.count - 1,
+                    through: 0,
+                    by: -1
+                ) {
+                    guard let source = clusters[prefixCount].first else {
+                        continue
+                    }
+                    var prefix = clusters[..<prefixCount].flatMap { $0 }
+                    let previous = prefix.last
                     guard let ellipsis = makeEllipsis(
                         inheriting: source,
-                        characterIndex: explicitBoundary.characterIndex,
-                        after: flattenedPrefix.last
+                        characterIndex: source.characterIndex,
+                        after: previous
                     ) else {
                         return nil
                     }
-                    var candidate = flattenedPrefix + [ellipsis]
-                    if !candidate.isEmpty {
-                        candidate[0].kerning = .zero
+                    prefix.append(ellipsis)
+                    prefix[0].kerning = .zero
+                    if Int(ceil(getGlyphsWidth(prefix))) <= maxWidth {
+                        return (prefix, truncatedRange(clusters[prefixCount...]))
                     }
-                    if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                        return (candidate, nil)
-                    }
-                    guard !prefix.isEmpty else { return nil }
-                    prefix.removeLast()
                 }
-            }
-
-            let clusters = Self.clusterRanges(in: glyphs).map {
-                Array(glyphs[$0])
-            }
-            guard clusters.count > 1 else { return nil }
-            for prefixCount in stride(
-                from: clusters.count - 1,
-                through: 0,
-                by: -1
-            ) {
-                guard let source = clusters[prefixCount].first else {
-                    continue
-                }
-                var prefix = clusters[..<prefixCount].flatMap { $0 }
-                let previous = prefix.last
-                guard let ellipsis = makeEllipsis(
-                    inheriting: source,
-                    characterIndex: source.characterIndex,
-                    after: previous
-                ) else {
-                    return nil
-                }
-                prefix.append(ellipsis)
-                prefix[0].kerning = .zero
-                if Int(ceil(getGlyphsWidth(prefix))) <= maxWidth {
-                    return (prefix, truncatedRange(clusters[prefixCount...]))
-                }
-            }
-            return nil
-        }
-
-        func headTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
-            let clusters = Self.clusterRanges(in: glyphs).map {
-                Array(glyphs[$0])
-            }
-            guard clusters.count > 1,
-                  let source = glyphs.first,
-                  let ellipsis = makeEllipsis(
-                    inheriting: source,
-                    characterIndex: source.characterIndex,
-                    after: nil
-                  ) else {
                 return nil
             }
-            for suffixCount in stride(
-                from: clusters.count - 1,
-                through: 0,
-                by: -1
-            ) {
-                var suffix = clusters.suffix(suffixCount).flatMap { $0 }
-                if !suffix.isEmpty {
-                    suffix[0].kerning = adjacencyKerning(
-                        from: ellipsis,
-                        to: suffix[0]
-                    )
-                }
-                let candidate = [ellipsis] + suffix
-                if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                    return (candidate, truncatedRange(clusters.dropLast(suffixCount)))
-                }
-            }
-            return nil
-        }
 
-        func middleTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
-            let clusters = Self.clusterRanges(in: glyphs).map {
-                Array(glyphs[$0])
-            }
-            guard clusters.count > 1 else { return nil }
-
-            var selectedPrefixCount = 0
-            var selectedEllipsis: Glyph?
-            for prefixCount in 0..<clusters.count {
-                guard let source = clusters[prefixCount].first else {
-                    continue
+            func headTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
+                let clusters = Self.clusterRanges(in: glyphs).map {
+                    Array(glyphs[$0])
                 }
-                let prefix = clusters[..<prefixCount].flatMap { $0 }
-                guard let ellipsis = makeEllipsis(
-                    inheriting: source,
-                    characterIndex: source.characterIndex,
-                    after: prefix.last
-                ) else {
-                    return nil
-                }
-                let retainedWidth = CGFloat(maxWidth) -
-                    getGlyphsWidth([ellipsis])
-                guard retainedWidth >= 0 else { return nil }
-                if getGlyphsWidth(prefix) <= retainedWidth * 0.5 {
-                    selectedPrefixCount = prefixCount
-                    selectedEllipsis = ellipsis
-                } else {
-                    break
-                }
-            }
-
-            guard selectedPrefixCount > 0,
-                  let ellipsis = selectedEllipsis else {
-                guard let source = glyphs.first,
+                guard clusters.count > 1,
+                      let source = glyphs.first,
                       let ellipsis = makeEllipsis(
                         inheriting: source,
                         characterIndex: source.characterIndex,
                         after: nil
-                      ),
-                      Int(ceil(getGlyphsWidth([ellipsis]))) <= maxWidth else {
+                      ) else {
                     return nil
                 }
-                return ([ellipsis], truncatedRange(clusters[...]))
+                for suffixCount in stride(
+                    from: clusters.count - 1,
+                    through: 0,
+                    by: -1
+                ) {
+                    var suffix = clusters.suffix(suffixCount).flatMap { $0 }
+                    if !suffix.isEmpty {
+                        suffix[0].kerning = adjacencyKerning(
+                            from: ellipsis,
+                            to: suffix[0]
+                        )
+                    }
+                    let candidate = [ellipsis] + suffix
+                    if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                        return (candidate, truncatedRange(clusters.dropLast(suffixCount)))
+                    }
+                }
+                return nil
             }
 
-            let maximumSuffixCount =
-                clusters.count - selectedPrefixCount - 1
-            let prefix = clusters[..<selectedPrefixCount].flatMap { $0 }
-            for suffixCount in stride(
-                from: maximumSuffixCount,
-                through: 0,
-                by: -1
-            ) {
-                var suffix = clusters.suffix(suffixCount).flatMap { $0 }
-                if !suffix.isEmpty {
-                    suffix[0].kerning = adjacencyKerning(
-                        from: ellipsis,
-                        to: suffix[0]
+            func middleTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
+                let clusters = Self.clusterRanges(in: glyphs).map {
+                    Array(glyphs[$0])
+                }
+                guard clusters.count > 1 else { return nil }
+
+                var selectedPrefixCount = 0
+                var selectedEllipsis: Glyph?
+                for prefixCount in 0..<clusters.count {
+                    guard let source = clusters[prefixCount].first else {
+                        continue
+                    }
+                    let prefix = clusters[..<prefixCount].flatMap { $0 }
+                    guard let ellipsis = makeEllipsis(
+                        inheriting: source,
+                        characterIndex: source.characterIndex,
+                        after: prefix.last
+                    ) else {
+                        return nil
+                    }
+                    let retainedWidth = CGFloat(maxWidth) -
+                        getGlyphsWidth([ellipsis])
+                    guard retainedWidth >= 0 else { return nil }
+                    if getGlyphsWidth(prefix) <= retainedWidth * 0.5 {
+                        selectedPrefixCount = prefixCount
+                        selectedEllipsis = ellipsis
+                    } else {
+                        break
+                    }
+                }
+
+                guard selectedPrefixCount > 0,
+                      let ellipsis = selectedEllipsis else {
+                    guard let source = glyphs.first,
+                          let ellipsis = makeEllipsis(
+                            inheriting: source,
+                            characterIndex: source.characterIndex,
+                            after: nil
+                          ),
+                          Int(ceil(getGlyphsWidth([ellipsis]))) <= maxWidth else {
+                        return nil
+                    }
+                    return ([ellipsis], truncatedRange(clusters[...]))
+                }
+
+                let maximumSuffixCount =
+                    clusters.count - selectedPrefixCount - 1
+                let prefix = clusters[..<selectedPrefixCount].flatMap { $0 }
+                for suffixCount in stride(
+                    from: maximumSuffixCount,
+                    through: 0,
+                    by: -1
+                ) {
+                    var suffix = clusters.suffix(suffixCount).flatMap { $0 }
+                    if !suffix.isEmpty {
+                        suffix[0].kerning = adjacencyKerning(
+                            from: ellipsis,
+                            to: suffix[0]
+                        )
+                    }
+                    var candidate = prefix + [ellipsis] + suffix
+                    candidate[0].kerning = .zero
+                    if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
+                        return (candidate, truncatedRange(clusters[selectedPrefixCount..<(clusters.count - suffixCount)]))
+                    }
+                }
+                return nil
+            }
+
+            let explicitBoundary = hasExplicitLineOverflow
+                ? visibleLines[lastVisibleIndex].trailingBoundary
+                : nil
+            let truncated: (glyphs: [Glyph], range: Range<Int>?)?
+            if explicitBoundary != nil, truncationMode != .tail {
+                return result()
+            } else if explicitBoundary != nil {
+                truncated = tailTruncation(
+                    visibleLines[lastVisibleIndex].glyphs,
+                    explicitBoundary: explicitBoundary
+                )
+            } else {
+                switch truncationMode {
+                case .head:
+                    truncated = headTruncation(paragraphGlyphs)
+                case .middle:
+                    truncated = middleTruncation(paragraphGlyphs)
+                case .tail:
+                    truncated = tailTruncation(
+                        paragraphGlyphs,
+                        explicitBoundary: nil
                     )
                 }
-                var candidate = prefix + [ellipsis] + suffix
-                candidate[0].kerning = .zero
-                if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                    return (candidate, truncatedRange(clusters[selectedPrefixCount..<(clusters.count - suffixCount)]))
-                }
             }
-            return nil
-        }
 
-        let explicitBoundary = hasExplicitLineOverflow
-            ? visibleLines[lastVisibleIndex].trailingBoundary
-            : nil
-        let truncated: (glyphs: [Glyph], range: Range<Int>?)?
-        if explicitBoundary != nil, truncationMode != .tail {
-            return result()
-        } else if explicitBoundary != nil {
-            truncated = tailTruncation(
-                visibleLines[lastVisibleIndex].glyphs,
-                explicitBoundary: explicitBoundary
+            // Remeasuring the final line must preserve its admitted origin,
+            // including an empty continuation that shares the same rectangle.
+            let admittedOriginY = visibleLines[lastVisibleIndex].originY
+            guard let truncated else {
+                if hasParagraphOverflow {
+                    visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
+                    updateMetrics(&visibleLines[lastVisibleIndex])
+                    if maxWidth != .max {
+                        visibleLines[lastVisibleIndex].width =
+                            CGFloat(maxWidth)
+                    }
+                    visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
+                        after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
+                    visibleLines[lastVisibleIndex].originY = admittedOriginY
+                }
+                return result()
+            }
+            // A token or omitted content alone does not record truncation. Only
+            // an accepted line with a nonempty removed source range contributes.
+            if let range = truncated.range { truncatedRanges.append(range) }
+            visibleLines[lastVisibleIndex].glyphs = truncated.glyphs
+            visibleLines[lastVisibleIndex].trailingBoundary = nil
+            visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
+            updateMetrics(&visibleLines[lastVisibleIndex])
+            visibleLines[lastVisibleIndex] = place(
+                visibleLines[lastVisibleIndex],
+                after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
             )
-        } else {
-            switch truncationMode {
-            case .head:
-                truncated = headTruncation(paragraphGlyphs)
-            case .middle:
-                truncated = middleTruncation(paragraphGlyphs)
-            case .tail:
-                truncated = tailTruncation(
-                    paragraphGlyphs,
-                    explicitBoundary: nil
-                )
-            }
-        }
-
-        // Remeasuring the final line must preserve its admitted origin,
-        // including an empty continuation that shares the same rectangle.
-        let admittedOriginY = visibleLines[lastVisibleIndex].originY
-        guard let truncated else {
-            if hasParagraphOverflow {
-                visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
-                updateMetrics(&visibleLines[lastVisibleIndex])
-                if maxWidth != .max {
-                    visibleLines[lastVisibleIndex].width =
-                        CGFloat(maxWidth)
-                }
-                visibleLines[lastVisibleIndex] = place(visibleLines[lastVisibleIndex],
-                    after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil)
-                visibleLines[lastVisibleIndex].originY = admittedOriginY
-            }
+            visibleLines[lastVisibleIndex].originY = admittedOriginY
             return result()
         }
-        // A token or omitted content alone does not record truncation. Only
-        // an accepted line with a nonempty removed source range contributes.
-        if let range = truncated.range { truncatedRanges.append(range) }
-        visibleLines[lastVisibleIndex].glyphs = truncated.glyphs
-        visibleLines[lastVisibleIndex].trailingBoundary = nil
-        visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
-        updateMetrics(&visibleLines[lastVisibleIndex])
-        visibleLines[lastVisibleIndex] = place(
-            visibleLines[lastVisibleIndex],
-            after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
-        )
-        visibleLines[lastVisibleIndex].originY = admittedOriginY
-        return result()
+        return truncateLastLine()
     }
 
     private static func _makeGlyphs(
