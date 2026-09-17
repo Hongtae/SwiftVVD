@@ -76,7 +76,8 @@ let package = Package(
                 .define("FT_DEBUG_LEVEL_TRACE", .when(configuration:.debug)),
                 .headerSearchPath("include"),
                 .unsafeFlags([
-                    "-Wno-format"
+                    "-Wno-format",
+                    "-Wno-shorten-64-to-32",
                 ]),
             ]),
     ],

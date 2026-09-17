@@ -22,6 +22,9 @@ let package = Package(
             publicHeadersPath: ".",
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
+                .unsafeFlags([
+                    "-Wno-shorten-64-to-32",
+                ]),
             ]),
     ],
     cLanguageStandard: .c11

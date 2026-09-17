@@ -33,7 +33,11 @@ let package = Package(
                 ],
             path: "Sources/VVDHelper",
             publicHeadersPath: ".",
-            cSettings: [],
+            cSettings: [
+                .unsafeFlags([
+                    "-Wno-shorten-64-to-32",
+                ]),
+            ],
             cxxSettings: [
                 .headerSearchPath("../libogg/include"),
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
@@ -135,7 +139,12 @@ let package = Package(
             name: "_libogg",
             path: "Sources/libogg",
             sources : ["src"],
-            publicHeadersPath: "include"),
+            publicHeadersPath: "include",
+            cSettings: [
+                .unsafeFlags([
+                    "-Wno-shorten-64-to-32",
+                ]),
+            ]),
         .target(
             name: "_libvorbis",
             dependencies: [.target(name: "_libogg")],
@@ -167,6 +176,9 @@ let package = Package(
             cSettings: [
                 .define("_CRT_SECURE_NO_WARNINGS", .when(platforms: [.windows])),
                 .define("HAVE_CONFIG_H"),
+                .unsafeFlags([
+                    "-Wno-shorten-64-to-32",
+                ]),
             ]),
         .target(
             name: "_libFLAC",
@@ -186,6 +198,7 @@ let package = Package(
                     "-Wno-tautological-constant-out-of-range-compare",
                     "-Wno-sizeof-pointer-memaccess",
                     "-Wno-implicit-function-declaration",
+                    "-Wno-shorten-64-to-32",
                 ])
             ]),
         .target(
@@ -273,6 +286,7 @@ let package = Package(
                 .unsafeFlags([
                     "-Wno-shift-negative-value",
                     "-Wno-deprecated-non-prototype",
+                    "-Wno-shorten-64-to-32",
                 ])
             ]),
         .target(
