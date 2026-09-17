@@ -51,6 +51,18 @@ extension Text {
         static let adjustsForOversizedCharacters = Sizing(.adjustsForOversizedCharacters)
     }
 
+    struct Baseline: Equatable {
+        enum Storage: UInt8, Hashable {
+            case standard = 0
+            case balanced = 1
+        }
+
+        var storage: Storage
+
+        static let standard = Baseline(storage: .standard)
+        static let balanced = Baseline(storage: .balanced)
+    }
+
     struct WritingMode: Hashable {
         enum Storage: UInt8, Hashable {
             case horizontalTopToBottom = 0
@@ -62,6 +74,11 @@ extension Text {
         static let horizontalTopToBottom = WritingMode(storage: .horizontalTopToBottom)
         static let verticalRightToLeft = WritingMode(storage: .verticalRightToLeft)
     }
+}
+
+struct TextLayoutMargins: Equatable {
+    var sizing: Text.Sizing = .standard
+    var baseline: Text.Baseline = .standard
 }
 
 protocol TextSizingModifier {
@@ -180,8 +197,8 @@ private struct WritingModeKey: EnvironmentKey {
     static var defaultValue: Text.WritingMode { .horizontalTopToBottom }
 }
 
-private struct TextSizingKey: EnvironmentKey {
-    static var defaultValue: Text.Sizing { .standard }
+private struct TextLayoutMarginsKey: EnvironmentKey {
+    static var defaultValue: TextLayoutMargins { TextLayoutMargins() }
 }
 
 private struct TextShapeKey: EnvironmentKey {
@@ -255,9 +272,19 @@ extension EnvironmentValues {
         set { self[WritingModeKey.self] = newValue }
     }
 
+    var textLayoutMargins: TextLayoutMargins {
+        get { self[TextLayoutMarginsKey.self] }
+        set { self[TextLayoutMarginsKey.self] = newValue }
+    }
+
     var textSizing: Text.Sizing {
-        get { self[TextSizingKey.self] }
-        set { self[TextSizingKey.self] = newValue }
+        get { textLayoutMargins.sizing }
+        set { textLayoutMargins.sizing = newValue }
+    }
+
+    var textBaseline: Text.Baseline {
+        get { textLayoutMargins.baseline }
+        set { textLayoutMargins.baseline = newValue }
     }
 
     var textShape: TextShape {
@@ -328,6 +355,7 @@ struct TextLayoutProperties: Equatable {
     var bodyHeadOutdent: CGFloat
     var pixelLength: CGFloat
     var textSizing: Text.Sizing
+    var textBaseline: Text.Baseline
     var textShape: TextShape
     private var flags: Flags
 
@@ -359,6 +387,7 @@ struct TextLayoutProperties: Equatable {
         bodyHeadOutdent = 0
         pixelLength = 1
         textSizing = .standard
+        textBaseline = .standard
         textShape = .bounds
         flags = []
     }
@@ -380,7 +409,9 @@ struct TextLayoutProperties: Equatable {
         writingMode = environment.writingMode
         bodyHeadOutdent = environment.bodyHeadOutdent
         pixelLength = environment.animationPixelLength
-        textSizing = environment.textSizing
+        let margins = environment.textLayoutMargins
+        textSizing = margins.sizing
+        textBaseline = margins.baseline
         textShape = environment.textShape
         flags = []
         if case let .full(full) = environment.textJustification.storage {

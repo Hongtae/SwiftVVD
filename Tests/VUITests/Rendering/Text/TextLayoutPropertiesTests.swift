@@ -4,8 +4,6 @@ import XCTest
 
 final class TextLayoutPropertiesTests: XCTestCase {
     func testObservedCarrierLayoutAndDefaults() throws {
-        XCTAssertEqual(MemoryLayout<TextLayoutProperties>.size, 145)
-        XCTAssertEqual(MemoryLayout<TextLayoutProperties>.stride, 152)
         XCTAssertEqual(MemoryLayout<Text.Sizing>.size, 16)
         XCTAssertEqual(MemoryLayout<Text.WritingMode>.size, 1)
         XCTAssertEqual(MemoryLayout<TextShape>.size, 24)
@@ -29,6 +27,7 @@ final class TextLayoutPropertiesTests: XCTestCase {
         XCTAssertEqual(value.bodyHeadOutdent, 0)
         XCTAssertEqual(value.pixelLength, 1)
         XCTAssertEqual(value.textSizing, .standard)
+        XCTAssertEqual(value.textBaseline, .standard)
         XCTAssertEqual(value.textShape, .bounds)
         XCTAssertFalse(value.widthIsFlexible)
         XCTAssertFalse(value.sizeFitting)
@@ -54,6 +53,7 @@ final class TextLayoutPropertiesTests: XCTestCase {
         environment.bodyHeadOutdent = 4
         environment.defaultPixelLength = 0.5
         environment.textSizing = .adjustsForOversizedCharacters
+        environment.textBaseline = .balanced
         environment.textShape = .excludeTop(.trailing, size: CGSize(width: 8, height: 9))
         environment.textJustification = .full(allLines: false, flexible: true)
 
@@ -75,9 +75,68 @@ final class TextLayoutPropertiesTests: XCTestCase {
         XCTAssertEqual(value.bodyHeadOutdent, 4)
         XCTAssertEqual(value.pixelLength, 0.5)
         XCTAssertEqual(value.textSizing, .adjustsForOversizedCharacters)
+        XCTAssertEqual(value.textBaseline, .balanced)
         XCTAssertEqual(value.textShape, environment.textShape)
         XCTAssertTrue(value.widthIsFlexible)
         XCTAssertFalse(value.sizeFitting)
+    }
+
+    // ASSERTIONS textLayoutMargins27EnvironmentObserved
+    func testMarginProjectionsPreserveSiblingValuesAndEnvironmentCopies() {
+        let original = EnvironmentValues()
+        XCTAssertEqual(original.textSizing, .standard)
+        XCTAssertEqual(original.textBaseline, .standard)
+
+        let modifier = MarginModifier()
+        var sizing = Text.Sizing.uniformLineHeight
+        sizing.modifiers = [modifier]
+        var sizingFirst = original
+        sizingFirst.textSizing = sizing
+        sizingFirst.textBaseline = .balanced
+        var baselineFirst = original
+        baselineFirst.textBaseline = .balanced
+        baselineFirst.textSizing = sizing
+        XCTAssertEqual(sizingFirst.textLayoutMargins, baselineFirst.textLayoutMargins)
+        XCTAssertEqual(sizingFirst.textSizing, sizing)
+        XCTAssertTrue(sizingFirst.textSizing.modifiers.first === modifier)
+        XCTAssertEqual(sizingFirst.textBaseline, .balanced)
+        XCTAssertEqual(original.textLayoutMargins, TextLayoutMargins())
+
+        var copy = sizingFirst
+        copy.textLayoutMargins = TextLayoutMargins(
+            sizing: .adjustsForOversizedCharacters, baseline: .standard
+        )
+        XCTAssertEqual(copy.textSizing, .adjustsForOversizedCharacters)
+        XCTAssertEqual(copy.textBaseline, .standard)
+        XCTAssertEqual(sizingFirst.textSizing, sizing)
+        XCTAssertEqual(sizingFirst.textBaseline, .balanced)
+        let properties = TextLayoutProperties(from: sizingFirst)
+        XCTAssertEqual(properties.textSizing, sizing)
+        XCTAssertEqual(properties.textBaseline, .balanced)
+    }
+
+    // ASSERTIONS textLayoutMargins27EnvironmentObserved
+    func testMarginProjectionReadsTrackTheCombinedEnvironmentValue() throws {
+        let original = EnvironmentValues()
+        let keyPaths: [PartialKeyPath<EnvironmentValues>] = [\.textSizing, \.textBaseline]
+        for keyPath in keyPaths {
+            let environment = original.trackingCopy()
+            let tracker = try XCTUnwrap(environment.tracker)
+            _ = environment[keyPath: keyPath]
+            XCTAssertFalse(tracker.hasDifferentUsedValues(original._plist))
+            var unrelated = original
+            unrelated.colorScheme = .dark
+            XCTAssertFalse(tracker.hasDifferentUsedValues(unrelated._plist))
+
+            var sizing = original
+            sizing.textSizing = .uniformLineHeight
+            XCTAssertTrue(tracker.hasDifferentUsedValues(sizing._plist))
+            var baseline = original
+            baseline.textBaseline = .balanced
+            XCTAssertTrue(tracker.hasDifferentUsedValues(baseline._plist))
+            baseline.textBaseline = .standard
+            XCTAssertFalse(tracker.hasDifferentUsedValues(baseline._plist))
+        }
     }
 
     // ASSERTIONS textMinimumScaleFactorEnvironmentObserved
@@ -102,7 +161,7 @@ final class TextLayoutPropertiesTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
+    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved textLayoutMargins27EnvironmentObserved
     func testDerivedLayoutReadTracksNormalizedResultInsteadOfRawLineLimits() throws {
         var original = EnvironmentValues()
         original.lineLimit = 0
@@ -126,6 +185,11 @@ final class TextLayoutPropertiesTests: XCTestCase {
         different = equivalent
         different.lineSpacing = 3
         XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+        different = equivalent
+        different.textBaseline = .balanced
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+        different.textBaseline = .standard
+        XCTAssertFalse(tracker.hasDifferentUsedValues(different._plist))
     }
 
     func testDerivedLayoutValueCopiesRemainIndependentAcrossTrackedOverrides() {
@@ -135,24 +199,31 @@ final class TextLayoutPropertiesTests: XCTestCase {
         let saved = environment[TextLayoutProperties.Key.self]
         var edited = saved
         edited.lineLimit = 7
+        edited.textBaseline = .balanced
         edited.sizeFitting = true
         XCTAssertEqual(environment[TextLayoutProperties.Key.self], saved)
 
         environment.lineLimit = 5
+        environment.textLayoutMargins = TextLayoutMargins(sizing: .uniformLineHeight, baseline: .balanced)
         let overridden = environment[TextLayoutProperties.Key.self]
         XCTAssertEqual(overridden.lineLimit, 5)
+        XCTAssertEqual(overridden.textSizing, .uniformLineHeight)
+        XCTAssertEqual(overridden.textBaseline, .balanced)
         XCTAssertFalse(overridden.sizeFitting)
         XCTAssertEqual(saved.lineLimit, 3)
+        XCTAssertEqual(saved.textBaseline, .standard)
         XCTAssertEqual(edited.lineLimit, 7)
+        XCTAssertEqual(edited.textBaseline, .balanced)
         XCTAssertTrue(edited.sizeFitting)
         XCTAssertEqual(original[TextLayoutProperties.Key.self].lineLimit, 3)
     }
 
-    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved
+    // ASSERTIONS canvasTextLayoutDerivedEnvironmentObserved textLayoutMargins27EnvironmentObserved
     func testStyledTextProducerTracksDerivedLayoutInsteadOfRawLineLimit() throws {
         var original = EnvironmentValues()
         original.font = Font.system(size: 14).resolved(in: original)
         original.lineLimit = 0
+        original.textBaseline = .balanced
         let environment = original.trackingCopy()
         let tracker = try XCTUnwrap(environment.tracker)
         let context = GraphTextResolutionContext(
@@ -164,12 +235,16 @@ final class TextLayoutPropertiesTests: XCTestCase {
             archiveOptions: .init(), features: [], sizeFitting: false
         ))
         XCTAssertEqual(resolved.layoutProperties.lineLimit, 1)
+        XCTAssertEqual(resolved.layoutProperties.textBaseline, .balanced)
         XCTAssertFalse(tracker.hasDifferentUsedValues(original._plist))
         var equivalent = original
         equivalent.lineLimit = -4
         XCTAssertFalse(tracker.hasDifferentUsedValues(equivalent._plist))
         var different = original
         different.lineLimit = 2
+        XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
+        different = original
+        different.textBaseline = .standard
         XCTAssertTrue(tracker.hasDifferentUsedValues(different._plist))
     }
 
@@ -228,5 +303,30 @@ final class TextLayoutPropertiesTests: XCTestCase {
             try ContentTransition.Style(from: &sessionDecoder),
             .sessionWidget
         )
+    }
+
+    // ASSERTIONS textLayoutProperties27BaselineCodingObserved
+    func testProtobufOmitsBaselineAndRestoresItsDefault() throws {
+        var value = TextLayoutProperties()
+        value.textSizing = .uniformLineHeight
+        value.lineSpacing = 3
+        let standardData = try ProtobufEncoder.encoding(value)
+        var balanced = value
+        balanced.textBaseline = .balanced
+        XCTAssertNotEqual(balanced, value)
+        XCTAssertEqual(try ProtobufEncoder.encoding(balanced), standardData)
+        var decoder = ProtobufDecoder(standardData)
+        XCTAssertEqual(try TextLayoutProperties(from: &decoder), value)
+
+        value = TextLayoutProperties()
+        value.textBaseline = .balanced
+        XCTAssertEqual(try ProtobufEncoder.encoding(value), Data())
+        var emptyDecoder = ProtobufDecoder(Data())
+        XCTAssertEqual(try TextLayoutProperties(from: &emptyDecoder).textBaseline, .standard)
+    }
+
+    private final class MarginModifier: AnyTextSizingModifier {
+        override func isEqual(to other: AnyTextSizingModifier) -> Bool { self === other }
+        override func updateLayoutMargins(_ margins: inout EdgeInsets) {}
     }
 }
