@@ -844,7 +844,7 @@ private extension DisplayList.Item {
             switch content.value {
             case let .flattened(contents, _, _):
                 return contents.forEachIdentity(body)
-            case .backend, .color, .shape, .image, .style, .crossFade,
+            case .backend, .color, .shape, .shadow, .image, .style, .crossFade,
                  .text, .drawing:
                 return true
             }

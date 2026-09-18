@@ -1319,7 +1319,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                         if let local = contents as? DisplayList.LocalContents {
                             colors.append(contentsOf: textColors(in: local.list))
                         }
-                    case .backend, .color, .shape, .image, .text:
+                    case .backend, .color, .shadow, .shape, .image, .text:
                         break
                     }
                 case let .effect(_, contents):
@@ -1574,7 +1574,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                                 path: itemPath
                             ))
                         }
-                    case .backend, .color, .shape, .image, .text:
+                    case .backend, .color, .shadow, .shape, .image, .text:
                         break
                     }
                 case let .states(states):
@@ -1640,7 +1640,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                                 path: itemPath + "/drawing"
                             ))
                         }
-                    case .backend, .color, .image:
+                    case .backend, .color, .shadow, .image:
                         break
                     }
                 case let .states(states):
@@ -2196,7 +2196,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                             ).concatenating(itemTransform)
                         ))
                     }
-                case .backend, .color, .shape, .image:
+                case .backend, .color, .shadow, .shape, .image:
                     break
                 }
             case let .effect(effect, contents):
@@ -2352,7 +2352,7 @@ final class MatchedGeometryEffectTests: XCTestCase {
                             ).concatenating(itemTransform)
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):

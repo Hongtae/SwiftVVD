@@ -75,7 +75,7 @@ extension ShapeStyledLeafView {
                 eoFill: fillStyle.isEOFilled,
                 origin: rendered.frame.origin
             )
-        case .text, .image, .empty:
+        case .text, .alphaMask, .image, .empty:
             var result = BitVector64()
             for (index, point) in points.prefix(64).enumerated() {
                 result[index] = rendered.frame.contains(point)
@@ -89,7 +89,7 @@ extension ShapeStyledLeafView {
         switch rendered.shape {
         case let .path(path, _):
             return path
-        case .text, .image:
+        case .text, .alphaMask, .image:
             return Path(rendered.frame)
         case .empty:
             return Path()
@@ -305,6 +305,9 @@ struct _ShapeStyle_RenderedShape {
     struct LayerNeeds: OptionSet {
         var rawValue: UInt8
 
+        static let drawingGroup = Self(rawValue: 1)
+        static let compositing = Self(rawValue: 2)
+
         init(rawValue: UInt8) {
             self.rawValue = rawValue
         }
@@ -313,6 +316,7 @@ struct _ShapeStyle_RenderedShape {
     enum Shape {
         case path(Path, FillStyle)
         case text(StyledTextContentView)
+        case alphaMask(DisplayList.Item, alphaOnly: Bool)
         case image(ImageDrawing, opacity: Double)
         case empty
 
@@ -324,6 +328,10 @@ struct _ShapeStyle_RenderedShape {
                     path.offsetBy(dx: offset.x, dy: offset.y),
                     fillStyle
                 )
+            case .alphaMask(var item, let alphaOnly):
+                item.frame.origin.x += offset.x
+                item.frame.origin.y += offset.y
+                return .alphaMask(item, alphaOnly: alphaOnly)
             case .text, .image, .empty:
                 return self
             }
@@ -358,6 +366,7 @@ struct _ShapeStyle_RenderedShape {
         self.frame = frame
         self.interpolatorData = nil
         self.item = DisplayList.Item()
+        self.item.frame = frame
         self.item.identity = identity
         self.item.version = version
         self.options = options
@@ -391,7 +400,7 @@ struct _ShapeStyle_RenderedShape {
             }
         case .image:
             renderUnstyledImage(layers: &layers)
-        case .path:
+        case .path, .alphaMask:
             guard let style = styles.styles.first(where: {
                 $0.key.name == name && $0.key._level == 0
             })?.style else {
@@ -409,97 +418,37 @@ struct _ShapeStyle_RenderedShape {
         }
     }
 
-    mutating func render(style: _ShapeStyle_Pack.Style) {
-        precondition(
-            style.effects.isEmpty,
-            "Shape-style composited effects require their rendered-shape producer."
-        )
-
-        let shading: GraphicsContext.Shading
-        switch style.fill {
-        case let .color(color):
-            shading = .color(Color(color))
-        case let .paint(paint):
-            if let paint = paint as? _AnyResolvedPaint<MeshGradient._Paint> {
-                shading = .meshGradient(paint.paint.meshGradient)
-            } else {
-                shading = GraphicsContext.Shading(property: .resolvedPaint(
-                    paint: paint, bounds: frame, opacity: 1
-                ))
-            }
-        }
-
-        var list = displayList(shading: shading)
-        if style.opacity != 1 {
-            var wrapped = DisplayList()
-            wrapped.appendOpacityItem(
-                bounds: list.interpolationBounds ?? frame,
-                opacity: Double(style.opacity),
-                contents: list
-            )
-            list = wrapped
-        }
-        if let blendMode = style._blend {
-            guard let blendMode = BlendMode(graphicsContextMode: blendMode) else {
-                preconditionFailure(
-                    "The resolved shape style uses an unsupported blend mode."
-                )
-            }
-            var wrapped = DisplayList()
-            wrapped.appendBlendModeItem(
-                bounds: list.interpolationBounds ?? frame,
-                blendMode: blendMode,
-                contents: list
-            )
-            list = wrapped
-        }
-        setItem(from: list)
-    }
-
     mutating func commitItem() -> DisplayList.Item? {
-        let hasItem: Bool
-        if case .empty = item.value {
-            hasItem = false
-        } else {
-            hasItem = true
-        }
-
-        let result: DisplayList.Item?
+        let isVisible = opacity != 0 && !frame.isEmpty
+        if !isVisible { item.value = .empty }
+        item.canonicalize(options: options)
         if let interpolatorData {
-            if hasItem {
-                item.canonicalize(options: options)
-                item.addEffect(.interpolatorLayer(
-                    interpolatorData.group,
-                    interpolatorData.serial
-                ))
-                item.canonicalize(options: options)
-                result = item
-            } else {
-                result = DisplayList.Item(
-                    effect: .interpolatorLayer(
-                        interpolatorData.group,
-                        interpolatorData.serial
-                    ),
-                    contents: DisplayList(),
-                    frame: frame,
-                    identity: item.identity,
-                    version: item.version,
-                    opacity: item.opacity
+            if case .empty = item.value {
+                item = DisplayList.Item(
+                    effect: .interpolatorLayer(interpolatorData.group, interpolatorData.serial),
+                    contents: DisplayList(), frame: frame,
+                    identity: item.identity, version: item.version
                 )
+            } else {
+                item.addEffect(.interpolatorLayer(interpolatorData.group, interpolatorData.serial))
             }
-        } else {
-            result = hasItem ? item : nil
+            item.canonicalize(options: options)
         }
-
-        self.interpolatorData = nil
-        let identity = item.identity
-        let version = item.version
-        item = DisplayList.Item()
-        item.identity = identity
-        item.version = version
+        if isVisible && layerNeeds.contains(.drawingGroup) {
+            item.addDrawingGroup(contentSeed: contentSeed)
+        }
+        if isVisible && blendMode != .normal { item.addEffect(.blendMode(blendMode)) }
+        if isVisible && opacity != 1 { item.addEffect(.opacity(opacity)) }
+        item.canonicalize(options: options)
+        let result: DisplayList.Item?
+        if case .empty = item.value { result = nil }
+        else { result = item }
+        interpolatorData = nil
+        item.value = .empty
+        item.frame = frame
         blendMode = .normal
         opacity = 1
-        layerNeeds = LayerNeeds()
+        layerNeeds = []
         return result
     }
 
@@ -509,6 +458,7 @@ struct _ShapeStyle_RenderedShape {
         let identity = copy.item.identity
         let version = copy.item.version
         copy.item = DisplayList.Item()
+        copy.item.frame = frame
         copy.item.identity = identity
         copy.item.version = version
         copy.blendMode = .normal
@@ -554,11 +504,32 @@ struct _ShapeStyle_RenderedShape {
         name: _ShapeStyle_Name,
         layers: inout _ShapeStyle_RenderedLayers
     ) {
-        layers.beginLayer(
-            id: .styled(name, 0),
-            style: style,
-            shape: &self
-        )
+        // Keep the existing direct text path until a style needs the shared mask
+        // consumer. Indexed colors and mixed-run partitioning have a separate owner.
+        if !style.effects.isEmpty || style._blend != nil {
+            guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+                  let host = viewGraph.rendererHost else {
+                fatalError("Styled text recording requires an active ViewGraph renderer host.")
+            }
+            let environment = _environment.value.untrackedCopy()
+            let viewport = CGRect(origin: .zero, size: CGSize(width: frame.width * environment.displayScale,
+                height: frame.height * environment.displayScale))
+            var context = GraphicsContext(recording: RBDisplayList(viewport: viewport),
+                environment: environment,
+                inputs: .init(sceneResources: host.sceneResources, viewport: viewport,
+                    contentScaleFactor: environment.displayScale, resourceCommandQueue: nil))
+            context.clipBoundingRect = .infinite
+            displayList(shading: .color(.white)).draw(in: context)
+            let contents = context.recording!.moveContents()
+            var mask = DisplayList.Item(content: DisplayList.Content(
+                drawing: contents, origin: .zero,
+                options: RasterizationOptions(flags: [.defaultFlags, .alphaOnly]),
+                seed: contentSeed), frame: contents.boundingRect,
+                identity: .none, version: item.version)
+            if contents.isEmpty { mask.value = .empty }
+            shape = .alphaMask(mask, alphaOnly: true)
+        }
+        layers.beginLayer(id: .styled(name, 0), style: style, shape: &self)
         render(style: style)
         layers.endLayer(shape: &self)
     }
@@ -582,7 +553,7 @@ struct _ShapeStyle_RenderedShape {
         layers.endLayer(shape: &self)
     }
 
-    private func displayList(
+    func displayList(
         shading: GraphicsContext.Shading
     ) -> DisplayList {
         var list = DisplayList()
@@ -627,13 +598,15 @@ struct _ShapeStyle_RenderedShape {
                 version: item.version,
                 environment: _environment.value.untrackedCopy()
             )
+        case .alphaMask:
+            preconditionFailure("Alpha-mask fills require the typed color or paint renderer.")
         case .empty:
             break
         }
         return list
     }
 
-    private mutating func setItem(from list: DisplayList) {
+    mutating func setItem(from list: DisplayList) {
         let identity = item.identity
         let version = item.version
         switch list.items.count {

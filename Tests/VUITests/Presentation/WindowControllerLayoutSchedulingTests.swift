@@ -8155,7 +8155,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             to: renderedShapeRecords(in: local.list)
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):
@@ -8390,7 +8390,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             to: nested
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):
@@ -8535,6 +8535,14 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                     label = "shader"
                 case .geometryGroup:
                     label = "geometryGroup"
+                case .blendMode:
+                    label = "blendMode"
+                case .filter:
+                    label = "filter"
+                case .clip:
+                    label = "clip"
+                case .compositingGroup:
+                    label = "compositingGroup"
                 }
                 lines.append(
                     "\(prefix)effect \(label) frame=\(item.frame) contentsBounds=\(String(describing: contents.interpolationBounds))"
@@ -8594,7 +8602,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         result.append(local.list)
                         result.append(contentsOf: drawingContents(in: local.list))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(_, contents):
@@ -8647,7 +8655,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             in: local.list
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(_, contents):
@@ -8820,7 +8828,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             )
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):
@@ -8946,7 +8954,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             inheritedOpacity: itemOpacity
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):
@@ -9160,7 +9168,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             to: nested
                         ))
                     }
-                case .backend, .color, .shape, .image, .text:
+                case .backend, .color, .shadow, .shape, .image, .text:
                     break
                 }
             case let .effect(effect, contents):
@@ -9240,7 +9248,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         if let local = contents as? DisplayList.LocalContents {
                             collect(local.list)
                         }
-                    case .backend,
+                    case .backend, .shadow,
                          .color,
                          .shape,
                          .text:
@@ -9291,7 +9299,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                         if let local = contents as? DisplayList.LocalContents {
                             collect(local.list)
                         }
-                    case .backend,
+                    case .backend, .shadow,
                          .color,
                          .shape,
                          .text:
@@ -9508,7 +9516,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
                             to: nested
                         ))
                     }
-                case .backend,
+                case .backend, .shadow,
                      .color,
                      .shape,
                      .text:

@@ -563,6 +563,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
         case archive(ArchiveIDs?)
         case platformGroup(any PlatformGroupFactory)
         case opacity(Float)
+        case blendMode(GraphicsContext.BlendMode)
+        case filter(GraphicsFilter)
+        case clip(Path, FillStyle, GraphicsContext.ClipOptions)
+        case compositingGroup
         case transform(ProjectionTransform)
         case mask(DisplayList, GraphicsContext.ClipOptions)
         case animation(any _DisplayList_AnyEffectAnimation)
@@ -1354,6 +1358,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             case backend(ItemCommand, (GraphicsContext) -> Void)
             case color(ColorView)
             case shape(ShapeValue)
+            case shadow(Path, ResolvedShadowStyle)
             case image(ImageValue)
             case style(StyleValue)
             case crossFade(CrossFadeValue)
@@ -1472,6 +1477,13 @@ struct DisplayList: Equatable, CustomStringConvertible {
             self.environment = environment
         }
 
+        init(shadow: ResolvedShadowStyle, path: Path, seed: Seed,
+             environment: EnvironmentValues?) {
+            self.value = .shadow(path, shadow)
+            self.seed = seed
+            self.environment = environment
+        }
+
         init(
             flattened list: DisplayList,
             origin: CGPoint,
@@ -1502,6 +1514,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 return .closure(bounds: nil)
             case let .shape(shape):
                 return shape.command
+            case let .shadow(path, _):
+                return .closure(bounds: path.boundingRect)
             case let .image(image):
                 return image.command
             case let .style(style):
@@ -1537,6 +1551,12 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 break
             case let .shape(shape):
                 shape.draw(in: context)
+            case let .shadow(path, shadow):
+                var shadow = shadow
+                shadow.kind.insert(.only)
+                GraphicsFilter.shadow(shadow).draw(in: context) { context in
+                    context.fill(path, with: .color(.white))
+                }
             case let .image(image):
                 image.draw(in: context)
             case let .style(style):
@@ -1545,10 +1565,18 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 crossFade.draw(in: context)
             case let .text(text):
                 text.draw(in: context)
-            case let .flattened(list, origin, _):
-                var context = context
-                context.translateBy(x: origin.x, y: origin.y)
-                list.draw(in: context)
+            case let .flattened(list, origin, options):
+                if options.isAccelerated {
+                    let bounds = list.interpolationBounds ?? .zero
+                    context.drawLayer(in: CGRect(origin: .zero, size: bounds.size)) { layer, _ in
+                        layer.translateBy(x: -origin.x, y: -origin.y)
+                        list.draw(in: layer)
+                    }
+                } else {
+                    var context = context
+                    context.translateBy(x: origin.x, y: origin.y)
+                    list.draw(in: context)
+                }
             case let .drawing(contents, origin, _):
                 var context = context
                 context.translateBy(x: origin.x, y: origin.y)
@@ -1559,7 +1587,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
         func transformed(by affineTransform: CGAffineTransform) -> Content {
             let transformedCommand = command.transformed(by: affineTransform)
             switch value {
-            case .backend:
+            case .backend, .shadow:
                 return Content(
                     command: transformedCommand,
                     seed: seed,
@@ -1844,13 +1872,19 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         mutating func addEffect(_ effect: DisplayList.Effect) {
-            var child = self
-            child.frame.origin = .zero
-
             var contents = DisplayList()
-            contents.items.append(child)
-            contents.interpolationBounds = child.frame
+            if case .empty = value {
+                contents.interpolationBounds = .zero
+            } else {
+                var child = self
+                child.frame.origin = .zero
+                child.identity = .none
+                contents.items = [child]
+                contents.interpolationBounds = child.frame
+            }
             value = .effect(effect, contents)
+            opacity = 1
+            styleChain = StyleChain()
         }
 
         mutating func canonicalize(options: DisplayList.Options) {
@@ -1882,6 +1916,11 @@ struct DisplayList: Equatable, CustomStringConvertible {
             let offset: CGSize
             switch value {
             case let .content(content):
+                if case let .flattened(_, _, options) = content.value, options.isAccelerated {
+                    var context = context
+                    context.translateBy(x: frame.minX, y: frame.minY)
+                    return context
+                }
                 guard let recordedBounds = content.command.bounds,
                       !recordedBounds.isNull else {
                     return context
@@ -2304,6 +2343,11 @@ struct DisplayList: Equatable, CustomStringConvertible {
         _ item: Item,
         affineTransform: CGAffineTransform
     ) {
+        if let transformed = item.transformedDrawingGroup(by: affineTransform) {
+            appendRecordedItem(transformed)
+            recordInterpolationBounds(transformed.frame)
+            return
+        }
         guard case let .content(content) = item.value else {
             preconditionFailure("DisplayList transformed items require content")
         }
@@ -2324,6 +2368,11 @@ struct DisplayList: Equatable, CustomStringConvertible {
         _ item: Item,
         affineTransform: CGAffineTransform
     ) {
+        if let transformed = item.transformedDrawingGroup(by: affineTransform) {
+            appendRecordedDebugItem(transformed)
+            recordInterpolationBounds(transformed.frame)
+            return
+        }
         guard case let .content(content) = item.value else {
             preconditionFailure("DisplayList transformed debug items require content")
         }
@@ -2358,6 +2407,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
         var result = DisplayList()
         result.items = items.map { item in
+            if let transformed = item.transformedDrawingGroup(by: transform) { return transformed }
             var item = item
             item.frame = item.frame.applying(transform)
             switch item.value {
@@ -2387,6 +2437,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
             return item
         }
         result.debugItems = debugItems.map { item in
+            if let transformed = item.transformedDrawingGroup(by: transform) { return transformed }
             var item = item
             item.frame = item.frame.applying(transform)
             if case let .content(content) = item.value {
@@ -2598,6 +2649,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
                         }
 
                     case let .flattened(list, _, _):
+                        if let transformed = item.transformedDrawingGroup(by: transform) {
+                            tasks.append(.item(transformed, .identity, opacity, outerStyleChain))
+                            break
+                        }
                         let transformedContent = content.transformed(by: transform)
                         tasks.append(
                             .finishFlattened(
@@ -2647,7 +2702,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                             .list(local.list, .identity, 1, StyleChain())
                         )
 
-                    case .backend, .color, .shape, .image, .text:
+                    case .backend, .color, .shape, .shadow, .image, .text:
                         var result = DisplayList()
                         let item = transformedItem(
                             item,
@@ -3409,7 +3464,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     content.draw(in: context)
                 case .color:
                     content.draw(in: context)
-                case .shape, .image:
+                case .shape, .shadow, .image:
                     content.draw(in: context)
                 case let .style(style):
                     render(
@@ -3445,10 +3500,17 @@ struct DisplayList: Equatable, CustomStringConvertible {
                         return
                     }
                     text.draw(drawing, in: context)
-                case let .flattened(list, origin, _):
+                case let .flattened(list, origin, options):
                     var context = content.renderContext(from: context)
-                    context.translateBy(x: origin.x, y: origin.y)
-                    renderItems(in: list, context: context, includeDebug: includeDebug)
+                    if options.isAccelerated {
+                        context.drawLayer(in: CGRect(origin: .zero, size: item.frame.size)) { layer, _ in
+                            layer.translateBy(x: -origin.x, y: -origin.y)
+                            self.renderItems(in: list, context: layer, includeDebug: includeDebug)
+                        }
+                    } else {
+                        context.translateBy(x: origin.x, y: origin.y)
+                        renderItems(in: list, context: context, includeDebug: includeDebug)
+                    }
                 case let .drawing(contents, origin, _):
                     var context = content.renderContext(from: context)
                     context.translateBy(x: origin.x, y: origin.y)
@@ -3553,6 +3615,24 @@ struct DisplayList: Equatable, CustomStringConvertible {
                  .interpolatorAnimation:
                 renderItems(in: contents, context: context, includeDebug: includeDebug)
 
+            case .compositingGroup:
+                context.drawLayer { layer in
+                    self.renderItems(in: contents, context: layer, includeDebug: includeDebug)
+                }
+            case let .blendMode(blend):
+                var context = context
+                context.blendMode = blend
+                context.drawLayer { layer in
+                    self.renderItems(in: contents, context: layer, includeDebug: includeDebug)
+                }
+            case let .filter(filter):
+                filter.draw(in: context) { context in
+                    self.renderItems(in: contents, context: context, includeDebug: includeDebug)
+                }
+            case let .clip(path, style, options):
+                var context = context
+                context.clip(to: path, style: style, options: options)
+                renderItems(in: contents, context: context, includeDebug: includeDebug)
             case let .platformGroup(factory):
                 factory.renderPlatformGroup(
                     contents: contents,
@@ -3724,6 +3804,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
             case let (.content(lhs), .content(rhs)):
                 guard lhs.seed == rhs.seed else { return false }
                 switch (lhs.value, rhs.value) {
+                case let (.shadow(lhsPath, lhsShadow), .shadow(rhsPath, rhsShadow)):
+                    return lhsPath == rhsPath && lhsShadow == rhsShadow
+                case (.shadow, _), (_, .shadow):
+                    return false
                 case let (.shape(lhsShape), .shape(rhsShape)):
                     return lhsShape.path == rhsShape.path &&
                         lhsShape.fillStyle == rhsShape.fillStyle &&
@@ -3893,6 +3977,10 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
         case archive
         case platformGroup
         case opacity
+        case blendMode
+        case filter
+        case clip
+        case compositingGroup
         case transform
         case mask
         case animation
@@ -3916,6 +4004,10 @@ private struct DisplayListEffectSurfaceRecord: Equatable {
     var animationValue: StrongHash?
     var animation: Animation?
     var opacity: Float?
+    var blendMode: GraphicsContext.BlendMode?
+    var filter: GraphicsFilter?
+    var path: Path?
+    var fillStyle: FillStyle?
     var transform: ProjectionTransform?
     var effectAnimation: DisplayListEffectAnimationSurfaceRecord?
     var archiveIDs: DisplayList.ArchiveIDs?
@@ -3940,6 +4032,15 @@ private extension DisplayList.Effect {
                 kind: .platformGroup,
                 platformGroupID: ObjectIdentifier(factory)
             )
+        case .compositingGroup:
+            return DisplayListEffectSurfaceRecord(kind: .compositingGroup)
+        case let .blendMode(blend):
+            return DisplayListEffectSurfaceRecord(kind: .blendMode, blendMode: blend)
+        case let .filter(filter):
+            return DisplayListEffectSurfaceRecord(kind: .filter, filter: filter)
+        case let .clip(path, style, options):
+            return DisplayListEffectSurfaceRecord(kind: .clip, path: path, fillStyle: style,
+                clipOptionsRawValue: options.rawValue)
         case let .opacity(opacity):
             return DisplayListEffectSurfaceRecord(kind: .opacity, opacity: opacity)
         case let .transform(transform):
@@ -4065,7 +4166,7 @@ extension DisplayList.EffectItem {
         _ body: (DisplayList.Item) -> Void
     ) {
         switch effect {
-        case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
+        case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup, .blendMode, .filter, .clip, .compositingGroup:
             contents.forEachRenderItem(includeDebug: includeDebug, body)
         case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
             break
@@ -4083,7 +4184,7 @@ private extension DisplayList.Item {
             body(self)
         case let .effect(effect, contents):
             switch effect {
-            case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup:
+            case .identity, .archive, .platformGroup, .opacity, .transform, .mask, .animation, .contentTransition, .shader, .geometryGroup, .blendMode, .filter, .clip, .compositingGroup:
                 contents.forEachRenderItem(includeDebug: includeDebug, body)
             case .state, .interpolatorRoot, .interpolatorLayer, .interpolatorAnimation:
                 break
