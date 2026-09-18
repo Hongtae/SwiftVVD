@@ -144,6 +144,33 @@ final class ShapeStyleCompositionTests: XCTestCase {
         }
     }
 
+    func testPublicShadowFillReachesTheSharedMetalConsumer() throws {
+        // ASSERTIONS shapeStyleShadowProducer27Observed
+        let color = Color(.sRGBLinear, red: 0.8, green: 0.1, blue: 0.2)
+        let shadow = ShadowStyle.drop(color: .green.opacity(0.7), radius: 2, x: 4, y: 3)
+        let host = CompositionHost(Rectangle().fill(color.shadow(shadow)).frame(width: 36, height: 28))
+        let list = try host.list()
+        let actual = try pixels(list.items, resources: host.rendererHost.sceneResources)
+        let expected = try pixels([rendered(style([drop])).item])
+        XCTAssertEqual(actual, expected)
+    }
+
+    func testImplicitPublicShadowCopiesForegroundAndOuterOpacityForMetal() throws {
+        // ASSERTIONS shapeStyleShadowProducer27Observed
+        // ASSERTIONS shapeStyleImplicitCopy27Observed
+        // ASSERTIONS shapeStyleOpacityProducer27Observed
+        let color = Color(.sRGBLinear, red: 0.8, green: 0.1, blue: 0.2)
+        let shadow = ShadowStyle.drop(color: .green.opacity(0.7), radius: 2, x: 4, y: 3)
+        let host = CompositionHost(Rectangle().fill(.shadow(shadow).opacity(0.4))
+            .frame(width: 36, height: 28).foregroundStyle(color))
+        let list = try host.list()
+        let actual = try pixels(list.items, resources: host.rendererHost.sceneResources)
+        var resolved = style([drop], opacity: 0.4)
+        resolved.effects[0].opacity = 0.4
+        let expected = try pixels([rendered(resolved).item])
+        XCTAssertEqual(actual, expected)
+    }
+
     func testMetalDrawingGroupPreservesPlacementAndShadowOutsideOriginalFrame() throws {
         // ASSERTIONS shapeStyleShadowComposition27Observed
         let direct = try rendered(style([drop])).item

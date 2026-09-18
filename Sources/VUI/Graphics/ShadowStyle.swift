@@ -100,7 +100,7 @@ public struct ShadowStyle: Equatable, Sendable {
             fatalError("Standard ShadowStyle requires shape-style resolution context.")
         case let .custom(kind, color, radius, offset):
             return ResolvedShadowStyle(
-                color: Color.ResolvedHDR(color.resolve(in: environment)),
+                color: color.resolveHDR(in: environment),
                 radius: radius,
                 offset: offset,
                 midpoint: midpoint,
@@ -120,6 +120,70 @@ public struct ShadowStyle: Equatable, Sendable {
             result.storage = .custom(kind, color, radius, offset)
         }
         return result
+    }
+}
+
+public struct _ShadowShapeStyle<Style: ShapeStyle>: ShapeStyle {
+    @usableFromInline
+    var style: Style
+    @usableFromInline
+    var shadowStyle: ShadowStyle
+
+    @usableFromInline
+    init(style: Style, shadowStyle: ShadowStyle) {
+        self.style = style
+        self.shadowStyle = shadowStyle
+    }
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        switch shape.operation {
+        case .prepareText:
+            shape.result = .preparedText(.foregroundKeyColor)
+        case let .resolveStyle(name, levels):
+            style._apply(to: &shape)
+            let shadow = shadowStyle.resolve(in: shape.environment)
+            var pack: _ShapeStyle_Pack
+            if case let .pack(value) = shape.result { pack = value }
+            else { pack = _ShapeStyle_Pack() }
+            for index in pack.styles.indices where pack.styles[index].key.name == name &&
+                levels.contains(Int(pack.styles[index].key._level)) {
+                // A newly appended effect starts with independent opacity and
+                // blend. Outer style modifiers can change it afterward.
+                pack.styles[index].style.effects.append(
+                    .init(kind: .shadow(shadow), opacity: 1, _blend: nil)
+                )
+            }
+            shape.result = .pack(pack)
+        case .copyStyle:
+            style._apply(to: &shape)
+            if case let .style(copied) = shape.result {
+                shape.result = .style(AnyShapeStyle(
+                    _ShadowShapeStyle<AnyShapeStyle>(style: copied, shadowStyle: shadowStyle)
+                ))
+            }
+        case .primaryStyle:
+            break
+        case .fallbackColor, .modifyBackground, .multiLevel:
+            style._apply(to: &shape)
+        }
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        Style._apply(to: &type)
+    }
+
+    public typealias Resolved = Never
+}
+
+extension ShapeStyle {
+    @inlinable public func shadow(_ style: ShadowStyle) -> some ShapeStyle {
+        _ShadowShapeStyle(style: self, shadowStyle: style)
+    }
+}
+
+extension ShapeStyle where Self == AnyShapeStyle {
+    public static func shadow(_ style: ShadowStyle) -> some ShapeStyle {
+        _ShadowShapeStyle(style: _ImplicitShapeStyle(), shadowStyle: style)
     }
 }
 

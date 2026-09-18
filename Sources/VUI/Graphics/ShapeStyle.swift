@@ -411,11 +411,23 @@ public struct SeparatorShapeStyle: ShapeStyle {
     public typealias Resolved = Never
 }
 
-public struct _ImplicitShapeStyle: ShapeStyle {
+public struct _ImplicitShapeStyle: PrimitiveShapeStyle {
     @inlinable init() {}
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        fatalError()
+        if case let .copyStyle(name) = shape.operation {
+            let style: AnyShapeStyle
+            if name == .background {
+                style = shape.environment.backgroundStyle ?? AnyShapeStyle(BackgroundStyle())
+            } else {
+                style = shape.foregroundStyle ?? shape.environment.currentForegroundStyle ??
+                    AnyShapeStyle(HierarchicalShapeStyle.primary)
+            }
+            shape.result = .style(style)
+        } else {
+            ForegroundStyle()._apply(to: &shape)
+        }
     }
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {}
     public typealias Resolved = Never
 }
 
@@ -527,30 +539,42 @@ public struct _OpacityShapeStyle<Style: ShapeStyle>: ShapeStyle {
     }
 
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        style._apply(to: &shape)
-        switch shape.result {
-        case let .preparedText(.foregroundColor(color)):
-            shape.result = .preparedText(
-                .foregroundColor(color.opacity(Double(opacity)))
-            )
-        case .preparedText(.foregroundKeyColor):
-            break
-        case var .pack(pack):
-            for index in pack.styles.indices {
+        if opacity == 1 {
+            style._apply(to: &shape)
+            return
+        }
+        switch shape.operation {
+        case .prepareText:
+            shape.result = .preparedText(.foregroundKeyColor)
+        case let .resolveStyle(name, levels):
+            style._apply(to: &shape)
+            var pack: _ShapeStyle_Pack
+            if case let .pack(value) = shape.result { pack = value }
+            else { pack = _ShapeStyle_Pack() }
+            for index in pack.styles.indices where pack.styles[index].key.name == name &&
+                levels.contains(Int(pack.styles[index].key._level)) {
                 pack.styles[index].style.opacity *= opacity
+                for effect in pack.styles[index].style.effects.indices {
+                    pack.styles[index].style.effects[effect].opacity *= opacity
+                }
             }
             shape.result = .pack(pack)
-        case let .style(style):
-            shape.result = .style(AnyShapeStyle(
-                _OpacityShapeStyle<AnyShapeStyle>(
-                    style: style,
-                    opacity: opacity
-                )
-            ))
-        case let .color(color):
-            shape.result = .color(color.opacity(Double(opacity)))
-        case .bool, .none:
+        case .copyStyle:
+            style._apply(to: &shape)
+            if case let .style(copied) = shape.result {
+                shape.result = .style(AnyShapeStyle(
+                    _OpacityShapeStyle<AnyShapeStyle>(style: copied, opacity: opacity)
+                ))
+            }
+        case .fallbackColor:
+            style._apply(to: &shape)
+            if case let .color(color) = shape.result {
+                shape.result = .color(color.opacity(Double(opacity)))
+            }
+        case .primaryStyle:
             break
+        case .modifyBackground, .multiLevel:
+            style._apply(to: &shape)
         }
     }
 
@@ -559,6 +583,19 @@ public struct _OpacityShapeStyle<Style: ShapeStyle>: ShapeStyle {
     }
 
     public typealias Resolved = Never
+}
+
+extension ShapeStyle {
+    @inlinable @_disfavoredOverload
+    public func opacity(_ opacity: Double) -> some ShapeStyle {
+        _OpacityShapeStyle(style: self, opacity: Float(opacity))
+    }
+}
+
+extension ShapeStyle where Self == AnyShapeStyle {
+    public static func opacity(_ opacity: Double) -> some ShapeStyle {
+        _OpacityShapeStyle(style: _ImplicitShapeStyle(), opacity: Float(opacity))
+    }
 }
 
 struct OffsetShapeStyle<Base: ShapeStyle>: ShapeStyle {
