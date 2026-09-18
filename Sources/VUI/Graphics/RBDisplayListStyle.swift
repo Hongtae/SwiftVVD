@@ -36,7 +36,7 @@ extension RBDisplayList {
         // A published chain is immutable. Selection mutates only fresh copies
         // before linking and publishing them through its operation owner.
         var next: Style?
-        let transform: CGAffineTransform
+        fileprivate(set) var transform: CGAffineTransform
         let hasClip: Bool
         let filterOptions: GraphicsContext.FilterOptions
 
@@ -163,10 +163,13 @@ extension RBDisplayList {
         private struct CopiedStyle { let style: Style? }
         private var styles: [Key: CopiedStyle] = [:]
         let predicate: RBDisplayListPredicate?
+        private let transform: CGAffineTransform
         private let outerStyle: Style?
 
-        init(predicate: RBDisplayListPredicate? = nil, outerStyle: Style? = nil) {
+        init(predicate: RBDisplayListPredicate? = nil, transform: CGAffineTransform = .identity,
+             outerStyle: Style? = nil) {
             self.predicate = predicate
+            self.transform = transform
             self.outerStyle = outerStyle
         }
 
@@ -193,6 +196,9 @@ extension RBDisplayList {
             for style in retained.reversed() {
                 let copy = style.copy()
                 if predicate != nil { copy.applyPredicate(styleOnly: styleOnly) }
+                // Effects keep the coordinates captured when they were added;
+                // replay moves those coordinates with the receiving context.
+                copy.transform = style.transform.concatenating(transform)
                 copy.next = head
                 head = copy
             }

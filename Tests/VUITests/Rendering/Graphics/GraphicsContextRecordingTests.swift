@@ -25,6 +25,73 @@ final class GraphicsContextRecordingTests: XCTestCase {
         #endif
     }
 
+    func testRerecordingComposesEachStyleTransformAndKeepsCopyOwnership() throws {
+        // ASSERTIONS recordedAffineStyleCopy27Observed
+        var source = recording()
+        let sourceMatrix = CGAffineTransform(a: 1.5, b: 0, c: 0, d: 0.75, tx: 8, ty: 6)
+        source.transform = sourceMatrix
+        source.addFilter(.shadow(color: .black, radius: 2, x: 3, y: 2))
+        source.fill(Path(CGRect(x: 8, y: 8, width: 8, height: 8)), with: .color(.red))
+        var branch = source
+        branch.translateBy(x: 5, y: 3)
+        branch.addFilter(.blur(radius: 0.75))
+        branch.fill(Path(CGRect(x: 24, y: 8, width: 8, height: 8)), with: .color(.green))
+        source.fill(Path(CGRect(x: 40, y: 8, width: 8, height: 8)), with: .color(.blue))
+
+        let list = try XCTUnwrap(source.recording)
+        let original = list.items
+        let sourceShadow = try XCTUnwrap(original[0].state.style)
+        let sourceBlur = try XCTUnwrap(original[1].state.style)
+        XCTAssertTrue(sourceShadow === original[2].state.style)
+        XCTAssertTrue(sourceBlur.next === sourceShadow)
+        XCTAssertEqual(sourceShadow.transform, sourceMatrix)
+        XCTAssertEqual(sourceBlur.transform, CGAffineTransform(a: 1.5, b: 0, c: 0, d: 0.75, tx: 15.5, ty: 8.25))
+
+        let receiverMatrix = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 96, ty: 0)
+        let shadowMatrix = CGAffineTransform(a: 0, b: 1.5, c: -0.75, d: 0, tx: 90, ty: 8)
+        let blurMatrix = CGAffineTransform(a: 0, b: 1.5, c: -0.75, d: 0, tx: 87.75, ty: 15.5)
+        for moved in [false, true] {
+            let contents: any RBDisplayListContents = moved ? list.moveContents() : list
+            for receiverEffect in [false, true] {
+                var receiver = recording()
+                receiver.transform = receiverMatrix
+                if receiverEffect { receiver.addFilter(.blur(radius: 2)) }
+                let outer = receiver.storage.state.pointee.style
+                contents.draw(in: receiver)
+                let copy = try XCTUnwrap(receiver.recording).moveContents()
+                XCTAssertEqual(copy.items.count, 3)
+                let firstHead = try XCTUnwrap(copy.items[0].state.style)
+                let middleHead = try XCTUnwrap(copy.items[1].state.style)
+                XCTAssertTrue(firstHead === copy.items[2].state.style)
+                let shadow = try XCTUnwrap(receiverEffect ? firstHead.next : firstHead)
+                let blur = try XCTUnwrap(receiverEffect ? middleHead.next : middleHead)
+                XCTAssertFalse(shadow === sourceShadow)
+                XCTAssertFalse(blur === sourceBlur)
+                XCTAssertEqual(shadow.transform, shadowMatrix)
+                XCTAssertEqual(blur.transform, blurMatrix)
+                XCTAssertEqual(blur.next?.transform, shadowMatrix)
+                XCTAssertEqual(copy.items[0].state.transform, shadowMatrix)
+                XCTAssertEqual(copy.items[1].state.transform, blurMatrix)
+                XCTAssertEqual(copy.items[2].state.transform, shadowMatrix)
+                if receiverEffect {
+                    XCTAssertFalse(firstHead === outer)
+                    XCTAssertEqual(firstHead.transform, receiverMatrix)
+                    XCTAssertEqual(middleHead.transform, receiverMatrix)
+                    XCTAssertEqual(outer?.transform, receiverMatrix)
+                    XCTAssertNil(outer?.next)
+                }
+                XCTAssertTrue(receiver.storage.state.pointee.style === outer)
+
+                contents.draw(in: receiver)
+                let repeated = try XCTUnwrap(receiver.recording).moveContents()
+                XCTAssertFalse(repeated.items[0].state.style === firstHead)
+                XCTAssertTrue(repeated.items[0].state.style === repeated.items[2].state.style)
+                XCTAssertEqual(sourceShadow.transform, sourceMatrix)
+                XCTAssertEqual(sourceBlur.transform, branch.transform)
+            }
+        }
+    }
+
     private func live(_ queue: CommandQueue, environment: EnvironmentValues = .init(),
                       scale: CGFloat = 1, offset: CGPoint = .zero) throws -> GraphicsContext {
         try XCTUnwrap(GraphicsContext(sceneResources: SceneResources(), environment: environment,

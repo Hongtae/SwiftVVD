@@ -80,7 +80,9 @@ final class RBDisplayList: RBDisplayListContents {
     func draw(in context: GraphicsContext) {
         // The value snapshot also permits replay into this destination.
         let items = items
-        let transform = context.recording.map { _ in CachedTransform(outerStyle: context.storage.state.pointee.style) }
+        let transform = context.recording.map { _ in
+            CachedTransform(transform: context.transform, outerStyle: context.storage.state.pointee.style)
+        }
         for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 
@@ -123,7 +125,9 @@ final class RBMovedDisplayListContents: RBDisplayListContents {
     }
 
     func draw(in context: GraphicsContext) {
-        let transform = context.recording.map { _ in RBDisplayList.CachedTransform(outerStyle: context.storage.state.pointee.style) }
+        let transform = context.recording.map { _ in
+            RBDisplayList.CachedTransform(transform: context.transform, outerStyle: context.storage.state.pointee.style)
+        }
         for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 }
