@@ -24,9 +24,9 @@ let package = Package(
     platforms: [.macOS(.v27), .iOS(.v27), .macCatalyst(.v27)],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
-        .library(name: "VVD", type: .dynamic, targets: ["VVD"]),
-        .library(name: "VUI", type: .dynamic, targets: ["VUI"]),
-        .library(name: "VGame", type: .dynamic, targets: ["VGame"]),
+        .library(name: "VVD", targets: ["VVD"]),
+        .library(name: "VUI", targets: ["VUI"]),
+        .library(name: "VGame", targets: ["VGame"]),
         .executable(name: "VEditor", targets: ["VEditor"])
     ],
     dependencies: [
