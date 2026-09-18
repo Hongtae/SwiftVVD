@@ -35,23 +35,45 @@ extension Text {
             func resolve(in environment: EnvironmentValues, with options: ResolveOptions,
                          properties: inout ResolvedProperties,
                          includeDefaultAttributes: Bool) -> Color.ResolvedHDR? {
+                let base: AnyShapeStyle
                 switch self {
+                case let .explicit(style): base = style
+                case let .foregroundKeyColor(style):
+                    if options.contains(.allowsKeyColors) { return Self.keyColor }
+                    base = style
                 case .implicit, .default:
                     guard includeDefaultAttributes else { return nil }
-                    if options.contains(.foregroundKeyColor) {
-                        return Color.ResolvedHDR(.init(colorSpace: .sRGBLinear,
-                            red: -1, green: -1, blue: -1, opacity: 1))
+                    if options.contains(.foregroundKeyColor) { return Self.keyColor }
+                    let inherited: AnyShapeStyle?
+                    if case .implicit = self { inherited = environment.foregroundStyleLevels?.primary }
+                    else { inherited = environment.defaultForegroundStyle }
+                    var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
+                    inherited?._apply(to: &shape)
+                    if case let .color(color) = shape.result { base = AnyShapeStyle(color) }
+                    else { base = Self.primary }
+                }
+                if options.contains(.allowsKeyColors) {
+                    var shape = _ShapeStyle_Shape(operation: .resolveStyle(name: .foreground, levels: 0..<1),
+                        environment: environment)
+                    base._apply(to: &shape)
+                    let style: _ShapeStyle_Pack.Style
+                    if case let .pack(pack) = shape.result,
+                       let value = pack.styles.first(where: { $0.key == .init(.foreground, 0) })?.style {
+                        style = value
+                    } else {
+                        style = _ShapeStyle_Pack.Style(.color(Color.clear.resolveHDR(in: environment)))
                     }
-                case .explicit, .foregroundKeyColor:
-                    break
+                    return properties.addCustomStyle(style)
                 }
                 var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
-                baseStyle(in: environment)._apply(to: &shape)
+                base._apply(to: &shape)
                 if case let .color(color) = shape.result { return color.resolveHDR(in: environment) }
                 ForegroundStyle()._apply(to: &shape)
                 if case let .color(color) = shape.result { return color.resolveHDR(in: environment) }
                 return Color.primary.resolveHDR(in: environment)
             }
+            private static let keyColor = Color.ResolvedHDR(.init(colorSpace: .sRGBLinear,
+                red: -1, green: -1, blue: -1, opacity: 1))
             private static let primary = AnyShapeStyle(HierarchicalShapeStyle.primary)
         }
         /// Preserves an explicit decoration, inheritance, or an explicit reset.
@@ -146,16 +168,10 @@ extension Text {
             }
             attributes.paragraphStyle = properties.style(environment: environment,
                 alignment: alignment, writingDirection: writingDirection, lineHeight: lineHeight)
-            if options.contains(.foregroundKeyColor) {
-                if let resolved = color.resolve(in: environment, with: options, properties: &properties,
-                                                includeDefaultAttributes: includeDefaultAttributes) {
-                    attributes.foregroundColor = Color(resolved)
-                    properties.addColor(resolved)
-                }
-            } else {
-                var shape = _ShapeStyle_Shape(operation: .fallbackColor(level: 0), environment: environment)
-                color.baseStyle(in: environment)._apply(to: &shape)
-                if case let .color(color) = shape.result { attributes.foregroundColor = color }
+            if let resolved = color.resolve(in: environment, with: options, properties: &properties,
+                                            includeDefaultAttributes: includeDefaultAttributes) {
+                attributes.foregroundColor = Color(resolved)
+                properties.addColor(resolved)
             }
             attributes.backgroundColor = backgroundColor
             attributes.baselineOffset = baselineOffset
@@ -210,7 +226,7 @@ extension Text {
 }
 
 extension Text.Modifier {
-    func modify(style: inout Text.Style) {
+    func modify(style: inout Text.Style, environment: EnvironmentValues) {
         switch self {
         case let .font(font): style.baseFont = font.map(Text.Style.TextStyleFont.explicit) ?? .default
         case let .color(color): style.color = color.map { .explicit(AnyShapeStyle($0)) } ?? .default
@@ -221,7 +237,7 @@ extension Text.Modifier {
         case let .kerning(value): style.kerning = value
         case let .tracking(value): style.tracking = value
         case let .baseline(value): style.baselineOffset = value
-        case let .anyTextModifier(modifier): modifier.modify(style: &style)
+        case let .anyTextModifier(modifier): modifier.modify(style: &style, environment: environment)
         case .rounded: preconditionFailure("Rounded text styling requires a resolved modifier contract.")
         }
     }

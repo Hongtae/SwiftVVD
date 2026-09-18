@@ -84,7 +84,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         }
         XCTAssertTrue(faces[0].isEqual(to: face))
         XCTAssertEqual(text, "AB")
-        XCTAssertEqual(style.foregroundColor, .purple)
+        XCTAssertEqual(style.foregroundColor, VUI.Color(VUI.Color.purple.resolveHDR(in: .init())))
         XCTAssertEqual(style.backgroundColor, .red)
         XCTAssertEqual(style.underlineStyle, underline)
         XCTAssertEqual(style.strikethroughStyle, strikethrough)
@@ -130,7 +130,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
             .anyTextModifier(UnderlineTextModifier(lineStyle: nil)),
             .anyTextModifier(UnderlineTextModifier(lineStyle: Text.LineStyle(color: .red)))
         ]
-        for modifier in modifiers.reversed() { modifier.modify(style: &textStyle) }
+        for modifier in modifiers.reversed() { modifier.modify(style: &textStyle, environment: .init()) }
         var input = _ResolvedTextRunAttributes(kern: 2).nsAttributes
         input.transferAttributedStringStyles(to: &textStyle)
         var properties = Text.ResolvedProperties()
@@ -150,7 +150,7 @@ final class AttributedTextCoreVisualTests: XCTestCase {
         XCTAssertEqual(line.width, 24)
 
         var parent = Text.Style()
-        for modifier in [Text.Modifier.tracking(4), .kerning(6)].reversed() { modifier.modify(style: &parent) }
+        for modifier in [Text.Modifier.tracking(4), .kerning(6)].reversed() { modifier.modify(style: &parent, environment: .init()) }
         var tracking = _ResolvedTextRunAttributes(tracking: 5).nsAttributes
         tracking.transferAttributedStringStyles(to: &parent)
         let retainedStyle = parent.nsAttributes(in: EnvironmentValues(), properties: &properties)

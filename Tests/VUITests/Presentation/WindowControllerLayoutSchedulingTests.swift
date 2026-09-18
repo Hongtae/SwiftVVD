@@ -3704,11 +3704,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         defer { appContext = previousAppContext }
 
         let probe = LayoutSchedulingAnimationProbe()
+        // Keep intrinsic foreground alpha opaque so samples isolate transition opacity.
         let controller = WindowController(
             content: LayoutSchedulingResolvedRemovalStatusRoot(
                 probe: probe,
                 font: VUI.Font(textureFont)
-            ),
+            ).foregroundStyle(VUI.Color.black),
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(LayoutSchedulingResolvedRemovalStatusRoot.self)
@@ -3838,11 +3839,12 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         defer { appContext = previousAppContext }
 
         let probe = LayoutSchedulingAnimationProbe()
+        // Keep intrinsic foreground alpha opaque so samples isolate transition opacity.
         let controller = WindowController(
             content: LayoutSchedulingAnimatedThenPlainStatusRoot(
                 probe: probe,
                 font: VUI.Font(textureFont)
-            ),
+            ).foregroundStyle(VUI.Color.black),
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(LayoutSchedulingAnimatedThenPlainStatusRoot.self)
@@ -5685,12 +5687,13 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         defer { appContext = previousAppContext }
         let counter = LayoutSchedulingCounter()
         let probe = LayoutSchedulingAnimationLabProbe()
+        // Keep intrinsic foreground alpha opaque so samples isolate transition opacity.
         let controller = WindowController(
             content: LayoutSchedulingAnimationLabReplacementRoot(
                 counter: counter,
                 probe: probe,
                 font: textFont
-            ),
+            ).foregroundStyle(VUI.Color.black),
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(LayoutSchedulingAnimationLabReplacementRoot.self)

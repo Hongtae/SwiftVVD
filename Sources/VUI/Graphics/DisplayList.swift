@@ -1577,10 +1577,27 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     context.translateBy(x: origin.x, y: origin.y)
                     list.draw(in: context)
                 }
-            case let .drawing(contents, origin, _):
+            case let .drawing(contents, origin, options):
                 var context = context
                 context.translateBy(x: origin.x, y: origin.y)
-                contents.draw(in: context)
+                if options.alphaOnly {
+                    // Recorded masks carry coverage independently of their RGB.
+                    var matrix = ColorMatrix.zero
+                    matrix.r5 = 1
+                    matrix.g5 = 1
+                    matrix.b5 = 1
+                    matrix.a4 = 1
+                    context.addFilter(.colorMatrix(matrix))
+                    let scale = context.contentScaleFactor
+                    let bounds = contents.boundingRect.applying(CGAffineTransform(scaleX: scale, y: scale))
+                        .integral.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale))
+                    context.drawLayer(in: bounds) { layer, _ in
+                        layer.translateBy(x: -bounds.minX, y: -bounds.minY)
+                        contents.draw(in: layer)
+                    }
+                } else {
+                    contents.draw(in: context)
+                }
             }
         }
 
@@ -3511,10 +3528,28 @@ struct DisplayList: Equatable, CustomStringConvertible {
                         context.translateBy(x: origin.x, y: origin.y)
                         renderItems(in: list, context: context, includeDebug: includeDebug)
                     }
-                case let .drawing(contents, origin, _):
+                case let .drawing(contents, origin, options):
                     var context = content.renderContext(from: context)
                     context.translateBy(x: origin.x, y: origin.y)
-                    if let local = contents as? LocalContents {
+                    if options.alphaOnly {
+                        var matrix = ColorMatrix.zero
+                        matrix.r5 = 1
+                        matrix.g5 = 1
+                        matrix.b5 = 1
+                        matrix.a4 = 1
+                        context.addFilter(.colorMatrix(matrix))
+                        let scale = context.contentScaleFactor
+                        let bounds = contents.boundingRect.applying(CGAffineTransform(scaleX: scale, y: scale))
+                            .integral.applying(CGAffineTransform(scaleX: 1 / scale, y: 1 / scale))
+                        context.drawLayer(in: bounds) { layer, _ in
+                            layer.translateBy(x: -bounds.minX, y: -bounds.minY)
+                            if let local = contents as? LocalContents {
+                                renderItems(in: local.list, context: layer, includeDebug: includeDebug)
+                            } else {
+                                contents.draw(in: layer)
+                            }
+                        }
+                    } else if let local = contents as? LocalContents {
                         renderItems(in: local.list, context: context, includeDebug: includeDebug)
                     } else {
                         contents.draw(in: context)

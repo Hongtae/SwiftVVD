@@ -262,6 +262,47 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         }
     }
 
+    func testPreparedBackendTextUsesTheSameResourceVersionOnPublicationAndReuse() throws {
+        #if canImport(Metal)
+        let device = try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        let host = TestViewRendererHost()
+        let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
+        host.storage = viewGraph
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
+            var renders = 0
+            let image = VUI.Image(size: CGSize(width: 8, height: 8)) { context in
+                renders += 1
+                context.fill(Path(CGRect(x: 0, y: 0, width: 8, height: 8)), with: .color(.red))
+            }
+            let inputs = makeInputs(graph)
+            let text = Text(verbatim: "A") + Text(image)
+            let outputs = Text._makeView(view: _GraphValue(_attribute: graph.makeInput(value: text)), inputs: inputs)
+            let resources = Attribute<ResourceList>(try XCTUnwrap(outputs.preferences.value(for: ResourceList.Key.self)))
+            let commands = try XCTUnwrap(device.renderQueue()?.makeCommandBuffer())
+            let environment = inputs.base.cachedEnvironment.value.environment
+            let context = try XCTUnwrap(GraphicsContext(sceneResources: host.sceneResources, environment: environment.value,
+                viewport: CGRect(x: 0, y: 0, width: 200, height: 100), contentOffset: .zero,
+                contentScaleFactor: 1, resolution: CGSize(width: 200, height: 100), commandBuffer: commands))
+            try XCTUnwrap(resources.value.items.first)(context)
+            XCTAssertEqual(renders, 1)
+            XCTAssertTrue(resources.value.items.isEmpty)
+            var changed = environment.value
+            changed.foregroundStyleLevels = .init(primary: AnyShapeStyle(VUI.Color.green))
+            environment.value = changed
+            try XCTUnwrap(resources.value.items.first)(context)
+            XCTAssertEqual(renders, 2)
+            XCTAssertTrue(resources.value.items.isEmpty)
+            XCTAssertTrue(commands.commit())
+        }
+        #else
+        throw XCTSkip("Metal is required for generated text attachments")
+        #endif
+    }
+
     func testPendingBackendResourceTaskDoesNotRetainItsGraph() throws {
         let witness = Witness()
         func capture() throws -> ResourceList.Task {

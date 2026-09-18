@@ -459,7 +459,14 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
         var options: Text.ResolveOptions = .includeTransitions
         if allowsKeyColors { options.insert(.allowsKeyColors) }
         if features.contains(.useTextSuffix) { options.insert(.allowsTextSuffix) }
-        let resolved = text._resolveStyledText(
+        var preparedText = text
+        if includeDefaultAttributes {
+            var shape = _ShapeStyle_Shape(operation: .prepareText(level: 0), environment: trackedEnvironment)
+            shape.activeRecursiveStyles.insert(.foreground)
+            shape.effectiveForegroundStyle._apply(to: &shape)
+            if case let .preparedText(result) = shape.result { preparedText = result.apply(to: text) }
+        }
+        let resolved = preparedText._resolveStyledText(
             context: context,
             referenceDate: referenceDate,
             archiveOptions: archiveOptions,

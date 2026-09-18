@@ -201,7 +201,7 @@ enum TextLineHeight: Hashable, Codable {
 final class LanguageTextModifier: AnyTextModifier {
     let language: TypesettingLanguage
     init(_ language: TypesettingLanguage) { self.language = language }
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         style.typesettingConfiguration.language = language
         style.typesettingConfiguration.languageAwareLineHeightRatio = .automatic
     }
@@ -211,7 +211,7 @@ final class LanguageTextModifier: AnyTextModifier {
 final class LanguageAwareLineHeightRatioTextModifier: AnyTextModifier {
     let value: TypesettingLanguageAwareLineHeightRatio
     init(_ value: TypesettingLanguageAwareLineHeightRatio) { self.value = value }
-    override func modify(style: inout Text.Style) { style.typesettingConfiguration.languageAwareLineHeightRatio = value }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.typesettingConfiguration.languageAwareLineHeightRatio = value }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.value == value }
 }
 /// Applies a text-scale request only while the modifier is enabled.
@@ -219,7 +219,7 @@ final class TextScaleModifier: AnyTextModifier {
     var isEnabled: Bool
     var scale: Text.Scale
     init(_ scale: Text.Scale, isEnabled: Bool) { self.scale = scale; self.isEnabled = isEnabled }
-    override func modify(style: inout Text.Style) { if isEnabled { style.scale = scale } }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { if isEnabled { style.scale = scale } }
     override func isEqual(to other: AnyTextModifier) -> Bool {
         guard let other = other as? Self else { return false }
         return scale == other.scale && isEnabled == other.isEnabled
@@ -229,7 +229,7 @@ final class TextScaleModifier: AnyTextModifier {
 final class SpeechModifier: AnyTextModifier {
     let value: AccessibilitySpeechAttributes
     init(_ value: AccessibilitySpeechAttributes) { self.value = value }
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         var speech = style.speech ?? AccessibilitySpeechAttributes()
         speech.merge(value)
         style.speech = speech
@@ -240,7 +240,7 @@ final class SpeechModifier: AnyTextModifier {
 final class AccessibilityTextModifier: AnyTextModifier {
     let value: AccessibilityTextAttributes
     init(_ value: AccessibilityTextAttributes) { self.value = value }
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         var accessibility = style.accessibility ?? AccessibilityTextAttributes()
         accessibility.merge(value)
         style.accessibility = accessibility
@@ -251,14 +251,14 @@ final class AccessibilityTextModifier: AnyTextModifier {
 final class TextShadowModifier: AnyTextModifier {
     let shadow: _ShadowEffect
     init(_ shadow: _ShadowEffect) { self.shadow = shadow }
-    override func modify(style: inout Text.Style) { style.shadow = self }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.shadow = self }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.shadow == shadow }
 }
 /// Retains the transition value later indexed by resolved text properties.
 final class TextTransitionModifier: AnyTextModifier {
     let resolved: Text.ResolvedProperties.Transition
     init(_ resolved: Text.ResolvedProperties.Transition) { self.resolved = resolved }
-    override func modify(style: inout Text.Style) { style.transition = self }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.transition = self }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.resolved == resolved }
 }
 

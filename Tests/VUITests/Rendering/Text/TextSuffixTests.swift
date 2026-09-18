@@ -289,7 +289,7 @@ final class TextSuffixTests: XCTestCase {
                 } else {
                     let previous = source.attributedStorage.attributes(at: string.utf16.count - 1, effectiveRange: nil)
                     XCTAssertEqual(attributes[.coreFont] as? VUI.Font, previous[.coreFont] as? VUI.Font)
-                    XCTAssertEqual(attributes[.coreForegroundColor] as? VUI.Color, .green)
+                    XCTAssertEqual(attributes[.coreForegroundColor] as? VUI.Color, VUI.Color(VUI.Color.green.resolveHDR(in: .init())))
                 }
                 let glyphs = source.unwrappedGlyphLines()
                 let attachmentGlyph = try XCTUnwrap(glyphs.last?.glyphs.last)
@@ -308,7 +308,7 @@ final class TextSuffixTests: XCTestCase {
             guard case let .styledText(_, _, _, previous) = source.runs[source.runs.count - 2],
                   case let .styledText(_, _, _, attachment) = source.runs.last else { return XCTFail() }
             XCTAssertEqual(attachment.fontResource?.pointSize, 17)
-            XCTAssertEqual(attachment.foregroundColor, .blue)
+            XCTAssertEqual(attachment.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
             XCTAssertEqual(attachment.underlineStyle, previous.underlineStyle)
             XCTAssertEqual(attachment.fontResource, previous.fontResource)
         }
@@ -347,10 +347,10 @@ final class TextSuffixTests: XCTestCase {
                 XCTAssertFalse(layout.isTruncated)
                 XCTAssertEqual(layout.count, 3)
                 guard layout.count == 3 else { return }
-                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
-                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
+                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
                 XCTAssertEqual(layout[1].lastRunAttributes?.fontResource?.pointSize, 23)
-                XCTAssertEqual(layout[2].lastRunAttributes?.foregroundColor, .red)
+                XCTAssertEqual(layout[2].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.red.resolveHDR(in: .init())))
                 XCTAssertEqual(layout[2].lastRunAttributes?.fontResource?.pointSize, 11)
                 XCTAssertEqual(layout[2].drawingOptions.rawValue, 2)
                 XCTAssertEqual(manager.suffix.line?.drawingOptions.rawValue, 0)
@@ -394,7 +394,7 @@ final class TextSuffixTests: XCTestCase {
                     XCTAssertEqual(layout.last?.drawingOptions.rawValue, width < 100 ? 0 : 2)
                     if width == 100 {
                         XCTAssertEqual(layout[0].flatMap { $0.characterIndices }.count, 1)
-                        XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
+                        XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
                     }
                 }
                 manager.resetCache()
@@ -426,8 +426,8 @@ final class TextSuffixTests: XCTestCase {
             guard layout.count == 3 else { return }
             XCTAssertTrue(layout[0].isEmpty)
             XCTAssertEqual(layout[0].typographicBounds.width, 0)
-            XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
-            XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+            XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
+            XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
             XCTAssertFalse(layout.isTruncated)
         }
     }
@@ -445,8 +445,8 @@ final class TextSuffixTests: XCTestCase {
                 XCTAssertEqual(layout.count, 3)
                 guard layout.count == 3 else { return }
                 XCTAssertEqual(layout[0].count, 2)
-                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, .blue)
-                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, .blue)
+                XCTAssertEqual(layout[0].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
+                XCTAssertEqual(layout[1].lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.blue.resolveHDR(in: .init())))
                 let bodyWidth: CGFloat = 30.0078125
                 let spaceWidth: CGFloat = 7.689453125
                 let tokenWidth: CGFloat = 15.3857421875
@@ -467,7 +467,7 @@ final class TextSuffixTests: XCTestCase {
             XCTAssertEqual(layout[0].lastRunAttributes?.kern, 2)
             XCTAssertEqual(layout[0].lastRunAttributes?.baselineOffset, 3)
             XCTAssertNotNil(layout[0].lastRunAttributes?.underlineStyle)
-            XCTAssertEqual(layout.last?.lastRunAttributes?.foregroundColor, .red)
+            XCTAssertEqual(layout.last?.lastRunAttributes?.foregroundColor, VUI.Color(VUI.Color.red.resolveHDR(in: .init())))
         }
     }
 

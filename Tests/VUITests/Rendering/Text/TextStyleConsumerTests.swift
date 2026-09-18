@@ -22,7 +22,7 @@ final class TextStyleConsumerTests {
 
     private func style(_ text: Text, parent: Text.Style = .init()) -> Text.Style {
         var result = parent
-        for modifier in text.modifiers.reversed() { modifier.modify(style: &result) }
+        for modifier in text.modifiers.reversed() { modifier.modify(style: &result, environment: .init()) }
         return result
     }
     private func environment() -> EnvironmentValues {
@@ -357,9 +357,9 @@ final class TextStyleConsumerTests {
         #expect(attributes(result).map { $0.fontResource?.languageAwareLineHeightRatio } == [0.33, nil, 0.33])
         var style = Text.Style()
         style.typesettingConfiguration.languageAwareLineHeightRatio = .legacy
-        LanguageTextModifier(.automatic).modify(style: &style)
+        LanguageTextModifier(.automatic).modify(style: &style, environment: .init())
         #expect(style.typesettingConfiguration.languageAwareLineHeightRatio == .automatic)
-        LanguageAwareLineHeightRatioTextModifier(.disable).modify(style: &style)
+        LanguageAwareLineHeightRatioTextModifier(.disable).modify(style: &style, environment: .init())
         #expect(style.typesettingConfiguration.languageAwareLineHeightRatio == .disable)
     }
 
@@ -1594,9 +1594,9 @@ final class TextStyleConsumerTests {
         #expect(runs[0].paragraphStyle?.baselineInterval == .exact(points: 27))
         #expect(runs[0].paragraphStyle === runs[1].paragraphStyle)
         var style = Text.Style()
-        SpeechModifier(.init(alwaysIncludesPunctuation: true, adjustedPitch: 0.75)).modify(style: &style)
-        SpeechModifier(.init(spellsOutCharacters: true)).modify(style: &style)
-        AccessibilityTextModifier(.init(headingLevel: .h2, label: Text(verbatim: "spoken"))).modify(style: &style)
+        SpeechModifier(.init(alwaysIncludesPunctuation: true, adjustedPitch: 0.75)).modify(style: &style, environment: .init())
+        SpeechModifier(.init(spellsOutCharacters: true)).modify(style: &style, environment: .init())
+        AccessibilityTextModifier(.init(headingLevel: .h2, label: Text(verbatim: "spoken"))).modify(style: &style, environment: .init())
         #expect(style.speech?.alwaysIncludesPunctuation == true)
         #expect(style.speech?.spellsOutCharacters == true)
         #expect(style.speech?.adjustedPitch == 0.75)
@@ -1622,7 +1622,7 @@ final class TextStyleConsumerTests {
         do {
             let shadow = TextShadowModifier(_ShadowEffect(color: .clear, radius: 3, offset: CGSize(width: 2, height: 4)))
             weakShadow = shadow
-            shadow.modify(style: &style)
+            shadow.modify(style: &style, environment: .init())
         }
         var copy: Text.Style? = style
         style.transition = TextTransitionModifier(.init(transition: .opacity))

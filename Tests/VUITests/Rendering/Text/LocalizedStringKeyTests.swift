@@ -1113,11 +1113,13 @@ final class LocalizedStringKeyTests: XCTestCase {
         XCTAssertEqual(stored.foregroundColor, VUI.Color.red)
 
         var style = Text.Style()
-        for modifier in embedded.modifiers.reversed() { modifier.modify(style: &style) }
+        for modifier in embedded.modifiers.reversed() { modifier.modify(style: &style, environment: .init()) }
         var properties = Text.ResolvedProperties()
-        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor, VUI.Color.red)
+        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor,
+                       VUI.Color(VUI.Color.red.resolveHDR(in: EnvironmentValues())))
         var attributes = _ResolvedTextRunAttributes(foregroundColor: VUI.Color.blue).nsAttributes
         attributes.transferAttributedStringStyles(to: &style)
-        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor, VUI.Color.blue)
+        XCTAssertEqual(style.nsAttributes(in: EnvironmentValues(), properties: &properties).foregroundColor,
+                       VUI.Color(VUI.Color.blue.resolveHDR(in: EnvironmentValues())))
     }
 }

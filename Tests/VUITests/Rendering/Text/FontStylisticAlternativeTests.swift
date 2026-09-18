@@ -64,7 +64,7 @@ final class FontStylisticAlternativeTests: XCTestCase {
         XCTAssertNotEqual(first, Text(verbatim: "AB")._stylisticAlternative(.two))
         let text = first._stylisticAlternative(.two)._stylisticAlternative(.one)
         var style = Text.Style()
-        for modifier in text.modifiers.reversed() { modifier.modify(style: &style) }
+        for modifier in text.modifiers.reversed() { modifier.modify(style: &style, environment: .init()) }
         let modifiers = try style.fontModifiers.map {
             try XCTUnwrap($0 as? AnyDynamicFontModifier<VUI.Font.StylisticAlternativeModifier>)
         }

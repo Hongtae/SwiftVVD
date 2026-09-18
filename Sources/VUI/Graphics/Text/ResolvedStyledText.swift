@@ -402,6 +402,24 @@ extension Text {
             }
         }
 
+        mutating func addCustomStyle(_ style: _ShapeStyle_Pack.Style) -> Color.ResolvedHDR {
+            if case var .color(color) = style.fill, style.effects.isEmpty,
+               style._blend == nil || style._blend == .normal {
+                color.opacity *= style.opacity
+                return color
+            }
+            let index: Int
+            if let existing = styles.firstIndex(of: style) {
+                index = existing
+            } else {
+                index = styles.count
+                styles.append(style)
+                features.insert(.keyColor)
+            }
+            return Color.ResolvedHDR(.init(colorSpace: .sRGBLinear,
+                red: -1, green: -1, blue: Float(index) / 1024, opacity: 1))
+        }
+
         init(
             insets: EdgeInsets = EdgeInsets(),
             features: Features = [],

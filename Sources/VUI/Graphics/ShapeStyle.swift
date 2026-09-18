@@ -76,6 +76,13 @@ public struct _ShapeStyle_Shape {
     enum PreparedTextResult {
         case foregroundColor(Color)
         case foregroundKeyColor
+
+        func apply(to text: Text) -> Text {
+            switch self {
+            case let .foregroundColor(color): text.foregroundColor(color)
+            case .foregroundKeyColor: text.modified(with: .anyTextModifier(TextForegroundKeyColorModifier.shared))
+            }
+        }
     }
 
     enum Result {
@@ -184,6 +191,10 @@ public struct _ShapeStyle_Shape {
             at: level,
             environment: environment
         )
+    }
+
+    var effectiveForegroundStyle: AnyShapeStyle {
+        foregroundStyle ?? environment.currentForegroundStyle ?? AnyShapeStyle(HierarchicalShapeStyle.primary)
     }
 
     mutating func storeStyle(_ style: _ShapeStyle_Pack.Style, name: _ShapeStyle_Name, level: Int) {

@@ -230,11 +230,14 @@ final class ShapeStyleCompositionTests: XCTestCase {
                case let .text(value) = content.value { text = value }
         }
         let mounted = try XCTUnwrap(text)
-        // Exercise the common consumer with a real mounted/resolved Text owner.
-        // Foreground/indexed Style allocation remains a separate producer boundary.
-        mounted.view.text.features.insert(.keyColor)
-        let list = host.graph.data.withCurrent {
-            var renderer = _ShapeStyle_RenderedShape(shape: .text(mounted.view),
+        let list = try host.graph.data.withCurrent {
+            var environment = EnvironmentValues()
+            environment.foregroundStyleLevels = .init(primary: AnyShapeStyle(Color.white.shadow(.drop(radius: 0))))
+            var helper = ResolvedTextHelper(includeDefaultAttributes: true, allowsKeyColors: true)
+            let prepared = try XCTUnwrap(helper.resolve(Text("Abc").font(.system(size: 24)),
+                with: environment, sizeFitting: false))
+            let view = StyledTextContentView(text: prepared, renderer: nil)
+            var renderer = _ShapeStyle_RenderedShape(shape: .text(view),
                 contentSeed: .init(decodedValue: 9), frame: mounted.frame,
                 options: [], environment: host.graph.data.graph.makeInput(value: EnvironmentValues()))
             var layers = _ShapeStyle_RenderedLayers(group: _ShapeStyle_InterpolatorGroup())

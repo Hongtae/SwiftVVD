@@ -504,34 +504,59 @@ struct _ShapeStyle_RenderedShape {
         name: _ShapeStyle_Name,
         layers: inout _ShapeStyle_RenderedLayers
     ) {
-        // Keep the existing direct text path until a style needs the shared mask
-        // consumer. Indexed colors and mixed-run partitioning have a separate owner.
-        if !style.effects.isEmpty || style._blend != nil {
-            guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
-                  let host = viewGraph.rendererHost else {
-                fatalError("Styled text recording requires an active ViewGraph renderer host.")
-            }
-            let environment = _environment.value.untrackedCopy()
-            let viewport = CGRect(origin: .zero, size: CGSize(width: frame.width * environment.displayScale,
-                height: frame.height * environment.displayScale))
-            var context = GraphicsContext(recording: RBDisplayList(viewport: viewport),
-                environment: environment,
-                inputs: .init(sceneResources: host.sceneResources, viewport: viewport,
-                    contentScaleFactor: environment.displayScale, resourceCommandQueue: nil))
-            context.clipBoundingRect = .infinite
-            displayList(shading: .color(.white)).draw(in: context)
-            let contents = context.recording!.moveContents()
-            var mask = DisplayList.Item(content: DisplayList.Content(
-                drawing: contents, origin: .zero,
-                options: RasterizationOptions(flags: [.defaultFlags, .alphaOnly]),
-                seed: contentSeed), frame: contents.boundingRect,
-                identity: .none, version: item.version)
-            if contents.isEmpty { mask.value = .empty }
-            shape = .alphaMask(mask, alphaOnly: true)
+        guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+              let host = viewGraph.rendererHost else {
+            fatalError("Styled text recording requires an active ViewGraph renderer host.")
         }
-        layers.beginLayer(id: .styled(name, 0), style: style, shape: &self)
-        render(style: style)
-        layers.endLayer(shape: &self)
+        let environment = _environment.value.untrackedCopy()
+        let viewport = CGRect(origin: .zero, size: CGSize(width: frame.width * environment.displayScale,
+            height: frame.height * environment.displayScale))
+        let contents = text.text.layers(for: frame.size, renderer: text.renderer,
+            deviceScale: environment.displayScale, environment: environment,
+            inputs: .init(sceneResources: host.sceneResources, viewport: viewport,
+                contentScaleFactor: environment.displayScale, resourceCommandQueue: nil))
+        func drawing(_ contents: any RBDisplayListContents, alphaOnly: Bool) -> DisplayList.Item {
+            var flags = RasterizationOptions.Flags.defaultFlags
+            if alphaOnly { flags.insert(.alphaOnly) }
+            return DisplayList.Item(content: DisplayList.Content(drawing: contents, origin: .zero,
+                options: RasterizationOptions(flags: flags), seed: contentSeed),
+                frame: contents.boundingRect.offsetBy(dx: frame.minX, dy: frame.minY),
+                identity: item.identity, version: item.version)
+        }
+        if let unstyled = contents.unstyled {
+            layers.beginLayer(id: .unstyled, style: nil, shape: &self)
+            item = drawing(unstyled, alphaOnly: false)
+            layers.endLayer(shape: &self)
+        }
+        let replacement: SIMD4<Float>
+        if case let .color(color) = style.fill {
+            replacement = SIMD4(color.linearRed, color.linearGreen, color.linearBlue, 1)
+        } else {
+            let value: Float = environment.colorScheme == .dark ? 1 : 0
+            replacement = SIMD4(value, value, value, 1)
+        }
+        let transform = RBDisplayListTransform()
+        for keyed in contents.keyed.reversed() {
+            transform.removeAll()
+            transform.addColorReplacement(from: SIMD4(-1, -1, Float(keyed.index) / 1024, -32768),
+                to: replacement, colorSpace: .linearSRGB)
+            let mask = drawing(transform.copyApplyingToDisplayList(keyed.contents), alphaOnly: true)
+            let keyedStyle = text.text.styles[keyed.index]
+            layers.beginLayer(id: .customStyle(UInt32(keyed.index)), style: keyedStyle, shape: &self)
+            shape = .alphaMask(mask, alphaOnly: true)
+            render(style: keyedStyle)
+            layers.endLayer(shape: &self)
+        }
+        if let foreground = contents.foreground {
+            transform.removeAll()
+            transform.addColorReplacement(from: SIMD4(-1, -1, -1, -32768),
+                to: replacement, colorSpace: .linearSRGB)
+            let mask = drawing(transform.copyApplyingToDisplayList(foreground), alphaOnly: true)
+            layers.beginLayer(id: .styled(name, 0), style: style, shape: &self)
+            shape = .alphaMask(mask, alphaOnly: true)
+            render(style: style)
+            layers.endLayer(shape: &self)
+        }
     }
 
     private mutating func renderUnstyledImage(

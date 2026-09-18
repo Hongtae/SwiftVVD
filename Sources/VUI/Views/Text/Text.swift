@@ -197,7 +197,7 @@ class AnyTextStorage: CustomDebugStringConvertible {
 }
 
 class AnyTextModifier {
-    func modify(style: inout Text.Style) {
+    func modify(style: inout Text.Style, environment: EnvironmentValues) {
         preconditionFailure("Abstract text modifier")
     }
 
@@ -1650,7 +1650,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                   style parentStyle: Style, properties: inout ResolvedProperties,
                   text: inout String, options: ResolveOptions = .includeTransitions) -> ResolvedTextSource? {
         var style = parentStyle
-        for modifier in modifiers.reversed() { modifier.modify(style: &style) }
+        for modifier in modifiers.reversed() { modifier.modify(style: &style, environment: context.environment) }
         switch storage {
         case let .verbatim(string):
             return style.resolve(string, context: context, properties: &properties, text: &text, options: options)
@@ -1872,7 +1872,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
 }
 
 final class BoldTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         if isActive { style.addFontModifier(.static(Font.BoldModifier.self)) }
         else { style.removeFontModifier(Font.BoldModifier.self) }
     }
@@ -1893,7 +1893,7 @@ final class BoldTextModifier: AnyTextModifier {
 }
 
 final class ItalicTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         if isActive { style.addFontModifier(.static(Font.ItalicModifier.self)) }
         else { style.removeFontModifier(Font.ItalicModifier.self) }
     }
@@ -1914,7 +1914,7 @@ final class ItalicTextModifier: AnyTextModifier {
 }
 
 final class MonospacedTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         if isActive { style.addFontModifier(.static(Font.MonospacedModifier.self)) }
         else { style.removeFontModifier(Font.MonospacedModifier.self) }
     }
@@ -1935,7 +1935,7 @@ final class MonospacedTextModifier: AnyTextModifier {
 }
 
 final class MonospacedDigitTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) { style.addFontModifier(.static(Font.MonospacedDigitModifier.self)) }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.addFontModifier(.static(Font.MonospacedDigitModifier.self)) }
     override func isEqual(to other: AnyTextModifier) -> Bool {
         other is MonospacedDigitTextModifier
     }
@@ -1953,7 +1953,7 @@ final class StylisticAlternativeTextModifier: AnyTextModifier {
         self.value = value
     }
 
-    override func modify(style: inout Text.Style) {
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         style.addFontModifier(.dynamic(Font.StylisticAlternativeModifier(alternative: value)))
     }
 
@@ -1968,7 +1968,7 @@ final class StylisticAlternativeTextModifier: AnyTextModifier {
 }
 
 final class UnderlineTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) { style.underline = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.underline = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
     let lineStyle: Text.LineStyle?
 
     init(lineStyle: Text.LineStyle?) {
@@ -1986,7 +1986,7 @@ final class UnderlineTextModifier: AnyTextModifier {
 }
 
 final class StrikethroughTextModifier: AnyTextModifier {
-    override func modify(style: inout Text.Style) { style.strikethrough = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.strikethrough = lineStyle.map(Text.Style.LineStyle.explicit) ?? .default }
     let lineStyle: Text.LineStyle?
 
     init(lineStyle: Text.LineStyle?) {
@@ -2004,7 +2004,7 @@ final class StrikethroughTextModifier: AnyTextModifier {
 }
 
 class TextAttributeModifierBase: AnyTextModifier {
-    override func modify(style: inout Text.Style) { style.customAttributes.append(self) }
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) { style.customAttributes.append(self) }
     func apply(to attributes: inout _TextAttributeValues) {}
 }
 
@@ -2037,6 +2037,11 @@ extension Text {
 
     public func foregroundColor(_ color: Color?) -> Text {
         modified(with: .color(color))
+    }
+
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> Text {
+        if let color = style as? Color { return foregroundColor(color) }
+        return modified(with: .anyTextModifier(TextForegroundStyleModifier(style)))
     }
 
     var foregroundColor: Color? {
@@ -2309,6 +2314,8 @@ extension Text: View {
         let resolvedTextHelper = ResolvedTextHelper(
             _time: timeAttr,
             _referenceDate: inputs[ReferenceDateInput.self],
+            includeDefaultAttributes: true,
+            allowsKeyColors: true,
             archiveOptions: archiveOptions,
             features: resolvedTextFeatures
         )
@@ -2346,7 +2353,16 @@ extension Text: View {
             let environment = cachedEnvironmentAttr.value.environment.value // Dependency 2: Environment (scale, theme, font)
             let referenceDate = Date()
             let renderEnvironment = environment.untrackedCopy()
-            let currentVersion = text._resolutionVersion(
+            var shape = _ShapeStyle_Shape(operation: .prepareText(level: 0), environment: environment)
+            shape.activeRecursiveStyles.insert(.foreground)
+            shape.effectiveForegroundStyle._apply(to: &shape)
+            let preparedText: Text
+            if case let .preparedText(result) = shape.result {
+                preparedText = result.apply(to: text)
+            } else {
+                preparedText = text
+            }
+            let currentVersion = preparedText._resolutionVersion(
                 in: environment,
                 referenceDate: referenceDate
             )
@@ -2400,7 +2416,7 @@ extension Text: View {
                 var context = context
                 context.copyOnWrite()
                 context.environment = renderEnvironment
-                guard let resolved = text._resolveStyledText(
+                guard let resolved = preparedText._resolveStyledText(
                     context: context,
                     referenceDate: referenceDate,
                     archiveOptions: archiveOptions,
