@@ -155,6 +155,67 @@ final class ShapeStyleCompositionTests: XCTestCase {
         XCTAssertEqual(actual, expected)
     }
 
+    func testPublicBlendFillAndImplicitStyleReachTheBackdrop() throws {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        let color = Color(.sRGBLinear, red: 0.8, green: 0.1, blue: 0.2)
+        let backdrop = Color(.sRGBLinear, red: 0.2, green: 0.5, blue: 0.7)
+        var outputs: [[UInt8]] = []
+        for mode: VUI.BlendMode in [.normal, .multiply, .screen, .destinationOut] {
+            let styled = CompositionHost(ZStack {
+                backdrop
+                Rectangle().fill(color.blendMode(mode)).frame(width: 36, height: 28)
+            })
+            let implicit = CompositionHost(ZStack {
+                backdrop
+                Rectangle().fill(.blendMode(mode)).frame(width: 36, height: 28).foregroundStyle(color)
+            })
+            let reference = CompositionHost(ZStack {
+                backdrop
+                Rectangle().fill(color).frame(width: 36, height: 28).blendMode(mode)
+            })
+            let actual = try pixels(styled.list().items, resources: styled.rendererHost.sceneResources)
+            let expected = try pixels(reference.list().items, resources: reference.rendererHost.sceneResources)
+            XCTAssertEqual(actual, expected, "Explicit style: \(mode)")
+            XCTAssertEqual(try pixels(implicit.list().items, resources: implicit.rendererHost.sceneResources),
+                expected, "Implicit style: \(mode)")
+            outputs.append(actual)
+        }
+        XCTAssertNotEqual(outputs[0], outputs[1])
+        XCTAssertNotEqual(outputs[1], outputs[2])
+        XCTAssertEqual(outputs[3][(40 * 96 + 40) * 4 + 3], 0)
+        XCTAssertEqual(outputs[3][(10 * 96 + 10) * 4 + 3], 255)
+    }
+
+    func testPublicTextBlendUsesBothForegroundAndIndexedLayers() throws {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        #if canImport(Metal)
+        let device = try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        let color = Color(.sRGBLinear, red: 0.8, green: 0.1, blue: 0.2)
+        let backdrop = Color(.sRGBLinear, red: 0.2, green: 0.5, blue: 0.7)
+        let text = Text("Abg").font(.system(size: 24))
+        var outputs: [[UInt8]] = []
+        for mode: VUI.BlendMode in [.normal, .multiply, .screen, .destinationOut] {
+            let inline = CompositionHost(ZStack { backdrop; text.foregroundStyle(color.blendMode(mode)) })
+            let foreground = CompositionHost(ZStack { backdrop; AnyView(text).foregroundStyle(color.blendMode(mode)) })
+            let reference = CompositionHost(ZStack { backdrop; text.foregroundColor(color).blendMode(mode) })
+            let expected = try pixels(reference.list().items, resources: reference.rendererHost.sceneResources, device: device)
+            for host in [inline, foreground] {
+                let actual = try pixels(host.list().items, resources: host.rendererHost.sceneResources, device: device)
+                XCTAssertLessThanOrEqual(zip(actual, expected).map { abs(Int($0) - Int($1)) }.max()!, 1,
+                    "Styled and View blend should differ only by offscreen rounding: \(mode)")
+            }
+            outputs.append(expected)
+        }
+        XCTAssertNotEqual(outputs[0], outputs[1])
+        XCTAssertNotEqual(outputs[1], outputs[2])
+        #else
+        throw XCTSkip("Metal is required for Text blend rendering")
+        #endif
+    }
+
     func testImplicitPublicShadowCopiesForegroundAndOuterOpacityForMetal() throws {
         // ASSERTIONS shapeStyleShadowProducer27Observed
         // ASSERTIONS shapeStyleImplicitCopy27Observed

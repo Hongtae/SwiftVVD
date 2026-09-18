@@ -540,6 +540,68 @@ extension EnvironmentValues {
     }
 }
 
+public struct _BlendModeShapeStyle<Style: ShapeStyle>: ShapeStyle {
+    public var style: Style
+    public var blendMode: BlendMode
+
+    @inlinable public init(style: Style, blendMode: BlendMode) {
+        self.style = style
+        self.blendMode = blendMode
+    }
+
+    public func _apply(to shape: inout _ShapeStyle_Shape) {
+        switch shape.operation {
+        case .prepareText:
+            if blendMode == .normal {
+                style._apply(to: &shape)
+            } else {
+                shape.result = .preparedText(.foregroundKeyColor)
+            }
+        case let .resolveStyle(name, levels):
+            style._apply(to: &shape)
+            var pack: _ShapeStyle_Pack
+            if case let .pack(value) = shape.result { pack = value }
+            else { pack = _ShapeStyle_Pack() }
+            let blend = blendMode.graphicsContextBlendMode
+            for index in pack.styles.indices where pack.styles[index].key.name == name &&
+                levels.contains(Int(pack.styles[index].key._level)) {
+                pack.styles[index].style.applyBlend(blend)
+            }
+            shape.result = .pack(pack)
+        case .copyStyle:
+            style._apply(to: &shape)
+            if case let .style(copied) = shape.result {
+                shape.result = .style(AnyShapeStyle(
+                    _BlendModeShapeStyle<AnyShapeStyle>(style: copied, blendMode: blendMode)
+                ))
+            }
+        case .primaryStyle:
+            break
+        case .fallbackColor, .modifyBackground, .multiLevel:
+            style._apply(to: &shape)
+        }
+    }
+
+    public static func _apply(to type: inout _ShapeStyle_ShapeType) {
+        Style._apply(to: &type)
+    }
+
+    public typealias Resolved = Never
+}
+
+extension ShapeStyle {
+    @inlinable @_disfavoredOverload
+    public func blendMode(_ mode: BlendMode) -> some ShapeStyle {
+        _BlendModeShapeStyle(style: self, blendMode: mode)
+    }
+}
+
+extension ShapeStyle where Self == AnyShapeStyle {
+    public static func blendMode(_ mode: BlendMode) -> some ShapeStyle {
+        _BlendModeShapeStyle(style: _ImplicitShapeStyle(), blendMode: mode)
+    }
+}
+
 public struct _OpacityShapeStyle<Style: ShapeStyle>: ShapeStyle {
     public var style: Style
     public var opacity: Float

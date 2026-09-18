@@ -5,6 +5,126 @@ import XCTest
 final class ShapeStyleProducerTests: XCTestCase {
     private let shadow = ShadowStyle.drop(color: Color(.sRGBLinear, red: 0, green: 0.6, blue: 0.2, opacity: 0.7), radius: 2, x: 4, y: 3)
 
+    func testBlendPreparationDelegatesOnlyNormalAndPreservesOtherOperationBoundaries() {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        for mode: VUI.BlendMode in [.normal, .multiply] {
+            let calls = ProducerCalls()
+            let style = _BlendModeShapeStyle(style: ObservedProducerStyle(calls: calls), blendMode: mode)
+            var shape = _ShapeStyle_Shape(operation: .prepareText(level: 2), environment: .init())
+            style._apply(to: &shape)
+            if mode == .normal {
+                guard case .bool(true) = shape.result else { return XCTFail("Normal must delegate preparation") }
+                XCTAssertEqual(calls.count, 1)
+            } else {
+                guard case .preparedText(.foregroundKeyColor) = shape.result else { return XCTFail() }
+                XCTAssertEqual(calls.count, 0)
+            }
+            let preparationCalls = calls.count
+            shape.operation = .primaryStyle
+            shape.result = .bool(false)
+            style._apply(to: &shape)
+            guard case .bool(false) = shape.result else { return XCTFail("Primary must preserve the result") }
+            XCTAssertEqual(calls.count, preparationCalls)
+            for operation: _ShapeStyle_Shape.Operation in [.fallbackColor(level: 2), .modifyBackground(level: 2),
+                .multiLevel, .copyStyle(name: .foreground)] {
+                shape.operation = operation
+                style._apply(to: &shape)
+                guard case .bool(true) = shape.result else { return XCTFail("Delegation must preserve the base result") }
+            }
+            XCTAssertEqual(calls.count, preparationCalls + 4)
+        }
+        var type = _ShapeStyle_ShapeType(result: .bool(false))
+        _BlendModeShapeStyle<ObservedProducerStyle>._apply(to: &type)
+        guard case .bool(true) = type.result else { return XCTFail("Type queries must reach the base type") }
+    }
+
+    func testBlendResolutionFillsUnsetComponentsOnlyWithinTheRequestedRange() {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        var style = _ShapeStyle_Pack.Style(.color(Color.red.resolveHDR(in: .init())))
+        style.opacity = 0.25
+        style._blend = .normal
+        let blends: [GraphicsContext.BlendMode?] = [nil, .multiply, .normal]
+        style.effects = blends.map {
+            .init(kind: .shadow(shadow.resolve(in: .init())), opacity: 0.6, _blend: $0)
+        }
+        let original = _ShapeStyle_Pack(styles: [(.init(.foreground, 0), style),
+            (.init(.background, 0), style), (.init(.background, 2), style), (.init(.background, 5), style)])
+        var shape = _ShapeStyle_Shape(operation: .resolveStyle(name: .background, levels: 2..<5),
+            result: .pack(original), environment: .init())
+        EmptyProducerStyle().blendMode(.screen)._apply(to: &shape)
+        guard case let .pack(result) = shape.result else { return XCTFail() }
+        var expected = original
+        expected.styles[2].style.effects[0]._blend = .screen
+        XCTAssertEqual(result.styles.map(\.key), expected.styles.map(\.key))
+        XCTAssertEqual(result.styles.map(\.style), expected.styles.map(\.style))
+        XCTAssertEqual(original.styles[2].style.effects[0]._blend, nil)
+    }
+
+    func testBlendResolutionPublishesAnEmptyPackWhenTheBaseHasNoPack() {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        for mode: VUI.BlendMode in [.normal, .multiply] {
+            for levels in [0..<1, 2..<2] {
+                var shape = _ShapeStyle_Shape(operation: .resolveStyle(name: .foreground, levels: levels),
+                    result: .bool(false), environment: .init())
+                EmptyProducerStyle().blendMode(mode)._apply(to: &shape)
+                guard case let .pack(pack) = shape.result else { return XCTFail("Resolution must publish a pack") }
+                XCTAssertTrue(pack.styles.isEmpty)
+            }
+        }
+    }
+
+    func testPublicBlendChainsKeepFirstAssignmentsAndFillLaterShadowSlots() throws {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        let color = AnyShapeStyle(Color.red)
+        XCTAssertEqual(try resolved(color.blendMode(.multiply).blendMode(.screen))._blend, .multiply)
+        XCTAssertEqual(try resolved(color.blendMode(.multiply).blendMode(.normal))._blend, .multiply)
+        XCTAssertEqual(try resolved(color.blendMode(.normal).blendMode(.multiply))._blend, .normal)
+        let chain = try resolved(color.shadow(shadow).opacity(0.4).blendMode(.multiply)
+            .shadow(shadow).blendMode(.screen))
+        XCTAssertEqual(chain._blend, .multiply)
+        XCTAssertEqual(chain.effects.map(\._blend), [.multiply, .screen])
+        XCTAssertEqual(chain.opacity, 0.4)
+        XCTAssertEqual(chain.effects.map(\.opacity), [0.4, 1])
+        let normal = try resolved(color.blendMode(.multiply).shadow(shadow).blendMode(.normal))
+        XCTAssertEqual(normal._blend, .multiply)
+        XCTAssertEqual(normal.effects[0]._blend, .normal)
+        XCTAssertEqual(normal.effects[0].kind, .shadow(shadow.resolve(in: .init())))
+    }
+
+    func testImplicitBlendCopiesTheSelectedStyleAndPreservesItsExistingMode() throws {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        var environment = EnvironmentValues()
+        environment.foregroundStyleLevels = .init(primary: AnyShapeStyle(Color.green.blendMode(.screen)))
+        environment.backgroundStyle = AnyShapeStyle(Color.blue.blendMode(.normal))
+        let implicit = AnyShapeStyle.blendMode(.multiply)
+        let foreground = implicit.copyStyle(in: environment)
+        let background = implicit.copyStyle(name: .background, in: environment)
+        let override = implicit.copyStyle(in: environment, foregroundStyle: AnyShapeStyle(Color.red))
+        environment.foregroundStyleLevels = .init(primary: AnyShapeStyle(Color.yellow))
+        environment.backgroundStyle = AnyShapeStyle(Color.black)
+        let selected = try [resolved(foreground, in: environment), resolved(background, in: environment),
+            resolved(override, in: environment)]
+        XCTAssertEqual(selected.map(\.fill), [.color(Color.green.resolveHDR(in: environment)),
+            .color(Color.blue.resolveHDR(in: environment)), .color(Color.red.resolveHDR(in: environment))])
+        XCTAssertEqual(selected.map(\._blend), [.screen, .normal, .multiply])
+    }
+
+    func testAllPublicBlendModesReachTheResolvedStyleIncludingExplicitNormal() throws {
+        // ASSERTIONS shapeStyleBlendProducer27Observed
+        let modes: [VUI.BlendMode] = [.normal, .multiply, .screen, .overlay, .darken, .lighten,
+            .colorDodge, .colorBurn, .softLight, .hardLight, .difference, .exclusion,
+            .hue, .saturation, .color, .luminosity, .sourceAtop, .destinationOver,
+            .destinationOut, .plusDarker, .plusLighter]
+        let expected: [Int32] = Array(0..<16) + [20, 21, 23, 26, 27]
+        for (mode, rawValue) in zip(modes, expected) {
+            let style = try resolved(Color.red.blendMode(mode))
+            XCTAssertEqual(style._blend?.rawValue, rawValue)
+            XCTAssertEqual(style.fill, .color(Color.red.resolveHDR(in: .init())))
+            XCTAssertEqual(style.opacity, 1)
+            XCTAssertTrue(style.effects.isEmpty)
+        }
+    }
+
     func testShadowPreparationAndPrimaryRequestDoNotEvaluateTheBase() {
         // ASSERTIONS shapeStyleShadowProducer27Observed
         let calls = ProducerCalls()
@@ -98,6 +218,7 @@ final class ShapeStyleProducerTests: XCTestCase {
             _ImplicitShapeStyle._apply(to: &type)
             _ShadowShapeStyle<_ImplicitShapeStyle>._apply(to: &type)
             _OpacityShapeStyle<_ImplicitShapeStyle>._apply(to: &type)
+            _BlendModeShapeStyle<_ImplicitShapeStyle>._apply(to: &type)
             switch (result, type.result) {
             case (.none, .none), (.bool(false), .bool(false)), (.bool(true), .bool(true)):
                 break

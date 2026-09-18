@@ -320,6 +320,14 @@ struct _ShapeStyle_Pack: Animatable, @unchecked Sendable {
             self.effects = []
         }
 
+        mutating func applyBlend(_ blend: GraphicsContext.BlendMode) {
+            // An explicit normal blend also owns its slot; fill only unset values.
+            if _blend == nil { _blend = blend }
+            for index in effects.indices where effects[index]._blend == nil {
+                effects[index]._blend = blend
+            }
+        }
+
         typealias AnimatableData = AnimatablePair<
             Fill.AnimatableData,
             AnimatablePair<Float, AnimatableArray<Effect.AnimatableData>>
