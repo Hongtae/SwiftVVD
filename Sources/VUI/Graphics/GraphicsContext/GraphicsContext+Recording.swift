@@ -70,18 +70,24 @@ extension GraphicsContext {
         }
     }
 
+    init(recording list: RBDisplayList, environment: EnvironmentValues, inputs: DrawingInputs) {
+        precondition(inputs.contentScaleFactor.isFinite && inputs.contentScaleFactor > 0,
+                     "Recording requires a positive finite content scale.")
+        self.init(displayList: list, inputs: inputs, backend: nil, environment: environment)
+        storage.state.pointee.isRecording = true
+    }
+
     func recordingContext(size: CGSize) -> GraphicsContext {
         var context = GraphicsContext(
-            displayList: RBDisplayList(
+            recording: RBDisplayList(
                 viewport: viewport,
                 colorSpace: RBDrawingStateGetDefaultColorSpace(storage.state)
             ),
-            backend: drawingBackend,
-            environment: environment
+            environment: environment,
+            inputs: storage.inputs
         )
         context.symbols = symbols
         context.contentOffset = contentOffset
-        context.storage.state.pointee.isRecording = true
         context.clipBoundingRect = CGRect(origin: .zero, size: size)
         return context
     }

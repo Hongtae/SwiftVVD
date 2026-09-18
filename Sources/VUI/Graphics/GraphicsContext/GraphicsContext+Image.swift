@@ -9,6 +9,33 @@ import Foundation
 import VVD
 
 extension GraphicsContext {
+    // Resolve generated images through a separate recording and rasterization.
+    // Submit before returning so later consumers on the resource queue follow
+    // the producer. CPU access keeps its own readback/completion boundary.
+    func renderImage(size: CGSize, renderer: (inout GraphicsContext) -> Void) -> Texture? {
+        let scale = environment.displayScale
+        let pixelSize = size * scale
+        guard scale.isFinite, scale > 0,
+              pixelSize.width.isFinite, pixelSize.height.isFinite,
+              pixelSize.width >= 1, pixelSize.height >= 1 else { return nil }
+        let queue = resourceCommandQueue
+        let viewport = CGRect(origin: .zero, size: pixelSize)
+        var recording = GraphicsContext(recording: RBDisplayList(viewport: viewport),
+            environment: environment, inputs: DrawingInputs(sceneResources: sceneResources,
+                viewport: viewport, contentScaleFactor: scale, resourceCommandQueue: queue))
+        recording.clipBoundingRect = CGRect(origin: .zero, size: size)
+        renderer(&recording)
+        let contents = recording.recording!.moveContents()
+        guard let commands = queue.makeCommandBuffer(),
+              let context = GraphicsContext(sceneResources: sceneResources, environment: environment,
+                viewport: viewport, contentOffset: .zero, contentScaleFactor: scale,
+                resolution: pixelSize, commandBuffer: commands) else { return nil }
+        context.clear(with: .clear)
+        contents.draw(in: context)
+        guard commands.commit() else { return nil }
+        return context.backdrop
+    }
+
     public struct ResolvedImage {
         var resolved: GraphicsImage
         public let baseline: CGFloat

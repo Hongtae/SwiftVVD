@@ -247,7 +247,7 @@ final class NamedImageProvider: AnyImageProviderBox, @unchecked Sendable {
                 } catch {
                     Log.error("Error on loading data: \(error)")
                 }
-                if let texture = image?.makeTexture(commandQueue: context.commandQueue) {
+                if let texture = image?.makeTexture(commandQueue: context.resourceCommandQueue) {
                     // cache
                     sceneResources.cachedTextures[url.absoluteString] = texture
                     self.scale = sceneResources.contentScaleFactor
@@ -286,11 +286,12 @@ final class RenderedImageProviderBox: AnyImageProviderBox, @unchecked Sendable {
     }
 
     override func makeTexture(_ context: GraphicsContext) -> Texture? {
-        if var context = context.makeLayerContext(self.size) {
-            renderer(&context)
-            return context.backdrop
-        }
-        return nil
+        context.renderImage(size: size, renderer: renderer)
+    }
+
+    override func resolveImage(in context: GraphicsContext) -> Image.Resolved {
+        Image.Resolved(image: GraphicsImage(texture: makeTexture(context),
+            scale: context.environment.displayScale), decorative: true)
     }
 }
 

@@ -9,6 +9,16 @@ import Foundation
 import VVD
 
 extension GraphicsContext {
+    // Resolution inputs can outlive a frame without retaining its render targets,
+    // command buffer, bindings or upload arena. A queue is needed only when an
+    // image provider creates a GPU resource; geometry and vector text need none.
+    struct DrawingInputs {
+        let sceneResources: SceneResources
+        let viewport: CGRect
+        let contentScaleFactor: CGFloat
+        let resourceCommandQueue: CommandQueue?
+    }
+
     final class Storage {
         final class Shared {
             let list: RBDisplayList
@@ -26,16 +36,19 @@ extension GraphicsContext {
         let shared: Shared
         let state: RBDrawingState
         // Execution resources belong to live contexts, not retained list contents.
-        let backend: DrawingBackend
+        let inputs: DrawingInputs
+        let backend: DrawingBackend?
         var environmentOverride: EnvironmentValues?
         var opacity: Float = 1
         var blendMode: RBBlendMode = .normal
         var shapeDistance: CGFloat = .nan
         let ownsState: Bool
 
-        init(shared: Shared, state: RBDrawingState, backend: DrawingBackend, ownsState: Bool) {
+        init(shared: Shared, state: RBDrawingState, inputs: DrawingInputs,
+             backend: DrawingBackend?, ownsState: Bool) {
             self.shared = shared
             self.state = state
+            self.inputs = inputs
             self.backend = backend
             self.ownsState = ownsState
         }
@@ -45,10 +58,12 @@ extension GraphicsContext {
         }
     }
 
-    init(displayList: RBDisplayList, backend: DrawingBackend, environment: EnvironmentValues) {
+    init(displayList: RBDisplayList, inputs: DrawingInputs,
+         backend: DrawingBackend?, environment: EnvironmentValues) {
         storage = Storage(
             shared: Storage.Shared(list: displayList, environment: environment),
             state: displayList.drawingState,
+            inputs: inputs,
             backend: backend,
             ownsState: false
         )
@@ -69,7 +84,8 @@ extension GraphicsContext {
         }
         // Overrides and shape distance are local to the current storage.
         // A detached copy starts with fresh defaults for those fields.
-        let copy = Storage(shared: shared, state: state, backend: original.backend, ownsState: true)
+        let copy = Storage(shared: shared, state: state, inputs: original.inputs,
+                           backend: original.backend, ownsState: true)
         copy.opacity = original.opacity
         copy.blendMode = original.blendMode
         storage = copy
@@ -134,10 +150,21 @@ extension GraphicsContext {
     }
 
     var contentBoundsState: ContentBoundsState { storage.state.pointee.contentBoundsState }
-    var drawingBackend: DrawingBackend { storage.backend }
-    var sceneResources: SceneResources { drawingBackend.sceneResources }
-    var viewport: CGRect { drawingBackend.viewport }
-    var contentScaleFactor: CGFloat { drawingBackend.contentScaleFactor }
+    var drawingBackend: DrawingBackend {
+        guard let backend = storage.backend else {
+            preconditionFailure("A recording context cannot encode GPU commands.")
+        }
+        return backend
+    }
+    var sceneResources: SceneResources { storage.inputs.sceneResources }
+    var viewport: CGRect { storage.inputs.viewport }
+    var contentScaleFactor: CGFloat { storage.inputs.contentScaleFactor }
+    var resourceCommandQueue: CommandQueue {
+        guard let queue = storage.inputs.resourceCommandQueue else {
+            preconditionFailure("Creating image resources requires a resource command queue.")
+        }
+        return queue
+    }
     var renderTargets: RenderTargets { drawingBackend.renderTargets }
     var commandBuffer: CommandBuffer { drawingBackend.commandBuffer }
     var pipeline: GraphicsPipelineStates { drawingBackend.pipeline }
@@ -150,9 +177,6 @@ extension GraphicsContext {
     // A new render target needs its own bindings; copies within that target
     // continue using the same arena and encoder resources.
     final class DrawingBackend {
-        let sceneResources: SceneResources
-        let viewport: CGRect
-        let contentScaleFactor: CGFloat
         let renderTargets: RenderTargets
         let commandBuffer: CommandBuffer
         let pipeline: GraphicsPipelineStates
@@ -161,8 +185,7 @@ extension GraphicsContext {
         let bindingSet1: ShaderBindingSet
         let bindingSet2: ShaderBindingSet
 
-        init?(sceneResources: SceneResources, viewport: CGRect,
-              contentScaleFactor: CGFloat, renderTargets: RenderTargets,
+        init?(renderTargets: RenderTargets,
               commandBuffer: CommandBuffer, uploadBufferArena: UploadBufferArena?,
               pathGeometryScratch: StencilPathGeometryScratch?) {
             guard let pipeline = GraphicsPipelineStates.sharedInstance(
@@ -172,9 +195,6 @@ extension GraphicsContext {
                 Log.error("Failed to create drawing backend bindings.")
                 return nil
             }
-            self.sceneResources = sceneResources
-            self.viewport = viewport
-            self.contentScaleFactor = contentScaleFactor
             self.renderTargets = renderTargets
             self.commandBuffer = commandBuffer
             self.pipeline = pipeline

@@ -169,12 +169,14 @@ public struct GraphicsContext {
             return nil
         }
         guard let backend = DrawingBackend(
-            sceneResources: sceneResources, viewport: viewport,
-            contentScaleFactor: contentScaleFactor, renderTargets: renderTargets,
+            renderTargets: renderTargets,
             commandBuffer: commandBuffer, uploadBufferArena: uploadBufferArena,
             pathGeometryScratch: pathGeometryScratch
         ) else { return nil }
-        self.init(displayList: RBDisplayList(viewport: viewport), backend: backend, environment: environment)
+        let inputs = DrawingInputs(sceneResources: sceneResources, viewport: viewport,
+            contentScaleFactor: contentScaleFactor, resourceCommandQueue: commandBuffer.commandQueue)
+        self.init(displayList: RBDisplayList(viewport: viewport), inputs: inputs,
+                  backend: backend, environment: environment)
         self.contentOffset = contentOffset
     }
 

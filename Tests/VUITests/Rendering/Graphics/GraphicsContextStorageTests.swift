@@ -238,8 +238,10 @@ final class GraphicsContextStorageTests: XCTestCase {
         weak var storage: GraphicsContext.Storage?
         weak var shared: GraphicsContext.Storage.Shared?
         func makeSymbol() throws -> GraphicsContext.ResolvedSymbol {
-            let context = try makeContext().recordingContext(size: CGSize(width: 8, height: 6))
-            backend = context.drawingBackend
+            let live = try makeContext()
+            backend = live.drawingBackend
+            let context = live.recordingContext(size: CGSize(width: 8, height: 6))
+            XCTAssertNil(context.storage.backend)
             storage = context.storage
             shared = context.storage.shared
             context.fill(Path(CGRect(x: 1, y: 2, width: 3, height: 2)), with: .color(.red))
