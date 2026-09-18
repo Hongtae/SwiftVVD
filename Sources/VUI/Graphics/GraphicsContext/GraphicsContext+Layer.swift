@@ -56,10 +56,8 @@ extension GraphicsContext {
         if recording != nil {
             var layer = recordingContext(size: frame.size)
             try content(&layer, frame.size)
-            let commands = layer.recording!
-            record(bounds: frame) { context in
-                context.drawLayer(in: frame) { layer, _ in commands.draw(in: layer) }
-            }
+            let contents = layer.recording!.moveContents()
+            record(bounds: frame, .layer(contents, frame: frame))
             return
         }
         // Recording must retain the layer for its eventual destination. Only
@@ -102,10 +100,8 @@ extension GraphicsContext {
             var layer = recordingContext(size: viewport.size / contentScaleFactor)
             layer.clipBoundingRect = clipBoundingRect
             try content(&layer)
-            let commands = layer.recording!
-            record(bounds: commands.bounds) { context in
-                context.drawLayer { commands.draw(in: $0) }
-            }
+            let contents = layer.recording!.moveContents()
+            record(bounds: contents.boundingRect, .layer(contents, frame: nil))
             return
         }
         if var context = self.makeLayerContext() {
@@ -143,12 +139,8 @@ extension GraphicsContext {
         if recording != nil {
             let layer = recordingContext(size: viewport.size / contentScaleFactor)
             content(layer)
-            let commands = layer.recording!
-            record(bounds: contentBounds) { context in
-                context.drawProjectiveLayer(transform: transform, contentBounds: contentBounds) {
-                    commands.draw(in: $0)
-                }
-            }
+            let contents = layer.recording!.moveContents()
+            record(bounds: contentBounds, .projectiveLayer(contents, transform, contentBounds))
             return
         }
         guard transform.isInvertible,

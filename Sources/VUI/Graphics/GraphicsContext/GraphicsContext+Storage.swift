@@ -25,15 +25,18 @@ extension GraphicsContext {
 
         let shared: Shared
         let state: RBDrawingState
+        // Execution resources belong to live contexts, not retained list contents.
+        let backend: DrawingBackend
         var environmentOverride: EnvironmentValues?
         var opacity: Float = 1
         var blendMode: RBBlendMode = .normal
         var shapeDistance: CGFloat = .nan
         let ownsState: Bool
 
-        init(shared: Shared, state: RBDrawingState, ownsState: Bool) {
+        init(shared: Shared, state: RBDrawingState, backend: DrawingBackend, ownsState: Bool) {
             self.shared = shared
             self.state = state
+            self.backend = backend
             self.ownsState = ownsState
         }
 
@@ -42,10 +45,11 @@ extension GraphicsContext {
         }
     }
 
-    init(displayList: RBDisplayList, environment: EnvironmentValues) {
+    init(displayList: RBDisplayList, backend: DrawingBackend, environment: EnvironmentValues) {
         storage = Storage(
             shared: Storage.Shared(list: displayList, environment: environment),
             state: displayList.drawingState,
+            backend: backend,
             ownsState: false
         )
     }
@@ -65,7 +69,7 @@ extension GraphicsContext {
         }
         // Overrides and shape distance are local to the current storage.
         // A detached copy starts with fresh defaults for those fields.
-        let copy = Storage(shared: shared, state: state, ownsState: true)
+        let copy = Storage(shared: shared, state: state, backend: original.backend, ownsState: true)
         copy.opacity = original.opacity
         copy.blendMode = original.blendMode
         storage = copy
@@ -76,12 +80,8 @@ extension GraphicsContext {
         set { storage.shared.symbols = newValue }
     }
 
-    var recording: DrawingCommands? {
-        get { storage.state.pointee.recording }
-        set {
-            copyOnWrite()
-            storage.state.pointee.recording = newValue
-        }
+    var recording: RBDisplayList? {
+        storage.state.pointee.isRecording ? storage.shared.list : nil
     }
 
     var recordedClips: [DrawingClip] {
@@ -101,7 +101,7 @@ extension GraphicsContext {
     }
 
     var maskTexture: Texture {
-        get { storage.state.pointee.maskTexture }
+        get { storage.state.pointee.maskTexture ?? drawingBackend.pipeline.defaultMaskTexture }
         set {
             copyOnWrite()
             storage.state.pointee.maskTexture = newValue
@@ -134,7 +134,7 @@ extension GraphicsContext {
     }
 
     var contentBoundsState: ContentBoundsState { storage.state.pointee.contentBoundsState }
-    var drawingBackend: DrawingBackend { storage.state.pointee.backend }
+    var drawingBackend: DrawingBackend { storage.backend }
     var sceneResources: SceneResources { drawingBackend.sceneResources }
     var viewport: CGRect { drawingBackend.viewport }
     var contentScaleFactor: CGFloat { drawingBackend.contentScaleFactor }

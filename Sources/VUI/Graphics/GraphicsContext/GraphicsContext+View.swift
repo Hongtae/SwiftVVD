@@ -10,7 +10,7 @@ import VVD
 
 extension GraphicsContext {
     public struct ResolvedSymbol {
-        let list: DrawingCommands
+        let list: any RBDisplayListContents
         public internal(set) var size: CGSize
     }
 

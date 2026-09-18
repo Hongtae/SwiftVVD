@@ -203,7 +203,7 @@ final class GraphicsContextLayerTests: XCTestCase {
         guard let device = makeGraphicsDeviceContext(api: .metal) else {
             throw XCTSkip("Metal graphics device unavailable")
         }
-        var commands: GraphicsContext.DrawingCommands?
+        var commands: RBMovedDisplayListContents?
         var calls = 0
         _ = try render(device: device, size: CGSize(width: 16, height: 12)) { context in
             var recording = context.recordingContext(size: CGSize(width: 128, height: 48))
@@ -212,11 +212,11 @@ final class GraphicsContextLayerTests: XCTestCase {
                 calls += 1
                 layer.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
             }
-            commands = recording.recording
+            commands = recording.recording?.moveContents()
         }
         let retained = try XCTUnwrap(commands)
         XCTAssertEqual(calls, 1)
-        XCTAssertEqual(retained.commands.count, 1)
+        XCTAssertEqual(retained.items.count, 1)
         for scale: CGFloat in [0.5, 1, 2] {
             let pixels = try render(device: device, scale: scale,
                                     offset: CGPoint(x: 4, y: 4)) { context in
@@ -228,6 +228,58 @@ final class GraphicsContextLayerTests: XCTestCase {
                             .applying(CGAffineTransform(scaleX: scale, y: scale)),
                            "recorded replay at scale \(scale)")
             XCTAssertEqual(calls, 1, "Replay must not reenter the original callback")
+        }
+    }
+
+    // ASSERTIONS canvasRecordedOwnership27Observed
+    func testMovedContentsReplayThroughDrawingDispatchAndAnotherRecording() throws {
+        guard let device = makeGraphicsDeviceContext(api: .metal) else {
+            throw XCTSkip("Metal graphics device unavailable")
+        }
+        func paint(_ context: inout GraphicsContext) {
+            context.clip(to: Path(CGRect(x: 6, y: 5, width: 12, height: 10)))
+            context.clipToLayer { mask in
+                mask.fill(Path(CGRect(x: 8, y: 3, width: 12, height: 16)), with: .color(.white))
+            }
+            context.opacity = 0.5
+            context.drawLayer { layer in
+                layer.fill(Path(CGRect(x: 0, y: 0, width: 20, height: 20)), with: .color(.red))
+                layer.fill(Path(CGRect(x: 12, y: 8, width: 8, height: 12)), with: .color(.blue))
+            }
+        }
+        let expected = try render(device: device) { context in
+            context.translateBy(x: 3, y: 4)
+            paint(&context)
+        }
+        XCTAssertTrue(expected.contains { $0 != 0 })
+
+        var saved: RBMovedDisplayListContents?
+        _ = try render(device: device) { context in
+            var recording = context.recordingContext(size: CGSize(width: 64, height: 48))
+            paint(&recording)
+            saved = recording.recording?.moveContents()
+        }
+        let contents = try XCTUnwrap(saved)
+        let content = DisplayList.Content(drawing: contents, origin: CGPoint(x: 3, y: 4), options: .init())
+        let frame = try XCTUnwrap(content.command.bounds)
+        var list = DisplayList()
+        list.items = [.init(content: content, frame: frame, identity: .none, version: .init())]
+        list.interpolationBounds = frame
+
+        for route in 0..<3 {
+            let pixels = try render(device: device) { context in
+                switch route {
+                case 0:
+                    content.draw(in: context)
+                case 1:
+                    DisplayList.GraphicsRenderer().render(list: list, at: .zero, in: context)
+                default:
+                    let recording = context.recordingContext(size: CGSize(width: 64, height: 48))
+                    DisplayList.GraphicsRenderer().render(list: list, at: .zero, in: recording)
+                    recording.recording?.moveContents().draw(in: context)
+                }
+            }
+            XCTAssertEqual(pixels, expected, "retained contents route \(route)")
         }
     }
 

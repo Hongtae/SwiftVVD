@@ -22,9 +22,7 @@ extension GraphicsContext {
         if path.isEmpty && options.contains(.inverse) { return }
         
         if recording != nil {
-            recordedClips.append(DrawingClip(transform: transform) {
-                $0.clip(to: path, style: style, options: options)
-            })
+            recordedClips.append(DrawingClip(transform: transform, contents: .path(path, style, options)))
             clipBoundingRect = Self.resolvedClipBoundingRect(
                 clipBoundingRect, pathBounds: path.boundingBoxOfPath, options: options
             )
@@ -127,12 +125,10 @@ extension GraphicsContext {
             var layer = recordingContext(size: viewport.size / contentScaleFactor)
             layer.clipBoundingRect = clipBoundingRect
             try content(&layer)
-            let commands = layer.recording!
-            recordedClips.append(DrawingClip(transform: transform) {
-                $0.clipToLayer(opacity: opacity, options: options) { commands.draw(in: $0) }
-            })
+            let contents = layer.recording!.moveContents()
+            recordedClips.append(DrawingClip(transform: transform, contents: .layer(contents, opacity, options)))
             clipBoundingRect = Self.resolvedLayerClipBoundingRect(
-                clipBoundingRect, layerBounds: commands.bounds, opacity: opacity, options: options
+                clipBoundingRect, layerBounds: contents.boundingRect, opacity: opacity, options: options
             )
             return
         }

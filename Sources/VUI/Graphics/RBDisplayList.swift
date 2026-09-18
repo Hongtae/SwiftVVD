@@ -24,25 +24,22 @@ typealias RBDrawingState = UnsafeMutablePointer<RBDisplayList.State>
 final class RBDisplayList: RBDisplayListContents {
     struct State {
         unowned let list: RBDisplayList
-        let backend: GraphicsContext.DrawingBackend
         var defaultColorSpace: RBColorSpace
         var transform: CGAffineTransform = .identity
         var clipBoundingRect: CGRect
         var viewTransform: CGAffineTransform = .identity
         var contentOffset: CGPoint = .zero
-        var maskTexture: Texture
+        var maskTexture: Texture?
         var filters: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] = []
-        var recording: GraphicsContext.DrawingCommands?
+        var isRecording = false
         var recordedClips: [GraphicsContext.DrawingClip] = []
         var contentBoundsState = GraphicsContext.ContentBoundsState()
 
-        init(list: RBDisplayList, backend: GraphicsContext.DrawingBackend,
+        init(list: RBDisplayList, viewport: CGRect,
              colorSpace: RBColorSpace) {
             self.list = list
-            self.backend = backend
             self.defaultColorSpace = colorSpace
-            self.clipBoundingRect = backend.viewport
-            self.maskTexture = backend.pipeline.defaultMaskTexture
+            self.clipBoundingRect = viewport
         }
     }
 
@@ -52,16 +49,39 @@ final class RBDisplayList: RBDisplayListContents {
         set { RBDrawingStateSetDefaultColorSpace(drawingState, newValue) }
     }
     private(set) var ownedStateCount = 0
+    private(set) var items: [Item] = []
+    private(set) var boundingRect = CGRect.null
+    var isEmpty: Bool { items.isEmpty }
 
-    init(backend: GraphicsContext.DrawingBackend, colorSpace: RBColorSpace = .sRGB) {
+    init(viewport: CGRect, colorSpace: RBColorSpace = .sRGB) {
         self.drawingState = .allocate(capacity: 1)
-        drawingState.initialize(to: State(list: self, backend: backend, colorSpace: colorSpace))
+        drawingState.initialize(to: State(list: self, viewport: viewport, colorSpace: colorSpace))
     }
 
     deinit {
         precondition(ownedStateCount == 0)
         drawingState.deinitialize(count: 1)
         drawingState.deallocate()
+    }
+
+    func append(_ item: Item, bounds: CGRect) {
+        items.append(item)
+        if !bounds.isNull, !bounds.isEmpty {
+            boundingRect = boundingRect.union(bounds)
+        }
+    }
+
+    func draw(in context: GraphicsContext) {
+        // The value snapshot also permits replay into this destination.
+        let items = items
+        for item in items { item.draw(in: context) }
+    }
+
+    func moveContents() -> RBMovedDisplayListContents {
+        let contents = RBMovedDisplayListContents(items: items, boundingRect: boundingRect)
+        items = []
+        boundingRect = .null
+        return contents
     }
 
     fileprivate func copyState(_ source: RBDrawingState) -> RBDrawingState {
@@ -78,6 +98,21 @@ final class RBDisplayList: RBDisplayListContents {
         state.deinitialize(count: 1)
         state.deallocate()
         ownedStateCount -= 1
+    }
+}
+
+final class RBMovedDisplayListContents: RBDisplayListContents {
+    let items: [RBDisplayList.Item]
+    let boundingRect: CGRect
+    var isEmpty: Bool { items.isEmpty }
+
+    init(items: [RBDisplayList.Item], boundingRect: CGRect) {
+        self.items = items
+        self.boundingRect = boundingRect
+    }
+
+    func draw(in context: GraphicsContext) {
+        for item in items { item.draw(in: context) }
     }
 }
 

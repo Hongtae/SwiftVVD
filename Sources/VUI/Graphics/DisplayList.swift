@@ -10,6 +10,9 @@ import Foundation
 nonisolated(unsafe) private var _displayListIdentityCounter: UInt32 = 0
 
 protocol RBDisplayListContents: AnyObject {
+    var boundingRect: CGRect { get }
+    var isEmpty: Bool { get }
+    func draw(in context: GraphicsContext)
 }
 
 /// Supplies a logical platform-group boundary while retaining the active renderer.
@@ -279,8 +282,15 @@ struct DisplayList: Equatable, CustomStringConvertible {
     final class LocalContents: RBDisplayListContents {
         var list: DisplayList
 
+        var boundingRect: CGRect { list.interpolationBounds ?? .null }
+        var isEmpty: Bool { list.items.isEmpty }
+
         init(list: DisplayList) {
             self.list = list
+        }
+
+        func draw(in context: GraphicsContext) {
+            list.draw(in: context)
         }
     }
 
@@ -1505,10 +1515,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     $0.offsetBy(dx: origin.x, dy: origin.y)
                 })
             case let .drawing(contents, origin, _):
-                let list = (contents as? LocalContents)?.list
-                return .closure(bounds: list?.interpolationBounds.map {
-                    $0.offsetBy(dx: origin.x, dy: origin.y)
-                })
+                let bounds = contents.boundingRect
+                return .closure(bounds: bounds.isNull ? nil : bounds.offsetBy(dx: origin.x, dy: origin.y))
             }
         }
 
@@ -1542,10 +1550,9 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 context.translateBy(x: origin.x, y: origin.y)
                 list.draw(in: context)
             case let .drawing(contents, origin, _):
-                guard let list = (contents as? LocalContents)?.list else { return }
                 var context = context
                 context.translateBy(x: origin.x, y: origin.y)
-                list.draw(in: context)
+                contents.draw(in: context)
             }
         }
 
@@ -3443,10 +3450,13 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     context.translateBy(x: origin.x, y: origin.y)
                     renderItems(in: list, context: context, includeDebug: includeDebug)
                 case let .drawing(contents, origin, _):
-                    guard let list = (contents as? LocalContents)?.list else { return }
                     var context = content.renderContext(from: context)
                     context.translateBy(x: origin.x, y: origin.y)
-                    renderItems(in: list, context: context, includeDebug: includeDebug)
+                    if let local = contents as? LocalContents {
+                        renderItems(in: local.list, context: context, includeDebug: includeDebug)
+                    } else {
+                        contents.draw(in: context)
+                    }
                 }
 
             case let .effect(effect, contents):
@@ -3559,17 +3569,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 if context.recording != nil, shader.shader != nil {
                     let layer = context.recordingContext(size: frame.size)
                     renderItems(in: contents, context: layer, includeDebug: includeDebug)
-                    let commands = layer.recording!
-                    context.record(bounds: frame) { context in
-                        guard let layer = context.makeLayerContext() else {
-                            commands.draw(in: context)
-                            return
-                        }
-                        commands.draw(in: layer)
-                        if !context.drawCustomShaderLayer(shader, sourceTexture: layer.backdrop, frame: frame) {
-                            commands.draw(in: context)
-                        }
-                    }
+                    let recording = layer.recording!.moveContents()
+                    context.record(bounds: frame, .shaderLayer(recording, shader, frame))
                     return
                 }
                 guard shader.shader != nil,

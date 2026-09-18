@@ -37,7 +37,7 @@ extension GraphicsContext {
     }
 
     func draw(_ image: ImageDrawing, in rect: CGRect, style: FillStyle = FillStyle()) {
-        if recording != nil, record(bounds: rect, { $0.draw(image, in: rect, style: style) }) { return }
+        if recording != nil, record(bounds: rect, .image(image, rect, style)) { return }
         if let symbol = image.symbol, rect.width > 0, rect.height > 0 {
             if let replacement = image.symbolReplacementPresentation {
                 drawSymbolReplacement(

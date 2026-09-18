@@ -174,7 +174,7 @@ public struct GraphicsContext {
             commandBuffer: commandBuffer, uploadBufferArena: uploadBufferArena,
             pathGeometryScratch: pathGeometryScratch
         ) else { return nil }
-        self.init(displayList: RBDisplayList(backend: backend), environment: environment)
+        self.init(displayList: RBDisplayList(viewport: viewport), backend: backend, environment: environment)
         self.contentOffset = contentOffset
     }
 

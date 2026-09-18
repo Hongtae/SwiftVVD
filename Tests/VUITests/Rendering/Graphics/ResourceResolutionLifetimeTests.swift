@@ -164,7 +164,11 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
             owner = ResolvedStyledText.TextLayoutManager(storage: attachment.nsAttributedString(with: [:]),
                 suffix: .alwaysVisible(line, []), attachments: .init(characterIndices: [0]))
         }
+#if canImport(ObjectiveC)
+        try autoreleasepool(invoking: populate)
+#else
         try populate()
+#endif
         withExtendedLifetime(owner) {
             XCTAssertNotNil(artwork)
             XCTAssertNotNil(deviceContext)

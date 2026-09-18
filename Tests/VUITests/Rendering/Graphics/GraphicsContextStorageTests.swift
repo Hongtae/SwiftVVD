@@ -188,14 +188,69 @@ final class GraphicsContextStorageTests: XCTestCase {
             var copy = recording!
             copy.opacity = 0.5
             XCTAssertTrue(copy.recording === commands)
-            copy.record(bounds: CGRect(x: 1, y: 2, width: 3, height: 2)) { _ in }
+            copy.fill(Path(CGRect(x: 1, y: 2, width: 3, height: 2)), with: .color(.red))
         }
         append()
         recording = nil
         XCTAssertNil(storage)
-        XCTAssertNil(list)
-        XCTAssertEqual(commands.commands.count, 1)
-        XCTAssertEqual(commands.bounds, CGRect(x: 1, y: 2, width: 3, height: 2))
+        XCTAssertTrue(list === commands)
+        XCTAssertEqual(commands.items.count, 1)
+        XCTAssertEqual(commands.boundingRect, CGRect(x: 1, y: 2, width: 3, height: 2))
         XCTAssertEqual(original.contentBoundingRect, .null)
+    }
+
+    // ASSERTIONS canvasRecordedOwnership27Observed
+    func testMovingContentsLeavesTheBuilderReusableAndReplayCopiesItsValues() throws {
+        let context = try makeContext().recordingContext(size: CGSize(width: 32, height: 24))
+        let builder = try XCTUnwrap(context.recording)
+        var path = Path(CGRect(x: 1, y: 2, width: 3, height: 2))
+        context.fill(path, with: .color(.red))
+        let first = builder.moveContents()
+        XCTAssertTrue(builder.isEmpty)
+        XCTAssertEqual(builder.boundingRect, .null)
+        path.addRect(CGRect(x: 12, y: 5, width: 4, height: 3))
+        context.fill(path, with: .color(.blue))
+        let second = builder.moveContents()
+        XCTAssertEqual(first.items.count, 1)
+        XCTAssertEqual(first.boundingRect, CGRect(x: 1, y: 2, width: 3, height: 2))
+        XCTAssertEqual(second.boundingRect, path.boundingBoxOfPath)
+        XCTAssertTrue(builder.isEmpty)
+
+        var destination = context.recordingContext(size: CGSize(width: 32, height: 24))
+        destination.translateBy(x: 3, y: 4)
+        destination.opacity = 0.5
+        first.draw(in: destination)
+        let copied = try XCTUnwrap(destination.recording).moveContents()
+        XCTAssertEqual(copied.items.count, 1)
+        XCTAssertEqual(copied.boundingRect, first.boundingRect.offsetBy(dx: 3, dy: 4))
+        XCTAssertEqual(copied.items[0].state.opacity, 0.5)
+        XCTAssertEqual(first.items[0].state.opacity, 1)
+        XCTAssertEqual(first.boundingRect, CGRect(x: 1, y: 2, width: 3, height: 2))
+        guard case let .fill(savedPath, _, _) = first.items[0].contents else {
+            return XCTFail("The retained item must keep a typed path payload")
+        }
+        XCTAssertEqual(savedPath.boundingBoxOfPath, first.boundingRect)
+    }
+
+    // ASSERTIONS canvasRecordedOwnership27Observed
+    func testRetainedPrimitiveSymbolDoesNotOwnItsExecutionBackendOrContext() throws {
+        weak var backend: GraphicsContext.DrawingBackend?
+        weak var storage: GraphicsContext.Storage?
+        weak var shared: GraphicsContext.Storage.Shared?
+        func makeSymbol() throws -> GraphicsContext.ResolvedSymbol {
+            let context = try makeContext().recordingContext(size: CGSize(width: 8, height: 6))
+            backend = context.drawingBackend
+            storage = context.storage
+            shared = context.storage.shared
+            context.fill(Path(CGRect(x: 1, y: 2, width: 3, height: 2)), with: .color(.red))
+            return .init(list: try XCTUnwrap(context.recording), size: CGSize(width: 8, height: 6))
+        }
+        let symbol = try makeSymbol()
+        XCTAssertNil(backend)
+        XCTAssertNil(storage)
+        XCTAssertNil(shared)
+        XCTAssertTrue(symbol.list is RBDisplayList)
+        XCTAssertFalse(symbol.list.isEmpty)
+        XCTAssertEqual(symbol.list.boundingRect, CGRect(x: 1, y: 2, width: 3, height: 2))
     }
 }

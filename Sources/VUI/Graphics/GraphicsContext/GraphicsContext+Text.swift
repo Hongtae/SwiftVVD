@@ -85,10 +85,8 @@ extension GraphicsContext {
             for line in layout { context.draw(line) }
             return
         }
-        if recording != nil, record(bounds: rect, {
-            $0.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
-                    snappingOrigin: snappingOrigin, clipBounds: clipBounds)
-        }) { return }
+        if recording != nil, record(bounds: rect, .text(drawing, rect, shading,
+            snapOrigin: snapOrigin, snappingOrigin: snappingOrigin, clipBounds: clipBounds)) { return }
 
         func runShading(_ color: Color?) -> Shading {
             guard let color else { return shading }

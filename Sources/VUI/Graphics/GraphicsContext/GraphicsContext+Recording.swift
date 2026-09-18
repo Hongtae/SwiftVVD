@@ -8,22 +8,28 @@
 import Foundation
 
 extension GraphicsContext {
-    // Recorded commands retain resolved drawing values and local state.
-    final class DrawingCommands {
-        var commands: [(GraphicsContext) -> Void] = []
-        var bounds = CGRect.null
+    struct DrawingClip {
+        enum Contents {
+            case path(Path, FillStyle, ClipOptions)
+            case layer(RBMovedDisplayListContents, Double, ClipOptions)
+        }
 
-        func draw(in context: GraphicsContext) {
-            for command in commands { command(context) }
+        let transform: CGAffineTransform
+        let contents: Contents
+
+        func apply(to context: inout GraphicsContext) {
+            switch contents {
+            case let .path(path, style, options):
+                context.clip(to: path, style: style, options: options)
+            case let .layer(contents, opacity, options):
+                context.clipToLayer(opacity: opacity, options: options) {
+                    contents.draw(in: $0)
+                }
+            }
         }
     }
 
-    struct DrawingClip {
-        var transform: CGAffineTransform
-        var apply: (inout GraphicsContext) -> Void
-    }
-
-    private struct DrawingState {
+    struct DrawingState {
         var transform: CGAffineTransform
         var opacity: Double
         var blendMode: BlendMode
@@ -44,7 +50,7 @@ extension GraphicsContext {
             let baseTransform = context.transform
             for clip in clips {
                 context.transform = clip.transform.concatenating(baseTransform)
-                clip.apply(&context)
+                clip.apply(to: &context)
             }
             context.transform = transform.concatenating(baseTransform)
             context.opacity *= opacity
@@ -57,33 +63,83 @@ extension GraphicsContext {
     func recordingContext(size: CGSize) -> GraphicsContext {
         var context = GraphicsContext(
             displayList: RBDisplayList(
-                backend: drawingBackend,
+                viewport: viewport,
                 colorSpace: RBDrawingStateGetDefaultColorSpace(storage.state)
             ),
+            backend: drawingBackend,
             environment: environment
         )
         context.symbols = symbols
         context.contentOffset = contentOffset
-        context.recording = DrawingCommands()
+        context.storage.state.pointee.isRecording = true
         context.clipBoundingRect = CGRect(origin: .zero, size: size)
         return context
     }
 
     @discardableResult
-    func record(bounds: CGRect, _ draw: @escaping (GraphicsContext) -> Void) -> Bool {
+    func record(bounds: CGRect, _ contents: RBDisplayList.Item.Contents) -> Bool {
         guard let recording else { return false }
-        let state = DrawingState(self)
-        recording.commands.append { context in
+        var visible = CGRect.null
+        if opacity > 0, !bounds.isNull, !bounds.isEmpty {
+            visible = bounds.intersection(clipBoundingRect).applying(transform)
+        }
+        recording.append(.init(state: DrawingState(self), contents: contents), bounds: visible)
+        return true
+    }
+}
+
+extension RBDisplayList {
+    // Backend payloads remain inspectable without retaining a drawing context.
+    struct Item {
+        enum Contents {
+            case fill(Path, GraphicsContext.Shading, FillStyle)
+            case stroke(Path, GraphicsContext.Shading, StrokeStyle, isAntialiased: Bool)
+            case image(ImageDrawing, CGRect, FillStyle)
+            case text(ResolvedTextSource.Drawing, CGRect, GraphicsContext.Shading,
+                      snapOrigin: Bool, snappingOrigin: CGPoint?, clipBounds: Bool)
+            case layer(RBMovedDisplayListContents, frame: CGRect?)
+            case projectiveLayer(RBMovedDisplayListContents, ProjectionTransform, CGRect)
+            case shaderLayer(RBMovedDisplayListContents, Shader.ResolvedShader, CGRect)
+        }
+
+        let state: GraphicsContext.DrawingState
+        let contents: Contents
+
+        func draw(in context: GraphicsContext) {
             var context = context
             state.apply(to: &context)
-            draw(context)
-        }
-        if opacity > 0, !bounds.isNull, !bounds.isEmpty {
-            let visible = bounds.intersection(clipBoundingRect).applying(transform)
-            if !visible.isNull, !visible.isEmpty {
-                recording.bounds = recording.bounds.union(visible)
+            switch contents {
+            case let .fill(path, shading, style):
+                context.fill(path, with: shading, style: style)
+            case let .stroke(path, shading, style, antialiased):
+                context.stroke(path, with: shading, style: style, isAntialiased: antialiased)
+            case let .image(image, rect, style):
+                context.draw(image, in: rect, style: style)
+            case let .text(drawing, rect, shading, snapOrigin, snappingOrigin, clipBounds):
+                context.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
+                             snappingOrigin: snappingOrigin, clipBounds: clipBounds)
+            case let .layer(contents, frame):
+                if let frame {
+                    context.drawLayer(in: frame) { layer, _ in contents.draw(in: layer) }
+                } else {
+                    context.drawLayer { contents.draw(in: $0) }
+                }
+            case let .projectiveLayer(contents, transform, bounds):
+                context.drawProjectiveLayer(transform: transform, contentBounds: bounds) {
+                    contents.draw(in: $0)
+                }
+            case let .shaderLayer(contents, shader, frame):
+                // Re-record the layer as a typed group when the receiver is another list.
+                if context.record(bounds: frame, .shaderLayer(contents, shader, frame)) { return }
+                guard let layer = context.makeLayerContext() else {
+                    contents.draw(in: context)
+                    return
+                }
+                contents.draw(in: layer)
+                if !context.drawCustomShaderLayer(shader, sourceTexture: layer.backdrop, frame: frame) {
+                    contents.draw(in: context)
+                }
             }
         }
-        return true
     }
 }
