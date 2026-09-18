@@ -300,6 +300,7 @@ final class TextProxyTests: XCTestCase {
 
     // ASSERTIONS textIntrinsicBackendSelectionObserved textIntrinsicZeroWidthNormalizationObserved
     // ASSERTIONS textStringDrawingEmptyMetricProducerObserved
+    // ASSERTIONS textEmptyFont27DrawingMarginsObserved
     func testRealTextHostsMeasureEmptyBaselinesAndNarrowWidthsThroughTheirOwner() throws {
         let host = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
@@ -352,8 +353,8 @@ final class TextProxyTests: XCTestCase {
                                     at: ViewSize(size)), expectedBaseline, label)
                                 if displayScale == 2 {
                                     let frame = layout.text.frame(in: size, renderer: layout.renderer)
-                                    XCTAssertEqual(frame, CGRect(x: 0, y: content.isEmpty ? 0 : -1,
-                                        width: expectedWidth, height: expectedHeight + (content.isEmpty ? 0 : 1.5)), label)
+                                    XCTAssertEqual(frame, CGRect(x: 0, y: -1,
+                                        width: expectedWidth, height: expectedHeight + 1.5), label)
                                 }
                                 if custom {
                                     let proxy = try XCTUnwrap(capture.proxy)

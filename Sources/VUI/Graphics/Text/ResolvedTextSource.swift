@@ -166,6 +166,11 @@ struct ResolvedTextSource {
     var displayScale: CGFloat { storage.displayScale }
     var drawMissingGlyphs: Bool { storage.drawMissingGlyphs }
 
+    func purgeResources(reason: ResourcePurgeReason) {
+        storage.purgeResources(reason: reason)
+        resolvedProperties?.fonts.purgeResources(reason: reason)
+    }
+
     /// Keeps the attachment separate from its line while inheriting the body's final input.
     func appending(_ attachment: AnyCustomTextAttachment, context: any TextResolutionContext) -> Self {
         var runs = runs
@@ -237,6 +242,14 @@ struct ResolvedTextSource {
             outsetData: storage.outsetData, preferredLanguages: storage.preferredLanguages)
         result.defaultLineMetrics = defaultLineMetrics
         result.resolvedProperties = resolvedProperties
+        if var properties = result.resolvedProperties {
+            var fonts = Text.ResolvedProperties.Fonts()
+            for font in properties.fonts.storage {
+                fonts.storage.insert(font === original ? resized : font)
+            }
+            properties.fonts = fonts
+            result.resolvedProperties = properties
+        }
         result.fontResolutionContext = context
         result.shading = shading
         return result
@@ -246,12 +259,20 @@ struct ResolvedTextSource {
     /// baseline offsets, attachments and custom attributes keep their units.
     func scalingFonts(by scale: CGFloat, toMultipleOf multiple: CGFloat? = 0.25) -> Self {
         guard scale != 1 else { return self }
+        var resizedFonts: [ObjectIdentifier: FontResource] = [:]
+        func resized(_ font: FontResource) -> FontResource? {
+            let key = ObjectIdentifier(font)
+            if let value = resizedFonts[key] { return value }
+            var size = font.pointSize * scale
+            if let multiple { size = (size / multiple).rounded() * multiple }
+            let value = font.fontWithSize(size)
+            resizedFonts[key] = value
+            return value
+        }
         let scaledRuns = runs.map { run -> Run in
             guard case let .styledText(_, text, custom, originalAttributes) = run,
                   let original = originalAttributes.fontResource else { return run }
-            var size = original.pointSize * scale
-            if let multiple { size = (size / multiple).rounded() * multiple }
-            guard let resized = original.fontWithSize(size) else {
+            guard let resized = resized(original) else {
                 return run
             }
             guard let context = fontResolutionContext else {
@@ -270,6 +291,12 @@ struct ResolvedTextSource {
             preferredLanguages: storage.preferredLanguages)
         result.defaultLineMetrics = defaultLineMetrics
         result.resolvedProperties = resolvedProperties
+        if var properties = result.resolvedProperties {
+            var fonts = Text.ResolvedProperties.Fonts()
+            for font in properties.fonts.storage { fonts.storage.insert(resized(font) ?? font) }
+            properties.fonts = fonts
+            result.resolvedProperties = properties
+        }
         result.fontResolutionContext = fontResolutionContext
         result.shading = shading
         return result
@@ -330,23 +357,7 @@ struct ResolvedTextSource {
                 resource = style.fontResource
             }
             guard let face = faces.first else { continue }
-            var metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
-                ?? face.resolvedMetrics.scaled(by: scaleFactor)
-            var outsetAttributes = face.outsetAttributes
-            // A selected catalog trait can differ from the physical variation coordinate.
-            if let weight = resource?.selectedWeight {
-                outsetAttributes?.weight = weight
-            }
-            // One scalar decision applies to every attribute font in the complete text.
-            if let attributes = outsetAttributes,
-               storage.hasOversizedScalars || attributes.needsOutsets,
-               let outsets = storage.outsetData?.outsets(
-                   for: attributes,
-                   pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
-                   preferredGroup: storage.outsetLanguageGroup) {
-                // A successful tuple replaces clipping, including a zero tuple.
-                metrics.outsets = resource?.adjustedOutsets(outsets) ?? outsets
-            }
+            let metrics = metrics(for: face, resource: resource)
             if result == nil {
                 result = metrics
             } else {
@@ -354,6 +365,41 @@ struct ResolvedTextSource {
             }
         }
         return result
+    }
+
+    func metrics(for font: FontResource) -> ResolvedFontMetrics? {
+        for run in runs {
+            if case let .styledText(faces, _, _, style) = run,
+               style.fontResource === font, let face = faces.first {
+                return metrics(for: face, resource: font)
+            }
+        }
+        if let provider = font.provider as? FixedFontProvider {
+            return metrics(for: provider.face, resource: font)
+        }
+        guard let context = fontResolutionContext else { return nil }
+        let request = Font(provider: FontBox(Font.PlatformFontProvider(font: font)))
+        guard let face = request.typefaceCascade(in: context.environment, forContext: context.sceneResources,
+            contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces.first else { return nil }
+        return metrics(for: face, resource: font)
+    }
+
+    private func metrics(for face: Typeface, resource: FontResource?) -> ResolvedFontMetrics {
+        var metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
+            ?? face.resolvedMetrics.scaled(by: scaleFactor)
+        var outsetAttributes = face.outsetAttributes
+        // A selected catalog trait can differ from the physical variation coordinate.
+        if let weight = resource?.selectedWeight { outsetAttributes?.weight = weight }
+        // One scalar decision applies to every attribute font in the complete text.
+        if let attributes = outsetAttributes,
+           storage.hasOversizedScalars || attributes.needsOutsets,
+           let outsets = storage.outsetData?.outsets(for: attributes,
+               pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
+               preferredGroup: storage.outsetLanguageGroup) {
+            // A successful tuple replaces clipping, including a zero tuple.
+            metrics.outsets = resource?.adjustedOutsets(outsets) ?? outsets
+        }
+        return metrics
     }
 
     struct LayoutMetrics: Equatable, Sendable {

@@ -4,6 +4,64 @@ import VVD
 @testable import VUI
 
 final class ResourceResolutionLifetimeTests: XCTestCase {
+    // ASSERTIONS textResolvedFontsIdentityAndMetricsObserved
+    func testRetainedFontCollectionsReleaseFixedDeviceResourcesOnTerminationOrLastValue() throws {
+        for ownerType: ResolvedStyledText.Type in [ResolvedStyledText.StringDrawing.self, ResolvedStyledText.TextLayoutManager.self] {
+            for terminates in [false, true] {
+                var owner: ResolvedStyledText?
+                var retainedFonts: Text.ResolvedProperties.Fonts?
+                weak var artwork: TextureFont?
+                weak var deviceContext: GraphicsDeviceContext?
+                weak var resourceReference: FontResource?
+                func populate() throws {
+                    let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+                    var root = URL(fileURLWithPath: #filePath)
+                    for _ in 0..<5 { root.deleteLastPathComponent() }
+                    let font = try XCTUnwrap(TextureFont(deviceContext: context, path: root.appendingPathComponent(
+                        "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path))
+                    artwork = font
+                    deviceContext = context
+                    let face = TextureTypeface(textureFont: font)
+                    let resource = FontResource(descriptor: FontDescriptor(source: .typeface(FixedFontProvider(face)), pointSize: 23),
+                        in: EnvironmentValues().fontResolutionContext)
+                    resourceReference = resource
+                    var attributes = _ResolvedTextRunAttributes()
+                    attributes.fontResource = resource
+                    attributes.font = VUI.Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+                    var source = ResolvedTextSource(runs: [.styledText([face], "A", .init(), attributes)], scaleFactor: 1)
+                    var properties = Text.ResolvedProperties()
+                    properties.fonts.storage.insert(resource)
+                    source.resolvedProperties = properties
+                    owner = ownerType.init(storage: source.attributedStorage, resolvedText: source)
+                    retainedFonts = owner?.fonts
+                }
+#if canImport(ObjectiveC)
+                try autoreleasepool(invoking: populate)
+#else
+                try populate()
+#endif
+                XCTAssertNotNil(artwork)
+                owner?.purgeResources(reason: .lowMemory)
+                XCTAssertNotNil(artwork)
+                if terminates {
+                    owner?.purgeResources(reason: .appTermination)
+                    withExtendedLifetime((owner, retainedFonts)) {
+                        XCTAssertNil(resourceReference)
+                        XCTAssertNil(artwork)
+                        XCTAssertNil(deviceContext)
+                    }
+                } else {
+                    owner = nil
+                    withExtendedLifetime(retainedFonts) { XCTAssertNotNil(artwork) }
+                    retainedFonts = nil
+                    XCTAssertNil(resourceReference)
+                    XCTAssertNil(artwork)
+                    XCTAssertNil(deviceContext)
+                }
+            }
+        }
+    }
+
     private final class Witness {
         weak var host: TestViewRendererHost?
         weak var viewGraph: ViewGraph?

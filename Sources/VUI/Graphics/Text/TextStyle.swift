@@ -133,6 +133,7 @@ extension Text {
             var attributes = _ResolvedTextRunAttributes()
             if let key = fontKey(in: environment, includeDefaultAttributes: includeDefaultAttributes) {
                 let resource = Font.FontCache.shared[key]
+                properties.fonts.storage.insert(resource)
                 attributes.font = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
                 attributes.fontResource = resource
             }

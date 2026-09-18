@@ -198,6 +198,134 @@ extension Text {
         struct Links: Equatable, Sendable {
         }
 
+        struct FontMetrics {
+            var capHeight: CGFloat = 0
+            var ascender: CGFloat = 0
+            var descender: CGFloat = 0
+            var leading: CGFloat = 0
+            var pointSize: CGFloat = 0
+            var outsets = EdgeInsets()
+
+            var resolvedMetrics: ResolvedFontMetrics {
+                .init(capHeight: capHeight, ascender: ascender, descender: descender,
+                      leading: leading, outsets: outsets)
+            }
+        }
+
+        struct Fonts {
+            struct FontPointer: Hashable, Sendable {
+                var font: FontResource
+
+                static func == (lhs: Self, rhs: Self) -> Bool { lhs.font === rhs.font }
+                func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(font)) }
+            }
+
+            enum Storage: Sequence, Sendable {
+                case font(FontResource), fonts(Set<FontPointer>), empty
+
+                mutating func insert(_ font: FontResource) {
+                    switch self {
+                    case .empty:
+                        self = .font(font)
+                    case let .font(previous):
+                        if previous !== font {
+                            self = .fonts([FontPointer(font: previous), FontPointer(font: font)])
+                        }
+                    case var .fonts(fonts):
+                        fonts.insert(FontPointer(font: font))
+                        self = .fonts(fonts)
+                    }
+                }
+
+                struct Iterator: IteratorProtocol {
+                    enum Storage {
+                        case font(FontResource), fonts(Set<FontPointer>.Iterator), empty
+                    }
+                    var storage: Storage
+
+                    mutating func next() -> FontResource? {
+                        switch storage {
+                        case let .font(font):
+                            storage = .empty
+                            return font
+                        case var .fonts(iterator):
+                            let font = iterator.next()?.font
+                            storage = .fonts(iterator)
+                            return font
+                        case .empty:
+                            return nil
+                        }
+                    }
+                }
+
+                func makeIterator() -> Iterator {
+                    switch self {
+                    case let .font(font): .init(storage: .font(font))
+                    case let .fonts(fonts): .init(storage: .fonts(fonts.makeIterator()))
+                    case .empty: .init(storage: .empty)
+                    }
+                }
+            }
+
+            // Value copies share retention until mutation. Termination releases
+            // references from every copy, including an externally retained source.
+            private final class Resources: AppLifetimeResource, @unchecked Sendable {
+                let state: Mutex<Storage>
+                init(_ storage: Storage) { state = Mutex(storage) }
+                override func purgeResources(reason: ResourcePurgeReason) {
+                    if reason == .appTermination { state.withLock { $0 = .empty } }
+                }
+            }
+            private var resources: Resources?
+
+            var storage: Storage {
+                get { resources?.state.withLock { $0 } ?? .empty }
+                set {
+                    if case .empty = newValue {
+                        resources = nil
+                    } else if isKnownUniquelyReferenced(&resources) {
+                        resources!.state.withLock { $0 = newValue }
+                    } else {
+                        resources = Resources(newValue)
+                    }
+                }
+            }
+
+            init() {}
+
+            init(_ text: NSAttributedString) {
+                text.enumerateAttribute(.coreFont, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+                    if let font = value as? Font,
+                       let provider = font.provider as? FontBox<Font.PlatformFontProvider> {
+                        storage.insert(provider.base.font)
+                    }
+                }
+            }
+
+            func purgeResources(reason: ResourcePurgeReason) {
+                resources?.purgeResources(reason: reason)
+            }
+
+            func maxMetrics(for text: ResolvedTextSource) -> FontMetrics {
+                var result = FontMetrics()
+                var isFirst = true
+                for font in storage {
+                    guard let metrics = text.metrics(for: font) else { continue }
+                    result.capHeight = max(result.capHeight, metrics.capHeight)
+                    result.ascender = max(result.ascender, metrics.ascender)
+                    result.descender = min(result.descender, metrics.descender)
+                    result.leading = isFirst ? metrics.leading : max(result.leading, metrics.leading)
+                    result.pointSize = max(result.pointSize, font.pointSize)
+                    result.outsets.top = max(result.outsets.top, metrics.outsets.top)
+                    result.outsets.leading = max(result.outsets.leading, metrics.outsets.leading)
+                    result.outsets.bottom = max(result.outsets.bottom, metrics.outsets.bottom)
+                    result.outsets.trailing = max(result.outsets.trailing, metrics.outsets.trailing)
+                    isFirst = false
+                }
+                return result
+            }
+        }
+
         struct LineHeightMetrics {
             var multiple: CGFloat?
             var exact: CGFloat?
@@ -252,6 +380,7 @@ extension Text {
         var customAttachments: CustomAttachments
         var paragraph: Paragraph
         var multilineTextAlignment: TextAlignment?
+        var fonts: Fonts
         var lineHeightMetrics: LineHeightMetrics
 
         mutating func addColor(_ color: Color.ResolvedHDR) {
@@ -269,6 +398,7 @@ extension Text {
             customAttachments: CustomAttachments = CustomAttachments(),
             paragraph: Paragraph = Paragraph(),
             multilineTextAlignment: TextAlignment? = nil,
+            fonts: Fonts = .init(),
             lineHeightMetrics: LineHeightMetrics = .init()
         ) {
             self.insets = insets
@@ -279,6 +409,7 @@ extension Text {
             self.customAttachments = customAttachments
             self.paragraph = paragraph
             self.multilineTextAlignment = multilineTextAlignment
+            self.fonts = fonts
             self.lineHeightMetrics = lineHeightMetrics
         }
 
@@ -517,7 +648,7 @@ extension StyledTextContentView: ShapeStyledLeafView {
     }
 }
 
-class ResolvedStyledText: InterpolatableContent {
+class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked Sendable {
     var layoutProperties: TextLayoutProperties
     var layoutMargins: EdgeInsets
     var scaleFactorOverride: CGFloat? {
@@ -530,6 +661,8 @@ class ResolvedStyledText: InterpolatableContent {
     var styles: [_ShapeStyle_Pack.Style]
     var transitions: [Text.ResolvedProperties.Transition]
     var links: Text.ResolvedProperties.Links
+    let fonts: Text.ResolvedProperties.Fonts
+    let maxFontMetrics: Text.ResolvedProperties.FontMetrics
     var lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics
     let resolvedText: ResolvedTextSource?
     var version: Int
@@ -537,8 +670,6 @@ class ResolvedStyledText: InterpolatableContent {
     var needsDrawingGroup: Bool
     private var attributedStorage: NSAttributedString?
     private var didResolveAttributedStorage: Bool
-    private var _computedMaxFontMetrics: ResolvedFontMetrics?
-    private var didComputeMaxFontMetrics: Bool
     required init(
         storage: NSAttributedString? = nil,
         layoutProperties: TextLayoutProperties = TextLayoutProperties(),
@@ -553,6 +684,7 @@ class ResolvedStyledText: InterpolatableContent {
         styles: [_ShapeStyle_Pack.Style] = [],
         transitions: [Text.ResolvedProperties.Transition] = [],
         links: Text.ResolvedProperties.Links = Text.ResolvedProperties.Links(),
+        fonts: Text.ResolvedProperties.Fonts? = nil,
         lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics = .init(),
         resolvedText: ResolvedTextSource? = nil,
         version: Int = 0,
@@ -569,6 +701,19 @@ class ResolvedStyledText: InterpolatableContent {
         self.styles = styles
         self.transitions = transitions
         self.links = links
+        let fonts = fonts ?? resolvedText?.resolvedProperties?.fonts ?? storage.map(Text.ResolvedProperties.Fonts.init) ?? .init()
+        self.fonts = fonts
+        if let resolvedText {
+            if case .empty = fonts.storage, let metrics = resolvedText.maximumFontMetrics {
+                // Raw backend runs have no retained font request or point size.
+                self.maxFontMetrics = .init(capHeight: metrics.capHeight, ascender: metrics.ascender,
+                    descender: metrics.descender, leading: metrics.leading, outsets: metrics.outsets)
+            } else {
+                self.maxFontMetrics = fonts.maxMetrics(for: resolvedText)
+            }
+        } else {
+            self.maxFontMetrics = .init()
+        }
         self.lineHeightMetrics = lineHeightMetrics
         self.resolvedText = resolvedText
         self.version = version
@@ -576,8 +721,6 @@ class ResolvedStyledText: InterpolatableContent {
         self.needsDrawingGroup = needsDrawingGroup
         self.attributedStorage = storage
         self.didResolveAttributedStorage = storage != nil
-        self._computedMaxFontMetrics = nil
-        self.didComputeMaxFontMetrics = false
     }
 
     deinit {
@@ -623,12 +766,12 @@ class ResolvedStyledText: InterpolatableContent {
         return storage
     }
 
-    var maxFontMetrics: ResolvedFontMetrics? {
-        if !didComputeMaxFontMetrics {
-            _computedMaxFontMetrics = resolvedText?.maximumFontMetrics
-            didComputeMaxFontMetrics = true
-        }
-        return _computedMaxFontMetrics
+    override func purgeResources(reason: ResourcePurgeReason) {
+        guard reason == .appTermination else { return }
+        fonts.purgeResources(reason: reason)
+        resolvedText?.purgeResources(reason: reason)
+        attributedStorage = nil
+        didResolveAttributedStorage = true
     }
 
     var metricsCacheEntryCount: Int {
@@ -641,7 +784,7 @@ class ResolvedStyledText: InterpolatableContent {
 
     /// Drawing padding is independent of typographic height and baselines.
     var drawingMargins: EdgeInsets {
-        let outsets = maxFontMetrics?.outsets ?? EdgeInsets()
+        let outsets = maxFontMetrics.outsets
         let scale = resolvedText?.displayScale ?? 1
         return EdgeInsets(
             top: ceil((outsets.top + stylePadding.top) * scale) / scale,
@@ -710,18 +853,16 @@ class ResolvedStyledText: InterpolatableContent {
     }
 
     func spacing() -> Spacing {
-        // Measure the unconstrained text before aggregating font metrics.
-        // Missing either carrier means there are no text-spacing categories.
+        // Spacing combines the unconstrained layout with the retained font metrics.
         let idealSize = CGSize(
             width: CGFloat.infinity,
             height: CGFloat.infinity
         )
-        guard let idealMetrics = cachedLayoutMetrics(in: idealSize),
-              let maxFontMetrics else {
+        guard let idealMetrics = cachedLayoutMetrics(in: idealSize) else {
             return Spacing()
         }
         return Spacing.textSpacing(
-            maxFontMetrics: maxFontMetrics,
+            maxFontMetrics: maxFontMetrics.resolvedMetrics,
             idealMetrics: idealMetrics,
             layoutProperties: layoutProperties
         )
@@ -814,7 +955,7 @@ class ResolvedStyledText: InterpolatableContent {
 }
 
 extension ResolvedStyledText {
-    final class StringDrawing: ResolvedStyledText {
+    final class StringDrawing: ResolvedStyledText, @unchecked Sendable {
         /// Retains prepared source lines across constraint changes. The arrays
         /// share immutable glyph data with the resource's existing storage.
         final class PreparedLayout {
@@ -1262,7 +1403,7 @@ extension ResolvedStyledText {
         }
     }
 
-    final class TextLayoutManager: ResolvedStyledText {
+    final class TextLayoutManager: ResolvedStyledText, @unchecked Sendable {
         var suffix: ResolvedTextSuffix
         var attachments: Text.ResolvedProperties.CustomAttachments
 
@@ -1280,6 +1421,7 @@ extension ResolvedStyledText {
             styles: [_ShapeStyle_Pack.Style] = [],
             transitions: [Text.ResolvedProperties.Transition] = [],
             links: Text.ResolvedProperties.Links = .init(),
+            fonts: Text.ResolvedProperties.Fonts? = nil,
             lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics = .init(),
             resolvedText: ResolvedTextSource? = nil,
             version: Int = 0,
@@ -1291,7 +1433,7 @@ extension ResolvedStyledText {
             super.init(storage: storage, layoutProperties: layoutProperties, layoutMargins: layoutMargins,
                 scaleFactorOverride: scaleFactorOverride, stylePadding: stylePadding, archiveOptions: archiveOptions,
                 isCollapsible: isCollapsible, features: features, suffix: suffix, attachments: attachments,
-                styles: styles, transitions: transitions, links: links, lineHeightMetrics: lineHeightMetrics,
+                styles: styles, transitions: transitions, links: links, fonts: fonts, lineHeightMetrics: lineHeightMetrics,
                 resolvedText: resolvedText,
                 version: version, transitionText: transitionText, needsDrawingGroup: needsDrawingGroup)
         }
@@ -1451,8 +1593,8 @@ extension ResolvedStyledText {
                     requestedSize: Size(CGSize(width: CGFloat.infinity, height: CGFloat.infinity), majorAxis: majorAxis),
                     minorAxisIsFlexible: false).base
             }
-            guard let ideal = cache.ideal, let maxFontMetrics else { return Spacing() }
-            return Spacing.textSpacing(maxFontMetrics: maxFontMetrics,
+            guard let ideal = cache.ideal else { return Spacing() }
+            return Spacing.textSpacing(maxFontMetrics: maxFontMetrics.resolvedMetrics,
                 idealMetrics: .init(size: ideal.size, firstBaseline: ideal.firstBaseline,
                                     lastBaseline: ideal.lastBaseline),
                 layoutProperties: layoutProperties)
