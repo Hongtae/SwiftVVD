@@ -83,7 +83,15 @@ extension GraphicsContext {
         if opacity > 0, !bounds.isNull, !bounds.isEmpty {
             visible = bounds.intersection(clipBoundingRect).applying(transform)
         }
-        recording.append(.init(state: DrawingState(self), contents: contents), bounds: visible)
+        var item = RBDisplayList.Item(state: DrawingState(self), contents: contents, bounds: visible)
+        if let shading = item.shading {
+            let resolved = resolvedDrawingShading(shading, bounds: item.shadingBounds)
+            item.replaceShading(resolved)
+            if case let .color(color)? = resolved.properties.first {
+                item.color = RecordedColor(color.resolve(in: environment))
+            }
+        }
+        recording.append(item, bounds: visible)
         return true
     }
 }
@@ -95,15 +103,16 @@ extension RBDisplayList {
             case fill(Path, GraphicsContext.Shading, FillStyle)
             case stroke(Path, GraphicsContext.Shading, StrokeStyle, isAntialiased: Bool)
             case image(ImageDrawing, CGRect, FillStyle)
-            case text(ResolvedTextSource.Drawing, CGRect, GraphicsContext.Shading,
-                      snapOrigin: Bool, snappingOrigin: CGPoint?, clipBounds: Bool)
+            case text(GraphicsContext.TextDrawing, GraphicsContext.Shading)
             case layer(RBMovedDisplayListContents, frame: CGRect?)
             case projectiveLayer(RBMovedDisplayListContents, ProjectionTransform, CGRect)
             case shaderLayer(RBMovedDisplayListContents, Shader.ResolvedShader, CGRect)
         }
 
         let state: GraphicsContext.DrawingState
-        let contents: Contents
+        var contents: Contents
+        let bounds: CGRect
+        var color: RecordedColor? = nil
 
         func draw(in context: GraphicsContext) {
             var context = context
@@ -115,9 +124,8 @@ extension RBDisplayList {
                 context.stroke(path, with: shading, style: style, isAntialiased: antialiased)
             case let .image(image, rect, style):
                 context.draw(image, in: rect, style: style)
-            case let .text(drawing, rect, shading, snapOrigin, snappingOrigin, clipBounds):
-                context.draw(drawing, in: rect, shading: shading, snapOrigin: snapOrigin,
-                             snappingOrigin: snappingOrigin, clipBounds: clipBounds)
+            case let .text(drawing, shading):
+                context.draw(drawing, shading: shading)
             case let .layer(contents, frame):
                 if let frame {
                     context.drawLayer(in: frame) { layer, _ in contents.draw(in: layer) }

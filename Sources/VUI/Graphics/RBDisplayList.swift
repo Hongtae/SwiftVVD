@@ -111,9 +111,19 @@ final class RBMovedDisplayListContents: RBDisplayListContents {
         self.boundingRect = boundingRect
     }
 
+    convenience init(items: [RBDisplayList.Item]) {
+        self.init(items: items, boundingRect: items.reduce(CGRect.null) { $0.union($1.bounds) })
+    }
+
     func draw(in context: GraphicsContext) {
         for item in items { item.draw(in: context) }
     }
+}
+
+final class RBEmptyDisplayListContents: RBDisplayListContents {
+    let boundingRect = CGRect.null
+    let isEmpty = true
+    func draw(in context: GraphicsContext) {}
 }
 
 func RBDrawingStateInit(_ state: RBDrawingState) -> RBDrawingState {

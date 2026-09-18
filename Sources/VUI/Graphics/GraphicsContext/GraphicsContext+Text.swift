@@ -69,7 +69,7 @@ extension GraphicsContext {
         snappingOrigin: CGPoint? = nil,
         clipBounds: Bool = true
     ) {
-        var rect = rect.standardized
+        let rect = rect.standardized
         if rect.isEmpty && clipBounds { return }
         if rect.isNull { return }
 
@@ -85,9 +85,6 @@ extension GraphicsContext {
             for line in layout { context.draw(line) }
             return
         }
-        if recording != nil, record(bounds: rect, .text(drawing, rect, shading,
-            snapOrigin: snapOrigin, snappingOrigin: snappingOrigin, clipBounds: clipBounds)) { return }
-
         func runShading(_ color: Color?) -> Shading {
             guard let color else { return shading }
             let resolved = color.resolve(in: environment)
@@ -99,6 +96,118 @@ extension GraphicsContext {
             return .color(color)
         }
 
+        func drawComponent(_ contents: TextDrawing.Contents, shading: Shading) {
+            self.draw(TextDrawing(contents: contents, origin: drawing.origin,
+                scale: 1 / drawing.source.scaleFactor, frame: rect,
+                snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
+                clipBounds: clipBounds), shading: shading)
+        }
+        for background in drawing.backgrounds {
+            drawComponent(.background(background.frame), shading: .color(background.color))
+        }
+        for batch in drawing.vectorBatches {
+            drawComponent(.vectorGlyphs(batch.path), shading: runShading(batch.foregroundColor))
+        }
+        var foregroundColors: [Color?] = []
+        for batch in drawing.batches where !batch.colorGlyphs {
+            if !foregroundColors.contains(batch.foregroundColor) {
+                foregroundColors.append(batch.foregroundColor)
+            }
+        }
+        for color in foregroundColors {
+            let batches = drawing.batches.filter { !$0.colorGlyphs && $0.foregroundColor == color }
+            drawComponent(.glyphs(batches), shading: runShading(color))
+        }
+        let colorGlyphs = drawing.batches.filter { $0.colorGlyphs }
+        if !colorGlyphs.isEmpty || !drawing.attachments.isEmpty {
+            drawComponent(.images(colorGlyphs, drawing.attachments), shading: .color(.white))
+        }
+        if !drawing.customAttachments.isEmpty,
+           let placement = textDrawingPlacement(frame: rect, origin: drawing.origin,
+               snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
+               clipBounds: clipBounds && recording == nil) {
+            // Recorded commands can later be replayed into a different viewport.
+            for item in drawing.customAttachments {
+                var context = self
+                if clipBounds { context.clip(to: Path(placement.rect)) }
+                var bounds = item.bounds
+                bounds.origin += placement.rect.origin + drawing.origin
+                item.attachment.draw(with: bounds, in: &context)
+            }
+        }
+        for decoration in drawing.decorations {
+            drawComponent(.decoration(decoration), shading: runShading(decoration.foregroundColor))
+        }
+        self.recordContentBounds(rect)
+    }
+
+    // A component owns only the geometry/resources needed for its draw command.
+    struct TextDrawing {
+        enum Contents {
+            case background(CGRect)
+            case vectorGlyphs(Path)
+            case glyphs([ResolvedTextSource.Drawing.Batch])
+            case images([ResolvedTextSource.Drawing.Batch], [ResolvedTextSource.Drawing.Attachment])
+            case decoration(ResolvedTextSource.Drawing.Decoration)
+        }
+        let contents: Contents
+        let origin: CGPoint
+        let scale: CGFloat
+        let frame: CGRect
+        let snapOrigin: Bool
+        let snappingOrigin: CGPoint?
+        let clipBounds: Bool
+
+        var shadingBounds: CGRect {
+            guard case let .decoration(decoration) = contents else { return frame }
+            let transform = CGAffineTransform(translationX: frame.minX + origin.x,
+                y: frame.minY + origin.y).scaledBy(x: scale, y: scale)
+            let start = decoration.start.applying(transform)
+            let end = decoration.end.applying(transform)
+            return CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                width: abs(start.x - end.x), height: abs(start.y - end.y))
+        }
+
+        var bounds: CGRect {
+            var bounds = CGRect.null
+            var clipped = true
+            func include(_ batches: [ResolvedTextSource.Drawing.Batch]) {
+                for batch in batches {
+                    for vertex in batch.vertices {
+                        let point = vertex.position
+                        bounds = bounds.union(CGRect(origin: point, size: .zero))
+                    }
+                }
+            }
+            switch contents {
+            case let .background(rect):
+                bounds = rect
+                clipped = false
+            case let .vectorGlyphs(path):
+                bounds = path.boundingBoxOfPath
+            case let .glyphs(batches):
+                include(batches)
+            case let .images(batches, attachments):
+                include(batches)
+                for attachment in attachments { bounds = bounds.union(attachment.frame) }
+            case let .decoration(decoration):
+                let start = decoration.start
+                let end = decoration.end
+                bounds = CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                    width: abs(start.x - end.x), height: abs(start.y - end.y))
+                    .insetBy(dx: -decoration.lineWidth / 2, dy: -decoration.lineWidth / 2)
+                clipped = false
+            }
+            bounds = bounds.applying(CGAffineTransform(translationX: frame.minX + origin.x,
+                y: frame.minY + origin.y).scaledBy(x: scale, y: scale))
+            return clipped && clipBounds ? bounds.intersection(frame) : bounds
+        }
+    }
+
+    private func textDrawingPlacement(frame: CGRect, origin: CGPoint,
+        snapOrigin: Bool, snappingOrigin: CGPoint?, clipBounds: Bool
+    ) -> (rect: CGRect, scissor: ScissorRect?)? {
+        var rect = frame
         var scissorRect: ScissorRect? = nil
         if snapOrigin || clipBounds {
             let transform = self.transform
@@ -110,12 +219,12 @@ extension GraphicsContext {
                     y: self.contentScaleFactor))
 
             if snapOrigin {
-                let anchor = snappingOrigin ?? (rect.origin + drawing.origin)
-                let relativeOffset = rect.origin + drawing.origin - anchor
-                var origin = anchor.applying(transform)
-                origin.x.round()
-                origin.y.round()
-                rect.origin = origin.applying(transform.inverted()) + relativeOffset - drawing.origin
+                let anchor = snappingOrigin ?? (rect.origin + origin)
+                let relativeOffset = rect.origin + origin - anchor
+                var pixelOrigin = anchor.applying(transform)
+                pixelOrigin.x.round()
+                pixelOrigin.y.round()
+                rect.origin = pixelOrigin.applying(transform.inverted()) + relativeOffset - origin
             }
             if clipBounds {
                 let tl = CGPoint(x: rect.minX, y: rect.minY).applying(transform)
@@ -127,145 +236,80 @@ extension GraphicsContext {
                 let minY = min(tl.y, tr.y, bl.y, br.y)
                 let maxY = max(tl.y, tr.y, bl.y, br.y)
                 
-                if minX >= self.viewport.maxX { return }
-                if minY >= self.viewport.maxY { return }
-                if maxX <= self.viewport.minX { return }
-                if maxY <= self.viewport.minY { return }
+                if minX >= self.viewport.maxX { return nil }
+                if minY >= self.viewport.maxY { return nil }
+                if maxX <= self.viewport.minX { return nil }
+                if maxY <= self.viewport.minY { return nil }
                 
                 let x1 = max(Int(floor(minX)), Int(self.viewport.minX))
                 let y1 = max(Int(floor(minY)), Int(self.viewport.minY))
                 let x2 = min(Int(ceil(maxX)), Int(self.viewport.maxX))
                 let y2 = min(Int(ceil(maxY)), Int(self.viewport.maxY))
-                if x1 >= x2 || y1 >= y2 { return }
+                if x1 >= x2 || y1 >= y2 { return nil }
                 
                 scissorRect = ScissorRect(x: x1, y: y1,
                                           width: x2 - x1, height: y2 - y1)
             }
         }
 
-        let scale = 1.0 / drawing.source.scaleFactor
+        return (rect, scissorRect)
+    }
+
+    func draw(_ drawing: TextDrawing, shading: Shading) {
+        if recording != nil, record(bounds: drawing.bounds, .text(drawing, shading)) { return }
+        guard let placement = textDrawingPlacement(frame: drawing.frame, origin: drawing.origin,
+            snapOrigin: drawing.snapOrigin, snappingOrigin: drawing.snappingOrigin,
+            clipBounds: drawing.clipBounds) else { return }
+        let rect = placement.rect
+        let scale = drawing.scale
         let offset = rect.origin + drawing.origin
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
-
-        for background in drawing.backgrounds {
-            self.fill(
-                Path(background.frame.applying(transform)),
-                with: .color(background.color)
-            )
-        }
-
-        for batch in drawing.vectorBatches {
-            let isAntialiased = self.environment.disableMSAA == false
-            guard let renderPass = self.beginRenderPass(
-                enableStencil: true,
-                enableMSAA: isAntialiased
-            ) else {
-                continue
-            }
-            if let scissorRect {
-                renderPass.encoder.setScissorRect(scissorRect)
-            }
-            if self.encodeStencilPathFillCommand(
-                renderPass: renderPass,
-                path: batch.path,
-                pathTransform: transform
-            ) {
-                self.encodeShadingBoxCommand(
-                    renderPass: renderPass,
-                    shading: runShading(batch.foregroundColor),
-                    stencil: .testNonZero,
-                    blendState: .opaque,
-                    bounds: rect
-                )
-                renderPass.end()
-                self.drawSource()
+        switch drawing.contents {
+        case let .background(frame):
+            fill(Path(frame.applying(transform)), with: shading)
+        case let .vectorGlyphs(path):
+            guard let pass = beginRenderPass(enableStencil: true,
+                enableMSAA: !environment.disableMSAA) else { return }
+            if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+            if encodeStencilPathFillCommand(renderPass: pass, path: path, pathTransform: transform) {
+                encodeShadingBoxCommand(renderPass: pass, shading: shading,
+                    stencil: .testNonZero, blendState: .opaque, bounds: rect)
+                pass.end()
+                drawSource()
             } else {
-                renderPass.end()
+                pass.end()
             }
-        }
-
-        var foregroundColors: [Color?] = []
-        for batch in drawing.batches where !batch.colorGlyphs {
-            if !foregroundColors.contains(batch.foregroundColor) {
-                foregroundColors.append(batch.foregroundColor)
+        case let .glyphs(batches):
+            guard let pass = beginRenderPass(enableStencil: false) else { return }
+            if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+            encodeDrawTextCommand(renderPass: pass, batches: batches, transform: transform,
+                color: .white, colorGlyphs: false)
+            encodeShadingBoxCommand(renderPass: pass, shading: shading,
+                stencil: .ignore, blendState: .multiply, bounds: rect)
+            pass.end()
+            drawSource()
+        case let .images(batches, attachments):
+            guard let pass = beginRenderPass(enableStencil: false) else { return }
+            if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+            encodeDrawTextCommand(renderPass: pass, batches: batches, transform: transform,
+                color: .white, colorGlyphs: true)
+            for attachment in attachments {
+                encodeDrawTextureCommand(renderPass: pass, texture: attachment.texture,
+                    frame: attachment.frame, transform: transform, textureFrame: attachment.textureFrame,
+                    textureTransform: .identity, blendState: .opaque, color: .white)
             }
-        }
-        for foregroundColor in foregroundColors {
-            guard let renderPass = self.beginRenderPass(enableStencil: false) else {
-                continue
-            }
-            if let scissorRect {
-                renderPass.encoder.setScissorRect(scissorRect)
-            }
-            self.encodeDrawTextCommand(renderPass: renderPass,
-                                       drawing: drawing,
-                                       transform: transform,
-                                       color: .white,
-                                       colorGlyphs: false,
-                                       foregroundColor: foregroundColor,
-                                       filtersForegroundColor: true)
-            let shading = runShading(foregroundColor)
-            self.encodeShadingBoxCommand(renderPass: renderPass,
-                                         shading: shading,
-                                         stencil: .ignore,
-                                         blendState: .multiply,
-                                         bounds: rect)
-            renderPass.end()
-            self.drawSource()
-        }
-
-        let hasColorGlyphs = drawing.batches.contains { $0.colorGlyphs }
-        if hasColorGlyphs || !drawing.attachments.isEmpty,
-           let renderPass = self.beginRenderPass(enableStencil: false) {
-            if let scissorRect {
-                renderPass.encoder.setScissorRect(scissorRect)
-            }
-            self.encodeDrawTextCommand(renderPass: renderPass,
-                                       drawing: drawing,
-                                       transform: transform,
-                                       color: .white,
-                                       colorGlyphs: true)
-            for attachment in drawing.attachments {
-                self.encodeDrawTextureCommand(renderPass: renderPass,
-                                              texture: attachment.texture,
-                                              frame: attachment.frame,
-                                              transform: transform,
-                                              textureFrame: attachment.textureFrame,
-                                              textureTransform: .identity,
-                                              blendState: .opaque,
-                                              color: .white)
-            }
-            renderPass.end()
-            self.drawSource()
-        }
-
-        for item in drawing.customAttachments {
-            var context = self
-            if clipBounds { context.clip(to: Path(rect)) }
-            var bounds = item.bounds
-            bounds.origin += offset
-            item.attachment.draw(with: bounds, in: &context)
-        }
-
-        for decoration in drawing.decorations {
-            let start = decoration.start.applying(transform)
-            let end = decoration.end.applying(transform)
-            let lineWidth = decoration.lineWidth * scale
+            pass.end()
+            drawSource()
+        case let .decoration(decoration):
             var path = Path()
-            path.move(to: start)
-            path.addLine(to: end)
-            self.stroke(
-                path,
-                with: runShading(decoration.foregroundColor),
-                style: StrokeStyle(
-                    lineWidth: lineWidth,
-                    lineCap: .butt,
-                    dash: decoration.dashPattern(lineWidth: lineWidth)
-                )
-            )
+            path.move(to: decoration.start.applying(transform))
+            path.addLine(to: decoration.end.applying(transform))
+            let width = decoration.lineWidth * scale
+            stroke(path, with: shading, style: StrokeStyle(lineWidth: width, lineCap: .butt,
+                dash: decoration.dashPattern(lineWidth: width)))
         }
-        self.recordContentBounds(rect)
+        recordContentBounds(rect)
     }
 
     public func resolve(_ text: Text) -> ResolvedText {
@@ -309,21 +353,16 @@ extension GraphicsContext {
     }
 
     func encodeDrawTextCommand(renderPass: RenderPass,
-                               drawing: ResolvedTextSource.Drawing,
+                               batches: [ResolvedTextSource.Drawing.Batch],
                                transform: CGAffineTransform,
                                color: BackendColor,
-                               colorGlyphs: Bool,
-                               foregroundColor: Color? = nil,
-                               filtersForegroundColor: Bool = false) {
-        if drawing.isEmpty { return }
+                               colorGlyphs: Bool) {
         let c = color.float4
         let transform = transform
             .concatenating(self.transform)
             .concatenating(self.viewTransform)
 
-        for batch in drawing.batches where
-            batch.colorGlyphs == colorGlyphs &&
-            (!filtersForegroundColor || batch.foregroundColor == foregroundColor) {
+        for batch in batches {
             let vertices = batch.vertices.map { vertex in
                 _Vertex(
                     position: Vector2(vertex.position).applying(transform).float2,

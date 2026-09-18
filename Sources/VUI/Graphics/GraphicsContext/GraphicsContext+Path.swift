@@ -946,17 +946,7 @@ extension GraphicsContext {
         return true
     }
 
-    func encodeShadingBoxCommand(renderPass: RenderPass,
-                                 shading: GraphicsContext.Shading,
-                                 stencil: _Stencil,
-                                 blendState: BlendState,
-                                 bounds: CGRect = .null) {
-
-        if shading.properties.isEmpty { return }
-
-        var vertices: [_Vertex] = []
-        var shader: _Shader = .vertexColor
-
+    func resolvedDrawingShading(_ shading: Shading, bounds: CGRect) -> Shading {
         var property = shading.properties.first
         if case .foreground = property {
             property = .style(style: ForegroundStyle())
@@ -970,6 +960,25 @@ extension GraphicsContext {
             style._apply(to: &shape)
             property = shape.resolvedShading?.properties.first
         }
+
+        if case let .color(color) = property {
+            property = .color(color: Color(color.resolve(in: environment)))
+        }
+        return property.map(Shading.init(property:)) ?? Shading(palette: [])
+    }
+
+    func encodeShadingBoxCommand(renderPass: RenderPass,
+                                 shading: GraphicsContext.Shading,
+                                 stencil: _Stencil,
+                                 blendState: BlendState,
+                                 bounds: CGRect = .null) {
+
+        if shading.properties.isEmpty { return }
+
+        var vertices: [_Vertex] = []
+        var shader: _Shader = .vertexColor
+
+        let property = resolvedDrawingShading(shading, bounds: bounds).properties.first
 
         if let property {
             switch property {
