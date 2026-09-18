@@ -34,16 +34,19 @@ extension GraphicsContext {
         var opacity: Double
         var blendMode: BlendMode
         var environment: EnvironmentValues
-        var filters: [(Filter, FilterOptions)]
+        var style: RBDisplayList.Style?
+        var filters: [(Filter, FilterOptions)] { style?.executionFilters ?? [] }
         var clips: [DrawingClip]
+        var clipBoundingRect: CGRect
 
         init(_ context: GraphicsContext) {
             transform = context.transform
             opacity = context.opacity
             blendMode = context.blendMode
             environment = context.environment.untrackedCopy()
-            filters = context.filters
+            style = context.storage.state.pointee.style
             clips = context.recordedClips
+            clipBoundingRect = context.clipBoundingRect
         }
 
         func apply(to context: inout GraphicsContext) {
@@ -57,6 +60,13 @@ extension GraphicsContext {
             if blendMode != .normal { context.blendMode = blendMode }
             context.filters = filters + context.filters
             context.environment = environment
+        }
+
+        func bounds(_ geometry: CGRect) -> CGRect {
+            guard opacity > 0, !geometry.isNull, !geometry.isEmpty else { return .null }
+            let bounds = geometry.intersection(clipBoundingRect).applying(transform)
+            guard transform.isIdentity, clips.isEmpty else { return bounds }
+            return style?.bounds(bounds) ?? bounds
         }
     }
 
@@ -79,11 +89,7 @@ extension GraphicsContext {
     @discardableResult
     func record(bounds: CGRect, _ contents: RBDisplayList.Item.Contents) -> Bool {
         guard let recording else { return false }
-        var visible = CGRect.null
-        if opacity > 0, !bounds.isNull, !bounds.isEmpty {
-            visible = bounds.intersection(clipBoundingRect).applying(transform)
-        }
-        var item = RBDisplayList.Item(state: DrawingState(self), contents: contents, bounds: visible)
+        var item = RBDisplayList.Item(state: DrawingState(self), contents: contents, geometryBounds: bounds)
         if let shading = item.shading {
             let resolved = resolvedDrawingShading(shading, bounds: item.shadingBounds)
             item.replaceShading(resolved)
@@ -91,7 +97,7 @@ extension GraphicsContext {
                 item.color = RecordedColor(color.resolve(in: environment))
             }
         }
-        recording.append(item, bounds: visible)
+        recording.append(item, bounds: item.bounds)
         return true
     }
 }
@@ -109,14 +115,19 @@ extension RBDisplayList {
             case shaderLayer(RBMovedDisplayListContents, Shader.ResolvedShader, CGRect)
         }
 
-        let state: GraphicsContext.DrawingState
+        var state: GraphicsContext.DrawingState
         var contents: Contents
-        let bounds: CGRect
+        var geometryBounds: CGRect
+        var bounds: CGRect { state.bounds(geometryBounds) }
         var color: RecordedColor? = nil
 
-        func draw(in context: GraphicsContext) {
+        func draw(in context: GraphicsContext, copyingStylesWith transform: CachedTransform?) {
             var context = context
             state.apply(to: &context)
+            if let transform {
+                context.copyOnWrite()
+                context.storage.state.pointee.style = transform.transformStyle(state.style)
+            }
             switch contents {
             case let .fill(path, shading, style):
                 context.fill(path, with: shading, style: style)

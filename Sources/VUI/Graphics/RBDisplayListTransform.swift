@@ -29,10 +29,13 @@ final class RBDisplayListTransform: NSObject, NSCopying {
         return copy
     }
 
-    private func applying(to item: RBDisplayList.Item) -> RBDisplayList.Item {
+    private func applying(to item: RBDisplayList.Item, copyingStylesWith transform: RBDisplayList.CachedTransform) -> RBDisplayList.Item {
         var item = item
+        item.state.style = transform.transformStyle(item.state.style)
         if case let .layer(contents, frame) = item.contents {
-            item.contents = .layer(RBMovedDisplayListContents(items: contents.items.map { applying(to: $0) }), frame: frame)
+            item.contents = .layer(RBMovedDisplayListContents(items: contents.items.map {
+                applying(to: $0, copyingStylesWith: transform)
+            }), frame: frame)
         } else if var color = item.color {
             var changed = false
             for replacement in replacements where replacement.from.matches(color) {
@@ -55,6 +58,7 @@ final class RBDisplayListTransform: NSObject, NSCopying {
         let items = recordedItems(in: contents)
         for item in items { item.requireColorOperations() }
         if items.isEmpty { return RBEmptyDisplayListContents() }
-        return RBMovedDisplayListContents(items: items.map { applying(to: $0) })
+        let transform = RBDisplayList.CachedTransform()
+        return RBMovedDisplayListContents(items: items.map { applying(to: $0, copyingStylesWith: transform) })
     }
 }

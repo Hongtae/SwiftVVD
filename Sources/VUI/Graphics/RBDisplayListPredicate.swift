@@ -80,17 +80,50 @@ final class RBDisplayListPredicate: NSObject, NSCopying {
         return copy
     }
 
+    func matches(_ color: RecordedColor?) -> Bool {
+        terms.allSatisfy { $0.matches(color) }
+    }
+
     private func matches(_ item: RBDisplayList.Item) -> Bool {
         if case let .layer(contents, _) = item.contents {
-            return contents.items.contains { matches($0) }
+            return contents.items.contains { matches($0) || matchesStyle($0.state.style, inverted: false) }
         }
-        return terms.allSatisfy { $0.matches(item.color) }
+        return matches(item.color)
+    }
+
+    private func matchesStyle(_ source: RBDisplayList.Style?, inverted: Bool) -> Bool {
+        var current = source
+        while let style = current {
+            let result = style.matches(self)
+            if result & 0x100 != 0 && (result & 1 != 0) != inverted { return true }
+            current = style.next
+        }
+        return false
+    }
+
+    private func copy(_ item: RBDisplayList.Item, with transform: RBDisplayList.CachedTransform,
+                      styleOnly: Bool) -> RBDisplayList.Item {
+        var item = item
+        item.state.style = transform.transformStyle(item.state.style, styleOnly: styleOnly)
+        if case let .layer(contents, frame) = item.contents {
+            let children = RBMovedDisplayListContents(items: contents.items.map {
+                copy($0, with: transform, styleOnly: styleOnly)
+            })
+            item.contents = .layer(children, frame: frame)
+            if frame == nil { item.geometryBounds = children.boundingRect }
+        }
+        return item
     }
 
     func copyFilteredDisplayList(_ contents: any RBDisplayListContents) -> any RBDisplayListContents {
         let items = recordedItems(in: contents)
         for item in items { item.requireColorOperations() }
-        let selected = items.filter { matches($0) != invertsResult }
+        let transform = RBDisplayList.CachedTransform(predicate: self)
+        let selected = items.compactMap { item -> RBDisplayList.Item? in
+            let styleOnly = matches(item) == invertsResult
+            guard !styleOnly || matchesStyle(item.state.style, inverted: invertsResult) else { return nil }
+            return copy(item, with: transform, styleOnly: styleOnly)
+        }
         if selected.isEmpty { return RBEmptyDisplayListContents() }
         return RBMovedDisplayListContents(items: selected)
     }
@@ -134,7 +167,18 @@ extension RBDisplayList.Item {
 
     // Reject unimplemented effect/payload branches before changing any contents.
     func requireColorOperations() {
-        precondition(state.filters.isEmpty, "Color operations on filtered commands are not implemented.")
+        if hasRecordedEffects {
+            precondition(state.transform.isIdentity && state.clips.isEmpty,
+                "Color operations on transformed or clipped effects are not implemented.")
+            precondition(geometryBounds.isNull || geometryBounds.isEmpty || state.clipBoundingRect.contains(geometryBounds),
+                "Color operations on effects crossing recording clip bounds are not implemented.")
+        }
+        var style = state.style
+        while let current = style {
+            precondition(current.supportsColorOperations,
+                "Color operations on this recorded effect are not implemented.")
+            style = current.next
+        }
         switch contents {
         case let .layer(contents, _):
             for item in contents.items { item.requireColorOperations() }
@@ -155,5 +199,13 @@ extension RBDisplayList.Item {
             default: preconditionFailure("Color operations on this shading are not implemented.")
             }
         }
+    }
+
+    private var hasRecordedEffects: Bool {
+        if state.style != nil { return true }
+        if case let .layer(contents, _) = contents {
+            return contents.items.contains { $0.hasRecordedEffects }
+        }
+        return false
     }
 }

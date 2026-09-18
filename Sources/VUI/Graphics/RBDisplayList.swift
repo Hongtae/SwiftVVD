@@ -31,6 +31,7 @@ final class RBDisplayList: RBDisplayListContents {
         var contentOffset: CGPoint = .zero
         var maskTexture: Texture?
         var filters: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] = []
+        var style: Style?
         var isRecording = false
         var recordedClips: [GraphicsContext.DrawingClip] = []
         var contentBoundsState = GraphicsContext.ContentBoundsState()
@@ -40,6 +41,11 @@ final class RBDisplayList: RBDisplayListContents {
             self.list = list
             self.defaultColorSpace = colorSpace
             self.clipBoundingRect = viewport
+        }
+
+        mutating func addStyle(_ style: Style) {
+            style.next = self.style
+            self.style = style
         }
     }
 
@@ -74,7 +80,8 @@ final class RBDisplayList: RBDisplayListContents {
     func draw(in context: GraphicsContext) {
         // The value snapshot also permits replay into this destination.
         let items = items
-        for item in items { item.draw(in: context) }
+        let transform = context.recording.map { _ in CachedTransform(outerStyle: context.storage.state.pointee.style) }
+        for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 
     func moveContents() -> RBMovedDisplayListContents {
@@ -116,7 +123,8 @@ final class RBMovedDisplayListContents: RBDisplayListContents {
     }
 
     func draw(in context: GraphicsContext) {
-        for item in items { item.draw(in: context) }
+        let transform = context.recording.map { _ in RBDisplayList.CachedTransform(outerStyle: context.storage.state.pointee.style) }
+        for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 }
 

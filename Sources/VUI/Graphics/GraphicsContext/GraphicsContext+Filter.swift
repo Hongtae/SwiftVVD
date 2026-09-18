@@ -180,6 +180,23 @@ extension GraphicsContext {
     public mutating func addFilter(_ filter: Filter,
                                    options: FilterOptions = FilterOptions()) {
         filters.append((filter, options))
+        if recording != nil {
+            let style: RBDisplayList.Style
+            let hasClip = !recordedClips.isEmpty
+            switch filter.style {
+            case let .shadow(color, radius, offset, blendMode, shadowOptions):
+                style = RBDisplayList.ShadowStyle(color: RecordedColor(color.resolve(in: environment)),
+                    radius: Float(radius), offset: offset, blendMode: blendMode, options: shadowOptions,
+                    transform: transform, hasClip: hasClip, filterOptions: options)
+            case let .blur(radius, blurOptions):
+                style = RBDisplayList.FilterStyle(filter: RBFilter.GaussianBlur(radius: Float(radius), options: blurOptions),
+                    transform: transform, hasClip: hasClip, filterOptions: options)
+            default:
+                style = RBDisplayList.ExecutionFilterStyle(filter: filter, transform: transform,
+                    hasClip: hasClip, filterOptions: options)
+            }
+            storage.state.pointee.addStyle(style)
+        }
     }
 
     func applyFilters(sourceDiscarded: Bool) {

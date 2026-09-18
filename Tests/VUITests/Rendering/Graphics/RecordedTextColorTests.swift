@@ -313,4 +313,246 @@ final class RecordedTextColorTests: XCTestCase {
         XCTAssertEqual(changed.boundingRect, saved.boundingRect)
         XCTAssertEqual(try render(device) { changed.draw(in: $0) }, original)
     }
+
+    private func effectRecording(_ context: GraphicsContext,
+                                 filters: [GraphicsContext.Filter], reversed: Bool = false,
+                                 layer: Bool = false, inner: Bool = false) -> RBMovedDisplayListContents {
+        var recorded = context.recordingContext(size: size)
+        if !inner { for filter in filters { recorded.addFilter(filter) } }
+        let shapes: (inout GraphicsContext) -> Void = { context in
+            let colors: [VUI.Color] = [Color(.sRGBLinear, red: -1, green: -1, blue: 0),
+                Color(.sRGBLinear, red: -1, green: -1, blue: 1 / 1024, opacity: 0.25), .cyan.opacity(0.6)]
+            for i in reversed ? [2, 1, 0] : [0, 1, 2] {
+                context.fill(Path(CGRect(x: 16 + i * 24, y: 16, width: 8, height: 8)), with: .color(colors[i]))
+            }
+        }
+        if layer {
+            recorded.drawLayer { child in
+                if inner { for filter in filters { child.addFilter(filter) } }
+                shapes(&child)
+            }
+        } else { shapes(&recorded) }
+        return recorded.recording!.moveContents()
+    }
+
+    private func shadow(_ color: VUI.Color = .black.opacity(0.5),
+                        options: GraphicsContext.ShadowOptions = []) -> GraphicsContext.Filter {
+        .shadow(color: color, radius: 2, x: 3, y: 2, options: options)
+    }
+
+    private func assertBounds(_ actual: CGRect, _ expected: CGRect,
+                              file: StaticString = #filePath, line: UInt = #line) {
+        // Recorded effect geometry uses Float operands; aggregation is CGRect.
+        for (a, b) in zip([actual.minX, actual.minY, actual.width, actual.height],
+                          [expected.minX, expected.minY, expected.width, expected.height]) {
+            XCTAssertEqual(a, b, accuracy: 0.00002, file: file, line: line)
+        }
+    }
+
+    func testRecordedStyleHeadIsSharedUntilAStateCopyAddsAnEffect() throws {
+        // ASSERTIONS recordedStyleProduction27Observed
+        var record = try context(device()).recordingContext(size: size)
+        record.addFilter(shadow())
+        let style = try XCTUnwrap(record.storage.state.pointee.style)
+        record.fill(Path(CGRect(x: 16, y: 16, width: 8, height: 8)), with: .color(.red))
+        var branch = record
+        branch.addFilter(.blur(radius: 2))
+        branch.fill(Path(CGRect(x: 40, y: 16, width: 8, height: 8)), with: .color(.green))
+        record.fill(Path(CGRect(x: 64, y: 16, width: 8, height: 8)), with: .color(.blue))
+        let source = record.recording!.moveContents()
+        XCTAssertTrue(record.storage.state.pointee.style === style)
+        XCTAssertTrue(branch.storage.state.pointee.style?.next === style)
+        XCTAssertTrue(source.items[0].state.style === source.items[2].state.style)
+        XCTAssertTrue(source.items[1].state.style?.next === source.items[0].state.style)
+        XCTAssertNil(style.next)
+        XCTAssertEqual(source.items[0].state.filters.count, 1)
+        XCTAssertEqual(source.items[1].state.filters.count, 2)
+    }
+
+    func testSharedStyleSelectionRetainsSourceOrderAndOperationScopedCopies() throws {
+        // ASSERTIONS recordedEffectPartition27Observed
+        // ASSERTIONS recordedStyleProduction27Observed
+        let device = try device()
+        let context = try context(device)
+        let key = Color(.sRGBLinear, red: -1, green: -1, blue: 0, opacity: 0.5)
+        let predicate = predicate(SIMD4(-1, -1, 0, wildcard))
+        var originalPixels: [UInt8]?
+        for reversed in [false, true] {
+            let source = effectRecording(context, filters: [shadow(key)], reversed: reversed)
+            let before = try render(device) { source.draw(in: $0) }
+            if let originalPixels { XCTAssertEqual(before, originalPixels) }
+            originalPixels = before
+            let selected = predicate.copyFilteredDisplayList(source)
+            let items = recordedItems(in: selected)
+            XCTAssertEqual(items.count, 3)
+            let copy = try XCTUnwrap(items[0].state.style as? RBDisplayList.ShadowStyle)
+            XCTAssertEqual(copy.options.contains(.shadowOnly), reversed)
+            XCTAssertTrue(items.allSatisfy { $0.state.style === copy })
+            XCTAssertFalse(copy === source.items[0].state.style)
+            XCTAssertEqual((source.items[0].state.style as? RBDisplayList.ShadowStyle)?.options, [])
+            let another = recordedItems(in: predicate.copyFilteredDisplayList(source))
+            XCTAssertFalse(another[0].state.style === copy)
+            XCTAssertTrue(another.allSatisfy { $0.state.style === another[0].state.style })
+            let expected = effectRecording(context, filters: [shadow(key, options: reversed ? .shadowOnly : [])], reversed: reversed)
+            XCTAssertEqual(try render(device) { selected.draw(in: $0) },
+                           try render(device) { expected.draw(in: $0) })
+            XCTAssertEqual(try render(device) { source.draw(in: $0) }, before)
+            weak var retiredStyle: RBDisplayList.Style?
+            autoreleasepool {
+                let retired = predicate.copyFilteredDisplayList(source)
+                retiredStyle = recordedItems(in: retired)[0].state.style
+                XCTAssertNotNil(retiredStyle)
+            }
+            XCTAssertNil(retiredStyle)
+        }
+    }
+
+    func testBlackShadowSelectionSeparatesBodyFromStyleAndDropsCachedEmptyChains() throws {
+        // ASSERTIONS recordedEffectPartition27Observed
+        let device = try device()
+        let context = try context(device)
+        let plain = effectRecording(context, filters: [])
+        let key = predicate(SIMD4(-1, -1, wildcard, wildcard))
+        let black = predicate(SIMD4(0, 0, 0, wildcard))
+        for options: GraphicsContext.ShadowOptions in [[], .shadowAbove, .shadowOnly, .disablesGroup] {
+            let source = effectRecording(context, filters: [shadow(options: options)])
+            let selectedKeys = key.copyFilteredDisplayList(source)
+            XCTAssertEqual(recordedItems(in: selectedKeys).count, 2)
+            XCTAssertTrue(recordedItems(in: selectedKeys).allSatisfy { $0.state.style == nil })
+            XCTAssertEqual(try render(device) { selectedKeys.draw(in: $0) },
+                           try render(device) { key.copyFilteredDisplayList(plain).draw(in: $0) })
+            let selectedShadow = black.copyFilteredDisplayList(source)
+            let reference = effectRecording(context, filters: [shadow(options: options.union(.shadowOnly))])
+            XCTAssertEqual(try render(device) { selectedShadow.draw(in: $0) },
+                           try render(device) { reference.draw(in: $0) })
+            black.invertsResult = true
+            XCTAssertEqual(try render(device) { black.copyFilteredDisplayList(source).draw(in: $0) },
+                           try render(device) { plain.draw(in: $0) })
+            black.invertsResult = false
+        }
+    }
+
+    func testEffectBoundsUseDistinctBlurAndShadowOutsetsAndSurviveSelection() throws {
+        // ASSERTIONS recordedEffectBounds27Observed
+        // ASSERTIONS recordedEffectPartition27Observed
+        let device = try device()
+        let context = try context(device)
+        let key = predicate(SIMD4(-1, -1, 0, wildcard))
+        let blur = effectRecording(context, filters: [.blur(radius: 2)])
+        let selectedBlur = key.copyFilteredDisplayList(blur)
+        assertBounds(selectedBlur.boundingRect, CGRect(x: 10, y: 10, width: 20, height: 20))
+        assertBounds(effectRecording(context, filters: [.blur(radius: 0.75)]).boundingRect,
+                     CGRect(x: 13, y: 13, width: 62, height: 14))
+        assertBounds(effectRecording(context, filters: [shadow()]).boundingRect,
+                     CGRect(x: 13.4, y: 12.4, width: 67.2, height: 19.2))
+        assertBounds(effectRecording(context, filters: [.shadow(radius: 0, x: 12, y: 2)]).boundingRect,
+                     CGRect(x: 16, y: 16, width: 68, height: 10))
+        assertBounds(effectRecording(context, filters: [.shadow(radius: 0, x: 12, y: 2, options: .shadowOnly)]).boundingRect,
+                     CGRect(x: 28, y: 18, width: 56, height: 8))
+        for (index, filters) in [[GraphicsContext.Filter.blur(radius: 2), shadow()], [shadow(), .blur(radius: 2)]].enumerated() {
+            let source = effectRecording(context, filters: filters)
+            assertBounds(source.boundingRect, CGRect(x: 7.4, y: 6.4, width: 79.2, height: 31.2))
+            XCTAssertEqual(source.boundingRect.minX, [7.399999618530273, 7.400000095367432][index], accuracy: 0.00000001)
+            let selected = key.copyFilteredDisplayList(source)
+            XCTAssertEqual(selected.boundingRect, selectedBlur.boundingRect)
+            XCTAssertEqual(try render(device) { selected.draw(in: $0) },
+                           try render(device) { selectedBlur.draw(in: $0) })
+        }
+    }
+
+    func testLayerBodySelectionKeepsChildrenWhileCopyingTheirStyles() throws {
+        // ASSERTIONS recordedEffectPartition27Observed
+        // ASSERTIONS textRecordedLayerBoundaryObserved
+        let device = try device()
+        let context = try context(device)
+        let key = predicate(SIMD4(-1, -1, 0, wildcard))
+        let black = predicate(SIMD4(0, 0, 0, wildcard))
+        let plain = effectRecording(context, filters: [], layer: true)
+        for inner in [false, true] {
+            let source = effectRecording(context, filters: [shadow()], layer: true, inner: inner)
+            let selected = key.copyFilteredDisplayList(source)
+            guard case let .layer(children, _) = recordedItems(in: selected).first?.contents else {
+                return XCTFail("Selection must keep the ordinary layer owner")
+            }
+            XCTAssertEqual(children.items.count, 3)
+            XCTAssertTrue(children.items.allSatisfy { $0.state.style == nil })
+            XCTAssertNil(recordedItems(in: selected)[0].state.style)
+            XCTAssertEqual(selected.boundingRect, plain.boundingRect)
+            XCTAssertEqual(try render(device) { selected.draw(in: $0) },
+                           try render(device) { plain.draw(in: $0) })
+            if inner {
+                XCTAssertEqual(try render(device) { black.copyFilteredDisplayList(source).draw(in: $0) },
+                               try render(device) { source.draw(in: $0) })
+            }
+        }
+    }
+
+    func testReplacementCopiesSharedStylesWithoutReplacingShadowColor() throws {
+        // ASSERTIONS recordedEffectReplacement27Observed
+        let device = try device()
+        let context = try context(device)
+        let key = Color(.sRGBLinear, red: -1, green: -1, blue: 0, opacity: 0.5)
+        let source = effectRecording(context, filters: [shadow(key)])
+        let original = try render(device) { source.draw(in: $0) }
+        let transform = RBDisplayListTransform()
+        transform.addColorReplacement(from: SIMD4(-1, -1, 0, wildcard), to: SIMD4(1, 0, 0, 1), colorSpace: .linearSRGB)
+        let changed = transform.copyApplyingToDisplayList(source)
+        let items = recordedItems(in: changed)
+        let copied = try XCTUnwrap(items[0].state.style as? RBDisplayList.ShadowStyle)
+        XCTAssertTrue(items.allSatisfy { $0.state.style === copied })
+        XCTAssertFalse(copied === source.items[0].state.style)
+        XCTAssertEqual(copied.color.components, (source.items[0].state.style as? RBDisplayList.ShadowStyle)?.color.components)
+        XCTAssertEqual(items[0].color?.components, SIMD4(1, 0, 0, 1))
+        XCTAssertEqual(try render(device) { source.draw(in: $0) }, original)
+        transform.removeAll()
+        transform.addColorReplacement(from: SIMD4(repeating: wildcard), to: SIMD4(1, 0, 0, 1), colorSpace: .linearSRGB)
+        let shadowOnly = effectRecording(context, filters: [shadow(options: .shadowOnly)])
+        XCTAssertEqual(try render(device) { transform.copyApplyingToDisplayList(shadowOnly).draw(in: $0) },
+                       try render(device) { shadowOnly.draw(in: $0) })
+    }
+
+    func testRerecordingKeepsSharedStyleIdentityAndReceiverEffects() throws {
+        // ASSERTIONS recordedStyleProduction27Observed
+        // ASSERTIONS canvasRecordedItemReplayObserved
+        let device = try device()
+        let context = try context(device)
+        let key = Color(.sRGBLinear, red: -1, green: -1, blue: 0, opacity: 0.5)
+        let source = effectRecording(context, filters: [shadow(key)])
+        for receiverBlur in [false, true] {
+            var receiver = context.recordingContext(size: size)
+            if receiverBlur { receiver.addFilter(.blur(radius: 2)) }
+            source.draw(in: receiver)
+            let rerecorded = receiver.recording!.moveContents()
+            XCTAssertTrue(rerecorded.items.allSatisfy { $0.state.style === rerecorded.items[0].state.style })
+            XCTAssertFalse(rerecorded.items[0].state.style === source.items[0].state.style)
+            let expected = effectRecording(context, filters: receiverBlur ? [shadow(key), .blur(radius: 2)] : [shadow(key)])
+            XCTAssertEqual(try render(device) { rerecorded.draw(in: $0) },
+                           try render(device) { expected.draw(in: $0) })
+            let predicate = predicate(SIMD4(-1, -1, 0, wildcard))
+            XCTAssertEqual(try render(device) { predicate.copyFilteredDisplayList(rerecorded).draw(in: $0) },
+                           try render(device) { predicate.copyFilteredDisplayList(expected).draw(in: $0) })
+        }
+    }
+
+    func testExecutionOnlyFiltersKeepDirectAndRecordedReplayEquivalent() throws {
+        let device = try device()
+        let context = try context(device)
+        let filters: [GraphicsContext.Filter] = [.colorMultiply(.green), .brightness(0.25)]
+        let draw: (inout GraphicsContext) -> Void = { context in
+            for filter in filters { context.addFilter(filter) }
+            context.fill(Path(CGRect(x: 16, y: 16, width: 8, height: 8)), with: .color(.cyan.opacity(0.6)))
+        }
+        var record = context.recordingContext(size: size)
+        draw(&record)
+        let source = record.recording!.moveContents()
+        let style = try XCTUnwrap(source.items[0].state.style)
+        XCTAssertTrue(style is RBDisplayList.ExecutionFilterStyle)
+        XCTAssertFalse(style.supportsColorOperations)
+        let expected = try render(device, draw)
+        XCTAssertTrue(expected.contains { $0 != 0 })
+        XCTAssertEqual(try render(device) { source.draw(in: $0) }, expected)
+        let receiver = context.recordingContext(size: size)
+        source.draw(in: receiver)
+        XCTAssertEqual(try render(device) { receiver.recording!.draw(in: $0) }, expected)
+    }
 }
