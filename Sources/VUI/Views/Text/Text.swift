@@ -1801,6 +1801,7 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
             let owner: ResolvedStyledText.Type = features.isDisjoint(with: managerFeatures) &&
                 suffix == .none && attachments.isEmpty
                 ? ResolvedStyledText.StringDrawing.self : ResolvedStyledText.TextLayoutManager.self
+            let insets = source.resolvedProperties?.insets ?? EdgeInsets()
             return owner.init(
                 storage: needsDynamicArchive
                     ? _dynamicArchiveStorage(
@@ -1809,7 +1810,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
                     ) ?? storage
                     : storage,
                 layoutProperties: layoutProperties,
-                layoutMargins: source.resolvedProperties?.insets ?? EdgeInsets(),
+                stylePadding: EdgeInsets(top: -insets.top, leading: -insets.leading,
+                    bottom: -insets.bottom, trailing: -insets.trailing),
                 archiveOptions: archiveOptions,
                 features: features,
                 suffix: suffix,

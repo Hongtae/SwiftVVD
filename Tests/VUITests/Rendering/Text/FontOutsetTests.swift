@@ -25,24 +25,38 @@ final class FontOutsetTests: XCTestCase {
     }
 
     private func fixture(_ edges: [Double]) throws -> FontOutsetData {
-        let object: [String: Any] = ["version": 1, "scalarRanges": [[197, 197]], "referenceWeights": [0],
+        let object: [String: Any] = ["version": 2, "scalarRanges": [[197, 197]],
+            "layoutScalarRanges": [[197, 197]], "referenceWeights": [0],
             "scriptGroups": [:],
             "referenceRows": [["normal": edges, "extended": edges]]]
         return try JSONDecoder().decode(FontOutsetData.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
     // ASSERTIONS textOutsetDefaultDataSourceObserved
+    // ASSERTIONS textAutomaticMargins27CharacterSetsObserved
+    // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
     func testBundledMembershipAndReferencesNeedNoFontNameRegistry() throws {
         let data = try XCTUnwrap(BundledFontCatalog.shared.outsetData)
         XCTAssertEqual(data.referenceRows.count, 9)
-        XCTAssertEqual(data.scalarRanges.count, 1584)
-        XCTAssertEqual(data.scalarRanges.reduce(0) { $0 + Int($1.upperBound - $1.lowerBound + 1) }, 8028)
+        XCTAssertEqual(data.scalarRanges.count, 1586)
+        XCTAssertEqual(data.scalarRanges.reduce(0) { $0 + Int($1.upperBound - $1.lowerBound + 1) }, 8030)
+        XCTAssertEqual(data.layoutScalarRanges.count, 1450)
+        XCTAssertEqual(data.layoutScalarRanges.reduce(0) { $0 + Int($1.upperBound - $1.lowerBound + 1) }, 6594)
         for scalar: Unicode.Scalar in ["Å", "\u{301}", "\u{212b}", "😀"] { XCTAssertTrue(data.contains(scalar)) }
         for scalar: Unicode.Scalar in ["H", "g", "漢", "한", "\u{fffc}"] { XCTAssertFalse(data.contains(scalar)) }
+        for scalar: Unicode.Scalar in ["\u{030d}", "\u{0a76}", "\u{1df5}", "\u{a8fb}"] {
+            XCTAssertTrue(data.contains(scalar))
+            XCTAssertTrue(data.containsForLayout(scalar))
+        }
+        for scalar: Unicode.Scalar in ["😀", "\u{fe0f}", "\u{1d70}"] { XCTAssertFalse(data.containsForLayout(scalar)) }
+        XCTAssertFalse(data.contains("\u{1d70}"))
         var attributes = FontOutsetAttributes(face: try font().faceTraits, scale: 1)
         let fallback = try XCTUnwrap(data.outsets(for: attributes, pointSize: 13, preferredGroup: 0))
         XCTAssertEqual(fallback.leading, 2.424812, accuracy: 1e-10)
         XCTAssertEqual(fallback.top, 1.853527, accuracy: 1e-10)
+        XCTAssertEqual(fallback.trailing, 1.365013, accuracy: 1e-10)
+        XCTAssertEqual(data.referenceRows[8].normal, [0.221681, 0.181204, 0.136001, 0.325064])
+        XCTAssertEqual(data.referenceRows[8].extended, [0.041505, 0.373482, 0.136001, 0.348091])
         attributes.weight = nil
         XCTAssertNil(data.outsets(for: attributes, pointSize: 13, preferredGroup: 0))
     }

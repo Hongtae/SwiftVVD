@@ -324,6 +324,19 @@ extension Text {
                 }
                 return result
             }
+
+            func oversizedDrawingMargin(for text: ResolvedTextSource) -> EdgeInsets {
+                guard text.hasOversizedLayoutScalars else { return .init() }
+                var result = EdgeInsets()
+                for font in storage {
+                    guard let outsets = text.languageAwareOutsets(for: font) else { continue }
+                    result.top = max(result.top, outsets.top)
+                    result.leading = max(result.leading, outsets.leading)
+                    result.bottom = max(result.bottom, outsets.bottom)
+                    result.trailing = max(result.trailing, outsets.trailing)
+                }
+                return result
+            }
         }
 
         struct LineHeightMetrics {
@@ -673,7 +686,7 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
     required init(
         storage: NSAttributedString? = nil,
         layoutProperties: TextLayoutProperties = TextLayoutProperties(),
-        layoutMargins: EdgeInsets = EdgeInsets(),
+        layoutMargins: EdgeInsets? = nil,
         scaleFactorOverride: CGFloat? = nil,
         stylePadding: EdgeInsets = EdgeInsets(),
         archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),
@@ -692,7 +705,6 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
         needsDrawingGroup: Bool = false
     ) {
         self.layoutProperties = layoutProperties
-        self.layoutMargins = layoutMargins
         self.scaleFactorOverride = scaleFactorOverride
         self.stylePadding = stylePadding
         self.archiveOptions = archiveOptions
@@ -703,16 +715,73 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
         self.links = links
         let fonts = fonts ?? resolvedText?.resolvedProperties?.fonts ?? storage.map(Text.ResolvedProperties.Fonts.init) ?? .init()
         self.fonts = fonts
+        let maxFontMetrics: Text.ResolvedProperties.FontMetrics
         if let resolvedText {
             if case .empty = fonts.storage, let metrics = resolvedText.maximumFontMetrics {
                 // Raw backend runs have no retained font request or point size.
-                self.maxFontMetrics = .init(capHeight: metrics.capHeight, ascender: metrics.ascender,
+                maxFontMetrics = .init(capHeight: metrics.capHeight, ascender: metrics.ascender,
                     descender: metrics.descender, leading: metrics.leading, outsets: metrics.outsets)
             } else {
-                self.maxFontMetrics = fonts.maxMetrics(for: resolvedText)
+                maxFontMetrics = fonts.maxMetrics(for: resolvedText)
             }
         } else {
-            self.maxFontMetrics = .init()
+            maxFontMetrics = .init()
+        }
+        self.maxFontMetrics = maxFontMetrics
+        if let layoutMargins {
+            self.layoutMargins = layoutMargins
+        } else if storage != nil || resolvedText != nil {
+            // Source-backed owners can defer materializing attributed storage.
+            let pixelLength = layoutProperties.pixelLength
+            let height = maxFontMetrics.ascender - maxFontMetrics.descender
+            var margins = EdgeInsets()
+            switch layoutProperties.textSizing.storage {
+            case .standard:
+                break
+            case .uniformLineHeight:
+                let leading = lineHeightMetrics.leading ?? maxFontMetrics.leading
+                if leading != 0 {
+                    let inset = (height - ceil(height / pixelLength) * pixelLength + leading) / 2
+                    margins.top = inset
+                    margins.bottom = inset
+                }
+            case .adjustsForOversizedCharacters:
+                if let resolvedText {
+                    let outsets = fonts.oversizedDrawingMargin(for: resolvedText)
+                    margins = EdgeInsets(top: ceil(outsets.top / pixelLength) * pixelLength,
+                        leading: ceil(outsets.leading / pixelLength) * pixelLength,
+                        bottom: ceil(outsets.bottom / pixelLength) * pixelLength,
+                        trailing: ceil(outsets.trailing / pixelLength) * pixelLength)
+                }
+            }
+            if layoutProperties.writingMode == .verticalRightToLeft {
+                margins = EdgeInsets(top: margins.leading, leading: margins.bottom,
+                    bottom: margins.trailing, trailing: margins.top)
+            }
+            for modifier in layoutProperties.textSizing.modifiers.reversed() {
+                modifier.updateLayoutMargins(&margins)
+            }
+            if layoutProperties.textBaseline == .balanced {
+                var target = lineHeightMetrics.multiple.map { $0 * maxFontMetrics.pointSize }
+                if let exact = lineHeightMetrics.exact { target = max(target ?? exact, exact) }
+                if let leading = lineHeightMetrics.leading {
+                    let value = maxFontMetrics.pointSize + leading
+                    target = max(target ?? value, value)
+                }
+                if let target {
+                    let delta = (height - target) / 2
+                    if layoutProperties.writingMode == .verticalRightToLeft {
+                        margins.leading += delta
+                        margins.trailing -= delta
+                    } else {
+                        margins.top -= delta
+                        margins.bottom += delta
+                    }
+                }
+            }
+            self.layoutMargins = margins
+        } else {
+            self.layoutMargins = .init()
         }
         self.lineHeightMetrics = lineHeightMetrics
         self.resolvedText = resolvedText
@@ -1410,7 +1479,7 @@ extension ResolvedStyledText {
         required init(
             storage: NSAttributedString? = nil,
             layoutProperties: TextLayoutProperties = TextLayoutProperties(),
-            layoutMargins: EdgeInsets = EdgeInsets(),
+            layoutMargins: EdgeInsets? = nil,
             scaleFactorOverride: CGFloat? = nil,
             stylePadding: EdgeInsets = EdgeInsets(),
             archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),

@@ -863,6 +863,7 @@ final class TextDrawingMarginTests: XCTestCase {
 
     // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
     // ASSERTIONS textDrawingFrameCompensationObserved
+    // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
     func testSelectedNamedWeightPreservesBitmapAndVectorDrawingOnGPU() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
@@ -881,7 +882,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         displayScale: 2, preferredLanguages: [language])
                     let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                     XCTAssertEqual(styled.drawingMargins.leading, language == "en" ? 4.5 : 1)
-                    XCTAssertEqual(styled.drawingMargins.trailing, 3)
+                    XCTAssertEqual(styled.drawingMargins.trailing, language == "en" ? 2.5 : 3)
                     let plain = try value(styled)
                     let expected = try render(device: device, environment: environment) {
                         $0.draw(text, in: CGRect(origin: .zero, size: plain.size))

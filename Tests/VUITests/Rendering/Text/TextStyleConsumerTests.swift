@@ -47,6 +47,7 @@ final class TextStyleConsumerTests {
 
     // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
     // ASSERTIONS fontSelectedWeightCopiesObserved
+    // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
     @Test func namedFontSelectionSurvivesResolvedCopiesAndReachesDrawingMargins() throws {
         var env = environment()
         env.displayScale = 2
@@ -57,8 +58,8 @@ final class TextStyleConsumerTests {
             let resource = try #require(attributes(source).first?.fontResource)
             #expect(resource.descriptor().resolvedWeight == 0)
             for (language, edges): (String, [CGFloat]) in [
-                ("en", [4.290052, 3.279317, 2.576023, 6.487472]),
-                ("ur", [0.831082, 4.756745, 2.576023, 7.574843])
+                ("en", [4.290052, 3.279317, 2.415023, 6.487472]),
+                ("ur", [0.831082, 4.756745, 2.571561, 7.574843])
             ] {
                 let text = ResolvedTextSource(runs: source.runs, scaleFactor: source.scaleFactor,
                     displayScale: 2, preferredLanguages: [language])
@@ -70,7 +71,7 @@ final class TextStyleConsumerTests {
                 let styled = ResolvedStyledText.StringDrawing(resolvedText: text)
                 let margins = styled.drawingMargins
                 #expect(margins.leading == (language == "en" ? 4.5 : 1))
-                #expect(margins.trailing == 3)
+                #expect(margins.trailing == (language == "en" ? 2.5 : 3))
                 let frame = styled.frame(in: text.measure(), renderer: nil)
                 #expect(frame.minX == -margins.leading)
                 #expect(frame.minY == -margins.top)
@@ -87,22 +88,23 @@ final class TextStyleConsumerTests {
     }
 
     // ASSERTIONS fontSelectedWeightCopiesObserved
+    // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
     @Test func namedFontModifiersUseSelectedWeightsForOutsetRows() throws {
         let nanum = Font.custom("NanumSquareNeo-Variable", fixedSize: 23)
         let roboto = Font.custom("Roboto-Regular", fixedSize: 23)
         let cases: [(VUI.Font, Float, [CGFloat])] = [
-            (nanum.weight(.regular), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
+            (nanum.weight(.regular), 0, [4.290052, 3.279317, 2.415023, 6.487472]),
             (.custom("NanumSquareNeo-Variable_Regular", fixedSize: 23), -0.23,
                 [4.166542, 3.144560, 2.415023, 6.395449]),
-            (nanum.weight(.heavy), 0.4, [4.709319, 3.279317, 3.289023, 6.809472]),
+            (nanum.weight(.heavy), 0.4, [4.709319, 3.279317, 2.783023, 6.809472]),
             (.custom("NanumSquareNeo-Variable_Heavy", fixedSize: 23), 0.8,
-                [5.098663, 3.316692, 3.542023, 7.062472]),
-            (roboto.weight(.heavy), 0.6, [4.888995, 3.523692, 3.657023, 7.177472]),
-            (roboto.weight(.heavy).italic(), 0.6, [4.888995, 3.523692, 3.657023, 7.177472]),
+                [5.098663, 4.167692, 3.128023, 7.476472]),
+            (roboto.weight(.heavy), 0.6, [4.888995, 3.523692, 2.967023, 7.177472]),
+            (roboto.weight(.heavy).italic(), 0.6, [4.888995, 3.523692, 2.967023, 7.177472]),
             (roboto.weight(.light).italic().weight(.heavy), 0.6,
-                [4.888995, 3.523692, 3.657023, 7.177472]),
+                [4.888995, 3.523692, 2.967023, 7.177472]),
             (roboto.italic().weight(.light).weight(.heavy), 0.6,
-                [4.888995, 3.523692, 3.657023, 7.177472])
+                [4.888995, 3.523692, 2.967023, 7.177472])
         ]
         for (font, weight, expected) in cases {
             for copy in [font, font.resolved(in: environment()).monospacedDigit()] {
@@ -119,6 +121,7 @@ final class TextStyleConsumerTests {
     }
 
     // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
+    // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
     @Test func suppliedFontWeightsRetainTheirPhysicalOutsetFallback() throws {
         let url = fontURL("NanumSquareNeo/NanumSquareNeo-Variable.ttf")
         let bytes = try Data(contentsOf: url)
@@ -126,11 +129,11 @@ final class TextStyleConsumerTests {
         let fixed = try #require(fixedCandidate)
         fixed.setPointSize(23, dpi: (72, 72))
         let cases: [(VUI.Font, Float, [CGFloat])] = [
-            (.file(url, size: 23), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
-            (.data(bytes, size: 23), 0, [4.290052, 3.279317, 2.576023, 6.487472]),
-            (.file(url, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.326472]),
-            (.data(bytes, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.326472]),
-            (.init(vector: fixed), -0.6, [4.009291, 3.144560, 2.392023, 6.326472])
+            (.file(url, size: 23), 0, [4.290052, 3.279317, 2.415023, 6.487472]),
+            (.data(bytes, size: 23), 0, [4.290052, 3.279317, 2.415023, 6.487472]),
+            (.file(url, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.349472]),
+            (.data(bytes, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.349472]),
+            (.init(vector: fixed), -0.6, [4.009291, 3.144560, 2.392023, 6.349472])
         ]
         for (font, weight, expected) in cases {
             for copy in [font, font.resolved(in: environment()).monospacedDigit()] {

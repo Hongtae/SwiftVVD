@@ -44,6 +44,7 @@ struct ResolvedTextSource {
         let outsetData: FontOutsetData?
         let outsetLanguageGroup: Int
         let hasOversizedScalars: Bool
+        let hasOversizedLayoutScalars: Bool
         let preferredLanguages: [String]
 
         init(
@@ -61,16 +62,18 @@ struct ResolvedTextSource {
             self.outsetData = outsetData
             self.preferredLanguages = preferredLanguages
             self.outsetLanguageGroup = outsetData?.preferredGroup(for: preferredLanguages) ?? 0
-            self.hasOversizedScalars = outsetData.map { data in
+            func contains(where predicate: (Unicode.Scalar) -> Bool) -> Bool {
                 runs.contains { run in
                     switch run {
                     case let .text(_, text), let .attributedText(_, text, _), let .styledText(_, text, _, _):
-                        text.unicodeScalars.contains(where: data.contains)
+                        text.unicodeScalars.contains(where: predicate)
                     case .attachment, .attributedAttachment:
-                        data.contains("\u{fffc}")
+                        predicate("\u{fffc}")
                     }
                 }
-            } ?? false
+            }
+            self.hasOversizedScalars = outsetData.map { contains(where: $0.contains) } ?? false
+            self.hasOversizedLayoutScalars = outsetData.map { contains(where: $0.containsForLayout) } ?? false
         }
 
         var runs: [Run] {
@@ -368,38 +371,59 @@ struct ResolvedTextSource {
     }
 
     func metrics(for font: FontResource) -> ResolvedFontMetrics? {
+        guard let face = face(for: font) else { return nil }
+        return metrics(for: face, resource: font)
+    }
+
+    var hasOversizedLayoutScalars: Bool { storage.hasOversizedLayoutScalars }
+
+    /// The layout-margin query uses language-aware outsets without a clipping fallback.
+    func languageAwareOutsets(for font: FontResource) -> EdgeInsets? {
+        guard let face = face(for: font) else { return nil }
+        return languageAwareOutsets(for: face, resource: font)
+    }
+
+    private func face(for font: FontResource) -> Typeface? {
         for run in runs {
             if case let .styledText(faces, _, _, style) = run,
                style.fontResource === font, let face = faces.first {
-                return metrics(for: face, resource: font)
+                return face
             }
         }
         if let provider = font.provider as? FixedFontProvider {
-            return metrics(for: provider.face, resource: font)
+            return provider.face
         }
         guard let context = fontResolutionContext else { return nil }
         let request = Font(provider: FontBox(Font.PlatformFontProvider(font: font)))
-        guard let face = request.typefaceCascade(in: context.environment, forContext: context.sceneResources,
-            contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces.first else { return nil }
-        return metrics(for: face, resource: font)
+        return request.typefaceCascade(in: context.environment, forContext: context.sceneResources,
+            contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces.first
     }
 
     private func metrics(for face: Typeface, resource: FontResource?) -> ResolvedFontMetrics {
         var metrics = resource?.resolvedMetrics(for: face, scaleFactor: scaleFactor)
             ?? face.resolvedMetrics.scaled(by: scaleFactor)
-        var outsetAttributes = face.outsetAttributes
-        // A selected catalog trait can differ from the physical variation coordinate.
-        if let weight = resource?.selectedWeight { outsetAttributes?.weight = weight }
         // One scalar decision applies to every attribute font in the complete text.
-        if let attributes = outsetAttributes,
-           storage.hasOversizedScalars || attributes.needsOutsets,
-           let outsets = storage.outsetData?.outsets(for: attributes,
-               pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
-               preferredGroup: storage.outsetLanguageGroup) {
+        if storage.hasOversizedScalars || outsetAttributes(for: face, resource: resource)?.needsOutsets == true,
+           let outsets = languageAwareOutsets(for: face, resource: resource) {
             // A successful tuple replaces clipping, including a zero tuple.
-            metrics.outsets = resource?.adjustedOutsets(outsets) ?? outsets
+            metrics.outsets = outsets
         }
         return metrics
+    }
+
+    private func outsetAttributes(for face: Typeface, resource: FontResource?) -> FontOutsetAttributes? {
+        var attributes = face.outsetAttributes
+        // A selected catalog trait can differ from the physical variation coordinate.
+        if let weight = resource?.selectedWeight { attributes?.weight = weight }
+        return attributes
+    }
+
+    private func languageAwareOutsets(for face: Typeface, resource: FontResource?) -> EdgeInsets? {
+        guard let attributes = outsetAttributes(for: face, resource: resource),
+              let outsets = storage.outsetData?.outsets(for: attributes,
+                  pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
+                  preferredGroup: storage.outsetLanguageGroup) else { return nil }
+        return resource?.adjustedOutsets(outsets) ?? outsets
     }
 
     struct LayoutMetrics: Equatable, Sendable {

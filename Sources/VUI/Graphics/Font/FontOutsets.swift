@@ -37,9 +37,13 @@ final class FontOutsetData: Sendable, Decodable {
         let extended: [Double]
     }
 
-    private enum CodingKeys: CodingKey { case version, scalarRanges, referenceWeights, scriptGroups, referenceRows }
+    private enum CodingKeys: CodingKey {
+        case version, scalarRanges, layoutScalarRanges, referenceWeights, scriptGroups, referenceRows
+    }
     /// Inclusive Unicode scalar ranges that select expanded metrics for the complete text.
     let scalarRanges: [ClosedRange<UInt32>]
+    /// Automatic layout margins exclude emoji scalars from the expanded-metric set.
+    let layoutScalarRanges: [ClosedRange<UInt32>]
     /// Logical weight boundaries used to select a reference row without interpolation.
     let referenceWeights: [Double]
     /// Likely-script groups used by the ordered preferred-language selection.
@@ -51,14 +55,15 @@ final class FontOutsetData: Sendable, Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let version = try container.decode(Int.self, forKey: .version)
         let ranges = try container.decode([[UInt32]].self, forKey: .scalarRanges)
+        let layoutRanges = try container.decode([[UInt32]].self, forKey: .layoutScalarRanges)
         referenceWeights = try container.decode([Double].self, forKey: .referenceWeights)
         scriptGroups = try container.decode([String: Int].self, forKey: .scriptGroups)
         let values = try container.decode([Row].self, forKey: .referenceRows)
         func invalid() -> DecodingError {
             .dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid font outset data."))
         }
-        guard version == 1,
-              ranges.allSatisfy({ $0.count == 2 && $0[0] <= $0[1] && $0[1] <= 0x10ffff &&
+        guard version == 2,
+              (ranges + layoutRanges).allSatisfy({ $0.count == 2 && $0[0] <= $0[1] && $0[1] <= 0x10ffff &&
                   ($0[1] < 0xd800 || $0[0] > 0xdfff) }),
               !referenceWeights.isEmpty, referenceWeights.allSatisfy(\.isFinite),
               referenceWeights.count == values.count,
@@ -67,16 +72,27 @@ final class FontOutsetData: Sendable, Decodable {
                   ($0.normal + $0.extended).allSatisfy { $0.isFinite && $0 >= 0 } }),
               scriptGroups.values.allSatisfy({ (0...4).contains($0) }) else { throw invalid() }
         scalarRanges = ranges.map { $0[0]...$0[1] }
-        guard zip(scalarRanges, scalarRanges.dropFirst()).allSatisfy({ $0.upperBound < $1.lowerBound }) else { throw invalid() }
+        layoutScalarRanges = layoutRanges.map { $0[0]...$0[1] }
+        guard [scalarRanges, layoutScalarRanges].allSatisfy({ ranges in
+            zip(ranges, ranges.dropFirst()).allSatisfy({ $0.upperBound < $1.lowerBound })
+        }) else { throw invalid() }
         referenceRows = values
     }
 
     func contains(_ scalar: Unicode.Scalar) -> Bool {
+        contains(scalar, in: scalarRanges)
+    }
+
+    func containsForLayout(_ scalar: Unicode.Scalar) -> Bool {
+        contains(scalar, in: layoutScalarRanges)
+    }
+
+    private func contains(_ scalar: Unicode.Scalar, in ranges: [ClosedRange<UInt32>]) -> Bool {
         var lower = 0
-        var upper = scalarRanges.count
+        var upper = ranges.count
         while lower < upper {
             let middle = (lower + upper) / 2
-            let range = scalarRanges[middle]
+            let range = ranges[middle]
             if scalar.value < range.lowerBound { upper = middle }
             else if scalar.value > range.upperBound { lower = middle + 1 }
             else { return true }
