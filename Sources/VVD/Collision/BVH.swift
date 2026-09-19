@@ -7,24 +7,159 @@
 
 import Foundation
 
-public struct BVH {
-    public let bounds: AABB
-
-    public struct Node {
-        public let aabb: AABB
+/// An immutable bounding-volume hierarchy over integer primitive identifiers.
+///
+/// A BVH is built from a bounds snapshot. Elements with null bounds are not
+/// included because they cannot be rejected by an AABB query; callers should
+/// retain those elements separately and include them as unconditional
+/// candidates.
+public struct BVH: Sendable {
+    public struct Element: Hashable, Sendable {
+        public let bounds: AABB
         public let primitiveIndex: Int
+
+        public init(bounds: AABB, primitiveIndex: Int) {
+            self.bounds = bounds
+            self.primitiveIndex = primitiveIndex
+        }
     }
 
-    let nodes: [Node]
+    private struct Node: Sendable {
+        let bounds: AABB
+        let primitiveIndex: Int?
+        var escapeIndex: Int
+    }
 
-    public init(_ bounds: AABB = .null) {
-        self.bounds = bounds
+    private struct BuildElement {
+        let element: Element
+        let insertionIndex: Int
+    }
+
+    public let bounds: AABB
+    public let elementCount: Int
+
+    public var nodeCount: Int { nodes.count }
+    public var isEmpty: Bool { nodes.isEmpty }
+
+    private let nodes: [Node]
+
+    public init() {
+        self.bounds = .null
+        self.elementCount = 0
         self.nodes = []
     }
 
-    public init(bounds: AABB, nodes: [Node]) {
-        self.bounds = bounds
+    public init(_ elements: [Element]) {
+        var elements = elements.enumerated().compactMap { index, element in
+            element.bounds.isNull
+                ? nil
+                : BuildElement(element: element, insertionIndex: index)
+        }
+        guard elements.isEmpty == false else {
+            self.bounds = .null
+            self.elementCount = 0
+            self.nodes = []
+            return
+        }
+
+        var nodes: [Node] = []
+        nodes.reserveCapacity(elements.count * 2 - 1)
+        Self.buildNodes(elements: &elements,
+                        range: elements.indices,
+                        nodes: &nodes)
+
+        self.bounds = nodes[0].bounds
+        self.elementCount = elements.count
         self.nodes = nodes
+    }
+
+    /// Returns primitive identifiers whose bounds overlap `queryBounds`.
+    ///
+    /// Result order follows tree traversal and is not an insertion-order
+    /// guarantee. A null query has no finite overlap candidates.
+    public func primitiveIndices(overlapping queryBounds: AABB) -> [Int] {
+        var result: [Int] = []
+        query(overlapping: queryBounds) { primitiveIndex in
+            result.append(primitiveIndex)
+            return true
+        }
+        return result
+    }
+
+    /// Visits primitive identifiers whose bounds overlap `queryBounds`.
+    ///
+    /// Return `false` from `body` to stop traversal. The return value is `true`
+    /// when the full query completed and `false` when the visitor stopped it.
+    @discardableResult
+    public func query(overlapping queryBounds: AABB,
+                      _ body: (Int) throws -> Bool) rethrows -> Bool {
+        guard queryBounds.isNull == false else { return true }
+
+        var nodeIndex = 0
+        while nodeIndex < nodes.count {
+            let node = nodes[nodeIndex]
+            guard node.bounds.intersects(queryBounds) else {
+                nodeIndex = node.escapeIndex
+                continue
+            }
+
+            if let primitiveIndex = node.primitiveIndex,
+               try body(primitiveIndex) == false {
+                return false
+            }
+            nodeIndex += 1
+        }
+        return true
+    }
+
+    private static func buildNodes(elements: inout [BuildElement],
+                                   range: Range<Int>,
+                                   nodes: inout [Node]) {
+        var nodeBounds = AABB.null
+        var centerBounds = AABB.null
+        for index in range {
+            nodeBounds.combine(elements[index].element.bounds)
+            centerBounds.expand(elements[index].element.bounds.center)
+        }
+
+        let nodeIndex = nodes.count
+        nodes.append(Node(bounds: nodeBounds,
+                          primitiveIndex: nil,
+                          escapeIndex: nodeIndex + 1))
+
+        if range.count == 1 {
+            nodes[nodeIndex] = Node(
+                bounds: nodeBounds,
+                primitiveIndex: elements[range.lowerBound].element.primitiveIndex,
+                escapeIndex: nodeIndex + 1)
+            return
+        }
+
+        let axis = longestAxis(centerBounds.extents)
+        elements[range].sort { lhs, rhs in
+            let lhsCenter = lhs.element.bounds.center[axis]
+            let rhsCenter = rhs.element.bounds.center[axis]
+            if lhsCenter == rhsCenter {
+                return lhs.insertionIndex < rhs.insertionIndex
+            }
+            return lhsCenter < rhsCenter
+        }
+
+        let middleIndex = range.lowerBound + range.count / 2
+        buildNodes(elements: &elements,
+                   range: range.lowerBound..<middleIndex,
+                   nodes: &nodes)
+        buildNodes(elements: &elements,
+                   range: middleIndex..<range.upperBound,
+                   nodes: &nodes)
+        nodes[nodeIndex].escapeIndex = nodes.count
+    }
+
+    private static func longestAxis(_ extents: Vector3) -> Int {
+        var axis = 0
+        if extents.y > extents[axis] { axis = 1 }
+        if extents.z > extents[axis] { axis = 2 }
+        return axis
     }
 
     public func quantized() -> (any QuantizedBVH)? {

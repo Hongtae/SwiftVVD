@@ -36,11 +36,59 @@ public struct CollisionPair {
     }
 }
 
-/// Stores colliders and performs a simple pairwise broad phase.
+private struct BroadPhaseSnapshot {
+    let bounds: [AABB]
+    let activeIndices: [Int]
+    let hierarchy: BVH
+    let unboundedIndices: [Int]
+
+    init(_ colliders: [Collider]) {
+        var bounds = Array(repeating: AABB.null, count: colliders.count)
+        var activeIndices: [Int] = []
+        var elements: [BVH.Element] = []
+        var unboundedIndices: [Int] = []
+
+        activeIndices.reserveCapacity(colliders.count)
+        elements.reserveCapacity(colliders.count)
+        unboundedIndices.reserveCapacity(colliders.count)
+
+        for (index, collider) in colliders.enumerated()
+        where collider.isEnabled && collider.isValid {
+            let colliderBounds = collider.bounds
+            bounds[index] = colliderBounds
+            activeIndices.append(index)
+            if colliderBounds.isNull {
+                unboundedIndices.append(index)
+            } else {
+                elements.append(BVH.Element(bounds: colliderBounds,
+                                            primitiveIndex: index))
+            }
+        }
+
+        self.bounds = bounds
+        self.activeIndices = activeIndices
+        self.hierarchy = BVH(elements)
+        self.unboundedIndices = unboundedIndices
+    }
+
+    func candidateIndices(overlapping queryBounds: AABB) -> [Int] {
+        if queryBounds.isNull {
+            return activeIndices
+        }
+
+        var candidates = hierarchy.primitiveIndices(overlapping: queryBounds)
+        candidates.append(contentsOf: unboundedIndices)
+        candidates.sort()
+        return candidates
+    }
+}
+
+/// Stores colliders and performs broad-phase candidate queries.
 ///
-/// The array-backed implementation establishes the public ownership and query
-/// behavior. A BVH can replace candidate generation later without changing
-/// collider or dynamics APIs.
+/// Each query builds an immutable BVH snapshot from current finite collider
+/// bounds. Colliders with null bounds remain unconditional candidates. This
+/// keeps mutable collider state synchronized without a separate dirty-tracking
+/// contract.
 public final class CollisionSpace {
     private var storage: [Collider]
     public var algorithms: CollisionAlgorithmRegistry
@@ -83,17 +131,32 @@ public final class CollisionSpace {
 
     /// Returns colliders intersecting `collider`, excluding the collider itself.
     public func overlaps(with collider: Collider) -> [Collider] {
-        storage.filter { collider.intersects($0, using: algorithms) }
+        guard collider.isEnabled && collider.isValid else { return [] }
+
+        let snapshot = BroadPhaseSnapshot(storage)
+        return snapshot.candidateIndices(overlapping: collider.bounds).compactMap {
+            let candidate = storage[$0]
+            return collider.intersects(candidate, using: algorithms)
+                ? candidate
+                : nil
+        }
     }
 
     /// Evaluates every unique enabled and filter-compatible collider pair.
     public func collisionPairs() -> [CollisionPair] {
         guard storage.count > 1 else { return [] }
 
+        let snapshot = BroadPhaseSnapshot(storage)
         var pairs: [CollisionPair] = []
         for indexA in 0..<(storage.count - 1) {
+            guard storage[indexA].isEnabled && storage[indexA].isValid else {
+                continue
+            }
+
             let colliderA = storage[indexA]
-            for indexB in (indexA + 1)..<storage.count {
+            let candidateIndices = snapshot.candidateIndices(
+                overlapping: snapshot.bounds[indexA])
+            for indexB in candidateIndices where indexB > indexA {
                 let colliderB = storage[indexB]
                 if colliderA.intersects(colliderB, using: algorithms) {
                     pairs.append(CollisionPair(colliderA: colliderA,
