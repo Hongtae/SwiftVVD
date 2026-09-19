@@ -47,6 +47,38 @@ struct FilledPrimitive {
 
     private static func half(_ value: Float) -> Float { Float(Float16(value)) }
 
+    // Geometry heights are nonnegative. Preserve zero after conversion and
+    // infinity after expansion without changing primitive admission.
+    static func reciprocalHeight(_ height: Float) -> Float {
+        if height == 0 { return .infinity }
+        if height == .infinity { return 0 }
+        let bits = height.bitPattern
+        var exponent = Int(bits >> 23)
+        var fraction = bits & 0x7fffff
+        let estimate: Float
+        if exponent == 0 && fraction < 0x200000 {
+            estimate = .infinity
+        } else {
+            if exponent == 0 {
+                let shift = fraction < 0x400000 ? 2 : 1
+                fraction = (fraction << shift) & 0x7fffff
+                exponent = 1 - shift
+            }
+            // Round the reciprocal of the significand bucket's midpoint.
+            let bucket = 256 + (fraction >> 15)
+            let significand = (262144 + bucket) / (2 * bucket + 1)
+            let resultExponent = 253 - exponent
+            let result = resultExponent > 0
+                ? UInt32(resultExponent) << 23 | (significand - 256) << 15
+                : (significand << 15) >> (1 - resultExponent)
+            estimate = Float(bitPattern: result)
+        }
+        // Each correction is fused; the following multiplication rounds
+        // separately. A division or an unfused correction changes coverage.
+        let first = estimate * Float(2).addingProduct(-height, estimate)
+        return first * Float(2).addingProduct(-height, first)
+    }
+
     static func hasIntegralBounds(_ rect: CGRect) -> Bool {
         let x = Float(rect.minX), y = Float(rect.minY)
         // Only the small interval above an integer boundary elides coverage.
@@ -303,6 +335,7 @@ extension GraphicsContext {
         let height = Float(primitive.rect.height)
         let expandedWidth = width + 2 * outset
         let expandedHeight = height + 2 * outset
+        let reciprocalHeight = FilledPrimitive.reciprocalHeight(expandedHeight)
         let frame = CGRect(x: CGFloat(Float(primitive.rect.minX) - outset),
                            y: CGFloat(Float(primitive.rect.minY) - outset),
                            width: CGFloat(expandedWidth), height: CGFloat(expandedHeight))
@@ -314,9 +347,9 @@ extension GraphicsContext {
         // Float words keep the uniform layout portable without requiring
         // native 16-bit storage support from the graphics device.
         let constants: (Float, Float, Float, Float, UInt32, UInt32) = (
-            (width * 0.5 - inset) / expandedHeight,
-            (height * 0.5 - inset) / expandedHeight,
-            corner / expandedHeight, coefficient, kind, radius > 0 ? 2 : 0)
+            (width * 0.5 - inset) * reciprocalHeight,
+            (height * 0.5 - inset) * reciprocalHeight,
+            corner * reciprocalHeight, coefficient, kind, radius > 0 ? 2 : 0)
         let matrix = transform.concatenating(viewTransform)
         let color = primitive.color
         let origin = Vector2(frame.minX, frame.minY).applying(matrix).float2
@@ -327,7 +360,7 @@ extension GraphicsContext {
                                origin.1.addingProduct(y, axisY.1).addingProduct(x, axisX.1)),
                 texcoord: (u, v), color: (color.x, color.y, color.z, color.w))
         }
-        let halfWidth = expandedWidth / expandedHeight * 0.5
+        let halfWidth = expandedWidth * reciprocalHeight * 0.5
         let tl = makeVertex(0, 0, -halfWidth, -0.5)
         let tr = makeVertex(1, 0, halfWidth, -0.5)
         let bl = makeVertex(0, 1, -halfWidth, 0.5)

@@ -172,6 +172,60 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS recordedPrimitiveCircleNormalization27Observed
+    // ASSERTIONS recordedPrimitiveReciprocalDomain27Observed
+    func testPrimitiveCircleNormalizationPreservesShadowAlpha() throws {
+        let device = try device()
+        guard device.device.features.isSuperset(of: [.float16Arithmetic, .float16InputOutput]) else {
+            throw XCTSkip("Exact shadow alpha requires typed half output")
+        }
+        var recorded = recording()
+        draw(&recorded, basis: bases[3].1, order: "style", shape: "circle", radius: 12)
+        let contents = try XCTUnwrap(recorded.recording).moveContents()
+        let live = try render(device, scale: 2) {
+            draw(&$0, basis: bases[3].1, order: "style", shape: "circle", radius: 12)
+        }
+        let replayed = try render(device, scale: 2) { contents.draw(in: $0) }
+        XCTAssertEqual(live, replayed)
+        for (x, y) in [(163, 61), (163, 91)] {
+            let offset = (y * 512 + x) * 4
+            XCTAssertEqual(Array(live[offset..<offset + 4]), [0, 0, 0, 2], "Shadow at (\(x), \(y))")
+        }
+    }
+
+    // ASSERTIONS recordedPrimitiveReciprocalDomain27Observed
+    func testPrimitiveReciprocalPreservesRoundingAndRange() throws {
+        let cases: [(UInt32, UInt32)] = [
+            (0, 0x7f800000), (0x00000001, 0xff800000), (0x001fffff, 0xff800000),
+            (0x00200000, 0x7f800000), (0x00200001, 0x7f7ffff8), (0x003fffff, 0x7f000002),
+            (0x00400000, 0x7f000000), (0x007fffff, 0x7e800001), (0x00800000, 0x7e800000),
+            (0x3f800000, 0x3f800000), (0x42c63c9e, 0x3c254c19), (0x7e7fffff, 0x00800000),
+            (0x7e800000, 0x00800000), (0x7e800001, 0x007fffff), (0x7f000000, 0x00400000),
+            (0x7f7fffff, 0x00200000), (0x7f800000, 0)
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(FilledPrimitive.reciprocalHeight(Float(bitPattern: input)).bitPattern,
+                           expected, "Input \(String(input, radix: 16))")
+        }
+        let height = Float(bitPattern: 0x42c63c9e)
+        let reciprocal = FilledPrimitive.reciprocalHeight(height)
+        XCTAssertEqual((height * reciprocal).bitPattern, 0x3f7ffffe)
+        XCTAssertEqual((12 * reciprocal).bitPattern, 0x3df7f226)
+        if let path = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_RECIPROCALS"] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            XCTAssertFalse(data.isEmpty)
+            XCTAssertEqual(data.count % 28, 0)
+            data.withUnsafeBytes { bytes in
+                for offset in stride(from: 0, to: bytes.count, by: 28) {
+                    let input = bytes.loadUnaligned(fromByteOffset: offset, as: UInt32.self).littleEndian
+                    let expected = bytes.loadUnaligned(fromByteOffset: offset + 20, as: UInt32.self).littleEndian
+                    XCTAssertEqual(FilledPrimitive.reciprocalHeight(Float(bitPattern: input)).bitPattern,
+                                   expected, "Input \(String(input, radix: 16))")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS recordedPrimitiveIsolation27Observed
     // ASSERTIONS recordedPrimitiveMesh27Observed
     // ASSERTIONS recordedPrimitiveGroupScissor27Observed
