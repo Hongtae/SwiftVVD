@@ -275,6 +275,138 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS recordedPrimitiveBlendPrecision27Observed
+    // ASSERTIONS recordedPrimitiveGroupExecution27Observed
+    func testPrimitiveSiblingStagesPreserveUnaffectedPixels() throws {
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_SIBLING_STAGES"].map { URL(fileURLWithPath: $0) }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let device = try device()
+        let color = Color(.sRGB, red: 1, green: 0.2196044921875, blue: 0.2353515625, opacity: 0.6)
+        for (name, basis) in bases where name == "identity" || name == "shear" {
+            for density: CGFloat in [1, 2] {
+                var stages: [String: [UInt8]] = [:]
+                for stage in ["prefix-first", "prefix-second", "shared", "overlay"] {
+                    var sourceTexture: Texture?
+                    let pixels = try render(device, scale: density) { root in
+                        if stage != "overlay" {
+                            root.fill(Path(CGRect(origin: .zero, size: self.size)),
+                                with: .color(.sRGB, red: 0.25, green: 0.5, blue: 1, opacity: 0.5))
+                            var first = root
+                            first.opacity = 0.75
+                            first.concatenate(basis)
+                            first.addFilter(.shadow(color: .black.opacity(0.5), radius: 2, x: 3, y: 2))
+                            first.fill(self.path("rect"), with: .color(color))
+                            if stage != "prefix-first" {
+                                var second = root
+                                second.translateBy(x: 20, y: 12)
+                                second.opacity = 0.5
+                                second.concatenate(basis)
+                                second.addFilter(.shadow(color: .black.opacity(0.5), radius: 12, x: 3, y: 2))
+                                second.fill(self.path("circle"), with: .color(color))
+                            }
+                        }
+                        if stage == "shared" || stage == "overlay" {
+                            root.fill(Path(CGRect(x: 80, y: 40, width: 144, height: 120)),
+                                with: .color(.sRGB, red: 0, green: 1, blue: 0, opacity: 0.625))
+                        }
+                        sourceTexture = root.sourceTexture
+                    }
+                    stages[stage] = pixels
+                    if let output {
+                        let label = "\(name)-\(Int(density))-\(stage)"
+                        try Data(pixels).write(to: output.appendingPathComponent(label + ".rgba"))
+                        if stage == "shared" || stage == "overlay" {
+                            let data = try XCTUnwrap(device.makeCPUAccessible(texture: try XCTUnwrap(sourceTexture)))
+                            let bytes = Data(bytes: try XCTUnwrap(data.contents()), count: pixels.count)
+                            try bytes.write(to: output.appendingPathComponent(label + "-source.rgba"))
+                        }
+                    }
+                }
+                let first = stages["prefix-first"]!, second = stages["prefix-second"]!
+                let final = stages["shared"]!, overlay = stages["overlay"]!
+                let width = Int(size.width * density)
+                var preservesOutside = true
+                for offset in stride(from: 0, to: final.count, by: 4) {
+                    let x = offset / 4 % width, y = offset / 4 / width
+                    if x < Int(80 * density) || x >= Int(224 * density) ||
+                        y < Int(40 * density) || y >= Int(160 * density) {
+                        preservesOutside = preservesOutside &&
+                            final[offset..<offset + 4] == second[offset..<offset + 4] &&
+                            overlay[offset..<offset + 4].allSatisfy { $0 == 0 }
+                    }
+                }
+                XCTAssertTrue(preservesOutside, "Later drawing must preserve pixels outside its bounds: \(name)-\(density)")
+                XCTAssertTrue(stride(from: 3, to: final.count, by: 4).allSatisfy {
+                    second[$0] >= first[$0] && final[$0] >= second[$0]
+                }, "Source-over drawing must retain accumulated coverage: \(name)-\(density)")
+            }
+        }
+    }
+
+    // ASSERTIONS recordedPrimitiveBlendPrecision27Observed
+    func testPrimitiveFragmentPrecisionReadbacks() throws {
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_NUMERICS"].map { URL(fileURLWithPath: $0) }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let device = try device()
+        for (name, basis) in bases where name == "identity" || name == "shear" {
+            for density: CGFloat in [1, 2] {
+                for format: PixelFormat in [.rgba8Unorm, .rgba16Float] {
+                    for role in ["shadow", "source", "layer"] {
+                        var texture: Texture?
+                        _ = try render(device, scale: density) { context in
+                            context.opacity = 0.75
+                            context.concatenate(basis)
+                            context.addFilter(.shadow(color: .black.opacity(0.5), radius: 2, x: 3, y: 2))
+                            let color = Color(.sRGB, red: 1, green: 0.2196044921875, blue: 0.2353515625, opacity: 0.6)
+                            let source = try XCTUnwrap(FilledPrimitive(path: self.path("rect"), color: color.resolve(in: .init())))
+                            let group = try XCTUnwrap(GraphicsContext.PrimitiveShadowGroup(source: source, context: context))
+                            let target = try XCTUnwrap(device.device.makeTexture(descriptor: TextureDescriptor(
+                                textureType: .type2D, pixelFormat: format, width: Int(self.size.width * density),
+                                height: Int(self.size.height * density), usage: [.renderTarget, .copySource])))
+                            texture = target
+                            let pass = try XCTUnwrap(context.beginRenderPass(viewport: context.viewport, renderTarget: target,
+                                loadAction: .clear, clearColor: .clear, useStencil: false, useMSAA: false))
+                            pass.encoder.setScissorRect(try XCTUnwrap(group.scissor))
+                            if role != "source" {
+                                XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: group.shadow,
+                                    transform: group.shadowTransform, blendState: .premultipliedAlphaBlend))
+                            }
+                            if role != "shadow" {
+                                XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: group.source,
+                                    transform: group.sourceTransform, blendState: .premultipliedAlphaBlend))
+                            }
+                            pass.end()
+                        }
+                        let data = try XCTUnwrap(device.makeCPUAccessible(texture: try XCTUnwrap(texture)))
+                        let isFloat = format == .rgba16Float
+                        let bytes = Data(bytes: try XCTUnwrap(data.contents()),
+                            count: Int(size.width * size.height * density * density) * (isFloat ? 8 : 4))
+                        let label = "\(name)-\(role)-\(Int(density))" + (isFloat ? ".rgba16f" : ".rgba")
+                        if name == "shear" && density == 1 && isFloat && role != "layer" {
+                            let expected: [(Int, Int, [Float])] = role == "shadow" ? [
+                                (127, 52, [0, 0, 0, 0.269775390625]),
+                                (129, 55, [0, 0, 0, 0.269775390625]),
+                                (129, 59, [0, 0, 0, 0.25146484375])
+                            ] : [
+                                (127, 52, [0.062042236328125, 0.01363372802734375, 0.0146026611328125, 0.062042236328125]),
+                                (129, 55, [0.0618896484375, 0.0135955810546875, 0.0145721435546875, 0.0618896484375]),
+                                (129, 59, [0.301025390625, 0.06610107421875, 0.07080078125, 0.301025390625])
+                            ]
+                            for (x, y, color) in expected {
+                                let offset = (y * Int(size.width) + x) * 8
+                                let words = bytes.withUnsafeBytes { buffer in
+                                    (0..<4).map { buffer.loadUnaligned(fromByteOffset: offset + $0 * 2, as: UInt16.self) }
+                                }
+                                XCTAssertEqual(words, color.map { Float16($0).bitPattern }, "\(label) at (\(x), \(y))")
+                            }
+                        }
+                        if let output { try bytes.write(to: output.appendingPathComponent(label)) }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS recordedPrimitiveGroupExecution27Observed
     // ASSERTIONS recordedPrimitiveGroupScissor27Observed
     func testPrimitiveGroupSelectionAndBounds() throws {
