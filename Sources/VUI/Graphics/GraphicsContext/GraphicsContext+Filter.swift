@@ -179,52 +179,58 @@ extension GraphicsContext {
 
     public mutating func addFilter(_ filter: Filter,
                                    options: FilterOptions = FilterOptions()) {
-        filters.append((filter, options))
-        if recording != nil {
-            let style: RBDisplayList.Style
-            let hasClip = !recordedClips.isEmpty
-            switch filter.style {
-            case let .shadow(color, radius, offset, blendMode, shadowOptions):
-                style = RBDisplayList.ShadowStyle(color: RecordedColor(color.resolve(in: environment)),
-                    radius: Float(radius), offset: offset, blendMode: blendMode, options: shadowOptions,
-                    transform: transform, hasClip: hasClip, filterOptions: options)
-            case let .blur(radius, blurOptions):
-                style = RBDisplayList.FilterStyle(filter: RBFilter.GaussianBlur(radius: Float(radius), options: blurOptions),
-                    transform: transform, hasClip: hasClip, filterOptions: options)
-            default:
-                style = RBDisplayList.ExecutionFilterStyle(filter: filter, transform: transform,
-                    hasClip: hasClip, filterOptions: options)
-            }
-            storage.state.pointee.addStyle(style)
+        copyOnWrite()
+        let style: RBDisplayList.Style
+        let hasClip = !recordedClips.isEmpty
+        switch filter.style {
+        case let .shadow(color, radius, offset, blendMode, shadowOptions):
+            style = RBDisplayList.ShadowStyle(color: RecordedColor(color.resolve(in: environment)),
+                radius: Float(radius), offset: offset, blendMode: blendMode, options: shadowOptions,
+                transform: transform, hasClip: hasClip, filterOptions: options)
+        case let .blur(radius, blurOptions):
+            style = RBDisplayList.FilterStyle(filter: RBFilter.GaussianBlur(radius: Float(radius), options: blurOptions),
+                transform: transform, hasClip: hasClip, filterOptions: options)
+        default:
+            style = RBDisplayList.ExecutionFilterStyle(filter: filter, transform: transform,
+                hasClip: hasClip, filterOptions: options)
         }
+        storage.state.pointee.addStyle(style)
     }
 
-    func applyFilters(sourceDiscarded: Bool) {
-        self.filters.forEach { (filter, options) in
+    func applyFilters(sourceDiscarded: Bool, primitive: FilledPrimitive? = nil) {
+        let styles = storage.state.pointee.style?.executionStyles ?? []
+        for (index, style) in styles.enumerated() {
+            let filter = style.executionFilter
             if case let .shadow(_, _, _, _, opts) = filter.style,
                opts.contains([.disablesGroup, .shadowAbove]) {
             } else {
                 applyFilter(filter: filter,
-                            options: options,
-                            sourceDiscarded: sourceDiscarded)
+                            options: style.filterOptions,
+                            sourceDiscarded: sourceDiscarded,
+                            styleTransform: style.transform,
+                            primitive: index == 0 ? primitive : nil)
             }
         }
     }
 
     func applyLayeredFilters(sourceDiscarded: Bool) {
-        self.filters.forEach { (filter, options) in
+        for style in storage.state.pointee.style?.executionStyles ?? [] {
+            let filter = style.executionFilter
             if case let .shadow(_, _, _, _, opts) = filter.style,
                opts.contains([.disablesGroup, .shadowAbove]) {
                 applyFilter(filter: filter,
-                            options: options,
-                            sourceDiscarded: sourceDiscarded)
+                            options: style.filterOptions,
+                            sourceDiscarded: sourceDiscarded,
+                            styleTransform: style.transform)
             }
         }
     }
 
     func applyFilter(filter: Filter,
                      options filterOptions: FilterOptions,
-                     sourceDiscarded: Bool) {
+                     sourceDiscarded: Bool,
+                     styleTransform: CGAffineTransform = .identity,
+                     primitive: FilledPrimitive? = nil) {
         let maxBlurIteration = 3
 
         let width = CGFloat(self.renderTargets.width)
@@ -297,9 +303,11 @@ extension GraphicsContext {
             }
         case let .blur(radius, options):
             if radius < .ulpOfOne { break }
+            let scales = RBDisplayList.Style.axisScales(styleTransform) * Float(contentScaleFactor)
             for pass in 0..<(maxBlurIteration*2) {
                 if let renderPass = self.beginRenderPassCompositionTarget() {
-                    let r = radius * CGFloat(pass/2+1) / CGFloat(maxBlurIteration)
+                    let scale = scales[pass % 2]
+                    let r = radius * CGFloat(scale) * CGFloat(pass/2+1) / CGFloat(maxBlurIteration)
                     if self.encodeBlurFilter(renderPass: renderPass,
                                              texture: self.sourceTexture,
                                              textureFrame: texFrame,
@@ -320,6 +328,10 @@ extension GraphicsContext {
                 }
             }
         case let .shadow(color, radius, offset, blendMode, options):
+            let shadow = primitive?.shadow(radius: Float(radius), color: color.resolve(in: environment),
+                itemTransform: transform, styleTransform: styleTransform, offset: offset)
+            let offset = CGPoint(x: styleTransform.a * offset.x + styleTransform.c * offset.y,
+                                 y: styleTransform.b * offset.x + styleTransform.d * offset.y)
             var colorMatrix = ColorMatrix.zero
             let color = color.backendColor(in: self.environment)
             colorMatrix.a4 = Float(color.a) // alpha factor (multiply)
@@ -333,20 +345,27 @@ extension GraphicsContext {
                                                      clearColor: .clear,
                                                      useStencil: false,
                                                      useMSAA: false) {
-                if self.encodeColorMatrixFilter(renderPass: renderPass,
-                                                frame: frame.offsetBy(dx: offset.x, dy: offset.y),
-                                                texture: self.sourceTexture,
-                                                textureFrame: texFrame,
-                                                colorMatrix: colorMatrix,
-                                                blendState: .opaque,
-                                                color: .white) {
-                    renderPass.end()
+                let encoded: Bool
+                if let shadow {
+                    encoded = encodePrimitive(renderPass: renderPass, primitive: shadow.primitive,
+                        transform: shadow.transform)
+                } else {
+                    encoded = self.encodeColorMatrixFilter(renderPass: renderPass,
+                        frame: frame.offsetBy(dx: offset.x, dy: offset.y),
+                        texture: self.sourceTexture,
+                        textureFrame: texFrame,
+                        colorMatrix: colorMatrix,
+                        blendState: .opaque,
+                        color: .white)
+                }
+                renderPass.end()
+                if encoded {
                     // backup source for later use
                     self.renderTargets.switchTemporaryToSource()
                     // temporary: original image
                     // source: shadow texture
                 } else {
-                    Log.error("GraphicsContext.encodeColorMatrixFilter failed.")
+                    Log.error("GraphicsContext shadow encoding failed.")
                     break
                 }
             } else {
@@ -354,8 +373,10 @@ extension GraphicsContext {
                 break
             }
             // apply blur (the source texture is solid color image)
-            applyFilter(filter: .blur(radius: radius), options: filterOptions,
-                        sourceDiscarded: sourceDiscarded)
+            if shadow == nil {
+                applyFilter(filter: .blur(radius: radius), options: filterOptions,
+                            sourceDiscarded: sourceDiscarded, styleTransform: styleTransform)
+            }
 
             var disablesGroup = options.contains(.disablesGroup)
             if sourceDiscarded { disablesGroup = true }

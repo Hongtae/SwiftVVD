@@ -109,11 +109,7 @@ extension GraphicsContext {
     }
 
     var filters: [(Filter, FilterOptions)] {
-        get { storage.state.pointee.filters }
-        _modify {
-            copyOnWrite()
-            yield &storage.state.pointee.filters
-        }
+        storage.state.pointee.style?.executionFilters ?? []
     }
 
     var maskTexture: Texture {

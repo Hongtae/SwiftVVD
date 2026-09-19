@@ -166,12 +166,37 @@ extension RBDisplayList.Item {
     }
 
     // Reject unimplemented effect/payload branches before changing any contents.
-    func requireColorOperations() {
+    func requireColorOperations(receivingTransform: CGAffineTransform = .identity) {
+        let effectiveTransform = state.transform.concatenating(receivingTransform)
         if hasRecordedEffects {
-            precondition(state.transform.isIdentity && state.clips.isEmpty,
-                "Color operations on transformed or clipped effects are not implemented.")
+            precondition(RBDisplayList.Style.isFiniteInvertible(effectiveTransform) && state.clips.isEmpty,
+                "Color operations require finite, invertible, unclipped effects.")
             precondition(geometryBounds.isNull || geometryBounds.isEmpty || state.clipBoundingRect.contains(geometryBounds),
                 "Color operations on effects crossing recording clip bounds are not implemented.")
+            let styles = state.style?.executionStyles ?? []
+            if !effectiveTransform.isIdentity || styles.contains(where: {
+                !$0.transform.concatenating(receivingTransform).isIdentity
+            }) {
+                precondition(styles.count <= 1,
+                    "Color operations on affine effect chains are not implemented.")
+                if let shadow = styles.first as? RBDisplayList.ShadowStyle {
+                    precondition([UInt32(0), 2].contains(shadow.options.rawValue),
+                        "Color operations on these affine shadow options are not implemented.")
+                    if case let .fill(path, shading, fillStyle) = contents {
+                        guard shadow.radius > 0, fillStyle.isAntialiased, !fillStyle.isEOFilled,
+                              shading.properties.count == 1,
+                              case let .color(color) = shading.properties[0],
+                              FilledPrimitive(path: path, color: color.resolve(in: state.environment)) != nil else {
+                            preconditionFailure("Color operations on this affine primitive shadow are not implemented.")
+                        }
+                    } else {
+                        switch contents {
+                        case .text, .layer, .image: break
+                        default: preconditionFailure("Color operations on this affine shadow payload are not implemented.")
+                        }
+                    }
+                }
+            }
         }
         var style = state.style
         while let current = style {
@@ -181,7 +206,7 @@ extension RBDisplayList.Item {
         }
         switch contents {
         case let .layer(contents, _):
-            for item in contents.items { item.requireColorOperations() }
+            for item in contents.items { item.requireColorOperations(receivingTransform: effectiveTransform) }
         case let .image(image, _, _):
             precondition(image.texture != nil && image.shading == nil && image.image.maskColor == nil,
                 "Color operations require an unshaded texture image.")

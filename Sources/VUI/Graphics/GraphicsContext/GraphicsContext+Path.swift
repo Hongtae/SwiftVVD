@@ -308,6 +308,17 @@ extension GraphicsContext {
         if shading.properties.isEmpty { return }
         if recording != nil, record(bounds: path.boundingBoxOfPath, .fill(path, shading, style)) { return }
 
+        if let primitive = analyticShadowPrimitive(path, shading: shading, style: style),
+           let renderPass = beginRenderPass(enableStencil: false, enableMSAA: false) {
+            let encoded = encodePrimitive(renderPass: renderPass, primitive: primitive, transform: transform)
+            renderPass.end()
+            if encoded {
+                drawSource(primitive: primitive)
+                recordContentBounds(path.boundingBoxOfPath)
+                return
+            }
+        }
+
         let isAntialiased = self.environment.disableMSAA == false && style.isAntialiased
         if let renderPass = self.beginRenderPass(enableStencil: true, enableMSAA: isAntialiased) {
             if self.encodeStencilPathFillCommand(renderPass: renderPass,

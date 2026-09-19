@@ -394,7 +394,7 @@ extension GraphicsContext {
                   pathGeometryScratch: pathGeometryScratch)
     }
 
-    func drawSource() {
+    func drawSource(primitive: FilledPrimitive? = nil) {
         var sourceDiscarded = false
         for (filter, _) in self.filters {
             if case let .shadow(_, _, _, _, opts) = filter.style,
@@ -403,7 +403,7 @@ extension GraphicsContext {
                 break
             }
         }
-        self.applyFilters(sourceDiscarded: sourceDiscarded)
+        self.applyFilters(sourceDiscarded: sourceDiscarded, primitive: primitive)
         if sourceDiscarded == false { self.applyBlendMode(applyMask: true) }
         self.applyLayeredFilters(sourceDiscarded: sourceDiscarded)
     }

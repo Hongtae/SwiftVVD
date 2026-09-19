@@ -13,6 +13,7 @@ import VVD
 enum _Shader {
     case stencil        // fill stencil, no fragment function
     case vertexColor    // vertex color
+    case primitiveColor
     case image          // texture with tint color
     case projectiveImage
     case rcImage        // for glyph, single(red) channel texture
@@ -377,6 +378,7 @@ class GraphicsPipelineStates {
                 }
 
                 shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
+                shaderFunctions[.primitiveColor] = try loadFragmentFunction("primitive_color.frag")
                 shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
                 shaderFunctions[.projectiveImage] = ShaderFunctions(
                     vertexFunction: projectiveVertexFunction,

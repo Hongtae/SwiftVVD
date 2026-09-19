@@ -47,27 +47,45 @@ extension RBDisplayList {
         }
 
         var executionFilter: GraphicsContext.Filter { preconditionFailure("Abstract recorded style") }
-        var supportsColorOperations: Bool { transform.isIdentity && !hasClip && filterOptions.isEmpty }
+        var supportsColorOperations: Bool {
+            Self.isFiniteInvertible(transform) && !hasClip && filterOptions.isEmpty
+        }
         func matches(_ predicate: RBDisplayListPredicate) -> UInt16 { 0 }
         func applyPredicate(styleOnly: Bool) {}
         func copy() -> Style { preconditionFailure("Abstract recorded style") }
         func applyBounds(_ bounds: CGRect) -> CGRect { bounds }
 
         func bounds(_ bounds: CGRect) -> CGRect {
-            // Unsupported execution adapters retain their previous geometry
-            // bounds; color operations reject those adapters before copying.
-            let bounds = supportsColorOperations ? applyBounds(bounds) : bounds
+            var bounds = bounds
+            if supportsColorOperations, !bounds.isNull, !bounds.isInfinite {
+                bounds = applyBounds(bounds.applying(transform.inverted())).applying(transform)
+            }
             return next?.bounds(bounds) ?? bounds
         }
 
-        var executionFilters: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] {
-            var result: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] = []
+        var executionStyles: [Style] {
+            var result: [Style] = []
             var style: Style? = self
             while let current = style {
-                result.append((current.executionFilter, current.filterOptions))
+                result.append(current)
                 style = current.next
             }
             return result.reversed()
+        }
+
+        var executionFilters: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] {
+            executionStyles.map { ($0.executionFilter, $0.filterOptions) }
+        }
+
+        static func isFiniteInvertible(_ transform: CGAffineTransform) -> Bool {
+            let determinant = transform.a * transform.d - transform.b * transform.c
+            return [transform.a, transform.b, transform.c, transform.d, transform.tx, transform.ty,
+                    determinant].allSatisfy(\.isFinite) && determinant != 0
+        }
+
+        static func axisScales(_ transform: CGAffineTransform) -> SIMD2<Float> {
+            SIMD2(Float(transform.a * transform.a + transform.b * transform.b).squareRoot(),
+                  Float(transform.c * transform.c + transform.d * transform.d).squareRoot())
         }
 
         static func outset(_ bounds: CGRect, by amount: Float, offset: CGPoint = .zero) -> CGRect {

@@ -58,14 +58,13 @@ extension GraphicsContext {
             context.transform = transform.concatenating(baseTransform)
             context.opacity *= opacity
             if blendMode != .normal { context.blendMode = blendMode }
-            context.filters = filters + context.filters
             context.environment = environment
         }
 
         func bounds(_ geometry: CGRect) -> CGRect {
             guard opacity > 0, !geometry.isNull, !geometry.isEmpty else { return .null }
             let bounds = geometry.intersection(clipBoundingRect).applying(transform)
-            guard transform.isIdentity, clips.isEmpty else { return bounds }
+            guard RBDisplayList.Style.isFiniteInvertible(transform), clips.isEmpty else { return bounds }
             return style?.bounds(bounds) ?? bounds
         }
     }
@@ -127,13 +126,11 @@ extension RBDisplayList {
         var bounds: CGRect { state.bounds(geometryBounds) }
         var color: RecordedColor? = nil
 
-        func draw(in context: GraphicsContext, copyingStylesWith transform: CachedTransform?) {
+        func draw(in context: GraphicsContext, copyingStylesWith transform: CachedTransform) {
             var context = context
             state.apply(to: &context)
-            if let transform {
-                context.copyOnWrite()
-                context.storage.state.pointee.style = transform.transformStyle(state.style)
-            }
+            context.copyOnWrite()
+            context.storage.state.pointee.style = transform.transformStyle(state.style)
             switch contents {
             case let .fill(path, shading, style):
                 context.fill(path, with: shading, style: style)

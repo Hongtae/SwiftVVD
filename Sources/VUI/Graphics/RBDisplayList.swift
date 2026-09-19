@@ -30,7 +30,6 @@ final class RBDisplayList: RBDisplayListContents {
         var viewTransform: CGAffineTransform = .identity
         var contentOffset: CGPoint = .zero
         var maskTexture: Texture?
-        var filters: [(GraphicsContext.Filter, GraphicsContext.FilterOptions)] = []
         var style: Style?
         var isRecording = false
         var recordedClips: [GraphicsContext.DrawingClip] = []
@@ -80,9 +79,8 @@ final class RBDisplayList: RBDisplayListContents {
     func draw(in context: GraphicsContext) {
         // The value snapshot also permits replay into this destination.
         let items = items
-        let transform = context.recording.map { _ in
-            CachedTransform(transform: context.transform, outerStyle: context.storage.state.pointee.style)
-        }
+        let transform = CachedTransform(transform: context.transform,
+            outerStyle: context.storage.state.pointee.style)
         for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 
@@ -125,9 +123,8 @@ final class RBMovedDisplayListContents: RBDisplayListContents {
     }
 
     func draw(in context: GraphicsContext) {
-        let transform = context.recording.map { _ in
-            RBDisplayList.CachedTransform(transform: context.transform, outerStyle: context.storage.state.pointee.style)
-        }
+        let transform = RBDisplayList.CachedTransform(transform: context.transform,
+            outerStyle: context.storage.state.pointee.style)
         for item in items { item.draw(in: context, copyingStylesWith: transform) }
     }
 }
