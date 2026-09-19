@@ -32,8 +32,64 @@ public struct Capsule: ConvexPrimitive {
         return false
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        guard isValid && ray.isValid else { return nil }
+
+        let halfHeight = height * Scalar(0.5)
+        var closest: PrimitiveRayHit?
+
+        let radialDirectionSquared = ray.direction.x * ray.direction.x +
+            ray.direction.z * ray.direction.z
+        let radialProjection = ray.origin.x * ray.direction.x +
+            ray.origin.z * ray.direction.z
+        let radialConstant = ray.origin.x * ray.origin.x +
+            ray.origin.z * ray.origin.z - radius * radius
+
+        func testCylinderSide(parameter: Scalar) {
+            let position = ray.point(at: parameter)
+            if position.y >= -halfHeight && position.y <= halfHeight {
+                _updateClosestRayHit(
+                    ray: ray,
+                    parameter: parameter,
+                    normal: Vector3(position.x, 0, position.z),
+                    closest: &closest)
+            }
+        }
+
+        if let parameters = _quadraticRayParameters(
+            a: radialDirectionSquared,
+            b: radialProjection,
+            c: radialConstant) {
+            testCylinderSide(parameter: parameters.near)
+            testCylinderSide(parameter: parameters.far)
+        }
+
+        func testHemisphere(centerY: Scalar, isTop: Bool) {
+            let center = Vector3(0, centerY, 0)
+            let offset = ray.origin - center
+            guard let parameters = _quadraticRayParameters(
+                a: ray.direction.lengthSquared,
+                b: Vector3.dot(offset, ray.direction),
+                c: offset.lengthSquared - radius * radius)
+            else { return }
+
+            func test(parameter: Scalar) {
+                let position = ray.point(at: parameter)
+                guard isTop ? position.y >= halfHeight : position.y <= -halfHeight else {
+                    return
+                }
+                _updateClosestRayHit(ray: ray,
+                                     parameter: parameter,
+                                     normal: position - center,
+                                     closest: &closest)
+            }
+            test(parameter: parameters.near)
+            test(parameter: parameters.far)
+        }
+
+        testHemisphere(centerY: halfHeight, isTop: true)
+        testHemisphere(centerY: -halfHeight, isTop: false)
+        return closest
     }
 }
 

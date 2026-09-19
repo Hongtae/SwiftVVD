@@ -209,8 +209,8 @@ private struct RegistryPrimitiveA: CollisionPrimitive {
 
     func contains(_ point: Vector3) -> Bool { false }
 
-    func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1
+    func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        nil
     }
 }
 
@@ -220,7 +220,7 @@ private struct RegistryPrimitiveB: CollisionPrimitive {
 
     func contains(_ point: Vector3) -> Bool { false }
 
-    func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1
+    func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        nil
     }
 }

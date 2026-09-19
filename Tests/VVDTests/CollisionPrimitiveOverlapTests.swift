@@ -207,7 +207,7 @@ private final class TestTriangleMeshStorage: TriangleMeshStorage {
         false
     }
 
-    func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        nil
     }
 }

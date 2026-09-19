@@ -132,4 +132,33 @@ final class CompoundPrimitiveTests: XCTestCase {
         XCTAssertTrue(CollisionAlgorithms.intersects(overlapping, plane))
         XCTAssertFalse(CollisionAlgorithms.intersects(plane, separated))
     }
+
+    func testContainsTransformsPointIntoChildSpace() {
+        let compound = CompoundPrimitive(children: [
+            .init(Sphere(center: .zero, radius: 1),
+                  transform: Transform(position: Vector3(3, 0, 0))),
+            .init(Box(halfExtents: Vector3(0.5, 0.5, 0.5)),
+                  transform: Transform(position: Vector3(-2, 0, 0)))
+        ])
+
+        XCTAssertTrue(compound.contains(Vector3(3.5, 0, 0)))
+        XCTAssertTrue(compound.contains(Vector3(-2, 0, 0)))
+        XCTAssertFalse(compound.contains(.zero))
+    }
+
+    func testRayHitUsesClosestTransformedChildGeometry() throws {
+        let compound = CompoundPrimitive(children: [
+            .init(Sphere(center: .zero, radius: 1),
+                  transform: Transform(position: Vector3(4, 0, 0))),
+            .init(Box(halfExtents: Vector3(0.5, 0.5, 0.5)),
+                  transform: Transform(position: Vector3(2, 0, 0)))
+        ])
+        let ray = Ray(origin: .zero, direction: Vector3(2, 0, 0))
+
+        let hit = try XCTUnwrap(compound.rayTest(ray))
+
+        XCTAssertEqual(hit.parameter, 0.75, accuracy: 1.0e-9)
+        XCTAssertEqual(hit.position, Vector3(1.5, 0, 0))
+        XCTAssertEqual(hit.normal, Vector3(-1, 0, 0))
+    }
 }

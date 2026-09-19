@@ -12,7 +12,7 @@ public protocol TriangleMeshStorage: AnyObject {
 
     func triangle(at index: Int) -> Triangle
     func contains(_ point: Vector3) -> Bool
-    func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar
+    func rayTest(_ ray: Ray) -> PrimitiveRayHit?
 }
 
 public struct TriangleMesh: ConcavePrimitive {
@@ -46,8 +46,8 @@ public struct TriangleMesh: ConcavePrimitive {
         storage.contains(point)
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        storage.rayTest(rayOrigin: origin, direction: direction)
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        storage.rayTest(ray)
     }
 }
 
@@ -87,8 +87,8 @@ private final class EmptyTriangleMeshStorage: TriangleMeshStorage, @unchecked Se
         false
     }
 
-    func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        nil
     }
 }
 

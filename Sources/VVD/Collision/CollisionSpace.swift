@@ -81,6 +81,15 @@ private struct BroadPhaseSnapshot {
         candidates.sort()
         return candidates
     }
+
+    func candidateIndices(intersecting ray: Ray) -> [Int] {
+        guard ray.isValid else { return [] }
+
+        var candidates = hierarchy.primitiveIndices(intersecting: ray)
+        candidates.append(contentsOf: unboundedIndices)
+        candidates.sort()
+        return candidates
+    }
 }
 
 /// Stores colliders and performs broad-phase candidate queries.
@@ -127,6 +136,58 @@ public final class CollisionSpace {
 
     public func contains(_ collider: Collider) -> Bool {
         storage.contains(collider)
+    }
+
+    /// Returns the closest enabled, valid, and filter-compatible ray hit.
+    public func raycast(_ ray: Ray,
+                        maximumDistance: Scalar = .infinity,
+                        filter: CollisionFilter = CollisionFilter()) -> RayHit? {
+        guard ray.isValid && maximumDistance >= .zero else { return nil }
+
+        let snapshot = BroadPhaseSnapshot(storage)
+        var closest: (storageIndex: Int, hit: RayHit)?
+        for index in snapshot.candidateIndices(intersecting: ray) {
+            let collider = storage[index]
+            guard filter.allowsCollision(with: collider.filter),
+                  let hit = collider.raycast(ray),
+                  hit.distance <= maximumDistance
+            else { continue }
+
+            if let current = closest,
+               current.hit.distance < hit.distance ||
+                (current.hit.distance == hit.distance &&
+                 current.storageIndex < index) {
+                continue
+            }
+            closest = (index, hit)
+        }
+        return closest?.hit
+    }
+
+    /// Returns enabled, valid, and filter-compatible ray hits ordered by
+    /// distance. Hits at the same distance preserve collider storage order.
+    public func raycastAll(_ ray: Ray,
+                           maximumDistance: Scalar = .infinity,
+                           filter: CollisionFilter = CollisionFilter()) -> [RayHit] {
+        guard ray.isValid && maximumDistance >= .zero else { return [] }
+
+        let snapshot = BroadPhaseSnapshot(storage)
+        var indexedHits: [(storageIndex: Int, hit: RayHit)] = []
+        for index in snapshot.candidateIndices(intersecting: ray) {
+            let collider = storage[index]
+            guard filter.allowsCollision(with: collider.filter),
+                  let hit = collider.raycast(ray),
+                  hit.distance <= maximumDistance
+            else { continue }
+            indexedHits.append((index, hit))
+        }
+        indexedHits.sort { lhs, rhs in
+            if lhs.hit.distance == rhs.hit.distance {
+                return lhs.storageIndex < rhs.storageIndex
+            }
+            return lhs.hit.distance < rhs.hit.distance
+        }
+        return indexedHits.map(\.hit)
     }
 
     /// Returns colliders intersecting `collider`, excluding the collider itself.

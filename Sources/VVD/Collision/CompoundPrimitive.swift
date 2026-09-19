@@ -59,11 +59,34 @@ public struct CompoundPrimitive: CollisionPrimitive {
     }
 
     public func contains(_ point: Vector3) -> Bool {
-        false
+        children.contains { child in
+            guard child.primitive.isValid else { return false }
+            return child.primitive.contains(point.applying(child.transform.inverted()))
+        }
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        guard isValid && ray.isValid else { return nil }
+
+        var closest: PrimitiveRayHit?
+        for child in flattenedChildren() where child.primitive.isValid {
+            if child.bounds.isNull == false && child.bounds.intersects(ray) == false {
+                continue
+            }
+
+            let inverseTransform = child.transform.inverted()
+            let childRay = Ray(
+                origin: ray.origin.applying(inverseTransform),
+                direction: ray.direction.applying(inverseTransform.orientation))
+            guard let childHit = child.primitive.rayTest(childRay) else { continue }
+            if let closest, closest.parameter <= childHit.parameter { continue }
+
+            closest = PrimitiveRayHit(
+                parameter: childHit.parameter,
+                position: childHit.position.applying(child.transform),
+                normal: childHit.normal.applying(child.transform.orientation).normalized())
+        }
+        return closest
     }
 }
 

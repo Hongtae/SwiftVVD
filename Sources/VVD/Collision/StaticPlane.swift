@@ -18,8 +18,23 @@ public struct StaticPlane: ConcavePrimitive {
         isValid && abs(plane.dot(point)) <= .ulpOfOne
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        plane.rayTest(rayOrigin: origin, direction: direction)
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        guard isValid && ray.isValid else { return nil }
+
+        let distance = plane.dot(ray.origin)
+        let denominator = Vector3.dot(plane.normal, ray.direction)
+        let parameter: Scalar
+        if abs(distance) <= .ulpOfOne {
+            parameter = .zero
+        } else {
+            guard abs(denominator) > .ulpOfOne else { return nil }
+            parameter = -distance / denominator
+            guard parameter >= .zero else { return nil }
+        }
+
+        return PrimitiveRayHit(parameter: parameter,
+                               position: ray.point(at: parameter),
+                               normal: plane.normal.normalized())
     }
 }
 

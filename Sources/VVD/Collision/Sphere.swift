@@ -77,28 +77,36 @@ public struct Sphere: ConvexPrimitive {
         return 0.0
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
-        if self.isValid {
-            if self.isPointInside(origin) {
-                return .zero
-            }
-            if dir.lengthSquared <= .ulpOfOne {
-                return -1.0
-            }
-            let d = dir.normalized()
-            let oc = origin - center
-            let b = 2.0 * Vector3.dot(oc, d)
-            let c = oc.magnitudeSquared - radius * radius
-            let discriminant = b * b - 4 * c
-            if discriminant < .zero {
-                return -1.0
-            }
-            let t = (-b - sqrt(discriminant)) * 0.5
-            if t >= .zero {
-                return t
-            }
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        guard isValid && ray.isValid else { return nil }
+
+        let offset = ray.origin - center
+        let directionLengthSquared = ray.direction.lengthSquared
+        let projectedOffset = Vector3.dot(offset, ray.direction)
+        let constant = offset.lengthSquared - radius * radius
+        let discriminant = projectedOffset * projectedOffset - directionLengthSquared * constant
+        guard discriminant >= .zero else { return nil }
+
+        let root = discriminant.squareRoot()
+        let nearParameter = (-projectedOffset - root) / directionLengthSquared
+        let farParameter = (-projectedOffset + root) / directionLengthSquared
+        let parameter: Scalar
+        if nearParameter >= .zero {
+            parameter = nearParameter
+        } else if farParameter >= .zero {
+            parameter = farParameter
+        } else {
+            return nil
         }
-        return -1.0
+
+        let position = ray.point(at: parameter)
+        let surfaceOffset = position - center
+        let normal = surfaceOffset.lengthSquared > .ulpOfOne
+            ? surfaceOffset.normalized()
+            : -ray.direction.normalized()
+        return PrimitiveRayHit(parameter: parameter,
+                               position: position,
+                               normal: normal)
     }
 }
 

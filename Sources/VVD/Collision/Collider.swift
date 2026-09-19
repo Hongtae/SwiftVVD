@@ -53,6 +53,22 @@ public final class Collider: Hashable {
         filter.allowsCollision(with: other.filter)
     }
 
+    /// Intersects a collision-space ray with this collider and converts the
+    /// primitive-local result back into collision-space geometry.
+    public func raycast(_ ray: Ray) -> RayHit? {
+        guard isEnabled && isValid && ray.isValid else { return nil }
+
+        let inverseTransform = transform.inverted()
+        let localRay = Ray(origin: ray.origin.applying(inverseTransform),
+                           direction: ray.direction.applying(inverseTransform.orientation))
+        guard let localHit = primitive.rayTest(localRay) else { return nil }
+
+        return RayHit(collider: self,
+                      position: localHit.position.applying(transform),
+                      normal: localHit.normal.applying(transform.orientation).normalized(),
+                      distance: localHit.parameter * ray.direction.length)
+    }
+
     /// Tests this collider against another collider.
     public func intersects(_ other: Collider,
                            using algorithms: CollisionAlgorithmRegistry =

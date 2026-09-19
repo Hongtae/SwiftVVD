@@ -26,8 +26,8 @@ public struct ConvexHull: ConvexPrimitive {
         false
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        nil
     }
 }
 

@@ -71,6 +71,54 @@ final class BVHTests: XCTestCase {
         XCTAssertEqual(visited.count, 1)
     }
 
+    func testRayQueriesReturnIntersectedBounds() {
+        let bvh = BVH([
+            BVH.Element(bounds: bounds(minX: -3, maxX: -2),
+                        primitiveIndex: 10),
+            BVH.Element(bounds: bounds(minX: 1, maxX: 2),
+                        primitiveIndex: 20),
+            BVH.Element(bounds: AABB(min: Vector3(1, 3, -1),
+                                     max: Vector3(2, 4, 1)),
+                        primitiveIndex: 30)
+        ])
+        let ray = Ray(origin: Vector3(-5, 0, 0),
+                      direction: Vector3(2, 0, 0))
+
+        XCTAssertEqual(Set(bvh.primitiveIndices(intersecting: ray)),
+                       Set([10, 20]))
+        XCTAssertTrue(bvh.primitiveIndices(
+            intersecting: Ray(origin: .zero, direction: .zero)).isEmpty)
+    }
+
+    func testRayQueryVisitorCanStopTraversal() {
+        let bvh = BVH([
+            BVH.Element(bounds: bounds(minX: -2, maxX: -1),
+                        primitiveIndex: 1),
+            BVH.Element(bounds: bounds(minX: 1, maxX: 2),
+                        primitiveIndex: 2)
+        ])
+        var visited: [Int] = []
+
+        let completed = bvh.query(
+            intersecting: Ray(origin: Vector3(-3, 0, 0),
+                              direction: Vector3(1, 0, 0))) { primitiveIndex in
+                visited.append(primitiveIndex)
+                return false
+            }
+
+        XCTAssertFalse(completed)
+        XCTAssertEqual(visited.count, 1)
+    }
+
+    func testAABBRayIntersectionHandlesParallelBoundaryDirections() {
+        let box = unitBounds()
+
+        XCTAssertTrue(box.intersects(
+            Ray(origin: Vector3(-2, 1, 0), direction: Vector3(1, 0, 0))))
+        XCTAssertFalse(box.intersects(
+            Ray(origin: Vector3(-2, 2, 0), direction: Vector3(1, 0, 0))))
+    }
+
     func testQueriesMatchLinearAABBScan() {
         let elements = (0..<27).map { primitiveIndex in
             let x = Scalar(primitiveIndex % 3) * 3

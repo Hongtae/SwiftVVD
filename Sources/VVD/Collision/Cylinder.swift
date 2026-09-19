@@ -24,8 +24,54 @@ public struct Cylinder: ConvexPrimitive {
         point.x * point.x + point.z * point.z <= radius * radius
     }
 
-    public func rayTest(rayOrigin origin: Vector3, direction: Vector3) -> Scalar {
-        -1.0
+    public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
+        guard isValid && ray.isValid else { return nil }
+
+        let halfHeight = height * Scalar(0.5)
+        var closest: PrimitiveRayHit?
+
+        let radialDirectionSquared = ray.direction.x * ray.direction.x +
+            ray.direction.z * ray.direction.z
+        let radialProjection = ray.origin.x * ray.direction.x +
+            ray.origin.z * ray.direction.z
+        let radialConstant = ray.origin.x * ray.origin.x +
+            ray.origin.z * ray.origin.z - radius * radius
+
+        func testSide(parameter: Scalar) {
+            let position = ray.point(at: parameter)
+            if position.y >= -halfHeight && position.y <= halfHeight {
+                _updateClosestRayHit(
+                    ray: ray,
+                    parameter: parameter,
+                    normal: Vector3(position.x, 0, position.z),
+                    closest: &closest)
+            }
+        }
+
+        if let parameters = _quadraticRayParameters(
+            a: radialDirectionSquared,
+            b: radialProjection,
+            c: radialConstant) {
+            testSide(parameter: parameters.near)
+            testSide(parameter: parameters.far)
+        }
+
+        if abs(ray.direction.y) > .ulpOfOne {
+            func testCap(capY: Scalar, normalY: Scalar) {
+                let parameter = (capY - ray.origin.y) / ray.direction.y
+                let position = ray.point(at: parameter)
+                let radialSquared = position.x * position.x + position.z * position.z
+                if radialSquared <= radius * radius {
+                    _updateClosestRayHit(ray: ray,
+                                         parameter: parameter,
+                                         normal: Vector3(0, normalY, 0),
+                                         closest: &closest)
+                }
+            }
+            testCap(capY: halfHeight, normalY: 1)
+            testCap(capY: -halfHeight, normalY: -1)
+        }
+        return closest
     }
 }
 

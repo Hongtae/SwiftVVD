@@ -86,6 +86,19 @@ public struct BVH: Sendable {
         return result
     }
 
+    /// Returns primitive identifiers whose bounds intersect `ray`.
+    ///
+    /// Result order follows tree traversal and is not an insertion-order
+    /// guarantee. An invalid ray has no candidates.
+    public func primitiveIndices(intersecting ray: Ray) -> [Int] {
+        var result: [Int] = []
+        query(intersecting: ray) { primitiveIndex in
+            result.append(primitiveIndex)
+            return true
+        }
+        return result
+    }
+
     /// Visits primitive identifiers whose bounds overlap `queryBounds`.
     ///
     /// Return `false` from `body` to stop traversal. The return value is `true`
@@ -95,10 +108,27 @@ public struct BVH: Sendable {
                       _ body: (Int) throws -> Bool) rethrows -> Bool {
         guard queryBounds.isNull == false else { return true }
 
+        return try queryNodes(where: { $0.intersects(queryBounds) }, body)
+    }
+
+    /// Visits primitive identifiers whose bounds intersect `ray`.
+    ///
+    /// Return `false` from `body` to stop traversal. The return value is `true`
+    /// when the full query completed and `false` when the visitor stopped it.
+    @discardableResult
+    public func query(intersecting ray: Ray,
+                      _ body: (Int) throws -> Bool) rethrows -> Bool {
+        guard ray.isValid else { return true }
+
+        return try queryNodes(where: { $0.intersects(ray) }, body)
+    }
+
+    private func queryNodes(where intersects: (AABB) -> Bool,
+                            _ body: (Int) throws -> Bool) rethrows -> Bool {
         var nodeIndex = 0
         while nodeIndex < nodes.count {
             let node = nodes[nodeIndex]
-            guard node.bounds.intersects(queryBounds) else {
+            guard intersects(node.bounds) else {
                 nodeIndex = node.escapeIndex
                 continue
             }
