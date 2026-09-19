@@ -55,6 +55,27 @@ public enum CollisionAlgorithms {
                                        frame: Transform = .identity) -> ContactManifold? {
         CollisionAlgorithmRegistry.builtinContactManifold(a, b, frame: frame)
     }
+
+    public static func timeOfImpact(_ a: any CollisionShape,
+                                    _ b: any CollisionShape,
+                                    frame: Transform = .identity,
+                                    translation: Vector3) -> TimeOfImpact? {
+        timeOfImpact(a.primitive,
+                     b.primitive,
+                     frame: frame,
+                     translation: translation)
+    }
+
+    public static func timeOfImpact(_ a: any CollisionPrimitive,
+                                    _ b: any CollisionPrimitive,
+                                    frame: Transform = .identity,
+                                    translation: Vector3) -> TimeOfImpact? {
+        CollisionAlgorithmRegistry.builtinTimeOfImpact(
+            a,
+            b,
+            frame: frame,
+            translation: translation)
+    }
 }
 
 /// An ordered pair of concrete collision primitive types.
@@ -92,6 +113,13 @@ public struct CollisionAlgorithmRegistry {
                               Transform) -> ContactManifold?)?
     }
 
+    private struct SweepEntry {
+        let timeOfImpact: (any CollisionPrimitive,
+                           any CollisionPrimitive,
+                           Transform,
+                           Vector3) -> TimeOfImpact?
+    }
+
     nonisolated(unsafe) private static let builtinAlgorithms: Self = {
         var registry = Self(usesBuiltinFallback: false)
         registry.registerBuiltinAlgorithms()
@@ -114,19 +142,38 @@ public struct CollisionAlgorithmRegistry {
         builtinAlgorithms.contactManifold(a, b, frame: frame)
     }
 
+    fileprivate static func builtinTimeOfImpact(
+        _ a: any CollisionPrimitive,
+        _ b: any CollisionPrimitive,
+        frame: Transform,
+        translation: Vector3
+    ) -> TimeOfImpact? {
+        builtinAlgorithms.timeOfImpact(a,
+                                       b,
+                                       frame: frame,
+                                       translation: translation)
+    }
+
     private var entries: [CollisionPrimitiveTypePair: Entry]
+    private var sweepEntries: [CollisionPrimitiveTypePair: SweepEntry]
 
     /// Whether a missing registry entry should use the built-in registry.
     public var usesBuiltinFallback: Bool
 
     public init(usesBuiltinFallback: Bool = true) {
         self.entries = [:]
+        self.sweepEntries = [:]
         self.usesBuiltinFallback = usesBuiltinFallback
     }
 
     public func isRegistered(_ a: any CollisionPrimitive.Type,
                              _ b: any CollisionPrimitive.Type) -> Bool {
         entries[CollisionPrimitiveTypePair(a, b)] != nil
+    }
+
+    public func isSweepRegistered(_ a: any CollisionPrimitive.Type,
+                                  _ b: any CollisionPrimitive.Type) -> Bool {
+        sweepEntries[CollisionPrimitiveTypePair(a, b)] != nil
     }
 
     /// Registers closures for one ordered primitive pair.
@@ -223,11 +270,95 @@ public struct CollisionAlgorithmRegistry {
                           })
     }
 
+    /// Registers a translational sweep for one ordered primitive pair.
+    ///
+    /// `frame` maps B-local points into A's start-local space. `translation`
+    /// moves A in that space while B remains fixed.
+    public mutating func registerSweep<
+        A: CollisionPrimitive,
+        B: CollisionPrimitive
+    >(
+        _ a: A.Type,
+        _ b: B.Type,
+        timeOfImpact: @escaping (A, B, Transform, Vector3) -> TimeOfImpact?
+    ) {
+        let key = CollisionPrimitiveTypePair(a, b)
+        sweepEntries[key] = SweepEntry { primitiveA, primitiveB, frame, translation in
+            guard let primitiveA = primitiveA as? A,
+                  let primitiveB = primitiveB as? B else {
+                return nil
+            }
+            return timeOfImpact(primitiveA, primitiveB, frame, translation)
+        }
+    }
+
+    /// Registers a typed sweep algorithm for its ordered primitive pair.
+    public mutating func registerSweep<Algorithm: CollisionSweepAlgorithm>(
+        _ algorithm: Algorithm
+    ) {
+        registerSweep(Algorithm.PrimitiveA.self,
+                      Algorithm.PrimitiveB.self) { a, b, frame, translation in
+            algorithm.timeOfImpact(a,
+                                   b,
+                                   frame: frame,
+                                   translation: translation)
+        }
+    }
+
+    /// Registers a translational sweep for both primitive orders.
+    public mutating func registerSymmetricSweep<
+        A: CollisionPrimitive,
+        B: CollisionPrimitive
+    >(
+        _ a: A.Type,
+        _ b: B.Type,
+        timeOfImpact: @escaping (A, B, Transform, Vector3) -> TimeOfImpact?
+    ) {
+        registerSweep(a, b, timeOfImpact: timeOfImpact)
+
+        guard ObjectIdentifier(a) != ObjectIdentifier(b) else { return }
+        registerSweep(b, a) { primitiveB, primitiveA, frame, translation in
+            let inverseFrame = frame.inverted()
+            let reverseTranslation = (-translation)
+                .applying(inverseFrame.orientation)
+            return timeOfImpact(primitiveA,
+                                primitiveB,
+                                inverseFrame,
+                                reverseTranslation).map {
+                _reversed($0, frame: frame, translation: translation)
+            }
+        }
+    }
+
+    /// Registers a typed sweep algorithm for both primitive orders.
+    public mutating func registerSymmetricSweep<
+        Algorithm: CollisionSweepAlgorithm
+    >(_ algorithm: Algorithm) {
+        registerSymmetricSweep(
+            Algorithm.PrimitiveA.self,
+            Algorithm.PrimitiveB.self
+        ) { a, b, frame, translation in
+            algorithm.timeOfImpact(a,
+                                   b,
+                                   frame: frame,
+                                   translation: translation)
+        }
+    }
+
     /// Removes one ordered primitive-pair registration.
     @discardableResult
     public mutating func unregister(_ a: any CollisionPrimitive.Type,
                                     _ b: any CollisionPrimitive.Type) -> Bool {
         entries.removeValue(forKey: CollisionPrimitiveTypePair(a, b)) != nil
+    }
+
+    /// Removes one ordered primitive-pair sweep registration.
+    @discardableResult
+    public mutating func unregisterSweep(
+        _ a: any CollisionPrimitive.Type,
+        _ b: any CollisionPrimitive.Type
+    ) -> Bool {
+        sweepEntries.removeValue(forKey: CollisionPrimitiveTypePair(a, b)) != nil
     }
 
     public func intersects(_ a: any CollisionShape,
@@ -276,6 +407,46 @@ public struct CollisionAlgorithmRegistry {
         }
         guard usesBuiltinFallback else { return nil }
         return Self.builtinContactManifold(a, b, frame: frame)
+    }
+
+    public func timeOfImpact(_ a: any CollisionShape,
+                             _ b: any CollisionShape,
+                             frame: Transform = .identity,
+                             translation: Vector3) -> TimeOfImpact? {
+        timeOfImpact(a.primitive,
+                     b.primitive,
+                     frame: frame,
+                     translation: translation)
+    }
+
+    public func timeOfImpact(_ a: any CollisionPrimitive,
+                             _ b: any CollisionPrimitive,
+                             frame: Transform = .identity,
+                             translation: Vector3) -> TimeOfImpact? {
+        let key = CollisionPrimitiveTypePair(type(of: a), type(of: b))
+        if let entry = sweepEntries[key] {
+            return entry.timeOfImpact(a, b, frame, translation)
+        }
+
+        if a is CompoundPrimitive || b is CompoundPrimitive {
+            return _compoundLeafTimeOfImpact(
+                a,
+                b,
+                frame: frame,
+                translation: translation
+            ) { primitiveA, primitiveB, leafFrame, leafTranslation in
+                timeOfImpact(primitiveA,
+                             primitiveB,
+                             frame: leafFrame,
+                             translation: leafTranslation)
+            }
+        }
+
+        guard usesBuiltinFallback else { return nil }
+        return Self.builtinTimeOfImpact(a,
+                                        b,
+                                        frame: frame,
+                                        translation: translation)
     }
 }
 
@@ -525,6 +696,8 @@ private extension CollisionAlgorithmRegistry {
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
             })
+
+        registerBuiltinSweepAlgorithms()
     }
 }
 
@@ -538,4 +711,16 @@ private func _reversed(_ manifold: ContactManifold,
                 penetrationDepth: contact.penetrationDepth,
                 featureID: contact.featureID)
     })
+}
+
+/// Re-expresses a reversed sweep in the new moving primitive's start space.
+private func _reversed(_ impact: TimeOfImpact,
+                       frame: Transform,
+                       translation: Vector3) -> TimeOfImpact {
+    let impactTranslation = translation * impact.fraction
+    return TimeOfImpact(
+        fraction: impact.fraction,
+        pointOnA: impact.pointOnB.applying(frame) + impactTranslation,
+        pointOnB: impact.pointOnA.applying(frame) + impactTranslation,
+        normal: -impact.normal.applying(frame.orientation))
 }

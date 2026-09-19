@@ -51,6 +51,48 @@ final class CollisionAlgorithmRegistryTests: XCTestCase {
         XCTAssertNotNil(defaultRegistry.contactManifold(sphereA, sphereB))
         XCTAssertFalse(isolatedRegistry.intersects(sphereA, sphereB))
         XCTAssertNil(isolatedRegistry.contactManifold(sphereA, sphereB))
+        XCTAssertNotNil(defaultRegistry.timeOfImpact(
+            sphereA,
+            sphereB,
+            frame: Transform(position: Vector3(3, 0, 0)),
+            translation: Vector3(4, 0, 0)))
+        XCTAssertNil(isolatedRegistry.timeOfImpact(
+            sphereA,
+            sphereB,
+            frame: Transform(position: Vector3(3, 0, 0)),
+            translation: Vector3(4, 0, 0)))
+    }
+
+    func testSymmetricSweepRegistrationReversesMotionAndGeometry() throws {
+        var registry = CollisionAlgorithmRegistry(usesBuiltinFallback: false)
+        registry.registerSymmetricSweep(RegistrySweepAlgorithm())
+
+        XCTAssertTrue(registry.isSweepRegistered(RegistryPrimitiveA.self,
+                                                 RegistryPrimitiveB.self))
+        XCTAssertTrue(registry.isSweepRegistered(RegistryPrimitiveB.self,
+                                                 RegistryPrimitiveA.self))
+
+        let forward = try XCTUnwrap(registry.timeOfImpact(
+            RegistryPrimitiveA(),
+            RegistryPrimitiveB(),
+            translation: Vector3(1, 0, 0)))
+        XCTAssertEqual(forward.pointOnA, Vector3(0.25, 0, 0))
+        XCTAssertEqual(forward.pointOnB, Vector3(0.5, 0, 0))
+        XCTAssertEqual(forward.normal, Vector3(1, 0, 0))
+
+        let reverse = try XCTUnwrap(registry.timeOfImpact(
+            RegistryPrimitiveB(),
+            RegistryPrimitiveA(),
+            translation: Vector3(-1, 0, 0)))
+        XCTAssertEqual(reverse.fraction, 0.25)
+        XCTAssertEqual(reverse.pointOnA, Vector3(0.25, 0, 0))
+        XCTAssertEqual(reverse.pointOnB, .zero)
+        XCTAssertEqual(reverse.normal, Vector3(-1, 0, 0))
+
+        XCTAssertTrue(registry.unregisterSweep(RegistryPrimitiveA.self,
+                                               RegistryPrimitiveB.self))
+        XCTAssertFalse(registry.isSweepRegistered(RegistryPrimitiveA.self,
+                                                  RegistryPrimitiveB.self))
     }
 
     func testSymmetricRegistrationReversesFrameAndContactGeometry() throws {
@@ -153,6 +195,113 @@ final class CollisionAlgorithmRegistryTests: XCTestCase {
         XCTAssertFalse(registry.intersects(primitiveA, compoundB))
     }
 
+    func testRegistryRecursesThroughCompoundLeavesForSweeps() throws {
+        var registry = CollisionAlgorithmRegistry(usesBuiltinFallback: false)
+        registry.registerSweep(
+            RegistryPrimitiveA.self,
+            RegistryPrimitiveB.self
+        ) { _, _, frame, translation in
+            guard frame == .identity,
+                  translation == Vector3(1, 0, 0)
+            else { return nil }
+            return TimeOfImpact(fraction: 0.25,
+                                pointOnA: Vector3(0.25, 0, 0),
+                                pointOnB: Vector3(0.5, 0, 0),
+                                normal: Vector3(1, 0, 0))
+        }
+        let compoundA = CompoundPrimitive(children: [
+            .init(RegistryPrimitiveA(),
+                  transform: Transform(position: Vector3(2, 0, 0))),
+        ])
+        let compoundB = CompoundPrimitive(children: [
+            .init(RegistryPrimitiveB(),
+                  transform: Transform(position: Vector3(1, 0, 0))),
+        ])
+
+        let impact = try XCTUnwrap(registry.timeOfImpact(
+            compoundA,
+            compoundB,
+            frame: Transform(position: Vector3(1, 0, 0)),
+            translation: Vector3(1, 0, 0)))
+
+        XCTAssertEqual(impact.fraction, 0.25)
+        XCTAssertEqual(impact.pointOnA, Vector3(2.25, 0, 0))
+        XCTAssertEqual(impact.pointOnB, Vector3(2.5, 0, 0))
+        XCTAssertEqual(impact.normal, Vector3(1, 0, 0))
+    }
+
+    func testCompoundSweepTransformsTranslationAndGeometryThroughRotatedChild() throws {
+        var registry = CollisionAlgorithmRegistry(usesBuiltinFallback: false)
+        registry.registerSweep(
+            RegistryPrimitiveA.self,
+            RegistryPrimitiveB.self
+        ) { _, _, frame, translation in
+            guard frame.position.lengthSquared < 1.0e-12,
+                  abs(frame.orientation.x) < 1.0e-9,
+                  abs(frame.orientation.y) < 1.0e-9,
+                  abs(frame.orientation.z) < 1.0e-9,
+                  abs(abs(frame.orientation.w) - 1) < 1.0e-9,
+                  (translation - Vector3(1, 0, 0)).lengthSquared < 1.0e-12
+            else { return nil }
+            return TimeOfImpact(fraction: 0.5,
+                                pointOnA: Vector3(0.25, 0, 0),
+                                pointOnB: Vector3(0.5, 0, 0),
+                                normal: Vector3(1, 0, 0))
+        }
+        let childTransform = Transform(
+            orientation: Quaternion(angle: Scalar.pi * 0.5,
+                                    axis: Vector3(0, 0, 1)),
+            position: Vector3(2, 0, 0))
+        let compound = CompoundPrimitive(children: [
+            .init(RegistryPrimitiveA(), transform: childTransform),
+        ])
+
+        let impact = try XCTUnwrap(registry.timeOfImpact(
+            compound,
+            RegistryPrimitiveB(),
+            frame: childTransform,
+            translation: Vector3(0, 1, 0)))
+
+        XCTAssertEqual(impact.fraction, 0.5)
+        XCTAssertEqual(impact.pointOnA.x, 2, accuracy: 1.0e-9)
+        XCTAssertEqual(impact.pointOnA.y, 0.25, accuracy: 1.0e-9)
+        XCTAssertEqual(impact.pointOnB.x, 2, accuracy: 1.0e-9)
+        XCTAssertEqual(impact.pointOnB.y, 0.5, accuracy: 1.0e-9)
+        XCTAssertEqual(impact.normal.x, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(impact.normal.y, 1, accuracy: 1.0e-9)
+    }
+
+    func testExplicitCompoundSweepRegistrationOverridesLeafTraversal() {
+        var registry = CollisionAlgorithmRegistry(usesBuiltinFallback: false)
+        registry.registerSweep(
+            RegistryPrimitiveA.self,
+            RegistryPrimitiveB.self
+        ) { _, _, _, _ in
+            TimeOfImpact(fraction: .zero,
+                         pointOnA: .zero,
+                         pointOnB: .zero,
+                         normal: Vector3(1, 0, 0))
+        }
+        let compound = CompoundPrimitive(children: [
+            .init(RegistryPrimitiveB()),
+        ])
+
+        XCTAssertNotNil(registry.timeOfImpact(
+            RegistryPrimitiveA(),
+            compound,
+            translation: .zero))
+
+        registry.registerSweep(
+            RegistryPrimitiveA.self,
+            CompoundPrimitive.self
+        ) { _, _, _, _ in nil }
+
+        XCTAssertNil(registry.timeOfImpact(
+            RegistryPrimitiveA(),
+            compound,
+            translation: .zero))
+    }
+
     func testCollisionSpaceUsesRegisteredAlgorithmsInsideCompounds() {
         let compoundA = CompoundPrimitive(children: [
             CompoundPrimitive.Child(RegistryPrimitiveA())
@@ -200,6 +349,21 @@ private struct RegistryAlgorithm: CollisionAlgorithm {
                                 pointOnB: Vector3(0.5, 0, 0),
                                 normal: Vector3(1, 0, 0),
                                 penetrationDepth: 0.25))
+    }
+}
+
+private struct RegistrySweepAlgorithm: CollisionSweepAlgorithm {
+    func timeOfImpact(_ a: RegistryPrimitiveA,
+                      _ b: RegistryPrimitiveB,
+                      frame: Transform,
+                      translation: Vector3) -> TimeOfImpact? {
+        guard frame == .identity,
+              translation == Vector3(1, 0, 0)
+        else { return nil }
+        return TimeOfImpact(fraction: 0.25,
+                            pointOnA: Vector3(0.25, 0, 0),
+                            pointOnB: Vector3(0.5, 0, 0),
+                            normal: Vector3(1, 0, 0))
     }
 }
 

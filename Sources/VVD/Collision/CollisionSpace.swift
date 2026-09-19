@@ -190,6 +190,69 @@ public final class CollisionSpace {
         return indexedHits.map(\.hit)
     }
 
+    /// Returns the first collider reached while translating `primitive` from
+    /// `transform`. Rotation remains fixed throughout the query.
+    public func sweep(_ primitive: any CollisionPrimitive,
+                      from transform: Transform = .identity,
+                      translation: Vector3,
+                      filter: CollisionFilter = CollisionFilter()) -> SweepHit? {
+        sweepAll(primitive,
+                 from: transform,
+                 translation: translation,
+                 filter: filter).first
+    }
+
+    /// Returns all supported translational impacts ordered by time-of-impact
+    /// fraction. Equal fractions preserve collider storage order.
+    public func sweepAll(_ primitive: any CollisionPrimitive,
+                         from transform: Transform = .identity,
+                         translation: Vector3,
+                         filter: CollisionFilter = CollisionFilter()) -> [SweepHit] {
+        sweepAll(primitive,
+                 from: transform,
+                 translation: translation,
+                 filter: filter,
+                 excluding: nil)
+    }
+
+    public func sweep(_ shape: any CollisionShape,
+                      from transform: Transform = .identity,
+                      translation: Vector3,
+                      filter: CollisionFilter = CollisionFilter()) -> SweepHit? {
+        sweep(shape.primitive,
+              from: transform,
+              translation: translation,
+              filter: filter)
+    }
+
+    public func sweepAll(_ shape: any CollisionShape,
+                         from transform: Transform = .identity,
+                         translation: Vector3,
+                         filter: CollisionFilter = CollisionFilter()) -> [SweepHit] {
+        sweepAll(shape.primitive,
+                 from: transform,
+                 translation: translation,
+                 filter: filter)
+    }
+
+    /// Sweeps a registered or external collider without mutating its transform.
+    /// The collider's own filter is used, and the collider is excluded from the
+    /// target set when it is registered in this space.
+    public func sweep(_ collider: Collider,
+                      translation: Vector3) -> SweepHit? {
+        sweepAll(collider, translation: translation).first
+    }
+
+    public func sweepAll(_ collider: Collider,
+                         translation: Vector3) -> [SweepHit] {
+        guard collider.isEnabled && collider.isValid else { return [] }
+        return sweepAll(collider.primitive,
+                        from: collider.transform,
+                        translation: translation,
+                        filter: collider.filter,
+                        excluding: collider)
+    }
+
     /// Returns colliders intersecting `collider`, excluding the collider itself.
     public func overlaps(with collider: Collider) -> [Collider] {
         guard collider.isEnabled && collider.isValid else { return [] }
@@ -229,5 +292,69 @@ public final class CollisionSpace {
             }
         }
         return pairs
+    }
+
+    private func sweepAll(_ primitive: any CollisionPrimitive,
+                          from transform: Transform,
+                          translation: Vector3,
+                          filter: CollisionFilter,
+                          excluding excludedCollider: Collider?) -> [SweepHit] {
+        let translationLength = translation.length
+        guard primitive.isValid,
+              translation.x.isFinite,
+              translation.y.isFinite,
+              translation.z.isFinite,
+              translationLength.isFinite
+        else { return [] }
+
+        let primitiveBounds = primitive.bounds
+        let queryBounds: AABB
+        if primitiveBounds.isNull {
+            queryBounds = .null
+        } else {
+            let startBounds = primitiveBounds.applying(transform)
+            var endTransform = transform
+            endTransform.position += translation
+            let endBounds = primitiveBounds.applying(endTransform)
+            queryBounds = startBounds.combining(endBounds)
+        }
+
+        let snapshot = BroadPhaseSnapshot(storage)
+        let inverseTransform = transform.inverted()
+        let localTranslation = translation
+            .applying(inverseTransform.orientation)
+        var indexedHits: [(storageIndex: Int, hit: SweepHit)] = []
+
+        for index in snapshot.candidateIndices(overlapping: queryBounds) {
+            let collider = storage[index]
+            guard collider !== excludedCollider,
+                  filter.allowsCollision(with: collider.filter),
+                  let impact = algorithms.timeOfImpact(
+                    primitive,
+                    collider.primitive,
+                    frame: collider.transform * inverseTransform,
+                    translation: localTranslation),
+                  impact.isValid
+            else { continue }
+
+            let hit = SweepHit(
+                collider: collider,
+                fraction: impact.fraction,
+                pointOnMoving: impact.pointOnA.applying(transform),
+                pointOnCollider: impact.pointOnB.applying(transform),
+                normal: impact.normal
+                    .applying(transform.orientation)
+                    .normalized(),
+                distance: translationLength * impact.fraction)
+            indexedHits.append((index, hit))
+        }
+
+        indexedHits.sort { lhs, rhs in
+            if lhs.hit.fraction == rhs.hit.fraction {
+                return lhs.storageIndex < rhs.storageIndex
+            }
+            return lhs.hit.fraction < rhs.hit.fraction
+        }
+        return indexedHits.map(\.hit)
     }
 }

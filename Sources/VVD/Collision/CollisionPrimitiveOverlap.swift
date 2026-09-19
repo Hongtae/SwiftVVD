@@ -7,7 +7,7 @@
 
 import Foundation
 
-private protocol _SupportMap {
+protocol _SupportMap {
     var isSupportMappingValid: Bool { get }
     var center: Vector3 { get }
     var bounds: AABB { get }
@@ -16,7 +16,7 @@ private protocol _SupportMap {
     func support(_ direction: Vector3) -> Vector3
 }
 
-private extension _SupportMap where Self: CollisionPrimitive {
+extension _SupportMap where Self: CollisionPrimitive {
     var isSupportMappingValid: Bool { isValid }
 }
 
