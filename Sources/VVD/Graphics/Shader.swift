@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import SPIRV_Cross
+private import SPIRV_Cross
 
 public struct ShaderAttribute: Sendable {
     public var name : String

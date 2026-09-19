@@ -7,8 +7,8 @@
 
 import Foundation
 import Synchronization
-import FreeType
-import HarfBuzz
+private import FreeType
+private import HarfBuzz
 
 //////////////////////////////////////////////////////////////////////////////
 // The coordinate system of the font has a positive Y value
@@ -1154,7 +1154,7 @@ public class Font: @unchecked Sendable {
         return length
     }
 
-    var metrics: FT_Size_Metrics {
+    private var metrics: FT_Size_Metrics {
         self.state.withLock {
             $0.face.pointee.size.pointee.metrics
         }

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import FreeType
+internal import FreeType
 
 extension Font {
     public struct GlyphMetrics: Sendable {
