@@ -151,6 +151,55 @@ final class CollisionPrimitiveOverlapTests: XCTestCase {
         XCTAssertFalse(CollisionAlgorithms.intersects(box, mesh, frame: separated))
     }
 
+    func testBuiltInMeshQueriesConvexCandidatesInMeshSpace() {
+        let box = Box(halfExtents: Vector3(0.5, 0.5, 0.5))
+        let mesh = TriangleMesh(triangles: [
+            Triangle(Vector3(-1, -1, 0),
+                     Vector3(1, -1, 0),
+                     Vector3(0, 1, 0)),
+            Triangle(Vector3(99, -1, 0),
+                     Vector3(101, -1, 0),
+                     Vector3(100, 1, 0)),
+        ])
+
+        XCTAssertTrue(CollisionAlgorithms.intersects(box, mesh))
+        XCTAssertFalse(CollisionAlgorithms.intersects(
+            box,
+            mesh,
+            frame: Transform(position: Vector3(0, 0, 2))))
+    }
+
+    func testMeshMeshOverlapUsesTransformedTriangleCandidates() {
+        let a = TriangleMesh(triangles: [
+            Triangle(Vector3(-1, -1, 0),
+                     Vector3(1, -1, 0),
+                     Vector3(0, 1, 0)),
+            Triangle(Vector3(49, -1, 0),
+                     Vector3(51, -1, 0),
+                     Vector3(50, 1, 0)),
+        ])
+        let b = TriangleMesh(triangles: [
+            Triangle(Vector3(-1, -0.5, 0),
+                     Vector3(1, -0.5, 0),
+                     Vector3(0, 0.5, 0)),
+            Triangle(Vector3(99, -1, 0),
+                     Vector3(101, -1, 0),
+                     Vector3(100, 1, 0)),
+        ])
+        let rotated = Quaternion(angle: Scalar.pi * 0.5,
+                                 axis: Vector3(0, 1, 0))
+
+        XCTAssertTrue(CollisionAlgorithms.intersects(
+            a,
+            b,
+            frame: Transform(orientation: rotated)))
+        XCTAssertFalse(CollisionAlgorithms.intersects(
+            a,
+            b,
+            frame: Transform(orientation: rotated,
+                             position: Vector3(3, 0, 0))))
+    }
+
     private func firstContact(_ a: any CollisionPrimitive,
                               _ b: any CollisionPrimitive,
                               frame: Transform = .identity,

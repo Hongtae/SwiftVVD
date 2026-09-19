@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct Triangle: Hashable {
+public struct Triangle: Hashable, Sendable {
     public let p0: Vector3
     public let p1: Vector3
     public let p2: Vector3
@@ -22,6 +22,11 @@ public struct Triangle: Hashable {
         let ab = p1 - p0
         let ac = p2 - p0
         return Vector3.cross(ab, ac).length * Scalar(0.5)
+    }
+
+    /// Unit-length face normal defined by the triangle's winding order.
+    public var normal: Vector3 {
+        Vector3.cross(p1 - p0, p2 - p0).normalized()
     }
 
     public var aabb: AABB {
@@ -51,7 +56,7 @@ public struct Triangle: Hashable {
     }
 
     /// RayTestResult: ray intersection test result with t,u,v
-    /// t: the distance from ray origin to the triangle plane
+    /// t: the parameter from the ray origin to the triangle plane
     ///   intersection point P(t) = rayOrigin + rayDir * t
     /// u,v: barycentric coordinates of intersection point inside the triangle.
     ///   intersection point T(u,v) = (1-u-v)*p0 + u*p1 + v*p2
@@ -90,7 +95,7 @@ public struct Triangle: Hashable {
             return nil
         }
 
-        // calculate t, (distance from origin, intersects triangle)
+        // calculate t, (ray parameter at the triangle intersection)
         let invDet = Scalar(1.0) / det
         let t = Vector3.dot(edge2, q) * invDet
         guard t >= .zero else {
@@ -134,7 +139,7 @@ public struct Triangle: Hashable {
             return nil
         }
 
-        // calculate t, (distance from origin, intersects triangle)
+        // calculate t, (ray parameter at the triangle intersection)
         let t = Vector3.dot(edge2, q) * invDet
         guard t >= .zero else {
             return nil

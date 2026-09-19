@@ -10,6 +10,7 @@ import Foundation
 private protocol _SupportMap {
     var isSupportMappingValid: Bool { get }
     var center: Vector3 { get }
+    var bounds: AABB { get }
 
     /// Farthest point of the primitive in the supplied direction.
     func support(_ direction: Vector3) -> Vector3
@@ -92,6 +93,7 @@ extension Cone: _SupportMap {
 extension Triangle: _SupportMap {
     var isSupportMappingValid: Bool { area > _overlapEpsilon }
     var center: Vector3 { (p0 + p1 + p2) / Scalar(3) }
+    var bounds: AABB { aabb }
 
     /// Triangle support point is the vertex with the largest projection.
     func support(_ direction: Vector3) -> Vector3 {
@@ -129,6 +131,7 @@ private struct _TransformedSupport: _SupportMap {
 
     var isSupportMappingValid: Bool { base.isSupportMappingValid }
     var center: Vector3 { base.center.applying(transform) }
+    var bounds: AABB { base.bounds.applying(transform) }
 
     /// Converts the world-space direction to local space, then transforms back.
     func support(_ direction: Vector3) -> Vector3 {
@@ -271,7 +274,7 @@ extension CollisionAlgorithms {
     }
 
     // Box, TriangleMesh
-    /// Tests the box against each mesh triangle with GJK.
+    /// Tests the box against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: Box, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -357,7 +360,7 @@ extension CollisionAlgorithms {
     }
 
     // Sphere, TriangleMesh
-    /// Tests the sphere against each mesh triangle with GJK.
+    /// Tests the sphere against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: Sphere, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -429,7 +432,7 @@ extension CollisionAlgorithms {
     }
 
     // Capsule, TriangleMesh
-    /// Tests the capsule against each mesh triangle with GJK.
+    /// Tests the capsule against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: Capsule, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -479,7 +482,7 @@ extension CollisionAlgorithms {
     }
 
     // Cylinder, TriangleMesh
-    /// Tests the cylinder against each mesh triangle with GJK.
+    /// Tests the cylinder against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: Cylinder, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -520,7 +523,7 @@ extension CollisionAlgorithms {
     }
 
     // Cone, TriangleMesh
-    /// Tests the cone against each mesh triangle with GJK.
+    /// Tests the cone against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: Cone, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -552,7 +555,7 @@ extension CollisionAlgorithms {
     }
 
     // ConvexHull, TriangleMesh
-    /// Tests the convex hull against each mesh triangle with GJK.
+    /// Tests the convex hull against overlapping mesh triangle candidates with GJK.
     static func intersects(_ a: ConvexHull, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _supportMapMeshIntersects(a, b, frame: frame)
     }
@@ -610,7 +613,7 @@ extension CollisionAlgorithms {
     }
 
     // TriangleMesh, TriangleMesh
-    /// Tests all triangle pairs, using AABB rejection before triangle overlap.
+    /// Tests BVH-pruned triangle candidates before exact triangle overlap.
     static func intersects(_ a: TriangleMesh, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         _triangleMeshIntersects(a, b, frame: frame)
     }
@@ -1080,17 +1083,21 @@ private func _supportMapPlaneIntersects(_ primitive: any _SupportMap, _ plane: S
     return minDistance <= _overlapEpsilon && maxDistance >= -_overlapEpsilon
 }
 
-/// Tests a convex support-mapped primitive against all triangles in a mesh.
+/// Tests a convex support-mapped primitive against overlapping mesh triangles.
 private func _supportMapMeshIntersects(_ primitive: any _SupportMap, _ mesh: TriangleMesh, frame: Transform) -> Bool {
     guard primitive.isSupportMappingValid && mesh.isValid else { return false }
 
-    for index in 0..<mesh.triangleCount {
+    let queryBounds = primitive.bounds.applying(frame.inverted())
+    var result = false
+    mesh.queryTriangles(overlapping: queryBounds) { index in
         let triangle = _transformed(mesh.triangle(at: index), by: frame)
         if _gjkIntersects(primitive, triangle) {
-            return true
+            result = true
+            return false
         }
+        return true
     }
-    return false
+    return result
 }
 
 /// Tests a static plane against all triangles in a mesh.
@@ -1106,20 +1113,27 @@ private func _planeMeshIntersects(_ plane: StaticPlane, _ mesh: TriangleMesh, fr
     return false
 }
 
-/// Tests mesh triangles pairwise after a cheap triangle AABB rejection.
+/// Tests mesh triangles pairwise after storage-defined bounds pruning.
 private func _triangleMeshIntersects(_ a: TriangleMesh, _ b: TriangleMesh, frame: Transform) -> Bool {
     guard a.isValid && b.isValid else { return false }
 
-    for indexA in 0..<a.triangleCount {
+    let inverseFrame = frame.inverted()
+    let boundsBInA = b.bounds.applying(frame)
+    var result = false
+    a.queryTriangles(overlapping: boundsBInA) { indexA in
         let triangleA = a.triangle(at: indexA)
-        for indexB in 0..<b.triangleCount {
+        let boundsAInB = _transformed(triangleA, by: inverseFrame).aabb
+        b.queryTriangles(overlapping: boundsAInB) { indexB in
             let triangleB = _transformed(b.triangle(at: indexB), by: frame)
-            if triangleA.aabb.intersects(triangleB.aabb) && triangleA.intersects(triangleB) {
-                return true
+            if triangleA.intersects(triangleB) {
+                result = true
+                return false
             }
+            return true
         }
+        return result == false
     }
-    return false
+    return result
 }
 
 /// Runs GJK for two convex support maps.

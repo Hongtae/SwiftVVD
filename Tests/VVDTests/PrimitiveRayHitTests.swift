@@ -79,7 +79,7 @@ final class PrimitiveRayHitTests: XCTestCase {
                                       point: .zero)).rayTest(ray))
     }
 
-    func testInvalidRayAndUnimplementedPrimitiveReturnNoHit() {
+    func testInvalidRayAndTopologylessHullReturnNoHit() {
         let invalidRay = Ray(origin: .zero, direction: .zero)
         XCTAssertNil(Sphere(center: .zero, radius: 1).rayTest(invalidRay))
         XCTAssertNil(Box(halfExtents: Vector3(1, 1, 1)).rayTest(invalidRay))
