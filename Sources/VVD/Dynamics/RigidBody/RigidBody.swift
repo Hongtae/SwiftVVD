@@ -82,25 +82,61 @@ public struct RigidBodyMassProperties: Hashable, Sendable {
 public final class RigidBody: Hashable {
     public let collider: Collider
 
-    public var motionType: RigidBodyMotionType
-    public var massProperties: RigidBodyMassProperties
+    public var motionType: RigidBodyMotionType {
+        didSet {
+            if motionType != oldValue { wakeUp() }
+        }
+    }
+    public var massProperties: RigidBodyMassProperties {
+        didSet {
+            if massProperties != oldValue { wakeUpIfSleeping() }
+        }
+    }
     public var material: PhysicsMaterial
-    public var linearVelocity: Vector3
-    public var angularVelocity: Vector3
+    public var linearVelocity: Vector3 {
+        didSet {
+            if linearVelocity != oldValue { wakeUpIfSleeping() }
+        }
+    }
+    public var angularVelocity: Vector3 {
+        didSet {
+            if angularVelocity != oldValue { wakeUpIfSleeping() }
+        }
+    }
     public var linearDamping: Scalar
     public var angularDamping: Scalar
     public var gravityScale: Scalar
+    public var allowsSleeping: Bool {
+        didSet {
+            if allowsSleeping == false { wakeUp() }
+        }
+    }
+    public var isContinuousCollisionDetectionEnabled: Bool {
+        didSet {
+            if isContinuousCollisionDetectionEnabled { wakeUpIfSleeping() }
+        }
+    }
+    public private(set) var isSleeping: Bool
+    public private(set) var sleepDuration: Scalar
 
     public private(set) var accumulatedForces: ForceAccumulator
 
     public var transform: Transform {
         get { collider.transform }
-        set { collider.transform = newValue }
+        set {
+            let changed = collider.transform != newValue
+            collider.transform = newValue
+            if changed { wakeUpIfSleeping() }
+        }
     }
 
     public var isEnabled: Bool {
         get { collider.isEnabled }
-        set { collider.isEnabled = newValue }
+        set {
+            let wasEnabled = collider.isEnabled
+            collider.isEnabled = newValue
+            if newValue && !wasEnabled { wakeUp() }
+        }
     }
 
     public var inverseMass: Scalar {
@@ -134,7 +170,9 @@ public final class RigidBody: Hashable {
                 angularVelocity: Vector3 = .zero,
                 linearDamping: Scalar = 0.0,
                 angularDamping: Scalar = 0.0,
-                gravityScale: Scalar = 1.0) {
+                gravityScale: Scalar = 1.0,
+                allowsSleeping: Bool = true,
+                isContinuousCollisionDetectionEnabled: Bool = false) {
         self.collider = collider
         self.motionType = motionType
         self.massProperties = massProperties
@@ -144,6 +182,11 @@ public final class RigidBody: Hashable {
         self.linearDamping = linearDamping
         self.angularDamping = angularDamping
         self.gravityScale = gravityScale
+        self.allowsSleeping = allowsSleeping
+        self.isContinuousCollisionDetectionEnabled =
+            isContinuousCollisionDetectionEnabled
+        self.isSleeping = false
+        self.sleepDuration = .zero
         self.accumulatedForces = ForceAccumulator()
     }
 
@@ -183,21 +226,55 @@ public final class RigidBody: Hashable {
     }
 
     public func addForce(_ force: Vector3) {
+        if force != .zero { wakeUp() }
         accumulatedForces.addForce(force)
     }
 
     public func addTorque(_ torque: Vector3) {
+        if torque != .zero { wakeUp() }
         accumulatedForces.addTorque(torque)
     }
 
     /// Adds force at a world-space point.
     public func addForce(_ force: Vector3, at point: Vector3) {
+        if force != .zero { wakeUp() }
         let centerOfMass = massProperties.centerOfMass.applying(transform)
         accumulatedForces.addForce(force, at: point - centerOfMass)
     }
 
     public func removeAllForces() {
         accumulatedForces.removeAll()
+    }
+
+    /// Wakes this body and resets its accumulated stationary duration.
+    public func wakeUp() {
+        isSleeping = false
+        sleepDuration = .zero
+    }
+
+    /// Stops an eligible dynamic body until it is explicitly or implicitly
+    /// awakened.
+    public func putToSleep() {
+        guard isEnabled,
+              motionType == .dynamic,
+              allowsSleeping
+        else { return }
+        linearVelocity = .zero
+        angularVelocity = .zero
+        isSleeping = true
+    }
+
+    func resetSleepDuration() {
+        sleepDuration = .zero
+    }
+
+    func advanceSleepDuration(by timeStep: Scalar) {
+        guard timeStep.isFinite, timeStep > .zero else { return }
+        sleepDuration += timeStep
+    }
+
+    private func wakeUpIfSleeping() {
+        if isSleeping { wakeUp() }
     }
 
     /// Replaces the current mass properties with a fresh primitive derivation.

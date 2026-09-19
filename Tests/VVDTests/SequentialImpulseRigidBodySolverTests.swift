@@ -175,9 +175,175 @@ final class SequentialImpulseRigidBodySolverTests: XCTestCase {
         XCTAssertEqual(bodyB.transform.position.x, 0.9, accuracy: 1.0e-9)
     }
 
+    func testPersistentContactWarmStartsNextStep() {
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: PhysicsMaterial(friction: 0, restitution: 0))
+        let bodyB = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            transform: Transform(position: Vector3(2, 0, 0)),
+            motionType: .static,
+            material: PhysicsMaterial(friction: 0, restitution: 0))
+        let contact = makeContact(bodyA: bodyA,
+                                  bodyB: bodyB,
+                                  penetrationDepth: 0,
+                                  featureID: ContactFeatureID(7))
+        let solver = SequentialImpulseRigidBodySolver(velocityIterations: 1)
+
+        solver.solve(RigidBodySolverContext(
+            timeStep: 1,
+            gravity: Vector3(1, 0, 0),
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+
+        XCTAssertEqual(bodyA.linearVelocity.x, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(solver.cachedContactCount, 1)
+
+        solver.velocityIterations = 0
+        solver.solve(RigidBodySolverContext(
+            timeStep: 1,
+            gravity: Vector3(1, 0, 0),
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+
+        XCTAssertEqual(bodyA.linearVelocity.x, 0, accuracy: 1.0e-9)
+    }
+
+    func testWarmStartReprojectsWorldFrictionIntoNewTangentBasis() {
+        let material = PhysicsMaterial(friction: 1, restitution: 0)
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: material)
+        bodyA.linearVelocity = Vector3(1, 1, 0)
+        let bodyB = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            transform: Transform(position: Vector3(2, 0, 0)),
+            motionType: .static,
+            material: material)
+        let contact = makeContact(bodyA: bodyA,
+                                  bodyB: bodyB,
+                                  penetrationDepth: 0,
+                                  featureID: ContactFeatureID(9))
+        let solver = SequentialImpulseRigidBodySolver(velocityIterations: 1)
+
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+        XCTAssertEqual(bodyA.linearVelocity, .zero)
+
+        bodyA.linearVelocity = Vector3(1, 0, 1)
+        solver.velocityIterations = 0
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+
+        XCTAssertEqual(bodyA.linearVelocity.x, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(bodyA.linearVelocity.y, -1, accuracy: 1.0e-9)
+        XCTAssertEqual(bodyA.linearVelocity.z, 1, accuracy: 1.0e-9)
+    }
+
+    func testDisablingWarmStartClearsContactCache() {
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: PhysicsMaterial(friction: 0))
+        let bodyB = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            transform: Transform(position: Vector3(2, 0, 0)),
+            motionType: .static,
+            material: PhysicsMaterial(friction: 0))
+        let solver = SequentialImpulseRigidBodySolver(velocityIterations: 1)
+        let featureOne = makeContact(bodyA: bodyA,
+                                     bodyB: bodyB,
+                                     penetrationDepth: 0,
+                                     featureID: ContactFeatureID(1))
+
+        bodyA.linearVelocity = Vector3(1, 0, 0)
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [featureOne],
+            constraints: []))
+        XCTAssertEqual(solver.cachedContactCount, 1)
+
+        solver.isWarmStartingEnabled = false
+        solver.velocityIterations = 0
+        bodyA.linearVelocity = Vector3(1, 0, 0)
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [featureOne],
+            constraints: []))
+
+        XCTAssertEqual(bodyA.linearVelocity.x, 1, accuracy: 1.0e-9)
+        XCTAssertEqual(solver.cachedContactCount, 0)
+
+        solver.isWarmStartingEnabled = true
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [],
+            constraints: []))
+        XCTAssertEqual(solver.cachedContactCount, 0)
+    }
+
+    func testSleepingContactRetainsCacheUntilFeatureDisappears() {
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: PhysicsMaterial(friction: 0))
+        bodyA.linearVelocity = Vector3(1, 0, 0)
+        let bodyB = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            transform: Transform(position: Vector3(2, 0, 0)),
+            motionType: .static,
+            material: PhysicsMaterial(friction: 0))
+        let contact = makeContact(bodyA: bodyA,
+                                  bodyB: bodyB,
+                                  penetrationDepth: 0,
+                                  featureID: ContactFeatureID(11))
+        let solver = SequentialImpulseRigidBodySolver(velocityIterations: 1)
+
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+        bodyA.putToSleep()
+
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [contact],
+            constraints: []))
+        XCTAssertTrue(bodyA.isSleeping)
+        XCTAssertEqual(solver.cachedContactCount, 1)
+
+        solver.solve(RigidBodySolverContext(
+            timeStep: 0.1,
+            gravity: .zero,
+            bodies: [bodyA, bodyB],
+            contacts: [],
+            constraints: []))
+        XCTAssertEqual(solver.cachedContactCount, 0)
+    }
+
     private func makeContact(bodyA: RigidBody,
                              bodyB: RigidBody,
-                             penetrationDepth: Scalar) -> RigidBodyContact {
+                             penetrationDepth: Scalar,
+                             featureID: ContactFeatureID = ContactFeatureID())
+        -> RigidBodyContact {
         RigidBodyContact(
             bodyA: bodyA,
             bodyB: bodyB,
@@ -185,6 +351,7 @@ final class SequentialImpulseRigidBodySolverTests: XCTestCase {
                 pointOnA: Vector3(1, 0, 0),
                 pointOnB: Vector3(1, 0, 0),
                 normal: Vector3(1, 0, 0),
-                penetrationDepth: penetrationDepth)))
+                penetrationDepth: penetrationDepth,
+                featureID: featureID)))
     }
 }

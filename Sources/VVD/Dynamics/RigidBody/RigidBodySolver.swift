@@ -32,17 +32,21 @@ public struct RigidBodySolverContext {
     public let bodies: [RigidBody]
     public let contacts: [RigidBodyContact]
     public let constraints: [any RigidBodyConstraint]
+    /// Collision queries available to solvers that implement CCD.
+    public let collisionSpace: CollisionSpace?
 
     public init(timeStep: Scalar,
                 gravity: Vector3,
                 bodies: [RigidBody],
                 contacts: [RigidBodyContact],
-                constraints: [any RigidBodyConstraint]) {
+                constraints: [any RigidBodyConstraint],
+                collisionSpace: CollisionSpace? = nil) {
         self.timeStep = timeStep
         self.gravity = gravity
         self.bodies = bodies
         self.contacts = contacts
         self.constraints = constraints
+        self.collisionSpace = collisionSpace
     }
 }
 

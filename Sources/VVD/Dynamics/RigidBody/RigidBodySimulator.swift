@@ -86,7 +86,8 @@ public final class RigidBodySimulator {
                                       gravity: gravity,
                                       bodies: bodyStorage,
                                       contacts: contacts,
-                                      constraints: constraintStorage.filter(\.isEnabled))
+                                      constraints: constraintStorage.filter(\.isEnabled),
+                                      collisionSpace: collisionSpace)
     }
 
     /// Delegates one simulation step to the configured solver.

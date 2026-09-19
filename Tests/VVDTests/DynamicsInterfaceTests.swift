@@ -51,6 +51,7 @@ final class DynamicsInterfaceTests: XCTestCase {
         XCTAssertEqual(context.bodies.count, 2)
         XCTAssertEqual(context.contacts.count, 1)
         XCTAssertEqual(context.constraints.count, 1)
+        XCTAssertTrue(context.collisionSpace === simulator.collisionSpace)
         XCTAssertEqual(context.gravity.y, -10, accuracy: 1.0e-9)
         XCTAssertTrue(context.contacts[0].bodyA === bodyA)
         XCTAssertTrue(context.contacts[0].bodyB === bodyB)
