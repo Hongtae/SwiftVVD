@@ -15,14 +15,36 @@ public enum RigidBodyMotionType: Hashable, Sendable {
 public struct RigidBodyMassProperties: Hashable, Sendable {
     public var mass: Scalar
     public var centerOfMass: Vector3
-    public var inertia: Vector3
+    /// Local-space inertia tensor about `centerOfMass`.
+    public var inertiaTensor: Matrix3
+
+    /// Compatibility access to the tensor diagonal. Assigning this property
+    /// replaces the full tensor with a diagonal tensor.
+    public var inertia: Vector3 {
+        get {
+            Vector3(inertiaTensor.m11,
+                    inertiaTensor.m22,
+                    inertiaTensor.m33)
+        }
+        set {
+            inertiaTensor = Self.diagonalMatrix(newValue)
+        }
+    }
 
     public init(mass: Scalar = 1.0,
                 centerOfMass: Vector3 = .zero,
                 inertia: Vector3 = .zero) {
         self.mass = mass
         self.centerOfMass = centerOfMass
-        self.inertia = inertia
+        self.inertiaTensor = Self.diagonalMatrix(inertia)
+    }
+
+    public init(mass: Scalar,
+                centerOfMass: Vector3 = .zero,
+                inertiaTensor: Matrix3) {
+        self.mass = mass
+        self.centerOfMass = centerOfMass
+        self.inertiaTensor = inertiaTensor
     }
 
     public var inverseMass: Scalar {
@@ -30,9 +52,29 @@ public struct RigidBodyMassProperties: Hashable, Sendable {
     }
 
     public var inverseInertia: Vector3 {
-        Vector3(inertia.x > .zero ? Scalar(1) / inertia.x : .zero,
-                inertia.y > .zero ? Scalar(1) / inertia.y : .zero,
-                inertia.z > .zero ? Scalar(1) / inertia.z : .zero)
+        let inverse = inverseInertiaTensor
+        return Vector3(inverse.m11, inverse.m22, inverse.m33)
+    }
+
+    public var inverseInertiaTensor: Matrix3 {
+        if let inverse = inertiaTensor.inverted() {
+            return inverse
+        }
+
+        if inertiaTensor.isDiagonal {
+            let diagonal = inertia
+            return Self.diagonalMatrix(Vector3(
+                diagonal.x > .zero ? Scalar(1) / diagonal.x : .zero,
+                diagonal.y > .zero ? Scalar(1) / diagonal.y : .zero,
+                diagonal.z > .zero ? Scalar(1) / diagonal.z : .zero))
+        }
+        return Self.diagonalMatrix(.zero)
+    }
+
+    private static func diagonalMatrix(_ diagonal: Vector3) -> Matrix3 {
+        Matrix3(diagonal.x, 0, 0,
+                0, diagonal.y, 0,
+                0, 0, diagonal.z)
     }
 }
 
@@ -67,6 +109,21 @@ public final class RigidBody: Hashable {
 
     public var inverseInertia: Vector3 {
         motionType == .dynamic ? massProperties.inverseInertia : .zero
+    }
+
+    public var inverseInertiaTensor: Matrix3 {
+        motionType == .dynamic
+            ? massProperties.inverseInertiaTensor
+            : Matrix3(0, 0, 0,
+                      0, 0, 0,
+                      0, 0, 0)
+    }
+
+    /// Inverse inertia rotated from body-local coordinates into simulation
+    /// coordinates.
+    public var worldInverseInertiaTensor: Matrix3 {
+        let rotation = transform.orientation.matrix3
+        return rotation.transposed() * inverseInertiaTensor * rotation
     }
 
     public init(collider: Collider,
@@ -104,6 +161,27 @@ public final class RigidBody: Hashable {
                   material: material)
     }
 
+    /// Creates a body after deriving finite-volume mass properties from its
+    /// primitive. Unsupported or zero-volume primitives fail construction.
+    public convenience init?(
+        primitive: any CollisionPrimitive,
+        density: Scalar,
+        transform: Transform = .identity,
+        filter: CollisionFilter = CollisionFilter(),
+        motionType: RigidBodyMotionType = .dynamic,
+        material: PhysicsMaterial = .default
+    ) {
+        guard let massProperties = RigidBodyMassProperties(
+            primitive: primitive,
+            density: density) else { return nil }
+        self.init(primitive: primitive,
+                  transform: transform,
+                  filter: filter,
+                  motionType: motionType,
+                  massProperties: massProperties,
+                  material: material)
+    }
+
     public func addForce(_ force: Vector3) {
         accumulatedForces.addForce(force)
     }
@@ -120,6 +198,16 @@ public final class RigidBody: Hashable {
 
     public func removeAllForces() {
         accumulatedForces.removeAll()
+    }
+
+    /// Replaces the current mass properties with a fresh primitive derivation.
+    @discardableResult
+    public func recalculateMassProperties(density: Scalar) -> Bool {
+        guard let properties = RigidBodyMassProperties(
+            primitive: collider.primitive,
+            density: density) else { return false }
+        massProperties = properties
+        return true
     }
 
     public static func == (lhs: RigidBody, rhs: RigidBody) -> Bool {

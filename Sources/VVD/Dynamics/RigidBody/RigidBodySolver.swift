@@ -11,6 +11,11 @@ public struct RigidBodyContact {
     public let bodyB: RigidBody
     public let manifold: ContactManifold
 
+    /// The symmetric material pair resolved for this contact.
+    public var material: PhysicsMaterial {
+        bodyA.material.combined(with: bodyB.material)
+    }
+
     public init(bodyA: RigidBody,
                 bodyB: RigidBody,
                 manifold: ContactManifold) {

@@ -27,10 +27,17 @@ final class DynamicsInterfaceTests: XCTestCase {
         let solver = RecordingRigidBodySolver()
         let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0),
                                            solver: solver)
-        let bodyA = RigidBody(primitive: Sphere(center: .zero, radius: 1))
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: PhysicsMaterial(friction: 0.25,
+                                      restitution: 0.2,
+                                      frictionCombineMode: .multiply,
+                                      restitutionCombineMode: .maximum))
         let bodyB = RigidBody(primitive: Sphere(center: .zero, radius: 1),
                               transform: Transform(position: Vector3(1.5, 0, 0)),
-                              motionType: .static)
+                              motionType: .static,
+                              material: PhysicsMaterial(friction: 0.8,
+                                                        restitution: 0.6))
         let constraint = FixedJointConstraint(bodyA: bodyA, bodyB: bodyB)
 
         XCTAssertTrue(simulator.add(bodyA))
@@ -47,6 +54,12 @@ final class DynamicsInterfaceTests: XCTestCase {
         XCTAssertEqual(context.gravity.y, -10, accuracy: 1.0e-9)
         XCTAssertTrue(context.contacts[0].bodyA === bodyA)
         XCTAssertTrue(context.contacts[0].bodyB === bodyB)
+        XCTAssertEqual(context.contacts[0].material.friction,
+                       0.2,
+                       accuracy: 1.0e-9)
+        XCTAssertEqual(context.contacts[0].material.restitution,
+                       0.6,
+                       accuracy: 1.0e-9)
     }
 
     func testForceAccumulatorAndMassPropertiesExposeSolverInputs() {
