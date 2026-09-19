@@ -1328,7 +1328,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     renderer.draw(layout: layout, in: &local)
                     local.recording!.draw(in: context)
                 } else if let drawing = makeDrawing() {
-                    context.draw(drawing, in: frame, shading: shading)
+                    context.draw(drawing, in: frame, shading: shading, clipBounds: false)
                 }
             }
 
@@ -1340,7 +1340,7 @@ struct DisplayList: Equatable, CustomStringConvertible {
                 if !transform.isIdentity {
                     context.concatenate(transform)
                 }
-                context.draw(drawing, in: frame, shading: shading)
+                context.draw(drawing, in: frame, shading: shading, clipBounds: false)
             }
 
             func transformed(

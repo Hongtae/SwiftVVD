@@ -30,8 +30,8 @@ final class GraphicsContextTextTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS textStringDrawingDrawGeometryObserved textStringDrawingRequestedDrawingWidthObserved
     func testDrawingBoundsKeepTheMeasurementProposalAndCachedWidthSeparate() throws {
+        // ASSERTIONS textStringDrawingRequestedWidth27Observed
         try withContext { context in
             let owner = try XCTUnwrap(context.resolve(Text(verbatim: "HHH")).resolved as? ResolvedStyledText.StringDrawing)
             owner.layoutMargins = .init(top: 1.25, leading: 2.5, bottom: 3.75, trailing: 4.5)
@@ -42,30 +42,39 @@ final class GraphicsContextTextTests: XCTestCase {
             let ordinary = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: false)
             XCTAssertEqual(ordinary.origin.x, 32.25)
             XCTAssertEqual(ordinary.origin.y, 32.25 + metrics.baselineAdjustment)
-            XCTAssertEqual(ordinary.size.width, metrics.size.width + 6)
+            XCTAssertEqual(ordinary.size.width, metrics.requestedWidth)
             XCTAssertEqual(ordinary.size.height, metrics.size.height)
             XCTAssertEqual(ordinary, owner.drawingBounds(in: CGRect(origin: rect.origin, size: .zero),
                                                         with: request, applyingMarginOffsets: false))
             let inset = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: true)
             XCTAssertEqual(inset.origin.x - ordinary.origin.x, owner.drawingMargins.leading)
             XCTAssertEqual(inset.origin.y - ordinary.origin.y, owner.drawingMargins.top)
-            XCTAssertEqual(ordinary.size.width - inset.size.width, 7)
+            XCTAssertEqual(ordinary.size.width, inset.size.width)
             XCTAssertEqual(ordinary.size.height - inset.size.height, 5)
-            owner.layoutProperties.hyphenationFactor = 0.7
-            for direction: LayoutDirection in [.leftToRight, .rightToLeft] {
-                owner.layoutProperties.layoutDirection = direction
-                for alignment: TextAlignment in [.leading, .center, .trailing] {
-                    owner.layoutProperties.multilineTextAlignment = alignment
-                    for margins in [false, true] {
-                        let drawing = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: margins)
-                        let reference = margins ? inset : ordinary
-                        XCTAssertEqual(drawing.size.width, 299)
-                        XCTAssertEqual(drawing.origin.y, reference.origin.y)
-                        XCTAssertEqual(drawing.size.height, reference.size.height)
-                        if alignment == .center { XCTAssertEqual(drawing.midX, reference.midX) }
-                        else if (alignment == .leading) == (direction == .leftToRight) {
-                            XCTAssertEqual(drawing.minX, reference.minX)
-                        } else { XCTAssertEqual(drawing.maxX, reference.maxX) }
+            for hyphenation: CGFloat in [0, 0.7] {
+                owner.layoutProperties.hyphenationFactor = hyphenation
+                for direction: LayoutDirection in [.leftToRight, .rightToLeft] {
+                    owner.layoutProperties.layoutDirection = direction
+                    for alignment: TextAlignment in [.leading, .center, .trailing] {
+                        owner.layoutProperties.multilineTextAlignment = alignment
+                        for margins in [false, true] {
+                            let drawing = owner.drawingBounds(in: rect, with: request, applyingMarginOffsets: margins)
+                            var reference = CGRect(x: rect.minX, y: rect.minY + metrics.baselineAdjustment,
+                                width: metrics.size.width + 6, height: metrics.size.height)
+                            if margins {
+                                reference.origin.x += owner.drawingMargins.leading
+                                reference.origin.y += owner.drawingMargins.top
+                                reference.size.width -= 7
+                                reference.size.height -= 5
+                            }
+                            XCTAssertEqual(drawing.size.width, 299)
+                            XCTAssertEqual(drawing.origin.y, reference.origin.y)
+                            XCTAssertEqual(drawing.size.height, reference.size.height)
+                            if alignment == .center { XCTAssertEqual(drawing.midX, reference.midX) }
+                            else if (alignment == .leading) == (direction == .leftToRight) {
+                                XCTAssertEqual(drawing.minX, reference.minX)
+                            } else { XCTAssertEqual(drawing.maxX, reference.maxX) }
+                        }
                     }
                 }
             }

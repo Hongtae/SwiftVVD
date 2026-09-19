@@ -108,6 +108,7 @@ final class TextDrawingMarginTests: XCTestCase {
 
     // ASSERTIONS textStringDrawingHorizontalLinePlacementObserved textStringDrawingDrawGeometryObserved
     func testAlignedLinesMoveGlyphsBackgroundsDecorationsAndAtomsTogether() throws {
+        // ASSERTIONS textStringDrawingRequestedWidth27Observed
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
         appContext = StyleTestAppContext(graphicsDeviceContext: device)
@@ -138,11 +139,12 @@ final class TextDrawingMarginTests: XCTestCase {
                     : (alignment == .leading) == (direction == .leftToRight) ? 0 : 1
                 let offsets = lines.map { (metrics.size.width - $0.width / source.scaleFactor) * fraction }
                 XCTAssertGreaterThan(offsets[1] - offsets[0], fraction == 0 ? -1 : 0)
+                let requestedOriginX = rect.minX + (metrics.size.width - metrics.requestedWidth) * fraction
                 let expected = try render(device: device, environment: environment) { context in
                     for (line, x) in zip(lines, offsets) {
                         let drawing = source.makeDrawing(lineGlyphs: [line], origin: CGPoint(x: x, y: metrics.baselineAdjustment))
                         context.draw(drawing, in: rect, shading: .color(.red),
-                                     snappingOrigin: CGPoint(x: rect.minX, y: rect.minY + metrics.baselineAdjustment),
+                                     snappingOrigin: CGPoint(x: requestedOriginX, y: rect.minY + metrics.baselineAdjustment),
                                      clipBounds: false)
                     }
                 }
@@ -172,7 +174,7 @@ final class TextDrawingMarginTests: XCTestCase {
                             x: x + owner.drawingMargins.leading,
                             y: metrics.baselineAdjustment + owner.drawingMargins.top))
                         context.draw(drawing, in: rect, shading: .color(.red), snappingOrigin: CGPoint(
-                            x: rect.minX + owner.drawingMargins.leading,
+                            x: requestedOriginX + owner.drawingMargins.leading,
                             y: rect.minY + metrics.baselineAdjustment + owner.drawingMargins.top))
                     }
                 }
@@ -463,7 +465,10 @@ final class TextDrawingMarginTests: XCTestCase {
                     environment.lineLimit = limit
                     environment.lineSpacing = spacing
                     environment.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "en"))
-                    var source = try resolve(Text(verbatim: "Alpha\nBeta\nGamma\nDelta"), environment: environment)
+                    // Keep this geometry comparison independent of translucent foreground
+                    // compositing across the renderer's separate truncation-token run.
+                    var source = try resolve(Text(verbatim: "Alpha\nBeta\nGamma\nDelta").foregroundColor(.black),
+                                             environment: environment)
                     source.shading = .color(.black)
                     let properties = TextLayoutProperties(from: environment)
                     let styled = ResolvedStyledText.StringDrawing(layoutProperties: properties, resolvedText: source)
@@ -490,7 +495,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         }
                         XCTAssertEqual(renderer.proxySize?.height, height)
                         XCTAssertEqual(renderer.layoutLineCount, count)
-                        XCTAssertEqual(actual, expected, "\(mode) scale=\(scale) limit=\(String(describing: limit)) spacing=\(spacing) replay=\(record)")
+                        XCTAssertTrue(actual == expected, "\(mode) scale=\(scale) limit=\(String(describing: limit)) spacing=\(spacing) replay=\(record)")
                     }
                 }
             }
@@ -588,6 +593,7 @@ final class TextDrawingMarginTests: XCTestCase {
     // ASSERTIONS textComponentFontLanguageAndRatioObserved
     // ASSERTIONS textStringDrawingCacheInvalidationObserved textStringDrawingScaledDrawingCacheGateObserved
     func testScaleOverrideResetPreservesImmediatePreparedAndRecordedPixels() throws {
+        // ASSERTIONS textInsetInkClipping27Observed
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
         appContext = StyleTestAppContext(graphicsDeviceContext: device)
@@ -618,7 +624,7 @@ final class TextDrawingMarginTests: XCTestCase {
                     let referenceDrawing = reference.makeDrawing(in: size,
                         origin: CGPoint(x: owner.drawingMargins.leading, y: owner.drawingMargins.top))
                     let expected = try render(device: device, environment: environment) {
-                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black))
+                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black), clipBounds: false)
                     }
                     XCTAssertTrue(expected.contains { $0 != 0 })
                     let preparedLayout = try XCTUnwrap(owner.preparedLayout)
@@ -719,6 +725,7 @@ final class TextDrawingMarginTests: XCTestCase {
     // ASSERTIONS textStringDrawingScaleSelectionObserved textStringDrawingScaledFontQuantizationObserved
     // ASSERTIONS textStringDrawingMultilineFittingObserved
     func testFittedTextUsesTheSelectedFontForPreparedDrawingAndReplayInBothModes() throws {
+        // ASSERTIONS textInsetInkClipping27Observed
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
         appContext = StyleTestAppContext(graphicsDeviceContext: device)
@@ -759,7 +766,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         layoutProperties: TextLayoutProperties(from: referenceEnvironment),
                         origin: CGPoint(x: owner.drawingMargins.leading, y: owner.drawingMargins.top))
                     let expected = try render(device: device, environment: environment) {
-                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black))
+                        $0.draw(referenceDrawing, in: item.frame, shading: .color(.black), clipBounds: false)
                     }
                     XCTAssertTrue(expected.contains { $0 != 0 })
                     let prepared = try XCTUnwrap(item.makeDrawing())
@@ -949,6 +956,7 @@ final class TextDrawingMarginTests: XCTestCase {
     // ASSERTIONS textDrawingFrameCompensationObserved
     // ASSERTIONS textDrawingRendererLocalContextObserved
     func testFractionalClippingPreservesPreparedAndRendererPixelsOnGPU() throws {
+        // ASSERTIONS textInsetInkClipping27Observed
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
         appContext = StyleTestAppContext(graphicsDeviceContext: device)
@@ -977,8 +985,7 @@ final class TextDrawingMarginTests: XCTestCase {
                         $0.draw(text, in: CGRect(origin: .zero, size: plain.size))
                     }
                     XCTAssertTrue(expected.contains { $0 != 0 })
-                    // The display-list frame uses a pixel-aligned scissor, while
-                    // the renderer's local context remains unbounded.
+                    // Only an explicit receiving-context clip restricts ink.
                     let clip = plain.frame.applying(CGAffineTransform(scaleX: renderScale, y: renderScale))
                         .integral.applying(CGAffineTransform(scaleX: 1 / renderScale, y: 1 / renderScale))
                     let clipped = try render(device: device, environment: environment) {
@@ -993,18 +1000,26 @@ final class TextDrawingMarginTests: XCTestCase {
                     let custom = try render(device: device, environment: environment) { item.draw(in: $0) }
                     let label = "\(kind) \(mode) renderScale=\(renderScale) frame=\(plain.frame)"
                     if kind == .single, case .bitmap = mode {
-                        // The tiny bitmap's right-edge coverage exceeds its advance.
-                        // Restoring the previous vertical allowance leaves that
-                        // independent horizontal clip unchanged.
+                        // Changing the vertical drawing allowance does not
+                        // introduce a horizontal ink clip.
                         let padded = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 0.5, leading: 0, bottom: 0, trailing: 0), resolvedText: text)
                         let previous = try value(padded)
                         XCTAssertEqual(previous.frame.minY, -1)
                         let pixels = try render(device: device, environment: environment) { previous.draw(in: $0) }
                         XCTAssertTrue(pixels == immediate, label)
                     }
-                    XCTAssertTrue(immediate == clipped, label)
-                    XCTAssertTrue(cached == clipped, label)
+                    XCTAssertTrue(immediate == expected, label)
+                    XCTAssertTrue(cached == expected, label)
                     XCTAssertTrue(custom == expected, label)
+                    for operation in 0..<3 {
+                        let explicitlyClipped = try render(device: device, environment: environment) {
+                            $0.clip(to: Path(clip))
+                            if operation == 0 { plain.draw(in: $0) }
+                            else if operation == 1 { plain.draw(prepared, in: $0) }
+                            else { item.draw(in: $0) }
+                        }
+                        XCTAssertTrue(explicitlyClipped == clipped, "Outer clip: \(label) operation=\(operation)")
+                    }
                     XCTAssertEqual(prepared.origin.y, expectedTop)
                     XCTAssertEqual(renderer.origin?.y, text.firstBaseline(in: plain.size) + expectedTop)
                 }

@@ -1095,7 +1095,8 @@ extension ResolvedStyledText {
             guard let source = drawingSource(in: size) else { return nil }
             let prepared = drawingScale(size: size) == 1 && !containsResolvable ? preparedLayout : nil
             return (source, source.makeGlyphLayout(in: layoutSize ?? size, layoutProperties: layoutProperties,
-                                                  sourceLines: prepared?.lines).lines)
+                truncationTolerance: 0.0002,
+                sourceLines: prepared?.lines, layoutScope: .document).lines)
         }
 
         func drawingBounds(in rect: CGRect, with size: CGSize, applyingMarginOffsets: Bool) -> CGRect {
@@ -1116,7 +1117,7 @@ extension ResolvedStyledText {
                 bounds.origin.x += margins.leading - layoutMargins.leading
                 bounds.origin.y += margins.top - layoutMargins.top
             }
-            if layoutProperties.hyphenationFactor != 0, metrics.requestedWidth != .infinity {
+            if metrics.requestedWidth != .infinity {
                 let adjustment = bounds.size.width - metrics.requestedWidth
                 switch layoutProperties.multilineTextAlignment {
                 case .center: bounds.origin.x += adjustment * 0.5
@@ -1253,12 +1254,43 @@ extension ResolvedStyledText {
             in size: CGSize, source: ResolvedTextSource
         ) -> (measurement: FittingMeasurement, scale: CGFloat)? {
             let minimum = layoutProperties.minScaleFactor
-            guard minimum > 0, minimum < 1, let font = source.uniformFont,
-                  let string = source.uniformString, source.fontResolutionContext != nil else { return nil }
+            guard minimum > 0, minimum < 1, source.fontResolutionContext != nil else { return nil }
+            let font = source.uniformFont
+            let string: String
+            if let uniform = source.uniformString {
+                string = uniform
+            } else {
+                // Mixed text runs share a fitting scale. LF starts a new paragraph owner.
+                // Supported separators retain their paragraph ownership during fitting.
+                guard layoutProperties.writingMode == .horizontalTopToBottom,
+                      case let .styledText(_, _, _, first) = source.runs.first else { return nil }
+                let allowsLineSeparators = (layoutProperties.lineLimit ?? 0) >= 1
+                var paragraphStyle = first.paragraphStyle
+                var startsParagraph = false
+                var text = ""
+                for run in source.runs {
+                    guard case let .styledText(_, value, _, attributes) = run,
+                          attributes.customAttachment == nil,
+                          attributes.fontResource?.requestedPointSize != nil,
+                          startsParagraph || attributes.paragraphStyle == paragraphStyle,
+                          (attributes.paragraphStyle?.firstLineHeadIndent ?? 0) == 0,
+                          (attributes.paragraphStyle?.lineSpacing ?? 0) == 0,
+                          attributes.paragraphStyle?.allowsTightening != true,
+                          !value.unicodeScalars.contains(where: {
+                              CharacterSet.newlines.contains($0) &&
+                                  !(allowsLineSeparators && ($0 == "\n" || $0 == "\u{2028}"))
+                          }) else { return nil }
+                    text += value
+                    paragraphStyle = attributes.paragraphStyle
+                    if !value.isEmpty { startsParagraph = value.hasSuffix("\n") }
+                }
+                guard !text.isEmpty else { return nil }
+                string = text
+            }
             let limit = layoutProperties.lineLimit
-            // Explicit separators in a one-line request retain their ordinary
-            // paragraph path until that path supplies its own fitting producer.
-            if limit == 1, string.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) }) {
+            if limit == 1, string.unicodeScalars.contains(where: {
+                CharacterSet.newlines.contains($0) && $0 != "\n" && $0 != "\u{2028}"
+            }) {
                 return nil
             }
             let naturalSize = CGSize(width: limit == 1 ? 9_000_000 : size.width, height: 9_000_000)
@@ -1279,7 +1311,10 @@ extension ResolvedStyledText {
                 return (original, 1)
             }
             func resized(_ scale: CGFloat) -> ResolvedTextSource? {
-                source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
+                if let font {
+                    return source.resizingUniformFont(to: (font.pointSize * scale * 4).rounded() * 0.25)
+                }
+                return source.scalingFonts(by: scale)
             }
             func oversized(_ candidate: ResolvedTextSource) -> Bool {
                 let measured = fittingMeasurement(in: naturalSize, source: candidate, layoutProperties: fittingProperties)
@@ -1301,7 +1336,12 @@ extension ResolvedStyledText {
             var high: CGFloat = 1
             if minimum > 0.01 {
                 guard let candidate = resized(minimum) else { return nil }
-                if candidate.uniformFont?.pointSize != font.pointSize, oversized(candidate) {
+                let unchanged = zip(candidate.runs, source.runs).allSatisfy { candidate, original in
+                    guard case let .styledText(_, _, _, a) = candidate,
+                          case let .styledText(_, _, _, b) = original else { return false }
+                    return a.fontResource?.pointSize == b.fontResource?.pointSize
+                }
+                if !unchanged, oversized(candidate) {
                     return finish(candidate, scale: minimum)
                 }
             }
@@ -1350,8 +1390,10 @@ extension ResolvedStyledText {
             let layout = source.makeGlyphLayout(
                 maxWidth: width >= CGFloat(Int.max) ? .max : Int(ceil(width)),
                 maximumHeight: size.height * source.scaleFactor,
+                truncationWidth: width,
+                truncationTolerance: 0.0002 * source.scaleFactor,
                 lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode,
-                sourceLines: sources)
+                sourceLines: sources, layoutScope: .document)
             return .init(metrics: source.unroundedLayoutMetrics(lineGlyphs: layout.lines), lineCount: layout.lineCount,
                          forcedClusterBreak: layout.forcedClusterBreak, truncatedRanges: layout.truncatedRanges)
         }
@@ -1478,7 +1520,8 @@ extension ResolvedStyledText {
             let pixelWidth = size.width * resolvedText.scaleFactor
             let lines = resolvedText.makeGlyphLayout(
                 maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
-                maximumHeight: .infinity, sourceLines: sources).lines
+                maximumHeight: .infinity, truncationWidth: pixelWidth,
+                truncationTolerance: 0.0002 * resolvedText.scaleFactor, sourceLines: sources).lines
             // A completed single content line admits its trailing fragment only
             // when that complete rectangle fits. It does not truncate the line
             // merely because the final empty fragment failed the height check.
@@ -1704,7 +1747,7 @@ extension ResolvedStyledText {
             }
             prepared.source.shading = shading
             return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines, layoutDirection: layoutDirection,
-                isTruncated: prepared.metrics.flags.contains(.isTruncated),
+                isTruncated: !prepared.layout.truncatedRanges.isEmpty,
                 origin: prepared.bounds.origin, usesLineStartAttributes: true)
         }
 
@@ -1781,8 +1824,18 @@ extension ResolvedStyledText {
                 fatalError("TextLayoutManager metrics require resolved text")
             }
             let minimum = max(layoutProperties.minScaleFactor, CGFloat.leastNonzeroMagnitude)
-            // Mixed attributes and attachments retain their existing fixed-scale producer.
-            guard minimum < 1, source.uniformFont != nil || storage?.length == 0 else {
+            guard minimum < 1 else {
+                return computeMetrics(scale: 1, requestedSize: requestedSize, minorAxisIsFlexible: false)
+            }
+            // Font runs share one fitting scale. Attachments keep their fixed-scale producer.
+            let canScaleTextRuns = layoutProperties.writingMode == .horizontalTopToBottom &&
+                source.fontResolutionContext != nil && source.runs.allSatisfy { run in
+                    guard case let .styledText(_, _, _, attributes) = run,
+                          attributes.customAttachment == nil,
+                          let font = attributes.fontResource else { return false }
+                    return font.requestedPointSize != nil
+                }
+            guard source.uniformFont != nil || storage?.length == 0 || canScaleTextRuns else {
                 return computeMetrics(scale: 1, requestedSize: requestedSize, minorAxisIsFlexible: false)
             }
             let size = requestedSize.physicalSize
@@ -1826,6 +1879,9 @@ extension ResolvedStyledText {
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let layout = glyphLayout(resolvedText, in: available, scale: scale)
             var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
+            raw.size.width = layout.lines.reduce(CGFloat.zero) {
+                max($0, $1.fragmentWidth ?? $1.width)
+            } / resolvedText.scaleFactor
             let truncated = !layout.truncatedRanges.isEmpty || layout.hasUnlaidText
             var retainedLayout: Text.Layout?
             if truncated, var suffixLine = suffix.line {
@@ -1888,6 +1944,8 @@ extension ResolvedStyledText {
                 source.makeGlyphLayout(
                     maxWidth: pixelWidth > CGFloat(Int.max) ? .max : Int(ceil(pixelWidth)),
                     maximumHeight: available.height * source.scaleFactor,
+                    truncationWidth: pixelWidth,
+                    truncationTolerance: 0.001 * source.scaleFactor,
                     lineLimit: layoutProperties.lineLimit, truncationMode: layoutProperties.truncationMode,
                     hasTextSuffix: suffix.line != nil)
             }

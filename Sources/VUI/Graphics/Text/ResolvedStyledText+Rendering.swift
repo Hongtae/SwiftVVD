@@ -23,7 +23,7 @@ extension ResolvedStyledText {
         context.clipBoundingRect = .infinite
         let bounds = frame(in: size, renderer: renderer)
         var list = DisplayList()
-        list.appendTextItem(StyledTextContentView(text: self, renderer: renderer), size: bounds.size,
+        list.appendTextItem(StyledTextContentView(text: self, renderer: renderer), size: size,
             foreground: .color(Color(.sRGBLinear, red: -1, green: -1, blue: -1)),
             bounds: bounds, seed: .init(), environment: environment)
         list.draw(in: context)

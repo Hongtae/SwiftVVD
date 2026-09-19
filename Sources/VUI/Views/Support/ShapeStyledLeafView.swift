@@ -485,7 +485,7 @@ struct _ShapeStyle_RenderedShape {
             var list = DisplayList()
             list.appendTextItem(
                 text,
-                size: textFrame.size,
+                size: frame.size,
                 foreground: resolvedText.shading,
                 bounds: textFrame,
                 displayBounds: frame,
@@ -604,7 +604,7 @@ struct _ShapeStyle_RenderedShape {
                 )
                 list.appendTextItem(
                     text,
-                    size: textFrame.size,
+                    size: frame.size,
                     foreground: shading,
                     bounds: textFrame,
                     displayBounds: frame,

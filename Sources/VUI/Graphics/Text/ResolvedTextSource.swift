@@ -484,7 +484,7 @@ struct ResolvedTextSource {
         }
         let pixelSize = lineGlyphs.reduce(CGSize.zero) { result, line in
             CGSize(
-                width: max(result.width, line.width),
+                width: max(result.width, line.fragmentWidth ?? line.width),
                 height: max(result.height, line.maxY)
             )
         }
@@ -628,6 +628,8 @@ struct ResolvedTextSource {
         var ascender: CGFloat
         var descender: CGFloat
         var width: CGFloat
+        // Retained fragment geometry can differ from the glyph advance width.
+        var fragmentWidth: CGFloat? = nil
         var trailingBoundary: Glyph? = nil
         var paragraphIndex: Int = 0
         var paragraphInput: Glyph? = nil
@@ -646,6 +648,13 @@ struct ResolvedTextSource {
         var height: CGFloat { ascender - descender }
         var baseline: CGFloat { originY + ascender }
         var maxY: CGFloat { originY + height }
+    }
+
+    enum LayoutScope {
+        // A paragraph fragment commits its pending line before the next
+        // paragraph is admitted. Document layout keeps that line pending.
+        case paragraph
+        case document
     }
 
     struct GlyphLayout {
@@ -1133,26 +1142,38 @@ struct ResolvedTextSource {
     func makeGlyphLayout(
         maxWidth: Int,
         maximumHeight: CGFloat,
+        truncationWidth: CGFloat? = nil,
+        truncationTolerance: CGFloat = 0,
         lineLimit: Int? = nil,
         truncationMode: Text.TruncationMode = .tail,
         sourceLines: [LineGlyphs]? = nil,
-        hasTextSuffix: Bool = false
+        hasTextSuffix: Bool = false,
+        layoutScope: LayoutScope = .paragraph
     ) -> GlyphLayout {
         _lineWrap(
             sourceLines ?? unwrappedGlyphLines(),
             maxWidth: maxWidth,
             maxHeight: maximumHeight,
+            truncationWidth: truncationWidth ?? CGFloat(maxWidth),
+            truncationTolerance: truncationTolerance,
             lineLimit: lineLimit,
             truncationMode: truncationMode,
-            hasTextSuffix: hasTextSuffix
+            hasTextSuffix: hasTextSuffix,
+            layoutScope: layoutScope
         )
     }
 
     func makeGlyphLayout(in size: CGSize, layoutProperties: TextLayoutProperties,
-                         sourceLines: [LineGlyphs]? = nil) -> GlyphLayout {
-        makeGlyphLayout(maxWidth: Self.pixelLimit(max(size.width, 0) * scaleFactor),
-            maximumHeight: max(size.height, 0) * scaleFactor, lineLimit: layoutProperties.lineLimit,
-            truncationMode: layoutProperties.truncationMode, sourceLines: sourceLines)
+                         truncationTolerance: CGFloat = 0,
+                         sourceLines: [LineGlyphs]? = nil,
+                         layoutScope: LayoutScope = .paragraph) -> GlyphLayout {
+        let width = max(size.width, 0) * scaleFactor
+        return makeGlyphLayout(maxWidth: Self.pixelLimit(width),
+            maximumHeight: max(size.height, 0) * scaleFactor, truncationWidth: width,
+            truncationTolerance: truncationTolerance * scaleFactor,
+            lineLimit: layoutProperties.lineLimit,
+            truncationMode: layoutProperties.truncationMode, sourceLines: sourceLines,
+            layoutScope: layoutScope)
     }
 
     func unwrappedGlyphLines() -> [LineGlyphs] {
@@ -1552,9 +1573,12 @@ struct ResolvedTextSource {
         _ lines: [LineGlyphs],
         maxWidth: Int,
         maxHeight: CGFloat,
+        truncationWidth: CGFloat,
+        truncationTolerance: CGFloat,
         lineLimit: Int?,
         truncationMode: Text.TruncationMode,
-        hasTextSuffix: Bool = false
+        hasTextSuffix: Bool = false,
+        layoutScope: LayoutScope = .paragraph
     ) -> GlyphLayout {
         let breakables = CharacterSet.whitespaces.union(.init(charactersIn: "-/?!}|"))
         let decimalNumbers = CharacterSet.decimalDigits
@@ -1570,7 +1594,10 @@ struct ResolvedTextSource {
         }
         let wrappingWidth = { (glyphs: [Glyph]) -> CGFloat in
             let trailing = glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }.count
-            return getGlyphsWidth(Array(glyphs.dropLast(trailing)))
+            let content = Array(glyphs.dropLast(trailing))
+            // Positive tracking on the last visible glyph belongs to the
+            // trailing extent, independently of trailing whitespace characters.
+            return getGlyphsWidth(content) - max(content.last?.style.tracking ?? 0, 0) * scaleFactor
         }
         // Returns the glyph index immediately after a breakable cluster.
         let getBreakableSplitIndex = { (glyphs: [Glyph]) -> Int? in
@@ -1643,6 +1670,13 @@ struct ResolvedTextSource {
 
         // Keep each phase's temporary line values in its own call frame.
         func wrapLines() -> [LineGlyphs] {
+            // A single-line paragraph is measured before truncation. Document
+            // drawing still wraps when an explicit line boundary is present.
+            if lineLimit == 1, truncationMode == .tail,
+               layoutScope == .paragraph ||
+                (lines.count == 1 && lines[0].trailingBoundary == nil) {
+                return lines
+            }
             var wrappedLines: [LineGlyphs] = []
             for sourceLine in lines {
                 var line = sourceLine
@@ -1784,10 +1818,12 @@ struct ResolvedTextSource {
             return end
         }
         let sourceEnd = textEnd(in: wrappedLines)
+        var acceptedSourceEnd = 0
         func result() -> GlyphLayout {
             GlyphLayout(lines: visibleLines, lineCount: processedLineCount,
                         forcedClusterBreak: forcedClusterBreak, truncatedRanges: truncatedRanges,
-                        hasUnlaidText: !visibleLines.isEmpty && textEnd(in: visibleLines) < sourceEnd)
+                        hasUnlaidText: !visibleLines.isEmpty &&
+                            max(acceptedSourceEnd, textEnd(in: visibleLines)) < sourceEnd)
         }
         var nextLineIndex = 0
         var needsTruncation = false
@@ -1799,7 +1835,8 @@ struct ResolvedTextSource {
                 let start = nextLineIndex
                 let paragraph = wrappedLines[start].paragraphIndex
                 var end = start + 1
-                while end < wrappedLines.count, wrappedLines[end].paragraphIndex == paragraph {
+                while end < wrappedLines.count,
+                      layoutScope == .document || wrappedLines[end].paragraphIndex == paragraph {
                     end += 1
                 }
                 let budget = maximumLineCount.map { $0 - visibleLines.count }
@@ -1808,7 +1845,7 @@ struct ResolvedTextSource {
                 let remainingHeight = availableHeight - paragraphY
                 if paragraphY > 0, remainingHeight <= 0 { break }
 
-                if wrappedLines[start].isSimpleParagraph {
+                if layoutScope == .paragraph, wrappedLines[start].isSimpleParagraph {
                     let line = place(wrappedLines[start], after: visibleLines.last)
                     forcedClusterBreak = forcedClusterBreak || line.forcedClusterBreak
                     // Simple paragraphs test the font height before adding the
@@ -1928,7 +1965,14 @@ struct ResolvedTextSource {
         guard let lastVisibleIndex = visibleLines.indices.last else {
             return result()
         }
-        if !needsTruncation, Int(ceil(visibleLines[lastVisibleIndex].width)) <= maxWidth {
+        let lastLineOverflows = truncationMode == .tail
+            ? wrappingWidth(visibleLines[lastVisibleIndex].glyphs) > truncationWidth
+            : Int(ceil(visibleLines[lastVisibleIndex].width)) > maxWidth
+        if !needsTruncation, !lastLineOverflows {
+            if layoutScope == .paragraph, truncationMode == .tail {
+                visibleLines[lastVisibleIndex].fragmentWidth = min(truncationWidth,
+                    visibleLines[lastVisibleIndex].width)
+            }
             return result()
         }
 
@@ -1967,7 +2011,7 @@ struct ResolvedTextSource {
             let hasParagraphOverflow =
                 paragraphGlyphs.count >
                     visibleLines[lastVisibleIndex].glyphs.count ||
-                Int(ceil(visibleLines[lastVisibleIndex].width)) > maxWidth
+                lastLineOverflows
             let hasExplicitLineOverflow =
                 !hasParagraphOverflow &&
                 nextLineIndex < wrappedLines.count &&
@@ -2040,61 +2084,85 @@ struct ResolvedTextSource {
                 return lower..<upper
             }
 
+            var acceptedTrailingWidth: CGFloat = 0
+            var preservesInsertedTrailingExtent = false
             func tailTruncation(
                 _ glyphs: [Glyph],
                 explicitBoundary: Glyph?
             ) -> (glyphs: [Glyph], range: Range<Int>?)? {
-                if let explicitBoundary,
-                   let source = glyphs.last {
-                    var prefix = Self.clusterRanges(in: glyphs).map {
-                        Array(glyphs[$0])
-                    }
-                    while true {
-                        let flattenedPrefix = prefix.flatMap { $0 }
-                        guard let ellipsis = makeEllipsis(
-                            inheriting: source,
-                            characterIndex: explicitBoundary.characterIndex,
-                            after: flattenedPrefix.last
-                        ) else {
-                            return nil
-                        }
-                        var candidate = flattenedPrefix + [ellipsis]
-                        if !candidate.isEmpty {
-                            candidate[0].kerning = .zero
-                        }
-                        if Int(ceil(getGlyphsWidth(candidate))) <= maxWidth {
-                            return (candidate, nil)
-                        }
-                        guard !prefix.isEmpty else { return nil }
-                        prefix.removeLast()
-                    }
-                }
-
                 let clusters = Self.clusterRanges(in: glyphs).map {
                     Array(glyphs[$0])
                 }
-                guard clusters.count > 1 else { return nil }
-                for prefixCount in stride(
-                    from: clusters.count - 1,
-                    through: 0,
-                    by: -1
-                ) {
-                    guard let source = clusters[prefixCount].first else {
-                        continue
+                if let explicitBoundary, let source = glyphs.last {
+                    guard let ellipsis = makeEllipsis(inheriting: source,
+                        characterIndex: explicitBoundary.characterIndex, after: source) else {
+                        return nil
                     }
-                    var prefix = clusters[..<prefixCount].flatMap { $0 }
+                    var candidate = glyphs + [ellipsis]
+                    candidate[0].kerning = .zero
+                    // Complete-line insertion and reconsideration retain the
+                    // final run's attributes and use the addition comparison.
+                    if getGlyphsWidth(candidate) <= truncationWidth + truncationTolerance {
+                        preservesInsertedTrailingExtent = getGlyphsWidth(candidate) <= truncationWidth
+                        return (candidate, nil)
+                    }
+                }
+
+                // An inserted token adds a glyph even to a one-cluster source.
+                guard clusters.count > (explicitBoundary == nil ? 1 : 0) else { return nil }
+                var initialToken: Glyph?
+                let initialPrefixCount = clusters.count - (explicitBoundary == nil ? 1 : 0)
+                for prefixCount in stride(from: initialPrefixCount, through: 0, by: -1) {
+                    var keptCount = prefixCount
+                    while keptCount > 0,
+                          clusters[keptCount - 1].allSatisfy({ CharacterSet.whitespaces.contains($0.scalar) }) {
+                        keptCount -= 1
+                    }
+                    let source: Glyph
+                    let tokenIndex: Int
+                    if keptCount == clusters.count {
+                        // The zero-length inserted run contains no character.
+                        // Its lookup uses the earliest source run in this line.
+                        guard let first = clusters.first?.first, let explicitBoundary else { continue }
+                        source = first
+                        tokenIndex = explicitBoundary.characterIndex
+                    } else {
+                        guard let first = clusters[keptCount].first else { continue }
+                        source = first
+                        tokenIndex = source.characterIndex
+                    }
+                    var prefix = clusters[..<keptCount].flatMap { $0 }
                     let previous = prefix.last
-                    guard let ellipsis = makeEllipsis(
-                        inheriting: source,
-                        characterIndex: source.characterIndex,
-                        after: previous
+                    if layoutScope == .document && initialToken == nil {
+                        // The first removed range is fitted without a token.
+                        guard getGlyphsWidth(prefix) - truncationWidth <= truncationTolerance else {
+                            continue
+                        }
+                        initialToken = makeEllipsis(inheriting: source,
+                            characterIndex: tokenIndex, after: previous)
+                    }
+                    // Document drawing reuses the first token while extending
+                    // its removed range. Paragraph drawing resolves each
+                    // candidate's attributes independently.
+                    guard var ellipsis = initialToken ?? makeEllipsis(
+                        inheriting: source, characterIndex: tokenIndex, after: previous
                     ) else {
                         return nil
                     }
+                    ellipsis.characterIndex = tokenIndex
+                    ellipsis.sourceRange = tokenIndex..<(tokenIndex + 1)
+                    // A token replacing only the zero-length inserted run has
+                    // no trailing character extent until body text is removed.
+                    let trailingWidth = keptCount == clusters.count ? 0
+                        : max(ellipsis.style.tracking ?? 0, 0) * scaleFactor
+                    let fittedWidth = getGlyphsWidth(prefix)
+                        + (ellipsis.advance.width - trailingWidth)
+                        + (prefix.isEmpty ? 0 : ellipsis.kerning.x)
                     prefix.append(ellipsis)
                     prefix[0].kerning = .zero
-                    if Int(ceil(getGlyphsWidth(prefix))) <= maxWidth {
-                        return (prefix, truncatedRange(clusters[prefixCount...]))
+                    if fittedWidth - truncationWidth <= truncationTolerance {
+                        acceptedTrailingWidth = trailingWidth
+                        return (prefix, truncatedRange(clusters[keptCount...]))
                     }
                 }
                 return nil
@@ -2247,15 +2315,43 @@ struct ResolvedTextSource {
             // A token or omitted content alone does not record truncation. Only
             // an accepted line with a nonempty removed source range contributes.
             if let range = truncated.range { truncatedRanges.append(range) }
+            if explicitBoundary != nil {
+                // The accepted fragment covers the paragraph even when a hard
+                // line separator ends its glyphs. Later paragraphs remain unlaid.
+                acceptedSourceEnd = textEnd(in: wrappedLines.filter { $0.paragraphIndex == lastParagraph })
+            }
+            let retainedWhitespaceWidth = layoutScope == .paragraph && preservesInsertedTrailingExtent
+                ? getGlyphsWidth(paragraphGlyphs) - wrappingWidth(paragraphGlyphs) : 0
             visibleLines[lastVisibleIndex].glyphs = truncated.glyphs
             visibleLines[lastVisibleIndex].trailingBoundary = nil
             visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
-            updateMetrics(&visibleLines[lastVisibleIndex])
-            visibleLines[lastVisibleIndex] = place(
-                visibleLines[lastVisibleIndex],
-                after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
-            )
-            visibleLines[lastVisibleIndex].originY = admittedOriginY
+            if truncationMode == .tail {
+                // The admitted line owns its vertical metrics. A token may
+                // remove the largest run or introduce a taller glyph without
+                // changing the line's height, baseline or spacing.
+                visibleLines[lastVisibleIndex].glyphs[0].kerning = .zero
+                visibleLines[lastVisibleIndex].width = getGlyphsWidth(visibleLines[lastVisibleIndex].glyphs)
+            } else {
+                updateMetrics(&visibleLines[lastVisibleIndex])
+                visibleLines[lastVisibleIndex] = place(
+                    visibleLines[lastVisibleIndex],
+                    after: lastVisibleIndex > 0 ? visibleLines[lastVisibleIndex - 1] : nil
+                )
+                visibleLines[lastVisibleIndex].originY = admittedOriginY
+            }
+            if layoutScope == .paragraph && truncationMode == .tail {
+                // Whole-line token insertion retains the original trailing
+                // extent. Other tail results retain their clipped glyph width.
+                visibleLines[lastVisibleIndex].fragmentWidth = min(truncationWidth,
+                    visibleLines[lastVisibleIndex].width + retainedWhitespaceWidth)
+            } else if layoutScope == .document && truncationMode == .tail &&
+                        !(lines.count == 1 && lines[0].trailingBoundary == nil) {
+                // Wrapped document drawing publishes the net token line. The
+                // single-line and paragraph-fragment paths restore its trailing
+                // extent, while all paths retain the full drawing advances.
+                visibleLines[lastVisibleIndex].fragmentWidth =
+                    visibleLines[lastVisibleIndex].width - acceptedTrailingWidth
+            }
             return result()
         }
         return truncateLastLine()

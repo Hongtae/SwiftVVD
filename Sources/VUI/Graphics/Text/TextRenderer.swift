@@ -710,7 +710,7 @@ extension ResolvedTextSource {
                 glyphs: line.glyphs,
                 runs: runs,
                 origin: CGPoint(x: origin.x + line.originX * scale, y: origin.y + line.baseline * scale),
-                width: (line.width - trailingSpace) * scale,
+                width: ((line.fragmentWidth ?? line.width) - trailingSpace) * scale,
                 ascent: line.ascender * scale,
                 descent: -line.descender * scale,
                 sourceStart: sourceStart
