@@ -5,6 +5,10 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
+#ifndef PRIMITIVE_OUTPUT_TYPE
+#define PRIMITIVE_OUTPUT_TYPE float4
+#endif
+
 struct FragmentInput
 {
     [[vk::location(0)]] float2 position : TEXCOORD0;
@@ -25,9 +29,9 @@ struct Constants
 float roundHalf(float x) { return f16tof32(f32tof16(x)); }
 float cubic(float t) { return roundHalf(roundHalf(t * t) * roundHalf(mad(t, -2.0, 3.0))); }
 
-float4 primitive_color(FragmentInput input) : SV_Target0
+PRIMITIVE_OUTPUT_TYPE primitive_color(FragmentInput input) : SV_Target0
 {
-    if (constants.kind == 1) return input.color;
+    if (constants.kind == 1) return PRIMITIVE_OUTPUT_TYPE(input.color);
     float2 q = abs(input.position) - constants.edges;
     float d = max(q.x, q.y);
     if (constants.kind == 3)
@@ -47,6 +51,6 @@ float4 primitive_color(FragmentInput input) : SV_Target0
         float t = saturate(roundHalf(roundHalf(a - roundHalf(d)) / roundHalf(a + a)));
         coverage = cubic(t);
     }
-    return float4(roundHalf(input.color.r * coverage), roundHalf(input.color.g * coverage),
-                  roundHalf(input.color.b * coverage), roundHalf(input.color.a * coverage));
+    return PRIMITIVE_OUTPUT_TYPE(roundHalf(input.color.r * coverage), roundHalf(input.color.g * coverage),
+                                 roundHalf(input.color.b * coverage), roundHalf(input.color.a * coverage));
 }

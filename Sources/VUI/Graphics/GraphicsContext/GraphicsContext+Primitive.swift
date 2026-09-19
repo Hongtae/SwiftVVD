@@ -214,7 +214,7 @@ extension GraphicsContext {
     }
 
     func encodePrimitive(renderPass: RenderPass, primitive: FilledPrimitive,
-                         transform: CGAffineTransform, blendState: BlendState = .opaque) -> Bool {
+                         transform: CGAffineTransform, blendState: BlendState? = nil) -> Bool {
         let radius = primitive.blurRadius
         let pixelTransform = transform.concatenating(CGAffineTransform(
             scaleX: contentScaleFactor, y: contentScaleFactor))
@@ -267,6 +267,10 @@ extension GraphicsContext {
         let bl = makeVertex(0, 1, -halfWidth, 0.5)
         let br = makeVertex(1, 1, halfWidth, 0.5)
         let vertices = [bl, tl, br, br, tl, tr]
+        // Typed half output and source-over form one precision path. Keep the
+        // float output path's existing replacement blend on other devices.
+        let blendState = blendState ?? (pipeline.primitiveOutputUsesFloat16
+            ? .premultipliedAlphaBlend : .opaque)
         guard let pipelineState = pipeline.renderState(shader: .primitiveColor,
                   colorFormat: renderPass.colorFormat, depthFormat: renderPass.depthFormat,
                   blendState: blendState, sampleCount: renderPass.sampleCount),

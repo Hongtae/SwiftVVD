@@ -11,7 +11,7 @@ def shader_tool_path(name: str) -> Path:
     sys.exit(f"Required shader tool '{name}' was not found on PATH.")
 
 
-def shader_configuration(path: Path) -> tuple[str, str]:
+def shader_configuration(path: Path) -> tuple[str, str, list[str]]:
     name = path.name
     configurations = {
         ".vert.hlsl": "vs_6_0",
@@ -23,7 +23,9 @@ def shader_configuration(path: Path) -> tuple[str, str]:
             entry_point = name.removesuffix(suffix)
             if name == "default.vert.hlsl":
                 entry_point = "defaultVertex"
-            return entry_point, profile
+            if name in ("primitive_color_half.frag.hlsl", "primitive_group_half.frag.hlsl"):
+                return entry_point, "ps_6_2", ["-enable-16bit-types"]
+            return entry_point, profile, []
     raise ValueError(f"Unsupported HLSL shader filename: {name}")
 
 
@@ -39,7 +41,7 @@ print("hlsl_path:", hlsl_path)
 print("spirv_path:", spirv_path)
 
 for input_path in sorted(hlsl_path.rglob("*.hlsl")):
-    entry_point, profile = shader_configuration(input_path)
+    entry_point, profile, options = shader_configuration(input_path)
     relative_path = input_path.relative_to(hlsl_path).with_suffix(".spv")
     output_path = spirv_path / relative_path
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,6 +50,7 @@ for input_path in sorted(hlsl_path.rglob("*.hlsl")):
         "-spirv",
         "-O3",
         "-fspv-target-env=vulkan1.3",
+        *options,
         "-T",
         profile,
         "-E",

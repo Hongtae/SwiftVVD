@@ -14,9 +14,47 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
 
     private func device() throws -> GraphicsDeviceContext {
         #if canImport(Metal)
-        return try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        let context = try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        if ProcessInfo.processInfo.environment["VUI_PRIMITIVE_FORCE_FLOAT_OUTPUT"] == "1" {
+            return GraphicsDeviceContext(device: GraphicsDeviceFeatureMask(context.device, features: []))
+        }
+        return context
         #else
         throw XCTSkip("Metal is required for this readback fixture")
+        #endif
+    }
+
+    // ASSERTIONS recordedPrimitiveBlendPrecision27Observed
+    func testPrimitiveShaderVariantsRequireBothDeviceFeatures() throws {
+        #if canImport(Metal)
+        let base = try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        let required: GraphicsDeviceFeatures = [.float16Arithmetic, .float16InputOutput]
+        XCTAssertTrue(base.device.features.isSuperset(of: required))
+        var retained: [GraphicsPipelineStates] = []
+        for features: GraphicsDeviceFeatures in [[], [.float16Arithmetic], [.float16InputOutput], required] {
+            let device = GraphicsDeviceFeatureMask(base.device, features: features)
+            let queue = try XCTUnwrap(device.makeCommandQueue(flags: .render))
+            let pipeline = try XCTUnwrap(GraphicsPipelineStates.sharedInstance(commandQueue: queue))
+            let half = features == required
+            XCTAssertEqual(pipeline.primitiveOutputUsesFloat16, half)
+            XCTAssertTrue((pipeline.device as AnyObject) === device)
+            XCTAssertFalse(retained.contains { $0 === pipeline })
+            retained.append(pipeline)
+            let otherQueue = try XCTUnwrap(device.makeCommandQueue(flags: .render))
+            XCTAssertTrue(pipeline === GraphicsPipelineStates.sharedInstance(commandQueue: otherQueue))
+            let outputs = device.loadedShaderOutputs.filter { $0.key.hasPrefix("primitive_") }
+            let suffix = half ? "_half.frag" : ".frag"
+            XCTAssertEqual(Set(outputs.keys), Set(["primitive_color" + suffix, "primitive_group" + suffix]))
+            for types in outputs.values { XCTAssertEqual(types, [half ? .half4 : .float4]) }
+            for shader: _Shader in [.primitiveColor, .primitiveGroup] {
+                XCTAssertNotNil(pipeline.renderState(shader: shader, colorFormat: .rgba8Unorm,
+                    depthFormat: .invalid, blendState: .premultipliedAlphaBlend, sampleCount: 1))
+            }
+        }
+        // Keeping every instance alive makes cross-device cache reuse observable.
+        XCTAssertEqual(retained.count, 4)
+        #else
+        throw XCTSkip("Metal is required for this shader compilation fixture")
         #endif
     }
 
@@ -432,6 +470,20 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                                     (0..<4).map { buffer.loadUnaligned(fromByteOffset: offset + $0 * 2, as: UInt16.self) }
                                 }
                                 XCTAssertEqual(words, color.map { Float16($0).bitPattern }, "\(label) at (\(x), \(y))")
+                            }
+                        }
+                        if name == "shear" && density == 1 && !isFloat && role == "layer" {
+                            let half = device.device.features.isSuperset(of: [
+                                .float16Arithmetic, .float16InputOutput
+                            ])
+                            let expected: [(Int, Int, [UInt8])] = [
+                                (127, 52, [16, 3, 4, half ? 80 : 81]),
+                                (129, 55, [16, 3, 4, half ? 80 : 81]),
+                                (129, 59, [77, 17, 18, half ? 122 : 121])
+                            ]
+                            for (x, y, color) in expected {
+                                let offset = (y * Int(size.width) + x) * 4
+                                XCTAssertEqual(Array(bytes[offset..<offset + 4]), color, "\(label) at (\(x), \(y))")
                             }
                         }
                         if let output { try bytes.write(to: output.appendingPathComponent(label)) }

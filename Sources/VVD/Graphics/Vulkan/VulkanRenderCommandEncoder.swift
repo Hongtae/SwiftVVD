@@ -460,7 +460,7 @@ final class VulkanRenderCommandEncoder: RenderCommandEncoder {
 
     func setDepthClipMode(_ mode: DepthClipMode) {
 
-        if mode == .clamp && self.encoder!.device.features.depthClamp == 0 {
+        if mode == .clamp && self.encoder!.device.deviceFeatures.depthClamp == 0 {
             Log.warn("\(#function): DepthClamp not supported for this hardware.")
         }
 

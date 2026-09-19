@@ -51,6 +51,7 @@ final class GraphicsContextUploadBufferTests: XCTestCase {
         }
 
         let name = "Upload buffer test device"
+        let features: GraphicsDeviceFeatures = []
         var allocations: [Allocation] = []
         var requests: [(length: Int, storageMode: StorageMode, cpuCacheMode: CPUCacheMode)] = []
         var metrics: [BufferMetrics] = []

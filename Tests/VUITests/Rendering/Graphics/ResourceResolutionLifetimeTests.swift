@@ -422,6 +422,7 @@ private final class LifetimeTestAppContext: AppContext {
 
 private final class LifetimeTestDevice: GraphicsDevice {
     let name = "Text resource lifetime test"
+    let features: GraphicsDeviceFeatures = []
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue? { nil }
     func makeShaderModule(from: VVD.Shader) -> ShaderModule? { nil }
     func makeShaderBindingSet(layout: ShaderBindingSetLayout) -> ShaderBindingSet? { nil }

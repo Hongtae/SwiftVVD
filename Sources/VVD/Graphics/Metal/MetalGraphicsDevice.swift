@@ -13,6 +13,8 @@ private import SPIRV_Cross
 final class MetalGraphicsDevice: GraphicsDevice, @unchecked Sendable {
 
     var name: String { device.name }
+    // Half arithmetic and stage I/O are core MSL features on every GPU family.
+    var features: GraphicsDeviceFeatures { [.float16Arithmetic, .float16InputOutput] }
     let device: MTLDevice
 
 #if DEBUG

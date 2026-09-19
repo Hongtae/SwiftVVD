@@ -7,6 +7,8 @@
 
 public protocol GraphicsDevice: Sendable {
     var name: String { get }
+    /// Optional features available for this device's lifetime.
+    var features: GraphicsDeviceFeatures { get }
 
     func makeCommandQueue(flags: CommandQueueFlags) -> CommandQueue?
     func makeShaderModule(from: Shader) -> ShaderModule?

@@ -37,7 +37,19 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
     var allocationCallbacks: UnsafePointer<VkAllocationCallbacks>? { self.instance.allocationCallbacks }
 
     var properties: VkPhysicalDeviceProperties { self.physicalDevice.properties }
-    var features: VkPhysicalDeviceFeatures { self.physicalDevice.features }
+    var deviceFeatures: VkPhysicalDeviceFeatures { self.physicalDevice.features }
+
+    var features: GraphicsDeviceFeatures {
+        // Device creation enables the queried Vulkan 1.1 and 1.2 features.
+        var supported: GraphicsDeviceFeatures = []
+        if physicalDevice.v12Features.shaderFloat16 != VK_FALSE {
+            supported.insert(.float16Arithmetic)
+        }
+        if physicalDevice.v11Features.storageInputOutput16 != VK_FALSE {
+            supported.insert(.float16InputOutput)
+        }
+        return supported
+    }
 
     var extensionProc = VulkanDeviceExtensions()
 
@@ -724,7 +736,7 @@ final class VulkanGraphicsDevice: GraphicsDevice, @unchecked Sendable {
         rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
         rasterizationState.polygonMode = VK_POLYGON_MODE_FILL
         if desc.triangleFillMode == .lines {
-            if self.features.fillModeNonSolid != 0 {
+            if self.deviceFeatures.fillModeNonSolid != 0 {
                 rasterizationState.polygonMode = VK_POLYGON_MODE_LINE
             } else {
                 Log.warn("VulkanGraphicsDevice.\(#function): PolygonFillMode not supported for this hardware.")

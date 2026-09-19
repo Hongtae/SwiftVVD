@@ -40,6 +40,7 @@ final class GraphicsContextPipelineStateTests: XCTestCase {
 
     private final class TestDevice: GraphicsDevice, @unchecked Sendable {
         let name = "Pipeline state test device"
+        let features: GraphicsDeviceFeatures = []
 
         private var renderFailures = 0
         private var renderDescriptors: [RenderPipelineDescriptor] = []

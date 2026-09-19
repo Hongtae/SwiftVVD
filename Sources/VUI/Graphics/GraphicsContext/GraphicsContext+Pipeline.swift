@@ -89,6 +89,7 @@ class GraphicsPipelineStates {
     }
 
     let device: GraphicsDevice
+    let primitiveOutputUsesFloat16: Bool
     private let shaderFunctions: [_Shader: ShaderFunctions]
 
     let bindingLayout1: ShaderBindingSetLayout  // 1 texture layout
@@ -309,8 +310,10 @@ class GraphicsPipelineStates {
          bindingLayout1: ShaderBindingSetLayout,
          bindingLayout2: ShaderBindingSetLayout,
          defaultSampler: SamplerState,
-         defaultMaskTexture: Texture) {
+         defaultMaskTexture: Texture,
+         primitiveOutputUsesFloat16: Bool = false) {
         self.device = device
+        self.primitiveOutputUsesFloat16 = primitiveOutputUsesFloat16
         self.shaderFunctions = shaderFunctions
         self.bindingLayout1 = bindingLayout1
         self.bindingLayout2 = bindingLayout2
@@ -320,17 +323,18 @@ class GraphicsPipelineStates {
     }
 
     private static let lock = Mutex(())
-    nonisolated(unsafe) private static weak var sharedInstance: GraphicsPipelineStates? = nil
+    nonisolated(unsafe) private static var sharedInstances: [WeakObject<GraphicsPipelineStates>] = []
 
     static func sharedInstance(commandQueue: CommandQueue) -> GraphicsPipelineStates? {
-        if let instance = sharedInstance {
-            return instance
-        }
         return lock.withLock { _ in
-            var instance = sharedInstance
-            if instance != nil { return instance }
-
             let device = commandQueue.device
+            sharedInstances.removeAll { $0.value == nil }
+            // Pipeline resources and their shader variants belong to one device.
+            if let instance = sharedInstances.compactMap({ $0.value }).first(where: {
+                ($0.device as AnyObject) === (device as AnyObject)
+            }) {
+                return instance
+            }
             do {
                 struct LoadError: Error {
                     let message: String
@@ -379,8 +383,13 @@ class GraphicsPipelineStates {
                 }
 
                 shaderFunctions[.vertexColor] = try loadFragmentFunction("vertex_color.frag")
-                shaderFunctions[.primitiveColor] = try loadFragmentFunction("primitive_color.frag")
-                shaderFunctions[.primitiveGroup] = try loadFragmentFunction("primitive_group.frag")
+                let primitiveOutputUsesFloat16 = device.features.isSuperset(of: [
+                    .float16Arithmetic, .float16InputOutput
+                ])
+                shaderFunctions[.primitiveColor] = try loadFragmentFunction(primitiveOutputUsesFloat16
+                    ? "primitive_color_half.frag" : "primitive_color.frag")
+                shaderFunctions[.primitiveGroup] = try loadFragmentFunction(primitiveOutputUsesFloat16
+                    ? "primitive_group_half.frag" : "primitive_group.frag")
                 shaderFunctions[.image] = try loadFragmentFunction("draw_image.frag")
                 shaderFunctions[.projectiveImage] = ShaderFunctions(
                     vertexFunction: projectiveVertexFunction,
@@ -495,22 +504,21 @@ class GraphicsPipelineStates {
                 encoder.endEncoding()
                 commandBuffer.commit()
 
-                instance = GraphicsPipelineStates(
+                let instance = GraphicsPipelineStates(
                     device: device,
                     shaderFunctions: shaderFunctions,
                     bindingLayout1: bindingLayout1,
                     bindingLayout2: bindingLayout2,
                     defaultSampler: defaultSampler,
-                    defaultMaskTexture: defaultMaskTexture)
+                    defaultMaskTexture: defaultMaskTexture,
+                    primitiveOutputUsesFloat16: primitiveOutputUsesFloat16)
 
-                // make weak-ref
-                Self.sharedInstance = instance
+                sharedInstances.append(WeakObject(instance))
                 Log.info("\(Self.self).\(#function): instance created.")
+                return instance
             } catch {
                 fatalError("\(Self.self).\(#function) Error: \(error)")
             }
-
-            return instance
         }
     }
 }
