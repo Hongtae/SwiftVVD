@@ -27,7 +27,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
     }
 
     private func render(_ device: GraphicsDeviceContext, scale: CGFloat,
-                        draw: (inout GraphicsContext) -> Void) throws -> [UInt8] {
+                        draw: (inout GraphicsContext) throws -> Void) throws -> [UInt8] {
         let resolution = size * scale
         let queue = try XCTUnwrap(device.renderQueue())
         let commands = try XCTUnwrap(queue.makeCommandBuffer())
@@ -35,7 +35,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
             viewport: CGRect(origin: .zero, size: resolution), contentOffset: .zero,
             contentScaleFactor: scale, resolution: resolution, commandBuffer: commands))
         context.clear(with: .clear)
-        draw(&context)
+        try draw(&context)
         let done = expectation(description: "primitive readback")
         commands.addCompletedHandler { _ in done.fulfill() }
         XCTAssertTrue(commands.commit())
@@ -117,8 +117,73 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                             }
                             XCTAssertTrue(pixels == direct, label)
                             XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 }, label)
+                            if name == "shear" && order == "both" && shape == "rect" && radius > 0 {
+                                let (x, y) = density == 1 ? (120, 41) : (240, 83)
+                                XCTAssertEqual(pixels[(y * Int(size.width * density) + x) * 4], 0,
+                                               "The source fringe must not extend beyond its mesh: \(label)")
+                            }
                             XCTAssertEqual(originalStyle.transform, originalTransform)
                             if let output { try Data(pixels).write(to: output.appendingPathComponent(label + ".rgba")) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS recordedPrimitiveIsolation27Observed
+    // ASSERTIONS recordedPrimitiveMesh27Observed
+    func testPrimitiveMetalIsolatesCoverageAndGroupOpacity() throws {
+        let device = try device()
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_ISOLATION"].map { URL(fileURLWithPath: $0) }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let color = Color(.sRGB, red: 1, green: 0.2196044921875, blue: 0.2353515625, opacity: 0.6)
+        for (name, basis) in bases where name == "identity" || name == "shear" {
+            for shape in ["rect", "small", "circular", "circle"] {
+                for radius: CGFloat in [0, 2, 12] {
+                    for opacity in [1.0, 0.75] {
+                        for density: CGFloat in [1, 2] {
+                            var stages: [String: [UInt8]] = [:]
+                            for role in ["source", "shadow", "composite"] {
+                                let label = "\(name)-\(shape)-\(Int(radius))-\(Int(opacity * 100))-\(role)-\(Int(density))"
+                                let pixels = try render(device, scale: density) { context in
+                                    context.opacity = opacity
+                                    context.concatenate(basis)
+                                    if role != "source" {
+                                        context.addFilter(.shadow(color: .black.opacity(0.5), radius: radius,
+                                            x: 3, y: 2, options: role == "shadow" ? .shadowOnly : []))
+                                    }
+                                    // Exercise the encoder directly to isolate the source and the
+                                    // still-gated zero-radius branch without widening public dispatch.
+                                    let primitive = try XCTUnwrap(FilledPrimitive(path: path(shape), color: color.resolve(in: .init())))
+                                    let pass = try XCTUnwrap(context.beginRenderPass(enableStencil: false, enableMSAA: false))
+                                    XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: primitive,
+                                                                          transform: context.transform))
+                                    pass.end()
+                                    context.drawSource(primitive: primitive)
+                                }
+                                stages[role] = pixels
+                                XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 }, label)
+                                if role == "shadow" {
+                                    XCTAssertTrue(stride(from: 0, to: pixels.count, by: 4).allSatisfy {
+                                        pixels[$0] == 0 && pixels[$0 + 1] == 0 && pixels[$0 + 2] == 0
+                                    }, label)
+                                }
+                                if name == "shear" && shape == "rect" && role == "source" {
+                                    let points = density == 1 ? [(120, 41), (71, 48)] : [(240, 83), (143, 96)]
+                                    for (x, y) in points {
+                                        XCTAssertEqual(pixels[(y * Int(size.width * density) + x) * 4 + 3], 0,
+                                                       "The primitive mesh must not extend its diagonal fringe: \(label)")
+                                    }
+                                }
+                                if let output { try Data(pixels).write(to: output.appendingPathComponent(label + ".rgba")) }
+                            }
+                            if opacity == 1 {
+                                let source = stages["source"]!, shadow = stages["shadow"]!, composite = stages["composite"]!
+                                XCTAssertTrue(stride(from: 3, to: source.count, by: 4).allSatisfy {
+                                    composite[$0] >= max(source[$0], shadow[$0])
+                                }, "Composition must retain both isolated layers at full opacity")
+                            }
                         }
                     }
                 }

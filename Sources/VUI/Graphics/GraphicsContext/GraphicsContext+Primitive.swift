@@ -101,7 +101,8 @@ extension GraphicsContext {
         let radius = primitive.blurRadius
         let pixelTransform = transform.concatenating(CGAffineTransform(
             scaleX: contentScaleFactor, y: contentScaleFactor))
-        let scale = Float(min(max(abs(pixelTransform.a), abs(pixelTransform.b)),
+        // The dominant component bounds the antialiasing mesh in item space.
+        let scale = Float(max(max(abs(pixelTransform.a), abs(pixelTransform.b)),
                               max(abs(pixelTransform.c), abs(pixelTransform.d))))
         let aligned = (pixelTransform.b == 0 && pixelTransform.c == 0) ||
                       (pixelTransform.a == 0 && pixelTransform.d == 0)
