@@ -41,6 +41,11 @@ public final class XPBDSimulator {
             ObjectIdentifier($0) == identifier
         }) else { return false }
         bodyStorage.remove(at: index)
+        constraintStorage.removeAll { constraint in
+            constraint.particleReferences.contains {
+                ObjectIdentifier($0.body) == identifier
+            }
+        }
         return true
     }
 
@@ -50,6 +55,11 @@ public final class XPBDSimulator {
         guard !constraintStorage.contains(where: { ObjectIdentifier($0) == identifier }) else {
             return false
         }
+        let bodyIdentifiers = Set(bodyStorage.map(ObjectIdentifier.init))
+        guard constraint.particleReferences.allSatisfy({ reference in
+            reference.isValid &&
+                bodyIdentifiers.contains(ObjectIdentifier(reference.body))
+        }) else { return false }
         constraintStorage.append(constraint)
         return true
     }

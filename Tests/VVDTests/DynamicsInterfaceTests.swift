@@ -88,7 +88,9 @@ final class DynamicsInterfaceTests: XCTestCase {
             XPBDParticle(position: .zero, mass: 0),
             XPBDParticle(position: Vector3(0, -1, 0), mass: 1)
         ])
-        let constraint = XPBDFixedJointConstraint()
+        let constraint = XPBDFixedJointConstraint(
+            particleA: XPBDParticleReference(body: rope, particleIndex: 1),
+            worldAnchor: Vector3(0, -1, 0))
 
         XCTAssertTrue(simulator.add(rope))
         XCTAssertFalse(simulator.add(rope))
