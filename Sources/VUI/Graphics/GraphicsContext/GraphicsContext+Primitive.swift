@@ -223,10 +223,13 @@ extension GraphicsContext {
                               max(abs(pixelTransform.c), abs(pixelTransform.d))))
         let aligned = (pixelTransform.b == 0 && pixelTransform.c == 0) ||
                       (pixelTransform.a == 0 && pixelTransform.d == 0)
-        let pixelRect = primitive.rect.applying(pixelTransform)
+        let pixelRect = primitive.bounds(transform: pixelTransform)
+        let x = Float(pixelRect.minX), y = Float(pixelRect.minY)
+        // Only the small interval above an integer boundary elides coverage.
+        // Keep the bounds and endpoint additions in the shader's Float domain.
         let plane = primitive.kind == 2 && aligned &&
-            [pixelRect.minX, pixelRect.minY, pixelRect.maxX, pixelRect.maxY].allSatisfy {
-                abs($0 - $0.rounded()) < 0.005
+            [x, y, x + Float(pixelRect.width), y + Float(pixelRect.height)].allSatisfy {
+                abs($0 - floor($0)) <= Float(0.005)
             }
         let outset: Float = plane ? 0 : radius > 0 ? Float(1).addingProduct(2.8, radius) : 1 / scale
         guard outset.isFinite else { return false }

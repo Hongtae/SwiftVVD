@@ -205,6 +205,40 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS recordedPrimitiveIntegralBounds27Observed
+    func testPrimitivePreservesFractionalRectangleCornerCoverage() throws {
+        let device = try device()
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_PLANE_EDGES"].map { URL(fileURLWithPath: $0) }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let color = Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 0.625).resolve(in: .init())
+        for (name, offset) in [("below-integral-source", CGFloat(-0.004)),
+                               ("near-integral-source", CGFloat(0.004))] {
+            for density: CGFloat in [1, 2] {
+                let primitive = try XCTUnwrap(FilledPrimitive(path:
+                    Path(CGRect(x: 80 + offset, y: 40, width: 144, height: 120)), color: color))
+                let pixels = try render(device, scale: density) { context in
+                    let pass = try XCTUnwrap(context.beginRenderPass(enableStencil: false, enableMSAA: false))
+                    XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: primitive, transform: .identity))
+                    pass.end()
+                    context.drawSource(primitive: primitive)
+                }
+                let width = Int(size.width * density)
+                let corners: [UInt8] = name.hasPrefix("below") ? [25, 24]
+                    : density == 1 ? [0, 0] : [24, 25]
+                for y in [Int(40 * density) - 1, Int(160 * density)] {
+                    for (x, alpha) in zip([Int(80 * density) - 1, Int(224 * density)], corners) {
+                        let index = (y * width + x) * 4
+                        XCTAssertEqual(Array(pixels[index..<index + 4]), [0, alpha, 0, alpha],
+                            "Fractional rectangle corner: \(name), density \(density), (\(x), \(y))")
+                    }
+                }
+                if let output {
+                    try Data(pixels).write(to: output.appendingPathComponent("\(name)-\(Int(density)).rgba"))
+                }
+            }
+        }
+    }
+
     // ASSERTIONS recordedPrimitiveGroupExecution27Observed
     // ASSERTIONS recordedPrimitiveGroupScissor27Observed
     // ASSERTIONS recordedPrimitiveSpillAttachments27Observed
