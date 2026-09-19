@@ -42,11 +42,14 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
             retained.append(pipeline)
             let otherQueue = try XCTUnwrap(device.makeCommandQueue(flags: .render))
             XCTAssertTrue(pipeline === GraphicsPipelineStates.sharedInstance(commandQueue: otherQueue))
-            let outputs = device.loadedShaderOutputs.filter { $0.key.hasPrefix("primitive_") }
+            let outputs = device.loadedShaderOutputs.filter {
+                $0.key.hasPrefix("primitive_") || $0.key.hasPrefix("plane_color")
+            }
             let suffix = half ? "_half.frag" : ".frag"
-            XCTAssertEqual(Set(outputs.keys), Set(["primitive_color" + suffix, "primitive_group" + suffix]))
+            XCTAssertEqual(Set(outputs.keys), Set(["plane_color" + suffix,
+                "primitive_color" + suffix, "primitive_group" + suffix]))
             for types in outputs.values { XCTAssertEqual(types, [half ? .half4 : .float4]) }
-            for shader: _Shader in [.primitiveColor, .primitiveGroup] {
+            for shader: _Shader in [.planeColor, .primitiveColor, .primitiveGroup] {
                 XCTAssertNotNil(pipeline.renderState(shader: shader, colorFormat: .rgba8Unorm,
                     depthFormat: .invalid, blendState: .premultipliedAlphaBlend, sampleCount: 1))
             }
@@ -360,6 +363,8 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                 for stage in ["prefix-first", "prefix-second", "shared", "overlay"] {
                     var sourceTexture: Texture?
                     let pixels = try render(device, scale: density) { root in
+                        let scratch = try XCTUnwrap(root.beginRenderPass(enableStencil: false))
+                        scratch.end()
                         if stage != "overlay" {
                             root.fill(Path(CGRect(origin: .zero, size: self.size)),
                                 with: .color(.sRGB, red: 0.25, green: 0.5, blue: 1, opacity: 0.5))
@@ -390,6 +395,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                         if stage == "shared" || stage == "overlay" {
                             let data = try XCTUnwrap(device.makeCPUAccessible(texture: try XCTUnwrap(sourceTexture)))
                             let bytes = Data(bytes: try XCTUnwrap(data.contents()), count: pixels.count)
+                            XCTAssertTrue(bytes.allSatisfy { $0 == 0 }, "Direct plane must leave cleared scratch untouched")
                             try bytes.write(to: output.appendingPathComponent(label + "-source.rgba"))
                         }
                     }

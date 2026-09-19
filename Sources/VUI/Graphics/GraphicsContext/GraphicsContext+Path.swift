@@ -308,6 +308,12 @@ extension GraphicsContext {
         if shading.properties.isEmpty { return }
         if recording != nil, record(bounds: path.boundingBoxOfPath, .fill(path, shading, style)) { return }
 
+        if let plane = SolidColorPlane(path: path, shading: shading, style: style, context: self) {
+            plane.draw(in: self)
+            recordContentBounds(path.boundingBoxOfPath)
+            return
+        }
+
         if let primitive = analyticShadowPrimitive(path, shading: shading, style: style) {
             if let group = PrimitiveShadowGroup(source: primitive, context: self) {
                 group.draw(in: self)

@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-// A filled, solid-color primitive consumed by the analytic shadow encoder.
+// A filled, solid-color primitive consumed by the plane and shadow encoders.
 // Complex paths, unequal corner axes and continuous corners use path drawing.
 struct FilledPrimitive {
     var rect: CGRect
@@ -17,7 +17,7 @@ struct FilledPrimitive {
     var blurRadius: Float = 0
     var color: SIMD4<Float>
 
-    init?(path: Path, color: Color.Resolved) {
+    init?(path: Path, color: Color.Resolved, opacity: Float = 1) {
         switch path.storage {
         case let .rect(rect):
             self.rect = rect.standardized
@@ -40,12 +40,21 @@ struct FilledPrimitive {
             return nil
         }
         let h = Self.half
-        let alpha = h(color.opacity)
+        let alpha = h(h(color.opacity) * h(opacity))
         self.color = SIMD4(h(h(color.red) * alpha), h(h(color.green) * alpha),
                            h(h(color.blue) * alpha), alpha)
     }
 
     private static func half(_ value: Float) -> Float { Float(Float16(value)) }
+
+    static func hasIntegralBounds(_ rect: CGRect) -> Bool {
+        let x = Float(rect.minX), y = Float(rect.minY)
+        // Only the small interval above an integer boundary elides coverage.
+        // Keep the bounds and endpoint additions in the shader's Float domain.
+        return [x, y, x + Float(rect.width), y + Float(rect.height)].allSatisfy {
+            $0.isFinite && abs($0 - floor($0)) <= Float(0.005)
+        }
+    }
 
     func bounds(transform: CGAffineTransform) -> CGRect {
         let amount = max(0, blurRadius * 2.8)
@@ -104,6 +113,69 @@ struct FilledPrimitive {
 }
 
 extension GraphicsContext {
+    // An unfiltered rectangle whose coverage can be discarded. Admission also
+    // requires a solid paint and a blend that needs no backdrop sampling.
+    struct SolidColorPlane {
+        let primitive: FilledPrimitive
+
+        init?(path: Path, shading: Shading, style: FillStyle, context: GraphicsContext) {
+            guard !style.isEOFilled, case .rect = path.storage,
+                  context.storage.state.pointee.style == nil,
+                  context.storage.state.pointee.maskTexture == nil,
+                  RBDrawingStateGetDefaultColorSpace(context.storage.state) == .sRGB,
+                  context.blendMode == .normal,
+                  context.opacity.isFinite, (0...1).contains(context.opacity),
+                  RBDisplayList.Style.isFiniteInvertible(context.transform),
+                  shading.properties.count == 1,
+                  case let .color(color) = shading.properties[0] else { return nil }
+            let resolved = color.resolve(in: context.environment)
+            guard [resolved.red, resolved.green, resolved.blue, resolved.opacity].allSatisfy({
+                $0.isFinite && (0...1).contains($0)
+            }), let primitive = FilledPrimitive(path: path, color: resolved,
+                                                opacity: Float(context.opacity)) else { return nil }
+
+            let pixels = context.transform
+                .concatenating(CGAffineTransform(translationX: context.contentOffset.x, y: context.contentOffset.y))
+                .concatenating(CGAffineTransform(scaleX: context.contentScaleFactor, y: context.contentScaleFactor))
+                .concatenating(CGAffineTransform(translationX: context.viewport.minX, y: context.viewport.minY))
+            let bounds = primitive.bounds(transform: pixels)
+            guard [bounds.minX, bounds.minY, bounds.width, bounds.height].allSatisfy({ Float($0).isFinite }) else {
+                return nil
+            }
+            let aligned = (pixels.b == 0 && pixels.c == 0) || (pixels.a == 0 && pixels.d == 0)
+            let scissor = CGRect(x: Int(context.viewport.minX), y: Int(context.viewport.minY),
+                                 width: Int(context.viewport.width), height: Int(context.viewport.height))
+                .intersection(CGRect(origin: .zero, size: context.resolution))
+            guard !style.isAntialiased || aligned &&
+                (FilledPrimitive.hasIntegralBounds(bounds) || bounds.contains(scissor)) else { return nil }
+            self.primitive = primitive
+        }
+
+        func draw(in context: GraphicsContext) {
+            guard let pass = context.beginRenderPassBackdropTarget() else {
+                Log.error("GraphicsContext solid color pass creation failed.")
+                return
+            }
+            let matrix = context.transform.concatenating(context.viewTransform)
+            let rect = primitive.rect
+            let x = CGFloat(Float(rect.minX)), y = CGFloat(Float(rect.minY))
+            let width = CGFloat(Float(rect.width)), height = CGFloat(Float(rect.height))
+            let origin = Vector2(x, y).applying(matrix).float2
+            let axisX = (Float(width * matrix.a), Float(width * matrix.b))
+            let axisY = (Float(height * matrix.c), Float(height * matrix.d))
+            let color = primitive.color
+            let vertex = { (x: Float, y: Float) in
+                _Vertex(position: (origin.0.addingProduct(y, axisY.0).addingProduct(x, axisX.0),
+                                   origin.1.addingProduct(y, axisY.1).addingProduct(x, axisX.1)),
+                        texcoord: (0, 0), color: (color.x, color.y, color.z, color.w))
+            }
+            context.encodeDrawCommand(renderPass: pass, shader: .planeColor, stencil: .ignore,
+                vertices: [vertex(0, 1), vertex(0, 0), vertex(1, 1), vertex(1, 1), vertex(0, 0), vertex(1, 0)],
+                texture: nil, blendState: color.w == 1 ? .opaque : .premultipliedAlphaBlend)
+            pass.end()
+        }
+    }
+
     // A scoped execution plan for one shadow and its solid source. The scratch
     // target belongs to this draw until it has been composited and reset.
     struct PrimitiveShadowGroup {
@@ -224,13 +296,7 @@ extension GraphicsContext {
         let aligned = (pixelTransform.b == 0 && pixelTransform.c == 0) ||
                       (pixelTransform.a == 0 && pixelTransform.d == 0)
         let pixelRect = primitive.bounds(transform: pixelTransform)
-        let x = Float(pixelRect.minX), y = Float(pixelRect.minY)
-        // Only the small interval above an integer boundary elides coverage.
-        // Keep the bounds and endpoint additions in the shader's Float domain.
-        let plane = primitive.kind == 2 && aligned &&
-            [x, y, x + Float(pixelRect.width), y + Float(pixelRect.height)].allSatisfy {
-                abs($0 - floor($0)) <= Float(0.005)
-            }
+        let plane = primitive.kind == 2 && aligned && FilledPrimitive.hasIntegralBounds(pixelRect)
         let outset: Float = plane ? 0 : radius > 0 ? Float(1).addingProduct(2.8, radius) : 1 / scale
         guard outset.isFinite else { return false }
         let width = Float(primitive.rect.width)

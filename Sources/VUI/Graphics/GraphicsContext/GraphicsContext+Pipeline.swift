@@ -13,6 +13,7 @@ import VVD
 enum _Shader {
     case stencil        // fill stencil, no fragment function
     case vertexColor    // vertex color
+    case planeColor
     case primitiveColor
     case primitiveGroup
     case image          // texture with tint color
@@ -386,6 +387,8 @@ class GraphicsPipelineStates {
                 let primitiveOutputUsesFloat16 = device.features.isSuperset(of: [
                     .float16Arithmetic, .float16InputOutput
                 ])
+                shaderFunctions[.planeColor] = try loadFragmentFunction(primitiveOutputUsesFloat16
+                    ? "plane_color_half.frag" : "plane_color.frag")
                 shaderFunctions[.primitiveColor] = try loadFragmentFunction(primitiveOutputUsesFloat16
                     ? "primitive_color_half.frag" : "primitive_color.frag")
                 shaderFunctions[.primitiveGroup] = try loadFragmentFunction(primitiveOutputUsesFloat16

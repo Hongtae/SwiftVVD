@@ -23,7 +23,7 @@ def shader_configuration(path: Path) -> tuple[str, str, list[str]]:
             entry_point = name.removesuffix(suffix)
             if name == "default.vert.hlsl":
                 entry_point = "defaultVertex"
-            if name in ("primitive_color_half.frag.hlsl", "primitive_group_half.frag.hlsl"):
+            if name in ("plane_color_half.frag.hlsl", "primitive_color_half.frag.hlsl", "primitive_group_half.frag.hlsl"):
                 return entry_point, "ps_6_2", ["-enable-16bit-types"]
             return entry_point, profile, []
     raise ValueError(f"Unsupported HLSL shader filename: {name}")
