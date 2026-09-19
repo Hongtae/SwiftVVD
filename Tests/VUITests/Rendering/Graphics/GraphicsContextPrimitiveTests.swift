@@ -133,6 +133,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
 
     // ASSERTIONS recordedPrimitiveIsolation27Observed
     // ASSERTIONS recordedPrimitiveMesh27Observed
+    // ASSERTIONS recordedPrimitiveGroupScissor27Observed
     func testPrimitiveMetalIsolatesCoverageAndGroupOpacity() throws {
         let device = try device()
         let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_ISOLATION"].map { URL(fileURLWithPath: $0) }
@@ -156,11 +157,15 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                                     // Exercise the encoder directly to isolate the source and the
                                     // still-gated zero-radius branch without widening public dispatch.
                                     let primitive = try XCTUnwrap(FilledPrimitive(path: path(shape), color: color.resolve(in: .init())))
-                                    let pass = try XCTUnwrap(context.beginRenderPass(enableStencil: false, enableMSAA: false))
-                                    XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: primitive,
-                                                                          transform: context.transform))
-                                    pass.end()
-                                    context.drawSource(primitive: primitive)
+                                    if let group = GraphicsContext.PrimitiveShadowGroup(source: primitive, context: context) {
+                                        group.draw(in: context)
+                                    } else {
+                                        let pass = try XCTUnwrap(context.beginRenderPass(enableStencil: false, enableMSAA: false))
+                                        XCTAssertTrue(context.encodePrimitive(renderPass: pass, primitive: primitive,
+                                                                              transform: context.transform))
+                                        pass.end()
+                                        context.drawSource(primitive: primitive)
+                                    }
                                 }
                                 stages[role] = pixels
                                 XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 }, label)
@@ -176,6 +181,15 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                                                        "The primitive mesh must not extend its diagonal fringe: \(label)")
                                     }
                                 }
+                                if radius == 0 && opacity == 0.75 && shape == "rect" && role == "composite" {
+                                    let point: (Int, Int)? = name == "shear" && density == 1 ? (59, 29)
+                                        : name == "identity" && density == 2 ? (166, 51) : nil
+                                    if let (x, y) = point {
+                                        let offset = (y * Int(size.width * density) + x) * 4
+                                        XCTAssertEqual(Array(pixels[offset..<offset + 4]), [0, 0, 0, 0],
+                                            "Group bounds must exclude the outer mesh fringe: \(label)")
+                                    }
+                                }
                                 if let output { try Data(pixels).write(to: output.appendingPathComponent(label + ".rgba")) }
                             }
                             if opacity == 1 {
@@ -189,6 +203,113 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
                 }
             }
         }
+    }
+
+    // ASSERTIONS recordedPrimitiveGroupExecution27Observed
+    // ASSERTIONS recordedPrimitiveGroupScissor27Observed
+    // ASSERTIONS recordedPrimitiveSpillAttachments27Observed
+    func testPrimitiveGroupsPreserveBackdropAndSiblingLifetime() throws {
+        let device = try device()
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_GROUPS"].map { URL(fileURLWithPath: $0) }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let color = Color(.sRGB, red: 1, green: 0.2196044921875, blue: 0.2353515625, opacity: 0.6)
+        for (name, basis) in bases where name == "identity" || name == "shear" {
+            let controls: [(String, Double)] = [0.25, 0.5, 0.75, 0.999, 0.9999, 1].flatMap {
+                [("single", $0), ("backdrop", $0)]
+            } + [("siblings", 0.75)]
+            for (kind, opacity) in controls {
+                let draw = { (root: inout GraphicsContext) in
+                    if kind != "single" {
+                        root.fill(Path(CGRect(origin: .zero, size: self.size)),
+                            with: .color(.sRGB, red: 0.25, green: 0.5, blue: 1, opacity: 0.5))
+                    }
+                    var first = root
+                    first.opacity = opacity
+                    first.concatenate(basis)
+                    first.addFilter(.shadow(color: .black.opacity(0.5), radius: 2, x: 3, y: 2))
+                    first.fill(self.path("rect"), with: .color(color))
+                    if kind == "siblings" {
+                        var second = root
+                        second.translateBy(x: 20, y: 12)
+                        second.opacity = 0.5
+                        second.concatenate(basis)
+                        second.addFilter(.shadow(color: .black.opacity(0.5), radius: 12, x: 3, y: 2))
+                        second.fill(self.path("circle"), with: .color(color))
+                        root.fill(Path(CGRect(x: 80, y: 40, width: 144, height: 120)),
+                            with: .color(.sRGB, red: 0, green: 1, blue: 0, opacity: 0.625))
+                    }
+                }
+                var source = recording()
+                draw(&source)
+                let contents = try XCTUnwrap(source.recording).moveContents()
+                for density: CGFloat in [1, 2] {
+                    let label = "\(name)-\(kind)-\(Int((opacity * 10000).rounded()))-\(Int(density))"
+                    var scratch: Texture?
+                    let pixels = try render(device, scale: density) {
+                        draw(&$0)
+                        scratch = $0.sourceTexture
+                    }
+                    let replay = try render(device, scale: density) { contents.draw(in: $0) }
+                    XCTAssertTrue(pixels == replay, label)
+                    if kind == "single" && Float16(opacity) < 1 {
+                        let buffer = try XCTUnwrap(device.makeCPUAccessible(texture: try XCTUnwrap(scratch)))
+                        let bytes = UnsafeRawBufferPointer(start: try XCTUnwrap(buffer.contents()),
+                            count: Int(size.width * size.height * density * density) * 4)
+                        XCTAssertTrue(bytes.allSatisfy { $0 == 0 }, "Completed group must release cleared scratch: \(label)")
+                    }
+                    let width = Int(size.width * density)
+                    let untouched = (Int(180 * density) * width + Int(240 * density)) * 4
+                    XCTAssertEqual(Array(pixels[untouched..<untouched + 4]),
+                        kind == "single" ? [0, 0, 0, 0] : [32, 64, 128, 128], label)
+                    if kind == "siblings" {
+                        let after = (Int(150 * density) * width + Int(210 * density)) * 4
+                        XCTAssertEqual(Array(pixels[after..<after + 4]), [12, 183, 48, 207], label)
+                    }
+                    if name == "identity" && kind == "single" && opacity == 0.75 && density == 1 {
+                        XCTAssertEqual(pixels[(22 * width + 36) * 4 + 3], 1,
+                            "Group opacity must be applied after child accumulation")
+                    }
+                    if let output { try Data(pixels).write(to: output.appendingPathComponent(label + ".rgba")) }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS recordedPrimitiveGroupExecution27Observed
+    // ASSERTIONS recordedPrimitiveGroupScissor27Observed
+    func testPrimitiveGroupSelectionAndBounds() throws {
+        let device = try device()
+        let primitive = try XCTUnwrap(FilledPrimitive(path: path("rect"), color: Color.red.resolve(in: .init())))
+        for (name, basis) in bases where name == "identity" || name == "shear" {
+            for density: CGFloat in [1, 2] {
+                _ = try render(device, scale: density) { context in
+                    context.concatenate(basis)
+                    context.addFilter(.shadow(color: .black.opacity(0.5), radius: 2, x: 3, y: 2))
+                    for opacity in [0.25, 0.75, 0.999, 0.9999, 1] {
+                        context.opacity = opacity
+                        let group = try XCTUnwrap(GraphicsContext.PrimitiveShadowGroup(source: primitive, context: context))
+                        XCTAssertEqual(group.opacity, Float(Float16(opacity)))
+                        if Float16(opacity) == 1 {
+                            XCTAssertNil(group.scissor)
+                        } else {
+                            let scissor = try XCTUnwrap(group.scissor)
+                            let expected = name == "identity"
+                                ? (density == 1 ? [29, 20, 60, 36] : [58, 40, 120, 72])
+                                : (density == 1 ? [54, 26, 93, 42] : [109, 53, 185, 83])
+                            XCTAssertEqual([scissor.x, scissor.y, scissor.width, scissor.height], expected)
+                        }
+                    }
+                    context.blendMode = .multiply
+                    XCTAssertNil(GraphicsContext.PrimitiveShadowGroup(source: primitive, context: context))
+                    context.blendMode = .normal
+                    context.addFilter(.blur(radius: 2))
+                    XCTAssertNil(GraphicsContext.PrimitiveShadowGroup(source: primitive, context: context))
+                }
+            }
+        }
+        var context = recording()
+        context.addFilter(.shadow(radius: 2, options: .shadowOnly))
+        XCTAssertNil(GraphicsContext.PrimitiveShadowGroup(source: primitive, context: context))
     }
 
     // ASSERTIONS recordedAffineEffectCoordinates27Observed

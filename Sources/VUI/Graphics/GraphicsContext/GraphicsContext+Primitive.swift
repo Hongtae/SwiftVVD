@@ -47,6 +47,25 @@ struct FilledPrimitive {
 
     private static func half(_ value: Float) -> Float { Float(Float16(value)) }
 
+    func bounds(transform: CGAffineTransform) -> CGRect {
+        let amount = max(0, blurRadius * 2.8)
+        let x = Float(rect.minX) - amount, y = Float(rect.minY) - amount
+        let width = Float(rect.width).addingProduct(2, amount)
+        let height = Float(rect.height).addingProduct(2, amount)
+        if transform.a == 1 && transform.b == 0 && transform.c == 0 && transform.d == 1 {
+            return CGRect(x: CGFloat(x + Float(transform.tx)), y: CGFloat(y + Float(transform.ty)),
+                          width: CGFloat(width), height: CGFloat(height))
+        }
+        let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)].map { x, y in
+            SIMD2(Float(transform.tx.addingProduct(transform.a, CGFloat(x)).addingProduct(transform.c, CGFloat(y))),
+                  Float(transform.ty.addingProduct(transform.b, CGFloat(x)).addingProduct(transform.d, CGFloat(y))))
+        }
+        let lo = corners.reduce(corners[0]) { SIMD2(min($0.x, $1.x), min($0.y, $1.y)) }
+        let hi = corners.reduce(corners[0]) { SIMD2(max($0.x, $1.x), max($0.y, $1.y)) }
+        return CGRect(x: CGFloat(lo.x), y: CGFloat(lo.y),
+                      width: CGFloat(hi.x - lo.x), height: CGFloat(hi.y - lo.y))
+    }
+
     func shadow(radius: Float, color: Color.Resolved, itemTransform: CGAffineTransform,
                 styleTransform: CGAffineTransform, offset: CGPoint) -> (primitive: Self, transform: CGAffineTransform)? {
         guard radius.isFinite, radius >= 0,
@@ -85,6 +104,104 @@ struct FilledPrimitive {
 }
 
 extension GraphicsContext {
+    // A scoped execution plan for one shadow and its solid source. The scratch
+    // target belongs to this draw until it has been composited and reset.
+    struct PrimitiveShadowGroup {
+        let source: FilledPrimitive
+        let sourceTransform: CGAffineTransform
+        let shadow: FilledPrimitive
+        let shadowTransform: CGAffineTransform
+        let opacity: Float
+        let scissor: ScissorRect?
+
+        init?(source: FilledPrimitive, context: GraphicsContext) {
+            let styles = context.storage.state.pointee.style?.executionStyles ?? []
+            guard styles.count == 1, let style = styles[0] as? RBDisplayList.ShadowStyle,
+                  style.supportsColorOperations, style.options.isEmpty,
+                  context.blendMode == .normal, context.storage.state.pointee.maskTexture == nil,
+                  context.opacity.isFinite, context.opacity > 0, context.opacity <= 1,
+                  let shadow = source.shadow(radius: style.radius, color: style.color.resolved,
+                      itemTransform: context.transform, styleTransform: style.transform, offset: style.offset) else {
+                return nil
+            }
+            let opacity = Float(Float16(Float(context.opacity)))
+            guard opacity > 0 else { return nil }
+            self.source = source
+            self.sourceTransform = context.transform
+            self.shadow = shadow.primitive
+            self.shadowTransform = shadow.transform
+            self.opacity = opacity
+            if opacity == 1 {
+                scissor = nil
+            } else {
+                let pixels = CGAffineTransform(translationX: context.contentOffset.x, y: context.contentOffset.y)
+                    .concatenating(CGAffineTransform(scaleX: context.contentScaleFactor, y: context.contentScaleFactor))
+                    .concatenating(CGAffineTransform(translationX: context.viewport.minX, y: context.viewport.minY))
+                let a = source.bounds(transform: sourceTransform.concatenating(pixels))
+                let b = shadow.primitive.bounds(transform: shadow.transform.concatenating(pixels))
+                let x = min(Float(a.minX), Float(b.minX)), y = min(Float(a.minY), Float(b.minY))
+                let width = max(Float(a.minX) + Float(a.width), Float(b.minX) + Float(b.width)) - x
+                let height = max(Float(a.minY) + Float(a.height), Float(b.minY) + Float(b.height)) - y
+                guard [x, y, width, height, x + width, y + height].allSatisfy(\.isFinite) else { return nil }
+                let parent = CGRect(x: Int(context.viewport.minX), y: Int(context.viewport.minY),
+                                    width: Int(context.viewport.width), height: Int(context.viewport.height))
+                let bounds = CGRect(x: CGFloat(floor(x)), y: CGFloat(floor(y)),
+                    width: CGFloat(ceil(x + width) - floor(x)), height: CGFloat(ceil(y + height) - floor(y)))
+                    .intersection(parent).intersection(CGRect(origin: .zero, size: context.resolution))
+                scissor = bounds.isNull || bounds.isEmpty ? ScissorRect(x: 0, y: 0, width: 0, height: 0)
+                    : ScissorRect(x: Int(bounds.minX), y: Int(bounds.minY),
+                                  width: Int(bounds.width), height: Int(bounds.height))
+            }
+        }
+
+        func draw(in context: GraphicsContext) {
+            if let scissor, scissor.width == 0 || scissor.height == 0 { return }
+            let grouped = scissor != nil
+            guard let pass = context.beginRenderPass(viewport: context.viewport,
+                renderTarget: grouped ? context.sourceTexture : context.backdrop,
+                loadAction: grouped ? .clear : .load, clearColor: .clear,
+                useStencil: false, useMSAA: false) else {
+                Log.error("GraphicsContext primitive group pass creation failed.")
+                return
+            }
+            if let scissor { pass.encoder.setScissorRect(scissor) }
+            let encoded = context.encodePrimitive(renderPass: pass, primitive: shadow,
+                transform: shadowTransform, blendState: .premultipliedAlphaBlend) &&
+                context.encodePrimitive(renderPass: pass, primitive: source,
+                    transform: sourceTransform, blendState: .premultipliedAlphaBlend)
+            pass.end()
+            guard encoded else {
+                Log.error("GraphicsContext primitive group encoding failed.")
+                return
+            }
+            guard let scissor else { return }
+            if let output = context.beginRenderPassBackdropTarget() {
+                output.encoder.setScissorRect(scissor)
+                context.encodePrimitiveGroup(renderPass: output, opacity: opacity)
+                output.end()
+            } else {
+                Log.error("GraphicsContext primitive group output pass creation failed.")
+            }
+            // The sampled target cannot also be an output of the composite pass.
+            // End its lifetime with a clear before another draw can reuse it.
+            if let reset = context.beginRenderPass(enableStencil: false) {
+                reset.end()
+            } else {
+                Log.error("GraphicsContext primitive group reset failed.")
+            }
+        }
+    }
+
+    func encodePrimitiveGroup(renderPass: RenderPass, opacity: Float) {
+        let color: Float4 = (opacity, opacity, opacity, opacity)
+        let tl = _Vertex(position: (-1, 1), texcoord: (0, 0), color: color)
+        let tr = _Vertex(position: (1, 1), texcoord: (0, 0), color: color)
+        let bl = _Vertex(position: (-1, -1), texcoord: (0, 0), color: color)
+        let br = _Vertex(position: (1, -1), texcoord: (0, 0), color: color)
+        encodeDrawCommand(renderPass: renderPass, shader: .primitiveGroup, stencil: .ignore,
+            vertices: [bl, tl, br, br, tl, tr], texture: sourceTexture, blendState: .premultipliedAlphaBlend)
+    }
+
     func analyticShadowPrimitive(_ path: Path, shading: Shading, style: FillStyle) -> FilledPrimitive? {
         guard style.isAntialiased, !style.isEOFilled,
               storage.state.pointee.maskTexture == nil,
@@ -97,7 +214,7 @@ extension GraphicsContext {
     }
 
     func encodePrimitive(renderPass: RenderPass, primitive: FilledPrimitive,
-                         transform: CGAffineTransform) -> Bool {
+                         transform: CGAffineTransform, blendState: BlendState = .opaque) -> Bool {
         let radius = primitive.blurRadius
         let pixelTransform = transform.concatenating(CGAffineTransform(
             scaleX: contentScaleFactor, y: contentScaleFactor))
@@ -149,7 +266,7 @@ extension GraphicsContext {
         let vertices = [bl, tl, br, br, tl, tr]
         guard let pipelineState = pipeline.renderState(shader: .primitiveColor,
                   colorFormat: renderPass.colorFormat, depthFormat: renderPass.depthFormat,
-                  blendState: .opaque, sampleCount: renderPass.sampleCount),
+                  blendState: blendState, sampleCount: renderPass.sampleCount),
               let depth = pipeline.depthStencilState(.ignore),
               let buffer = makeBuffer(vertices) else { return false }
         let encoder = renderPass.encoder
