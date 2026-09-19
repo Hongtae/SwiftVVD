@@ -19,7 +19,8 @@ public final class RigidBodySimulator {
 
     public init(collisionSpace: CollisionSpace = CollisionSpace(),
                 gravity: Vector3 = Vector3(0, -9.81, 0),
-                solver: (any RigidBodySolver)? = nil) {
+                solver: (any RigidBodySolver)? =
+                    SequentialImpulseRigidBodySolver()) {
         self.collisionSpace = collisionSpace
         self.gravity = gravity
         self.solver = solver

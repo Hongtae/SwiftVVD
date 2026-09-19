@@ -17,7 +17,7 @@ public final class XPBDSimulator {
     public var constraints: [any XPBDConstraint] { constraintStorage }
 
     public init(gravity: Vector3 = Vector3(0, -9.81, 0),
-                solver: (any XPBDSolver)? = nil) {
+                solver: (any XPBDSolver)? = XPBDProjectionSolver()) {
         self.gravity = gravity
         self.solver = solver
         self.bodyStorage = []
