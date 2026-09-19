@@ -7,9 +7,9 @@
 
 #if ENABLE_UIKIT
 import Foundation
-@_implementationOnly import UIKit
+internal import UIKit
 
-private final class UIKitViewController: UIViewController {
+final class UIKitViewController: UIViewController {
 
     var uiView: UIKitView? = nil
 
@@ -17,15 +17,10 @@ private final class UIKitViewController: UIViewController {
 
     override func loadView() {
         if self.uiView == nil {
-            self.uiView = makeUIKitView()
+            self.uiView = UIKitView()
         }
-        self.view = (self.uiView as! UIView)
+        self.view = self.uiView
     }
-}
-
-@MainActor
-func makeUIKitViewController() -> AnyObject {
-    UIKitViewController()
 }
 
 #endif

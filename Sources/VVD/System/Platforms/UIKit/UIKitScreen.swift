@@ -7,7 +7,7 @@
 
 #if ENABLE_UIKIT
 import Foundation
-@_implementationOnly import UIKit
+internal import UIKit
 
 struct UIKitScreen: Screen {
     let id: ScreenID

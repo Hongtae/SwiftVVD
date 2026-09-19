@@ -69,7 +69,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
         var layer: CAMetalLayer? = nil
 #if ENABLE_APPKIT
         if layer == nil {
-            if let view = (self.window as? AppKitWindow)?.nsView {
+            if let view = (self.window as? AppKitWindow)?.view {
                 layer = CAMetalLayer()
                 view.wantsLayer = true
                 view.layer = layer
@@ -82,7 +82,7 @@ final class MetalSwapChain: SwapChain, @unchecked Sendable {
 #endif
 #if ENABLE_UIKIT
         if layer == nil {
-            if let view = (self.window as? UIKitWindow)?.uiView {
+            if let view = (self.window as? UIKitWindow)?.view {
                 layer = view.layer as? CAMetalLayer
             }
         }

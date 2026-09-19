@@ -8,7 +8,7 @@
 #if ENABLE_UIKIT
 import Foundation
 internal import QuartzCore
-@_implementationOnly import UIKit
+internal import UIKit
 
 #if !os(watchOS)
 private extension KeyboardModifierFlags {
@@ -25,24 +25,7 @@ private extension KeyboardModifierFlags {
 #endif
 
 @MainActor
-protocol UIKitView: AnyObject {
-    var contentBounds: CGRect { get }
-    var windowFrame: CGRect { get }
-    var contentScaleFactor: CGFloat { get }
-    var textInput: Bool { get set }
-    var layer: CALayer { get }
-    var proxyWindow: UIKitWindow? { get set }
-    func touchLocation(atIndex index: Int) -> CGPoint?
-    func resetTextComposition(_ emitEvents: Bool) -> String?
-}
-
-@MainActor
-func makeUIKitView() -> UIKitView {
-    UIKitViewImpl()
-}
-
-@MainActor
-private final class UIKitViewImpl: UIView, UITextFieldDelegate, UIKitView {
+final class UIKitView: UIView, UITextFieldDelegate {
 
     private func keyboardModifiers(from event: UIEvent?) -> KeyboardModifierFlags {
 #if os(watchOS)

@@ -7,7 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
-@_implementationOnly import AppKit
+internal import AppKit
 
 private struct AppKitClipboardError: Error, CustomStringConvertible {
     let operation: String

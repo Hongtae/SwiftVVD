@@ -7,13 +7,13 @@
 
 #if ENABLE_UIKIT
 import Foundation
-@_implementationOnly import UIKit
+internal import UIKit
 
 @MainActor private var activeWindowScenes: [UIWindowScene] = []
 @MainActor private var activeWindows: [UIWindow] = []
 
 @MainActor
-func anyWindowScene() -> AnyObject? {
+func anyWindowScene() -> UIWindowScene? {
     activeWindowScenes.first
 }
 

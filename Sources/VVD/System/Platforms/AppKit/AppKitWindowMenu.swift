@@ -7,7 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
-@_implementationOnly import AppKit
+internal import AppKit
 
 @MainActor
 private final class AppKitWindowMenuActionTarget: NSObject {

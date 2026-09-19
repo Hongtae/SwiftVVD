@@ -7,7 +7,7 @@
 
 #if ENABLE_UIKIT
 import Foundation
-@_implementationOnly import UIKit
+internal import UIKit
 
 @MainActor
 final class UIKitWindow: Window {
@@ -19,49 +19,49 @@ final class UIKitWindow: Window {
     var contentScaleFactor: CGFloat { self.view?.contentScaleFactor ?? 1.0 }
 
     var origin: CGPoint {
-        get { uiView?.frame.origin ?? .zero }
+        get { view?.frame.origin ?? .zero }
         set(value) {
-            if let uiView {
-                uiView.frame.origin = value
+            if let view {
+                view.frame.origin = value
             }
         }
     }
 
     var contentSize: CGSize {
         get {
-            if let bounds = uiView?.bounds {
+            if let bounds = view?.bounds {
                 return CGSize(width: bounds.width, height: bounds.height)
             }
             return .zero
         }
         set(value) {
-            if let uiView {
-                uiView.bounds.size = value
+            if let view {
+                view.bounds.size = value
             }
         }
     }
 
     var resolution: CGSize {
         get {
-            if let uiView {
-                let bounds = uiView.bounds
-                let scale = uiView.contentScaleFactor
+            if let view {
+                let bounds = view.bounds
+                let scale = view.contentScaleFactor
                 return CGSize(width: bounds.width * scale, height: bounds.height * scale)
             }
             return .zero
         }
         set(value) {
-            if let uiView {
-                let scale = 1.0 / uiView.contentScaleFactor
+            if let view {
+                let scale = 1.0 / view.contentScaleFactor
                 let size = CGSize(width: value.width * scale, height: value.height * scale)
-                uiView.bounds.size = size
+                view.bounds.size = size
             }
         }
     }
 
     var title: String {
-        get { uiView?.window?.rootViewController?.title ?? "" }
-        set { uiView?.window?.rootViewController?.title = newValue }
+        get { view?.window?.rootViewController?.title ?? "" }
+        set { view?.window?.rootViewController?.title = newValue }
     }
 
     var screen: (any Screen)? {
@@ -84,24 +84,24 @@ final class UIKitWindow: Window {
     var eventObservers = WindowEventObserverContainer()
 
     private var window: UIWindow?
-    private var view: UIKitView?
-    var uiView: UIView? { self.view as? UIView }
+    private(set) var view: UIKitView?
 
     required init?(name: String, style: WindowStyle, delegate: WindowDelegate?, data: [String: Any]) {
 
-        let viewController = makeUIKitViewController() as! UIViewController
-        let uiView: UIView = viewController.view
-        self.view = (uiView as! UIKitView)
+        let viewController = UIKitViewController()
+        viewController.loadViewIfNeeded()
+        let view = viewController.uiView!
+        self.view = view
 
         if style.contains(.autoResize) {
-            uiView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         } else {
-            uiView.autoresizingMask = [.flexibleRightMargin, .flexibleBottomMargin]
+            view.autoresizingMask = [.flexibleRightMargin, .flexibleBottomMargin]
         }
         viewController.title = name
 
         let window: UIWindow
-        if let scene = anyWindowScene() as? UIWindowScene {
+        if let scene = anyWindowScene() {
             window = UIWindow(windowScene: scene)
         } else {
             window = UIWindow()
@@ -110,7 +110,7 @@ final class UIKitWindow: Window {
         window.rootViewController = viewController
 
         self.window = window
-        self.view!.proxyWindow = self
+        view.proxyWindow = self
 
         setActiveWindow(window)
     }
@@ -125,21 +125,21 @@ final class UIKitWindow: Window {
     }
 
     func show() {
-        uiView?.isHidden = false
+        view?.isHidden = false
     }
 
     func hide() {
-        uiView?.isHidden = true
+        view?.isHidden = true
     }
 
     func activate() {
-        uiView?.isHidden = false
+        view?.isHidden = false
         self.window?.makeKeyAndVisible()
-        _ = uiView?.becomeFirstResponder()
+        _ = view?.becomeFirstResponder()
     }
 
     func minimize() {
-        uiView?.isHidden = true
+        view?.isHidden = true
     }
 
     func center() {
@@ -211,17 +211,17 @@ final class UIKitWindow: Window {
     }
 
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
-        if let uiView, let window {
-            let ptWindow = uiView.convert(point, to: nil)
+        if let view, let window {
+            let ptWindow = view.convert(point, to: nil)
             return window.convert(ptWindow, to: nil)
         }
         return point
     }
     
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
-        if let uiView, let window {
+        if let view, let window {
             let ptWindow = window.convert(point, from: nil)
-            return uiView.convert(ptWindow, from: nil)
+            return view.convert(ptWindow, from: nil)
         }
         return point
     }

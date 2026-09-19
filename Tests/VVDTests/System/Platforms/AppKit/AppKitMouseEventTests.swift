@@ -15,7 +15,7 @@ final class AppKitMouseEventTests: XCTestCase {
         )
         defer { window.close() }
 
-        let view = try XCTUnwrap(window.nsView)
+        let view = try XCTUnwrap(window.view)
         let nativeWindow = try XCTUnwrap(view.window)
         let observer = NSObject()
         var events: [MouseEvent] = []
@@ -68,7 +68,7 @@ final class AppKitMouseEventTests: XCTestCase {
         )
         defer { window.close() }
 
-        let view = try XCTUnwrap(window.nsView)
+        let view = try XCTUnwrap(window.view)
         let nativeWindow = try XCTUnwrap(view.window)
         let observer = NSObject()
         var events: [MouseEvent] = []

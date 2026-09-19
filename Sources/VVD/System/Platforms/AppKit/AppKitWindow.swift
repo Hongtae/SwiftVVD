@@ -7,7 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
-@_implementationOnly import AppKit
+internal import AppKit
 
 private final class _NativeWindow: NSWindow {
     override var canBecomeKey: Bool { true }
@@ -21,15 +21,15 @@ final class AppKitWindow: Window {
 
     var resolution: CGSize {
         get {
-            if let nsView {
-                let pixelBounds = nsView.convertToBacking(nsView.bounds)
+            if let view {
+                let pixelBounds = view.convertToBacking(view.bounds)
                 return CGSize(width: pixelBounds.width, height: pixelBounds.height)
             }
             return .zero
         }
         set (value) {
-            if nsView?.window?.contentView === self.view {
-                let window = nsView!.window!
+            if view?.window?.contentView === self.view {
+                let window = view!.window!
                 let origin = self.origin
                 let contentSize = window.convertFromBacking(
                     NSMakeRect(0, 0, value.width, value.height)).size
@@ -40,9 +40,9 @@ final class AppKitWindow: Window {
                     self.origin = origin
                 }
             } else {
-                if let s = nsView?.convertFromBacking(value) {
-                    nsView?.frame.size = s
-                    nsView?.window?.layoutIfNeeded()
+                if let s = view?.convertFromBacking(value) {
+                    view?.frame.size = s
+                    view?.window?.layoutIfNeeded()
                 }
             }
         }
@@ -53,15 +53,14 @@ final class AppKitWindow: Window {
     var contentScaleFactor: CGFloat { self.view?.contentScaleFactor ?? 1.0 }
 
     var title: String {
-        get { nsView?.window?.title ?? "" }
-        set { nsView?.window?.title = newValue }
+        get { view?.window?.title ?? "" }
+        set { view?.window?.title = newValue }
     }
 
     private var window: NSWindow?
-    private var view: AppKitView?
+    private(set) var view: AppKitView?
     private var _menuController: AppKitWindowMenuController?
     private var cursorOverride: Cursor?
-    var nsView: NSView? { view as? NSView }
 
     var menuController: (any WindowMenuController)? {
         guard let window else {
@@ -79,10 +78,10 @@ final class AppKitWindow: Window {
 
     var origin: CGPoint {
         get {
-            if let nsView {
-                if nsView.window?.contentView === self.view {
-                    let frame = nsView.window!.frame
-                    if let screen = nsView.window?.screen {
+            if let view {
+                if view.window?.contentView === self.view {
+                    let frame = view.window!.frame
+                    if let screen = view.window?.screen {
                         let referenceY = AppKitScreen.desktopTop(fallback: screen)
                         return AppKitScreen.topLeftRect(
                             fromNative: frame,
@@ -91,15 +90,15 @@ final class AppKitWindow: Window {
                     }
                     return frame.origin
                 } else {
-                    return nsView.frame.origin
+                    return view.frame.origin
                 }
             }
             return .zero
         }
         set(value) {
-            if let nsView {
-                if nsView.window?.contentView === self.view {
-                    let window = nsView.window!
+            if let view {
+                if view.window?.contentView === self.view {
+                    let window = view.window!
                     if let screen = window.screen {
                         let referenceY = AppKitScreen.desktopTop(fallback: screen)
                         let nativePoint = AppKitScreen.nativePoint(
@@ -112,8 +111,8 @@ final class AppKitWindow: Window {
                     }
                     window.displayIfNeeded()
                 } else {
-                    nsView.frame.origin = value
-                    nsView.window?.layoutIfNeeded()
+                    view.frame.origin = value
+                    view.window?.layoutIfNeeded()
                 }
             }
         }
@@ -121,20 +120,20 @@ final class AppKitWindow: Window {
 
     var contentSize: CGSize {
         get {
-            if let nsView {
-                var bounds = nsView.bounds
-                if nsView.window != nil {
-                    bounds = nsView.convert(bounds, to: nil)
+            if let view {
+                var bounds = view.bounds
+                if view.window != nil {
+                    bounds = view.convert(bounds, to: nil)
                 }
                 return CGSize(width: bounds.width, height: bounds.height)
             }
             return .zero
         }
         set(value) {
-            if let nsView {
-                if nsView.window?.contentView === self.view {
+            if let view {
+                if view.window?.contentView === self.view {
                     let origin = self.origin
-                    let window = nsView.window!
+                    let window = view.window!
                     window.setContentSize(value)
                     if origin == self.origin {
                         window.displayIfNeeded()
@@ -142,8 +141,8 @@ final class AppKitWindow: Window {
                         self.origin = origin
                     }
                 } else {
-                    nsView.frame.size = value
-                    nsView.window?.layoutIfNeeded()
+                    view.frame.size = value
+                    view.window?.layoutIfNeeded()
                 }
             }
         }
@@ -195,12 +194,12 @@ final class AppKitWindow: Window {
                                      defer: true)
         self.window = window
         self.delegate = delegate
-        let view = makeAppKitView(frame: contentRect)
+        let view = AppKitView(frame: contentRect)
         self.view = view
         view.proxyWindow = self
         
-        window.contentView = (view as! NSView)
-        window.delegate = (view as! NSWindowDelegate)
+        window.contentView = view
+        window.delegate = view
         window.isReleasedWhenClosed = false
         window.acceptsMouseMovedEvents = true
         window.allowsConcurrentViewDrawing = true
@@ -214,7 +213,7 @@ final class AppKitWindow: Window {
         }
         
         if style.contains(.acceptFileDrop) {
-            (view as! NSView).registerForDraggedTypes([.fileURL])
+            view.registerForDraggedTypes([.fileURL])
         }
         if isPopupWindow {
             window.level = .init(rawValue: Int(CGWindowLevelForKey(.popUpMenuWindow)))
@@ -233,7 +232,7 @@ final class AppKitWindow: Window {
     }
 
     func show() {
-        if let window = nsView?.window {
+        if let window = view?.window {
             if window.styleMask.contains(.nonactivatingPanel) {
                 window.orderFrontRegardless()
             } else {
@@ -245,7 +244,7 @@ final class AppKitWindow: Window {
     }
 
     func hide() {
-        if let window = nsView?.window {
+        if let window = view?.window {
             window.resignKey()
             window.orderOut(nil)
 
@@ -254,7 +253,7 @@ final class AppKitWindow: Window {
     }
 
     func activate() {
-        if let window = nsView?.window {
+        if let window = view?.window {
             if window.styleMask.contains(.nonactivatingPanel) {
                 window.orderFrontRegardless()
             } else if window.canBecomeKey {
@@ -277,11 +276,11 @@ final class AppKitWindow: Window {
     }
 
     func minimize() {
-        nsView?.window?.miniaturize(nil)
+        view?.window?.miniaturize(nil)
     }
 
     func center() {
-        nsView?.window?.center()
+        view?.window?.center()
     }
 
     func requestToClose() -> Bool {
@@ -410,8 +409,8 @@ final class AppKitWindow: Window {
     }
     
     func convertPointToScreen(_ point: CGPoint) -> CGPoint {
-        if let nsView, let window {
-            let ptWindow = nsView.convert(point, to: nil)
+        if let view, let window {
+            let ptWindow = view.convert(point, to: nil)
             let ptScreen = window.convertPoint(toScreen: ptWindow)
             if let screen = window.screen {
                 let referenceY = AppKitScreen.desktopTop(fallback: screen)
@@ -426,7 +425,7 @@ final class AppKitWindow: Window {
     }
     
     func convertPointFromScreen(_ point: CGPoint) -> CGPoint {
-        if let nsView, let window {
+        if let view, let window {
             var nativePoint = point
             if let screen = window.screen {
                 let referenceY = AppKitScreen.desktopTop(fallback: screen)
@@ -436,7 +435,7 @@ final class AppKitWindow: Window {
                 )
             }
             let ptWindow = window.convertPoint(fromScreen: nativePoint)
-            return nsView.convert(ptWindow, from: nil)
+            return view.convert(ptWindow, from: nil)
         }
         return point
     }

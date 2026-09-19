@@ -7,31 +7,8 @@
 
 #if ENABLE_APPKIT
 import Foundation
-@_implementationOnly import AppKit
+internal import AppKit
 
-@MainActor
-protocol AppKitView: AnyObject {
-    var activated: Bool { get set }
-    var visible: Bool { get set }
-    var contentBounds: CGRect { get }
-    var windowFrame: CGRect { get }
-    var contentScaleFactor: CGFloat { get }
-    var mousePosition: CGPoint { get set }
-    var mouseLocked: Bool { get set }
-    var cursorOverride: NSCursor? { get set }
-    var textInput: Bool { get set }
-    var proxyWindow: AppKitWindow? { get set }
-    func resetTextComposition(_ emitEvents: Bool) -> String?
-    
-    var wantsLayer: Bool { get set }
-    var layer: CALayer? { get set }
-    var bounds: CGRect { get }
-}
-
-@MainActor
-func makeAppKitView(frame: CGRect) -> AppKitView {
-    AppKitViewImpl(frame: frame)
-}
 
 private let LEFT_SHIFT_BIT = UInt(0x20002)
 private let RIGHT_SHIFT_BIT = UInt(0x20004)
@@ -56,7 +33,7 @@ private extension KeyboardModifierFlags {
 }
 
 @MainActor
-private final class AppKitViewImpl: NSView, NSTextInputClient, NSWindowDelegate, AppKitView {
+final class AppKitView: NSView, NSTextInputClient, NSWindowDelegate {
 
     var mouseLocked: Bool = false {
         didSet {

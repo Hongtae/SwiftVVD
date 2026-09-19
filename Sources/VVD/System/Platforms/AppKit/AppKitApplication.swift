@@ -8,7 +8,7 @@
 #if ENABLE_APPKIT
 import Foundation
 import Synchronization
-@_implementationOnly import AppKit
+internal import AppKit
 
 final class AppKitApplication: Application, @unchecked Sendable {
     nonisolated(unsafe) static var shared: AppKitApplication? = nil

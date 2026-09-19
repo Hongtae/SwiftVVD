@@ -80,6 +80,7 @@ let package = Package(
                 .define("VK_USE_PLATFORM_WAYLAND_KHR", .when(platforms:[.linux])),
             ],
             swiftSettings: [
+                .unsafeFlags(["-enable-library-evolution"]),
                 // App & Window
                 .define("ENABLE_WIN32",     .when(platforms: [.windows])),
                 .define("ENABLE_UIKIT",     .when(platforms: [.iOS, .macCatalyst, .tvOS, .watchOS])),

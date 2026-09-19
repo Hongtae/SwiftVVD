@@ -7,7 +7,7 @@
 
 #if ENABLE_APPKIT
 import Foundation
-@_implementationOnly import AppKit
+internal import AppKit
 
 @MainActor
 func makeAppKitCursor(_ cursor: Cursor) -> NSCursor? {

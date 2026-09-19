@@ -15,9 +15,7 @@ final class AppKitTextInputTests: XCTestCase {
         )
         defer { window.close() }
 
-        let textInputClient = try XCTUnwrap(
-            window.nsView as? any NSTextInputClient
-        )
+        let textInputClient = try XCTUnwrap(window.view)
         let observer = NSObject()
         var events: [KeyboardEvent] = []
         window.addEventObserver(observer) { (event: KeyboardEvent) in
