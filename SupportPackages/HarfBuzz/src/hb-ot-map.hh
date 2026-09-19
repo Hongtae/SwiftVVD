@@ -75,6 +75,7 @@ struct hb_ot_map_t
     unsigned short auto_zwj : 1;
     unsigned short random : 1;
     unsigned short per_syllable : 1;
+    unsigned short optional_ligature : 1;
     hb_mask_t mask;
     hb_tag_t feature_tag;
 

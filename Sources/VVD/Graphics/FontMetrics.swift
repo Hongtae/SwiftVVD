@@ -7,6 +7,7 @@
 
 import Foundation
 internal import FreeType
+internal import HarfBuzz
 
 extension Font {
     public struct GlyphMetrics: Sendable {
@@ -41,6 +42,10 @@ extension Font {
         public let descender: Int
         public let height: Int
 
+        /// Independent capital-letter height in design units, when available.
+        /// This includes selected variation and missing-table metric resolution.
+        public let capHeight: Int?
+
         /// Independent clipping distances, when the selected face provides them.
         /// These use unitsPerEM and retain fractional variation adjustments.
         public let clipping: ClippingMetrics?
@@ -61,9 +66,9 @@ extension Font {
     }
 }
 
-/// Reads fractional clipping distances without changing the selected face.
+/// Reads clipping distances and composition metrics without changing the selected face.
 /// The caller must hold the face's existing state lock for the entire read.
-enum FontClippingMetricsReader {
+enum FontMetricsReader {
     static func read(face: FT_Face, library: FT_Library?) -> Font.ClippingMetrics? {
         let os2 = FontTable(face: face, tag: 0x4f53_2f32)
         guard os2.contains(0, count: 78) else { return nil }
@@ -71,6 +76,55 @@ enum FontClippingMetricsReader {
         let avar = FontTable(face: face, tag: 0x6176_6172)
         let mvar = FontTable(face: face, tag: 0x4d56_4152)
 
+        guard let coordinates = selectedCoordinates(face: face, library: library,
+                                                     fvar: fvar, avar: avar) else { return nil }
+        return Font.ClippingMetrics(
+            ascent: Double(os2.uint16(74)) + metricDelta(mvar, tag: 0x6863_6c61, coordinates: coordinates),
+            descent: Double(os2.uint16(76)) + metricDelta(mvar, tag: 0x6863_6c64, coordinates: coordinates)
+        )
+    }
+
+    static func compositionMetrics(face: FT_Face, library: FT_Library?,
+                                   font: OpaquePointer) -> GlyphComposer.Metrics? {
+        let os2 = FontTable(face: face, tag: 0x4f53_2f32)
+        let fvar = FontTable(face: face, tag: 0x6676_6172)
+        let avar = FontTable(face: face, tag: 0x6176_6172)
+        let mvar = FontTable(face: face, tag: 0x4d56_4152)
+        guard let coordinates = selectedCoordinates(face: face, library: library,
+                                                     fvar: fvar, avar: avar) else { return nil }
+        var xHeight = os2.uint16(0) >= 2 && os2.contains(86, count: 4) ? Int(os2.int16(86)) : 0
+        var capHeight = os2.uint16(0) >= 2 && os2.contains(86, count: 4) ? Int(os2.int16(88)) : 0
+        xHeight += Int(metricDelta(mvar, tag: 0x7868_6774, coordinates: coordinates).rounded(.toNearestOrAwayFromZero))
+        capHeight += Int(metricDelta(mvar, tag: 0x6370_6874, coordinates: coordinates).rounded(.toNearestOrAwayFromZero))
+        let ascender = Int(face.pointee.ascender)
+        if xHeight == 0 || capHeight == 0 {
+            // Keep the four-character lookup together. Once any character maps,
+            // unmapped members contribute the missing glyph's bounds as well.
+            let characters: [UInt32] = [0x78, 0x6f, 0x48, 0x4f]
+            var mapped = false
+            let glyphs = characters.map { character -> UInt32 in
+                var glyph: UInt32 = 0
+                if hb_font_get_nominal_glyph(font, character, &glyph) != 0 { mapped = true }
+                return glyph
+            }
+            if mapped {
+                let tops = glyphs.map { glyph -> Int in
+                    var bounds = hb_glyph_extents_t()
+                    guard hb_font_get_glyph_extents(font, glyph, &bounds) != 0 else { return 0 }
+                    return Int(bounds.y_bearing / 64)
+                }
+                if xHeight == 0 { xHeight = (tops[0] + tops[1]) >> 1 }
+                if capHeight == 0 { capHeight = (tops[2] + tops[3]) >> 1 }
+            }
+            if xHeight == 0 { xHeight = ascender * 2 / 3 }
+            if capHeight == 0 { capHeight = ascender * 8 / 9 }
+        }
+        return .init(capHeight: CGFloat(capHeight), xHeight: CGFloat(xHeight),
+                     ascender: CGFloat(ascender))
+    }
+
+    private static func selectedCoordinates(face: FT_Face, library: FT_Library?,
+                                            fvar: FontTable, avar: FontTable) -> [Int16]? {
         var descriptor: UnsafeMutablePointer<FT_MM_Var>?
         let result = FT_Get_MM_Var(face, &descriptor)
         defer {
@@ -86,12 +140,8 @@ enum FontClippingMetricsReader {
                 FT_Get_Var_Design_Coordinates(face, FT_UInt(axisCount), $0.baseAddress)
             }) == 0 else { return nil }
         }
-        guard let coordinates = normalizedCoordinates(
+        return normalizedCoordinates(
             fvar: fvar, avar: avar, selected: selected.map { Int32(truncatingIfNeeded: $0) }
-        ) else { return nil }
-        return Font.ClippingMetrics(
-            ascent: Double(os2.uint16(74)) + metricDelta(mvar, tag: 0x6863_6c61, coordinates: coordinates),
-            descent: Double(os2.uint16(76)) + metricDelta(mvar, tag: 0x6863_6c64, coordinates: coordinates)
         )
     }
 

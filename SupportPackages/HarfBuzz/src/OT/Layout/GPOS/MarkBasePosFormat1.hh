@@ -120,8 +120,14 @@ struct MarkBasePosFormat1_2
      * We don't use skippy_iter.prev() to avoid O(n^2) behavior. */
 
     auto &skippy_iter = c->iter_input;
+    skippy_iter.reset_fast (buffer->idx);
     skippy_iter.set_lookup_props (LookupFlag::IgnoreMarks);
 
+    if (buffer->positioning_run_boundary_count)
+    {
+      c->last_base_until = 0;
+      c->last_base = -1;
+    }
     if (c->last_base_until > buffer->idx)
     {
       c->last_base_until = 0;

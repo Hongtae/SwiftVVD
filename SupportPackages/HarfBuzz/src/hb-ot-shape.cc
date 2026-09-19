@@ -838,10 +838,15 @@ hb_ot_hide_default_ignorables (hb_buffer_t *buffer,
     /* Replace default-ignorables with a zero-advance invisible glyph. */
     for (unsigned int i = 0; i < count; i++)
     {
-      if (_hb_glyph_info_is_default_ignorable (&info[i]))
+      if (_hb_glyph_info_is_default_ignorable (&info[i]) &&
+          !(buffer->preserve_deleted_glyphs && info[i].codepoint == 65535))
 	info[i].codepoint = invisible;
     }
   }
+  else if (buffer->preserve_deleted_glyphs)
+    buffer->delete_glyphs_inplace ([] (const hb_glyph_info_t *info) {
+      return info->codepoint != 65535 && _hb_glyph_info_is_default_ignorable (info);
+    });
   else
     buffer->delete_glyphs_inplace (_hb_glyph_info_is_default_ignorable);
 }

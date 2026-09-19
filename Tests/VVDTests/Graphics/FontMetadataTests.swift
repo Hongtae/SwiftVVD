@@ -9,6 +9,29 @@ final class FontMetadataTests: XCTestCase {
     private static let weightTag: UInt32 = 0x7767_6874
     private static let widthTag: UInt32 = 0x7764_7468
 
+    // ASSERTIONS fontRegisteredExtrasCache27Observed
+    func testResourceFeatureMetadataOutlivesItsInspectionFaceAndSourceFile() throws {
+        let source = Self.resource(Self.roboto)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ttf")
+        try FileManager.default.copyItem(at: source, to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let snapshot = try XCTUnwrap(Font.resourceMetadata(path: url.path))
+        XCTAssertEqual(snapshot.metadata, try XCTUnwrap(Font.metadata(path: source.path)))
+        XCTAssertNil(Font.resourceMetadata(path: url.path, faceIndex: -1))
+        XCTAssertNil(Font.resourceMetadata(path: url.path, faceIndex: 1))
+        try FileManager.default.removeItem(at: url)
+        XCTAssertNil(Font.resourceMetadata(path: url.path))
+        let settings = snapshot.features.select([
+            Font.ShapingFeature(tag: "liga", value: 1)!,
+            Font.ShapingFeature(tag: "tnum", value: 2)!,
+            Font.ShapingFeature(tag: "ss01", value: 1)!
+        ])
+        XCTAssertEqual(settings.map(\.tag), [0x7373_3031, 0x746e_756d])
+        XCTAssertEqual(settings.map(\.value), [1, 2])
+        XCTAssertEqual(settings.map(\.type), [35, 6])
+        XCTAssertEqual(settings.map(\.selector), [2, 0])
+    }
+
     func testActiveFaceTraitsRetainVariationAndSizeWithoutReopeningMetadata() throws {
         for name in [Self.roboto, Self.nanum] {
             let url = Self.resource(name)
@@ -96,6 +119,23 @@ final class FontMetadataTests: XCTestCase {
             $0.platformID == 3 && $0.languageID == 1033 && $0.nameID == 4
         })
         XCTAssertEqual(english.data, "Roboto Regular".data(using: .utf16BigEndian))
+    }
+
+    func testSourceTablePresenceDoesNotFollowSynthesizedVariationMetadata() throws {
+        var data = try Data(contentsOf: Self.resource(Self.roboto))
+        let original = try XCTUnwrap(Font.metadata(data: data))
+        XCTAssertTrue(original.sfntTableTags.contains(0x5354_4154))
+        XCTAssertFalse(original.sfntTableTags.contains(0x7472_616b))
+        let record = try tableRecord("STAT", in: data)
+        data[record + 3] = 0x5f
+        let changed = try XCTUnwrap(Font.metadata(data: data))
+        XCTAssertFalse(changed.sfntTableTags.contains(0x5354_4154))
+        XCTAssertTrue(changed.sfntTableTags.contains(0x5354_415f))
+        XCTAssertEqual(changed.variationAxes, original.variationAxes)
+        XCTAssertEqual(changed.variationInstances, original.variationInstances)
+        data.resetBytes(in: data.startIndex..<data.endIndex)
+        XCTAssertTrue(changed.sfntTableTags.contains(0x5354_415f))
+        XCTAssertTrue(original.sfntTableTags.contains(0x5354_4154))
     }
 
     func testUnsupportedNameEncodingPreservesCopiedBytes() throws {
@@ -357,6 +397,19 @@ final class FontMetadataTests: XCTestCase {
 
         """
         let value = try XCTUnwrap(Font.metadata(data: Data(bdf.utf8)))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).bdf")
+        try Data(bdf.utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        for font in [try XCTUnwrap(Font(data: Data(bdf.utf8))), try XCTUnwrap(Font(path: file.path))] {
+            font.setPointSize(8, dpi: (75, 75))
+            let copy = try XCTUnwrap(font.copy(pointSize: 16))
+            XCTAssertFalse(copy.isScalable)
+            XCTAssertTrue(copy.source === font.source)
+            XCTAssertEqual(copy.pointSize, 16)
+            XCTAssertEqual(copy.glyphMetrics(for: "A")?.advance, font.glyphMetrics(for: "A")?.advance)
+            XCTAssertEqual(copy.bitmapScale, font.bitmapScale * 2)
+            XCTAssertEqual(font.pointSize, 8)
+        }
         XCTAssertEqual(value.numFaces, 1)
         XCTAssertNil(value.postScriptName)
         XCTAssertTrue(value.variationAxes.isEmpty)

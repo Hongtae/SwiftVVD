@@ -901,6 +901,9 @@ struct skipping_iterator_t
   void init (context_t *c_, bool context_match = false)
   {
     c = c_;
+    bounds_input = !context_match;
+    source_start = 0;
+    source_end = (unsigned) -1;
     end = c->buffer->len;
     match_glyph_data16 = nullptr;
 #ifndef HB_NO_BEYOND_64K
@@ -941,12 +944,14 @@ struct skipping_iterator_t
     idx = start_index_;
     end = c->buffer->len;
     matcher.syllable = c->buffer->cur().syllable();
+    reset_source_range ();
   }
   void reset_back (unsigned int start_index_, bool from_out_buffer = false)
   {
     // For GSUB backward iterator
     idx = start_index_;
     matcher.syllable = c->buffer->cur().syllable();
+    reset_source_range ();
   }
 
 #ifndef HB_OPTIMIZE_SIZE
@@ -956,6 +961,7 @@ struct skipping_iterator_t
   {
     // Doesn't set end or syllable. Used by GPOS which doesn't care / change.
     idx = start_index_;
+    reset_source_range ();
   }
 
 #ifndef HB_OPTIMIZE_SIZE
@@ -975,6 +981,10 @@ struct skipping_iterator_t
 #endif
   match_t match (hb_glyph_info_t &info)
   {
+    // Input ranges constrain even skipped glyphs. Substitution backtrack and
+    // lookahead remain available outside the selected input interval.
+    if (info.cluster < source_start || info.cluster >= source_end)
+      return NOT_MATCH;
     matcher_t::may_skip_t skip = matcher.may_skip (c, info);
     if (unlikely (skip == matcher_t::SKIP_YES))
       return SKIP;
@@ -1072,7 +1082,41 @@ struct skipping_iterator_t
 
   unsigned int idx;
   protected:
+  void reset_source_range ()
+  {
+    source_start = 0;
+    source_end = (unsigned) -1;
+    if (!bounds_input) return;
+    const unsigned int *boundaries = nullptr;
+    unsigned count = 0;
+    if (c->table_index == 0)
+    {
+      if (!c->optional_ligature) return;
+      boundaries = c->buffer->optional_ligature_boundaries;
+      count = c->buffer->optional_ligature_boundary_count;
+    }
+    else if (c->table_index == 1)
+    {
+      boundaries = c->buffer->positioning_run_boundaries;
+      count = c->buffer->positioning_run_boundary_count;
+    }
+    else return;
+    if (!count) return;
+    unsigned source = c->buffer->cur().cluster;
+    unsigned low = 0, high = count;
+    while (low < high)
+    {
+      unsigned middle = low + (high - low) / 2;
+      if (boundaries[middle] <= source) low = middle + 1;
+      else high = middle;
+    }
+    if (low) source_start = boundaries[low - 1];
+    if (low < count) source_end = boundaries[low];
+  }
+
   context_t *c;
+  bool bounds_input;
+  unsigned source_start, source_end;
   matcher_t matcher;
   const HBUINT16 *match_glyph_data16;
 #ifndef HB_NO_BEYOND_64K
@@ -1144,6 +1188,7 @@ struct hb_ot_apply_context_t :
   bool auto_zwj = true;
   bool per_syllable = false;
   bool random = false;
+  bool optional_ligature = false;
   unsigned new_syllables = (unsigned) -1;
 
   signed last_base = -1; // GPOS uses

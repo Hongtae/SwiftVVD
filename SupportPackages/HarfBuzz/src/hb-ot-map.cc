@@ -164,6 +164,10 @@ hb_ot_map_builder_t::add_lookups (hb_ot_map_t  &m,
       lookup->random = random;
       lookup->per_syllable = per_syllable;
       lookup->feature_tag = feature_tag;
+      lookup->optional_ligature = feature_tag == HB_TAG ('c','l','i','g') ||
+                                  feature_tag == HB_TAG ('d','l','i','g') ||
+                                  feature_tag == HB_TAG ('h','l','i','g') ||
+                                  feature_tag == HB_TAG ('l','i','g','a');
     }
 
     offset += len;
@@ -373,6 +377,7 @@ hb_ot_map_builder_t::compile (hb_ot_map_t                  &m,
 	    lookups.arrayZ[j].mask |= lookups.arrayZ[i].mask;
 	    lookups.arrayZ[j].auto_zwnj &= lookups.arrayZ[i].auto_zwnj;
 	    lookups.arrayZ[j].auto_zwj &= lookups.arrayZ[i].auto_zwj;
+	    lookups.arrayZ[j].optional_ligature &= lookups.arrayZ[i].optional_ligature;
 	  }
 	lookups.shrink (j + 1);
       }

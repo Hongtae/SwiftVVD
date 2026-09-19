@@ -89,13 +89,16 @@ public class Platform {
 }
 
 extension Platform {
-    package typealias ThreadID = UInt
+    /// Identifies a thread within the current process, not a persistent identity.
+    public typealias ThreadID = UInt
 
-    package static func threadYield() {
+    /// Requests that the calling thread yield execution to the platform scheduler.
+    public static func threadYield() {
         VVDThreadYield()
     }
 
-    package static func currentThreadID() -> ThreadID {
+    /// Returns the identity of the current thread.
+    public static func currentThreadID() -> ThreadID {
         return VVDThreadCurrentId()
     }
 }

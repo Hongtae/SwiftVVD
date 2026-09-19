@@ -57,6 +57,8 @@ let package = Package(
         .target(
             name: "VVD",
             dependencies: [
+                .product(name: "ICUTextAnalysis",
+                         package: "VVDSupport"),
                 .product(name: "VVDSupport",
                          package: "VVDSupport"),
                 .product(name: "SPIRV-Cross",

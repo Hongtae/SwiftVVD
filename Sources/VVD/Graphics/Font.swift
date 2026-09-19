@@ -144,14 +144,72 @@ public class Font: @unchecked Sendable {
 
     private let library: FTLibrary
 
+    /// Loaded bytes shared by deliberate copies, independently of mutable faces.
+    package final class Source: @unchecked Sendable {
+        private struct Storage: @unchecked Sendable {
+            let data: any FixedAddressStorageData
+        }
+        private let storage: Mutex<Storage?>
+
+        fileprivate init(data: (any FixedAddressStorageData)? = nil) {
+            storage = Mutex(data.map { Storage(data: $0) })
+        }
+
+        // The caller holds the face lock. Never reopen its original path: the
+        // loaded stream may survive a rename, replacement or removal of that file.
+        fileprivate func data(from stream: FT_Stream) -> (any FixedAddressStorageData)? {
+            storage.withLock { data -> Storage? in
+                if let data { return data }
+                guard let size = Int(exactly: stream.pointee.size), size > 0 else { return nil }
+                let bytes: Data
+                if let read = stream.pointee.read {
+                    let position = stream.pointee.pos
+                    defer {
+                        _ = read(stream, position, nil, 0)
+                        stream.pointee.pos = position
+                    }
+                    // Compressed streams can publish a sentinel size until EOF.
+                    // Read in bounded chunks rather than allocating that size.
+                    var result = Data()
+                    var buffer = [UInt8](repeating: 0, count: min(size, 65536))
+                    while result.count < size {
+                        let count = min(buffer.count, size - result.count)
+                        let received = buffer.withUnsafeMutableBufferPointer {
+                            read(stream, FT_ULong(result.count), $0.baseAddress, FT_ULong(count))
+                        }
+                        guard received <= count else { return nil }
+                        result.append(contentsOf: buffer.prefix(Int(received)))
+                        if received < count {
+                            guard stream.pointee.size == 0x7fffffff else { return nil }
+                            break
+                        }
+                    }
+                    guard !result.isEmpty else { return nil }
+                    bytes = result
+                } else {
+                    guard let base = stream.pointee.base else { return nil }
+                    bytes = Data(bytes: base, count: size)
+                }
+                let retained = Storage(data: bytes.makeFixedAddressStorage())
+                data = retained
+                return retained
+            }?.data
+        }
+    }
+
+    package let source: Source
+
     private struct State: @unchecked Sendable {
         let face: FT_Face
         let shapingFont: OpaquePointer
+        let layoutFont: OpaquePointer?
         let hasColorPaint: Bool
         var colorRasterizer: OpaquePointer?
+        var pointSize: CGFloat
         var size26d6: FT_F26Dot6
         var dpi: DPI
 
+        var featureCatalog: FontFeatures?
         var isBitmapPreferred = false
         var isKerningEnabled = true
         var isColorEnabled = true
@@ -181,6 +239,20 @@ public class Font: @unchecked Sendable {
         }
     }
 
+    /// The PostScript name of the currently selected face configuration.
+    public var postScriptName: String? {
+        state.withLock { FT_Get_Postscript_Name($0.face).map { String(cString: $0) } }
+    }
+
+    package var featureCatalog: FontFeatures {
+        state.withLock { state in
+            if let catalog = state.featureCatalog { return catalog }
+            let catalog = FontFeatures(face: hb_font_get_face(state.shapingFont))
+            state.featureCatalog = catalog
+            return catalog
+        }
+    }
+
     public let fontData: (any FixedAddressStorageData)?
 
     public let familyName: String
@@ -194,8 +266,9 @@ public class Font: @unchecked Sendable {
 
     public let maxPointSize: CGFloat = CGFloat(1<<25) - CGFloat(1.0/64.0)
 
+    /// Logical point size before rasterizer quantization.
     public var pointSize: CGFloat {
-        get { ft26d6ToFloat(state.withLock { $0.size26d6 }) }
+        get { state.withLock { $0.pointSize } }
         set { self.updateSize(pointSize: newValue, dpi: nil) }
     }
 
@@ -255,7 +328,7 @@ public class Font: @unchecked Sendable {
             guard !FT_IS_SCALABLE($0.face) else { return 1 }
             let pixelsPerEM = CGFloat($0.face.pointee.size.pointee.metrics.y_ppem)
             guard pixelsPerEM > 0 else { return 1 }
-            return CGFloat($0.size26d6) / 64 * CGFloat($0.dpi.y) / 72 / pixelsPerEM
+            return $0.pointSize * CGFloat($0.dpi.y) / 72 / pixelsPerEM
         }
     }
 
@@ -324,15 +397,46 @@ public class Font: @unchecked Sendable {
         public let sfntStyle: SFNTStyleMetadata
         /// Unmerged source records; localized and legacy names keep their identities.
         public let sfntNames: [SFNTNameRecord]
+        /// Source table tags, independent of synthesized parser metadata.
+        public let sfntTableTags: Set<UInt32>
     }
 
     /// Inspects a collection face without creating a rendering Font.
     /// Returns nil if the source, collection index, or required variation data is invalid.
     public static func metadata(path: String, faceIndex: Int = 0) -> FaceMetadata? {
         guard !path.utf8.contains(0) else { return nil }
-        return withMetadataFace(faceIndex: faceIndex) { library, index, face in
+        return withResourceFace(faceIndex: faceIndex) { library, index, face in
             FT_New_Face(library, path, index, &face)
+        } read: { face, library in
+            readMetadata(face: face, library: library)
         }
+    }
+
+    /// Copies selection and feature metadata from one temporary, unsized face.
+    package static func resourceMetadata(path: String, faceIndex: Int = 0)
+        -> (metadata: FaceMetadata, features: FontFeatures)? {
+        guard !path.utf8.contains(0) else { return nil }
+        return withResourceFace(faceIndex: faceIndex) { library, index, face in
+            FT_New_Face(library, path, index, &face)
+        } read: { face, library in
+            guard let featureFace = hb_ft_face_create(face, nil) else { return nil }
+            defer { hb_face_destroy(featureFace) }
+            let features = FontFeatures(face: featureFace)
+            guard let metadata = readMetadata(face: face, library: library) else { return nil }
+            return (metadata, features)
+        }
+    }
+
+    /// Inspects the loaded source without reopening its path or changing this face.
+    /// The result describes the source collection face; current variation
+    /// coordinates and other mutable rendering settings remain separate.
+    public final func metadata() -> FaceMetadata? {
+        let data = state.withLock { state -> (any FixedAddressStorageData)? in
+            guard let stream = state.face.pointee.stream else { return nil }
+            return source.data(from: stream)
+        }
+        guard let data else { return nil }
+        return Self.metadata(data: data, faceIndex: faceIndex & 0xffff)
     }
 
     /// Borrows contiguous bytes when available and copies all returned metadata.
@@ -341,8 +445,10 @@ public class Font: @unchecked Sendable {
             return nil
         }
         func inspect(_ address: UnsafeRawPointer?) -> FaceMetadata? {
-            withMetadataFace(faceIndex: faceIndex) { library, index, face in
+            withResourceFace(faceIndex: faceIndex) { library, index, face in
                 FT_New_Memory_Face(library, address, count, index, &face)
+            } read: { face, library in
+                readMetadata(face: face, library: library)
             }
         }
         if let result = data.withContiguousStorageIfAvailable({ bytes in
@@ -355,10 +461,11 @@ public class Font: @unchecked Sendable {
         return withExtendedLifetime(storage) { inspect(storage.address) }
     }
 
-    private static func withMetadataFace(
+    private static func withResourceFace<Result>(
         faceIndex: Int,
-        open: (FT_Library, FT_Long, inout FT_Face?) -> FT_Error
-    ) -> FaceMetadata? {
+        open: (FT_Library, FT_Long, inout FT_Face?) -> FT_Error,
+        read: (FT_Face, FT_Library) -> Result?
+    ) -> Result? {
         // Higher bits select named instances in FreeType, not collection faces.
         guard (0...0xffff).contains(faceIndex) else { return nil }
         let library = sharedFTLibrary()
@@ -375,7 +482,7 @@ public class Font: @unchecked Sendable {
               face.pointee.num_faces > FT_Long(faceIndex) else {
             return nil
         }
-        return readMetadata(face: face, library: handle)
+        return read(face, handle)
     }
 
     private static func readSFNTStyle(face: FT_Face) -> SFNTStyleMetadata {
@@ -429,6 +536,18 @@ public class Font: @unchecked Sendable {
             ))
         }
         let sfntStyle = readSFNTStyle(face: face)
+        var tableTags: Set<UInt32> = []
+        var tableCount: FT_ULong = 0
+        if FT_Sfnt_Table_Info(face, 0, nil, &tableCount) == 0 {
+            for index in 0..<tableCount {
+                var tag: FT_ULong = 0
+                var length: FT_ULong = 0
+                if FT_Sfnt_Table_Info(face, FT_UInt(index), &tag, &length) == 0,
+                   let value = UInt32(exactly: tag) {
+                    tableTags.insert(value)
+                }
+            }
+        }
 
         var axes: [VariationAxis] = []
         var instances: [VariationInstance] = []
@@ -512,24 +631,25 @@ public class Font: @unchecked Sendable {
             variationInstances: instances,
             defaultVariationInstanceIndex: defaultInstanceIndex,
             sfntStyle: sfntStyle,
-            sfntNames: sfntNames
+            sfntNames: sfntNames,
+            sfntTableTags: tableTags
         )
     }
 
-    package enum ShapingDirection: Hashable, Sendable {
+    public enum ShapingDirection: Hashable, Sendable {
         case leftToRight
         case rightToLeft
         case topToBottom
         case bottomToTop
     }
 
-    package struct ShapingFeature: Hashable, Sendable {
-        package let tag: UInt32
-        package let value: UInt32
+    public struct ShapingFeature: Hashable, Sendable {
+        public let tag: UInt32
+        public let value: UInt32
         /// Unicode-scalar offsets in the shaped source. `nil` applies globally.
-        package let range: Range<Int>?
+        public let range: Range<Int>?
 
-        package init(
+        public init(
             tag: UInt32,
             value: UInt32 = 1,
             range: Range<Int>? = nil
@@ -539,7 +659,7 @@ public class Font: @unchecked Sendable {
             self.range = range
         }
 
-        package init?(
+        public init?(
             tag: String,
             value: UInt32 = 1,
             range: Range<Int>? = nil
@@ -558,17 +678,37 @@ public class Font: @unchecked Sendable {
         }
     }
 
-    package struct ShapedGlyph: Hashable, Sendable {
-        package let index: UInt32
+    public struct ShapedGlyph: Hashable, Sendable {
+        public let index: UInt32
+        /// Unicode-scalar index associated with this individual glyph.
+        public let sourceIndex: Int
         /// Unicode-scalar range represented by this glyph's source cluster.
-        package let sourceRange: Range<Int>
-        package let advance: CGSize
-        package let offset: CGPoint
+        public let sourceRange: Range<Int>
+        public let advance: CGSize
+        public let offset: CGPoint
+        /// Internal table attachment or geometric placement has resolved this mark.
+        package let hasResolvedMarkPosition: Bool
+
+        package init(
+            index: UInt32,
+            sourceIndex: Int,
+            sourceRange: Range<Int>,
+            advance: CGSize,
+            offset: CGPoint,
+            hasResolvedMarkPosition: Bool = false
+        ) {
+            self.index = index
+            self.sourceIndex = sourceIndex
+            self.sourceRange = sourceRange
+            self.advance = advance
+            self.offset = offset
+            self.hasResolvedMarkPosition = hasResolvedMarkPosition
+        }
     }
 
-    package struct ShapedText: Hashable, Sendable {
-        package let glyphs: [ShapedGlyph]
-        package let direction: ShapingDirection
+    public struct ShapedText: Hashable, Sendable {
+        public let glyphs: [ShapedGlyph]
+        public let direction: ShapingDirection
     }
 
     public init?(path: String, faceIndex: Int = 0) {
@@ -613,22 +753,29 @@ public class Font: @unchecked Sendable {
         }
         self.library = library
         self.fontData = nil
-        self.familyName = .init(cString: face.pointee.family_name)
-        self.styleName = .init(cString: face.pointee.style_name)
+        self.source = Source()
+        self.familyName = face.pointee.family_name.map { String(cString: $0) } ?? ""
+        self.styleName = face.pointee.style_name.map { String(cString: $0) } ?? ""
         self.faceIndex = Int(face.pointee.face_index)
         self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
         self.state = Mutex(State(
             face: face,
             shapingFont: shapingFont,
+            layoutFont: Self.makeLayoutFont(face: face, parent: shapingFont, pointSize: ft26d6ToFloat(size26d6)),
             hasColorPaint: hb_ot_color_has_paint(hb_font_get_face(shapingFont)) != 0,
+            pointSize: ft26d6ToFloat(size26d6),
             size26d6: size26d6,
             dpi: dpi
         ))
         self.filePath = path
     }
 
-    public init?(data: any DataProtocol, faceIndex: Int = 0) {
+    public convenience init?(data: any DataProtocol, faceIndex: Int = 0) {
+        self.init(data: data, faceIndex: faceIndex, source: nil, filePath: "")
+    }
+
+    init?(data: any DataProtocol, faceIndex: Int, source: Source?, filePath: String) {
         if data.isEmpty { return nil }
         guard let faceIndex = FT_Long(exactly: faceIndex),
               faceIndex >= 0 else {
@@ -640,6 +787,7 @@ public class Font: @unchecked Sendable {
 
         let data = data.makeFixedAddressStorage()
         self.fontData = data
+        self.source = source ?? Source(data: data)
 
         let library = sharedFTLibrary()
         var face: FT_Face? = nil
@@ -674,19 +822,62 @@ public class Font: @unchecked Sendable {
             return nil
         }
         self.library = library
-        self.familyName = .init(cString: face.pointee.family_name)
-        self.styleName = .init(cString: face.pointee.style_name)
+        self.familyName = face.pointee.family_name.map { String(cString: $0) } ?? ""
+        self.styleName = face.pointee.style_name.map { String(cString: $0) } ?? ""
         self.faceIndex = Int(face.pointee.face_index)
         self.numFaces = Int(face.pointee.num_faces)
         self.numGlyphs = Int(face.pointee.num_glyphs)
         self.state = Mutex(State(
             face: face,
             shapingFont: shapingFont,
+            layoutFont: Self.makeLayoutFont(face: face, parent: shapingFont, pointSize: ft26d6ToFloat(size26d6)),
             hasColorPaint: hb_ot_color_has_paint(hb_font_get_face(shapingFont)) != 0,
+            pointSize: ft26d6ToFloat(size26d6),
             size26d6: size26d6,
             dpi: dpi
         ))
-        self.filePath = ""
+        self.filePath = filePath
+    }
+
+    /// Creates an independently mutable face that preserves the current
+    /// selection, point size, DPI, and rendering settings.
+    public final func copy() -> Font? {
+        copy(pointSizeOverride: nil)
+    }
+
+    /// Creates an independently mutable face that preserves the current
+    /// selection, DPI, and rendering settings at the requested point size.
+    /// Passing zero preserves the current point size. Returns nil when a nonzero
+    /// point size is nonfinite or outside the supported range.
+    public final func copy(pointSize requestedSize: CGFloat) -> Font? {
+        copy(pointSizeOverride: requestedSize)
+    }
+
+    private func copy(pointSizeOverride requestedSize: CGFloat?) -> Font? {
+        state.withLock { state in
+            let size = requestedSize == 0 ? state.pointSize : requestedSize ?? state.pointSize
+            guard size.isFinite, size >= 1 / 64, size <= maxPointSize,
+                  let stream = state.face.pointee.stream,
+                  let data = source.data(from: stream),
+                  let copy = makeCopy(data: data) else { return nil }
+            // Reapplying even identical coordinates changes a named instance
+            // into an explicit variation and can change its reported name.
+            if state.face.pointee.face_flags & FT_FACE_FLAG_VARIATION != 0 {
+                let coordinates = variationCoordinates(face: state.face)
+                guard !coordinates.isEmpty, copy.setVariationCoordinates(coordinates) else { return nil }
+            }
+            copy.setPointSize(size, dpi: state.dpi)
+            guard copy.pointSize == size else { return nil }
+            copy.isBitmapPreferred = state.isBitmapPreferred
+            copy.isKerningEnabled = state.isKerningEnabled
+            copy.isColorEnabled = state.isColorEnabled
+            return copy
+        }
+    }
+
+    // Called with this face locked, before the new face can be observed by a caller.
+    func makeCopy(data: any FixedAddressStorageData) -> Font? {
+        Font(data: data, faceIndex: faceIndex, source: source, filePath: filePath)
     }
 
     deinit {
@@ -695,6 +886,9 @@ public class Font: @unchecked Sendable {
             // The HarfBuzz font borrows `face`, so it must be destroyed first.
             if let rasterizer = $0.colorRasterizer {
                 hb_raster_paint_destroy(rasterizer)
+            }
+            if let layoutFont = $0.layoutFont {
+                hb_font_destroy(layoutFont)
             }
             hb_font_destroy($0.shapingFont)
             _ = self.library.withFaceLifecycleLock {
@@ -718,17 +912,43 @@ public class Font: @unchecked Sendable {
         self.updateSize(pointSize: pointSize, dpi: dpi)
     }
 
+    private static func makeLayoutFont(face: FT_Face, parent: OpaquePointer, pointSize: CGFloat) -> OpaquePointer? {
+        guard FT_IS_SCALABLE(face),
+              face.pointee.face_flags & FT_FACE_FLAG_SFNT != 0,
+              face.pointee.units_per_EM > 0,
+              let font = hb_font_create_sub_font(parent) else { return nil }
+        // Shape scalable OpenType faces in fractional design units. Scaling
+        // positions after shaping keeps raster-size quantization out of layout.
+        hb_ot_font_set_funcs(font)
+        let units = Int32(face.pointee.units_per_EM) * 64
+        hb_font_set_scale(font, units, units)
+        hb_font_set_ptem(font, Float(pointSize))
+        return font
+    }
+
+    private static func updateLayoutFont(_ state: State) {
+        guard let font = state.layoutFont else { return }
+        var count: UInt32 = 0
+        let coordinates = hb_font_get_var_coords_normalized(state.shapingFont, &count)
+        hb_font_set_var_coords_normalized(font, coordinates, count)
+        hb_font_set_ptem(font, Float(state.pointSize))
+    }
+
     private func updateSize(pointSize: CGFloat?, dpi: DPI?) {
         if pointSize == nil && dpi == nil { return }
 
+        var logicalSize: CGFloat?
         var charSize: FT_F26Dot6?
         if let pointSize {
-            // clamp pointSize (26.6 signed-fixed) from 1/64 to 2^25-(1/64)
+            // Keep the logical request within the rasterizer's supported range,
+            // and quantize only the size passed to FreeType.
             let dp: Double = clamp(Double(pointSize) * 64.0, min:1.0, max:Double(0x7fffffff))
+            logicalSize = CGFloat(dp / 64)
             charSize = FT_F26Dot6(floor(dp))
         }
 
         self.state.withLock {
+            let logicalSize = logicalSize ?? $0.pointSize
             let charSize: FT_F26Dot6 = charSize ?? $0.size26d6
             let resX, resY: UInt32
             if let dpi {
@@ -739,15 +959,17 @@ public class Font: @unchecked Sendable {
                 resY = $0.dpi.y
             }
 
-            if charSize != $0.size26d6 || resX != $0.dpi.x || resY != $0.dpi.y {
+            if logicalSize != $0.pointSize || charSize != $0.size26d6 || resX != $0.dpi.x || resY != $0.dpi.y {
                 let face = $0.face
                 if Self.setSize(face, size26d6: charSize, dpi: (resX, resY)) != 0 {
                     Log.err("FT_Set_Char_Size failed! (size:\(String(format:"0x%x", charSize)), dpi:\(resX)x\(resY))")
                     return
                 }
+                $0.pointSize = logicalSize
                 $0.size26d6 = charSize
                 $0.dpi = (resX, resY)
                 hb_ft_font_changed($0.shapingFont)
+                Self.updateLayoutFont($0)
                 assert(self.numGlyphs == Int(face.pointee.num_glyphs))
                 self.clearCacheLocked()
             }
@@ -851,7 +1073,7 @@ public class Font: @unchecked Sendable {
         state.withLock { state in
             let face = state.face
             return FaceTraits(
-                pixelSize: CGFloat(state.size26d6) / 64 * CGFloat(state.dpi.y) / 72,
+                pixelSize: state.pointSize * CGFloat(state.dpi.y) / 72,
                 variationCoordinates: variationCoordinates(face: face),
                 sfntStyle: Self.readSFNTStyle(face: face),
                 isItalic: face.pointee.style_flags & FT_Long(FT_STYLE_FLAG_ITALIC) != 0
@@ -885,6 +1107,7 @@ public class Font: @unchecked Sendable {
                     return false
                 }
                 hb_ft_font_changed(state.shapingFont)
+                Self.updateLayoutFont(state)
                 self.clearCacheLocked()
                 return true
             }
@@ -942,21 +1165,54 @@ public class Font: @unchecked Sendable {
                 return false
             }
             hb_ft_font_changed(state.shapingFont)
+            Self.updateLayoutFont(state)
             self.clearCacheLocked()
             return true
         }
     }
 
-    package func shape(
+    /// Shapes one directional run with script-specific glyph selection and source clusters.
+    /// Feature ranges and source clusters use Unicode-scalar offsets.
+    public func shape(
         _ text: String,
         direction: ShapingDirection? = nil,
         language: String? = nil,
         features requestedFeatures: [ShapingFeature] = []
     ) -> ShapedText? {
+        shape(text, direction: direction, language: language, features: requestedFeatures,
+              optionalLigatureBoundaries: [])
+    }
+
+    /// Source-scalar boundaries independently constrain optional substitution
+    /// and positioning inputs while canonical characters and required
+    /// substitutions keep context. Line owners retain deleted slots until their
+    /// own public run projection.
+    package func shape(
+        _ text: String,
+        direction: ShapingDirection? = nil,
+        language: String? = nil,
+        features requestedFeatures: [ShapingFeature] = [],
+        optionalLigatureBoundaries: [Int],
+        positioningRunBoundaries: [Int] = [],
+        sourceRunBoundaries: [Int] = [],
+        retainsDeletedGlyphs: Bool = false,
+        allowsLeadingMarkBase: Bool = true,
+        characterInput: CharacterComposer.Input? = nil
+    ) -> ShapedText? {
         let scalars = text.unicodeScalars.map(\.value)
-        guard let textLength = Int32(exactly: scalars.count) else {
+        guard characterInput == nil || characterInput!.scalars.count == scalars.count else { return nil }
+        guard Int32(exactly: scalars.count) != nil else {
             return nil
         }
+        func boundariesAreValid(_ boundaries: [Int]) -> Bool {
+            boundaries.allSatisfy { $0 > 0 && $0 < scalars.count } &&
+                zip(boundaries, boundaries.dropFirst()).allSatisfy { $0 < $1 }
+        }
+        guard boundariesAreValid(optionalLigatureBoundaries),
+              boundariesAreValid(positioningRunBoundaries),
+              boundariesAreValid(sourceRunBoundaries) else { return nil }
+        let optionalBoundaries = optionalLigatureBoundaries.map(UInt32.init)
+        let positioningBoundaries = positioningRunBoundaries.map(UInt32.init)
         if scalars.isEmpty {
             return ShapedText(
                 glyphs: [],
@@ -964,38 +1220,39 @@ public class Font: @unchecked Sendable {
             )
         }
 
+        // Glyph identity and an indivisible source cluster serve different
+        // consumers. Keep scalar indices through shaping while retaining
+        // complete graphemes and ligature intervals for line breaking.
+        var graphemeRanges: [Range<Int>] = []
+        graphemeRanges.reserveCapacity(scalars.count)
+        for character in text {
+            let start = graphemeRanges.count
+            let length = character.unicodeScalars.count
+            graphemeRanges.append(contentsOf: repeatElement(start..<(start + length), count: length))
+        }
+        let scriptRuns = ScriptRun.ranges(in: scalars)
+        let resolvedDirection = direction ?? ShapingDirection(harfbuzzValue:
+            hb_script_get_horizontal_direction(hb_script_from_iso15924_tag(scriptRuns[0].iso15924Tag))) ?? .leftToRight
+        let orderedRuns = resolvedDirection == .rightToLeft || resolvedDirection == .bottomToTop
+            ? Array(scriptRuns.reversed()) : scriptRuns
+        let hasComposableMarks = resolvedDirection == .leftToRight &&
+            scalars.contains(where: GlyphComposer.accepts)
+        let uncombinedRanges: [Range<Int>]
+        if hasComposableMarks {
+            guard let ranges = GlyphComposer.uncombinedRanges(in: text) else {
+                return nil
+            }
+            uncombinedRanges = ranges
+        } else {
+            uncombinedRanges = []
+        }
+
         return self.state.withLock { state -> ShapedText? in
             guard let buffer = hb_buffer_create() else { return nil }
             defer { hb_buffer_destroy(buffer) }
 
-            scalars.withUnsafeBufferPointer { bufferPointer in
-                hb_buffer_add_utf32(
-                    buffer,
-                    bufferPointer.baseAddress,
-                    textLength,
-                    0,
-                    textLength
-                )
-            }
-            hb_buffer_set_cluster_level(
-                buffer,
-                HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES
-            )
-            if let direction {
-                hb_buffer_set_direction(buffer, direction.harfbuzzValue)
-            }
-            if let language, !language.isEmpty {
-                language.withCString { pointer in
-                    hb_buffer_set_language(
-                        buffer,
-                        hb_language_from_string(pointer, -1)
-                    )
-                }
-            }
-            hb_buffer_guess_segment_properties(buffer)
-
-            var features: [hb_feature_t] = []
-            features.reserveCapacity(
+            var baseFeatures: [hb_feature_t] = []
+            baseFeatures.reserveCapacity(
                 requestedFeatures.count + (state.isKerningEnabled ? 0 : 1)
             )
             for requested in requestedFeatures {
@@ -1014,7 +1271,7 @@ public class Font: @unchecked Sendable {
                     start = 0
                     end = UInt32.max
                 }
-                features.append(hb_feature_t(
+                baseFeatures.append(hb_feature_t(
                     tag: requested.tag,
                     value: requested.value,
                     start: start,
@@ -1023,8 +1280,8 @@ public class Font: @unchecked Sendable {
             }
             if !state.isKerningEnabled {
                 let kerningTag: UInt32 = 0x6b65_726e // kern
-                features.removeAll { $0.tag == kerningTag }
-                features.append(hb_feature_t(
+                baseFeatures.removeAll { $0.tag == kerningTag }
+                baseFeatures.append(hb_feature_t(
                     tag: kerningTag,
                     value: 0,
                     start: 0,
@@ -1032,80 +1289,247 @@ public class Font: @unchecked Sendable {
                 ))
             }
 
-            guard let featureCount = UInt32(exactly: features.count) else {
-                return nil
-            }
-
-            features.withUnsafeBufferPointer { featurePointer in
-                hb_shape(
-                    state.shapingFont,
-                    buffer,
-                    featurePointer.baseAddress,
-                    featureCount
+            let positionScale: CGSize
+            let positionUnits: CGFloat
+            if state.layoutFont != nil {
+                positionUnits = CGFloat(state.face.pointee.units_per_EM) * 64
+                positionScale = CGSize(
+                    width: state.pointSize * CGFloat(state.dpi.x) / 72,
+                    height: state.pointSize * CGFloat(state.dpi.y) / 72
                 )
+            } else {
+                // Fixed strikes and non-OpenType faces retain their native
+                // FreeType position units and existing bitmap scaling.
+                positionUnits = 64
+                positionScale = CGSize(width: 1, height: 1)
             }
-
-            var infoCount: UInt32 = 0
-            var positionCount: UInt32 = 0
-            guard let infos = hb_buffer_get_glyph_infos(buffer, &infoCount),
-                  let positions = hb_buffer_get_glyph_positions(
-                    buffer,
-                    &positionCount
-                  ),
-                  infoCount == positionCount else {
-                return nil
-            }
-
-            guard let count = Int(exactly: infoCount) else { return nil }
-            var glyphClusters: [Int] = []
-            glyphClusters.reserveCapacity(count)
-            for index in 0..<count {
-                guard let cluster = Int(exactly: infos[index].cluster) else {
-                    return nil
-                }
-                glyphClusters.append(cluster)
-            }
-            let clusterStarts = Set(glyphClusters).sorted()
-            guard clusterStarts.allSatisfy({ $0 >= 0 && $0 < scalars.count }) else {
-                return nil
-            }
-            var clusterEnds: [Int: Int] = [:]
-            clusterEnds.reserveCapacity(clusterStarts.count)
-            for (index, start) in clusterStarts.enumerated() {
-                clusterEnds[start] = index + 1 < clusterStarts.count
-                    ? clusterStarts[index + 1]
-                    : scalars.count
-            }
-
             var glyphs: [ShapedGlyph] = []
-            glyphs.reserveCapacity(count)
-            for index in 0..<count {
-                let info = infos[index]
-                let position = positions[index]
-                let clusterStart = glyphClusters[index]
-                guard let clusterEnd = clusterEnds[clusterStart] else {
+            glyphs.reserveCapacity(scalars.count)
+            let compositionMetrics = hasComposableMarks ? state.layoutFont.flatMap {
+                    FontMetricsReader.compositionMetrics(face: state.face, library: library.library, font: $0)
+                }?.scaled(by: positionScale.height / CGFloat(state.face.pointee.units_per_EM)) : nil
+            for run in orderedRuns {
+                hb_buffer_reset(buffer)
+                let isLastResort = FT_Get_Postscript_Name(state.face).map {
+                    String(cString: $0) == "LastResort"
+                } ?? false
+                var encodings = resolvedDirection == .leftToRight && state.layoutFont != nil
+                    ? CharacterEncoder.encodings(scalars, run: run,
+                        font: state.layoutFont!, isLastResort: isLastResort) : nil
+                let hasPreparedCharacters = characterInput?.ranges.contains {
+                    $0.lowerBound <= run.range.lowerBound && $0.upperBound >= run.range.upperBound
+                } == true
+                let preservesCharacters = resolvedDirection == .leftToRight && state.layoutFont != nil &&
+                    (hasPreparedCharacters || CharacterComposer.accepts(run, scalars: scalars))
+                let prepared = hasPreparedCharacters ? characterInput : (preservesCharacters ?
+                    CharacterComposer.prepare(scalars,
+                        range: run.range, graphemes: graphemeRanges, isLastResort: isLastResort,
+                        hasGlyph: { scalar in
+                            var glyph: UInt32 = 0
+                            return hb_font_get_nominal_glyph(state.layoutFont!, scalar, &glyph) != 0 && glyph != 0
+                        }) : nil)
+                if let prepared {
+                    if encodings == nil {
+                        encodings = Array(repeating: HB_GLYPH_ENCODING_DEFAULT, count: scalars.count)
+                    }
+                    for source in prepared.deletedSources {
+                        encodings![source] = HB_GLYPH_ENCODING_INVISIBLE
+                    }
+                }
+                let input = prepared?.scalars ?? scalars
+                input.withUnsafeBufferPointer { pointer in
+                    // Keep the complete source as context while shaping only
+                    // this script interval. Cluster offsets remain absolute.
+                    hb_buffer_add_utf32(buffer, pointer.baseAddress, Int32(input.count),
+                                        UInt32(run.range.lowerBound), Int32(run.range.count))
+                }
+                hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_CHARACTERS)
+                hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(run.iso15924Tag))
+                hb_buffer_set_direction(buffer, resolvedDirection.harfbuzzValue)
+                if let language, !language.isEmpty {
+                    language.withCString { pointer in
+                        hb_buffer_set_language(buffer, hb_language_from_string(pointer, -1))
+                    }
+                }
+                hb_buffer_guess_segment_properties(buffer)
+
+                var features = baseFeatures
+                if run.script == 18 {
+                    // Hangul contextual substitutions are disabled by default.
+                    // Explicit low-level feature requests retain precedence.
+                    features.insert(hb_feature_t(tag: 0x6361_6c74, value: 0,
+                                                 start: 0, end: UInt32.max), at: 0)
+                }
+                guard let featureCount = UInt32(exactly: features.count) else {
                     return nil
                 }
-                glyphs.append(ShapedGlyph(
-                    index: info.codepoint,
-                    sourceRange: clusterStart..<clusterEnd,
-                    advance: CGSize(
-                        width: ft26d6ToFloat(FT_F26Dot6(position.x_advance)),
-                        height: ft26d6ToFloat(FT_F26Dot6(position.y_advance))
-                    ),
-                    offset: CGPoint(
-                        x: ft26d6ToFloat(FT_F26Dot6(position.x_offset)),
-                        y: ft26d6ToFloat(FT_F26Dot6(position.y_offset))
-                    )
-                ))
-            }
 
-            return ShapedText(
-                glyphs: glyphs,
-                direction: ShapingDirection(
-                    harfbuzzValue: hb_buffer_get_direction(buffer)
-                ) ?? direction ?? .leftToRight
-            )
+                var attachments: [Range<Int>] = []
+                let composesMarks = compositionMetrics != nil &&
+                    scalars[run.range].contains(where: GlyphComposer.accepts)
+                features.withUnsafeBufferPointer { featurePointer in
+                    if composesMarks || preservesCharacters || encodings != nil ||
+                        !optionalBoundaries.isEmpty || !positioningBoundaries.isEmpty {
+                        (encodings ?? []).withUnsafeBufferPointer { encodingPointer in
+                            optionalBoundaries.withUnsafeBufferPointer { optionalBoundaryPointer in
+                                positioningBoundaries.withUnsafeBufferPointer { positioningBoundaryPointer in
+                                    withUnsafeMutablePointer(to: &attachments) { context in
+                                        HBShapeWithGlyphAttachments(state.layoutFont ?? state.shapingFont,
+                                            buffer, featurePointer.baseAddress, featureCount,
+                                            preservesCharacters ? 1 : 0, encodingPointer.baseAddress,
+                                            UInt32(encodingPointer.count), optionalBoundaryPointer.baseAddress,
+                                            UInt32(optionalBoundaryPointer.count),
+                                            positioningBoundaryPointer.baseAddress,
+                                            UInt32(positioningBoundaryPointer.count), { glyph, parent, data in
+                                                let lower = Int(min(glyph, parent)), upper = Int(max(glyph, parent)) + 1
+                                                data!.assumingMemoryBound(to: [Range<Int>].self).pointee.append(lower..<upper)
+                                            }, context)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        hb_shape(state.layoutFont ?? state.shapingFont, buffer,
+                                 featurePointer.baseAddress, featureCount)
+                    }
+                }
+
+                var infoCount: UInt32 = 0
+                var positionCount: UInt32 = 0
+                guard let infos = hb_buffer_get_glyph_infos(buffer, &infoCount),
+                      let positions = hb_buffer_get_glyph_positions(
+                        buffer,
+                        &positionCount
+                      ),
+                      infoCount == positionCount else {
+                    return nil
+                }
+
+                guard let count = Int(exactly: infoCount) else { return nil }
+                // Internal deleted slots remain present throughout GPOS. Public
+                // glyphs retain only the initial placeholder, when one is needed
+                // to represent the beginning of the complete source interval.
+                let published = (0..<count).filter {
+                    encodings == nil || infos[$0].codepoint != 65535 ||
+                        ($0 == 0 && infos[$0].cluster == 0)
+                }
+                if published.count != count {
+                    let publishedIndices = Dictionary(uniqueKeysWithValues:
+                        published.enumerated().map { ($0.element, $0.offset) })
+                    attachments = attachments.compactMap { range in
+                        let members = range.compactMap { publishedIndices[$0] }
+                        guard let first = members.first, let last = members.last else { return nil }
+                        return first..<(last + 1)
+                    }
+                }
+                var glyphClusters: [Int] = []
+                glyphClusters.reserveCapacity(published.count)
+                var runGlyphs: [ShapedGlyph] = []
+                runGlyphs.reserveCapacity(published.count)
+                for index in published {
+                    guard let cluster = Int(exactly: infos[index].cluster) else {
+                        return nil
+                    }
+                    glyphClusters.append(cluster)
+                }
+                let clusterStarts = Set(glyphClusters).sorted()
+                guard clusterStarts.allSatisfy({ run.range.contains($0) }) else {
+                    return nil
+                }
+                var clusterEnds: [Int: Int] = [:]
+                clusterEnds.reserveCapacity(clusterStarts.count)
+                for (index, start) in clusterStarts.enumerated() {
+                    clusterEnds[start] = index + 1 < clusterStarts.count
+                        ? clusterStarts[index + 1]
+                        : run.range.upperBound
+                }
+
+                for (publishedIndex, index) in published.enumerated() {
+                    let info = infos[index]
+                    let position = positions[index]
+                    let clusterStart = glyphClusters[publishedIndex]
+                    guard let clusterEnd = clusterEnds[clusterStart] else {
+                        return nil
+                    }
+                    runGlyphs.append(ShapedGlyph(
+                        index: info.codepoint,
+                        sourceIndex: clusterStart,
+                        sourceRange: graphemeRanges[clusterStart].lowerBound..<graphemeRanges[clusterEnd - 1].upperBound,
+                        advance: CGSize(
+                            width: (CGFloat(position.x_advance) / positionUnits) * positionScale.width,
+                            height: (CGFloat(position.y_advance) / positionUnits) * positionScale.height
+                        ),
+                        offset: CGPoint(
+                            x: (CGFloat(position.x_offset) / positionUnits) * positionScale.width,
+                            y: (CGFloat(position.y_offset) / positionUnits) * positionScale.height
+                        ),
+                        hasResolvedMarkPosition: attachments.contains { $0.contains(publishedIndex) }
+                    ))
+                }
+                if composesMarks, let font = state.layoutFont, let metrics = compositionMetrics {
+                    // The cursor contributes the first marked source interval
+                    // in this shaping run to default-ignorable base admission.
+                    let uncombinedRange = uncombinedRanges.first { range in
+                        range.lowerBound >= run.range.lowerBound &&
+                            range.upperBound <= run.range.upperBound &&
+                            scalars[range].contains(where: GlyphComposer.isMark)
+                    }
+                    GlyphComposer.compose(&runGlyphs, scalars: scalars, font: font,
+                        metrics: metrics, units: positionUnits, scale: positionScale,
+                        attachments: attachments, uncombinedRange: uncombinedRange,
+                        allowsLeadingMarkBase: allowsLeadingMarkBase)
+                }
+                let rawGlyphStart = glyphs.count
+                if retainsDeletedGlyphs, published.count != count {
+                    // Geometric composition uses its existing visible-glyph
+                    // intervals. Publish that geometry alongside the original
+                    // shaping buffer's deleted slots.
+                    var nextPublished = 0
+                    for index in 0..<count {
+                        if nextPublished < published.count, published[nextPublished] == index {
+                            glyphs.append(runGlyphs[nextPublished])
+                            nextPublished += 1
+                        } else {
+                            let source = Int(infos[index].cluster)
+                            guard run.range.contains(source) else { return nil }
+                            glyphs.append(ShapedGlyph(index: infos[index].codepoint,
+                                sourceIndex: source, sourceRange: graphemeRanges[source],
+                                advance: CGSize(
+                                    width: (CGFloat(positions[index].x_advance) / positionUnits) * positionScale.width,
+                                    height: (CGFloat(positions[index].y_advance) / positionUnits) * positionScale.height),
+                                offset: CGPoint(
+                                    x: (CGFloat(positions[index].x_offset) / positionUnits) * positionScale.width,
+                                    y: (CGFloat(positions[index].y_offset) / positionUnits) * positionScale.height)))
+                        }
+                    }
+                } else {
+                    glyphs.append(contentsOf: runGlyphs)
+                }
+                if retainsDeletedGlyphs, !sourceRunBoundaries.isEmpty {
+                    // Required substitutions can consume every glyph owned by
+                    // one original attributed run. Keep one zero-width slot at
+                    // that shaping owner while leaving same-run ligatures
+                    // compact. Optional lookup ranges remain a separate input.
+                    let boundaries = [run.range.lowerBound] + sourceRunBoundaries.filter {
+                        $0 > run.range.lowerBound && $0 < run.range.upperBound
+                    } + [run.range.upperBound]
+                    for (lower, upper) in zip(boundaries, boundaries.dropFirst()) {
+                        let sourceRange = lower..<upper
+                        guard !glyphs[rawGlyphStart...].contains(where: {
+                            sourceRange.contains($0.sourceIndex)
+                        }) else { continue }
+                        let backwards = resolvedDirection == .rightToLeft ||
+                            resolvedDirection == .bottomToTop
+                        let insertion = glyphs[rawGlyphStart...].firstIndex(where: {
+                            backwards ? $0.sourceIndex < lower : $0.sourceIndex > lower
+                        }) ?? glyphs.endIndex
+                        glyphs.insert(ShapedGlyph(index: 65535,
+                            sourceIndex: lower, sourceRange: graphemeRanges[lower],
+                            advance: .zero, offset: .zero), at: insertion)
+                    }
+                }
+            }
+            return ShapedText(glyphs: glyphs, direction: resolvedDirection)
         }
     }
 
@@ -1283,7 +1707,7 @@ public class Font: @unchecked Sendable {
         }
     }
 
-    package func glyphMetrics(
+    public func glyphMetrics(
         at index: UInt32,
         embolden: CGFloat = 0
     ) -> GlyphMetrics? {
@@ -1705,7 +2129,7 @@ public class Font: @unchecked Sendable {
         return true
     }
 
-    package func withGlyphBitmap(
+    public func withGlyphBitmap(
         at index: UInt32,
         embolden: CGFloat,
         outline: CGFloat,
@@ -1744,12 +2168,16 @@ public class Font: @unchecked Sendable {
             case "CFF": outlineFormat = .compactFontFormat
             default: outlineFormat = .other
             }
-            let clipping = FontClippingMetricsReader.read(face: face, library: library.library)
+            let clipping = FontMetricsReader.read(face: face, library: library.library)
+            let capHeight = $0.layoutFont.flatMap {
+                FontMetricsReader.compositionMetrics(face: face, library: library.library, font: $0)
+            }.map { Int($0.capHeight) }
             return DesignMetrics(outlineFormat: outlineFormat,
                                  unitsPerEM: Int(face.pointee.units_per_EM),
                                  ascender: Int(face.pointee.ascender),
                                  descender: Int(face.pointee.descender),
                                  height: Int(face.pointee.height),
+                                 capHeight: capHeight,
                                  clipping: clipping)
         }
     }
@@ -1775,6 +2203,85 @@ public class Font: @unchecked Sendable {
         case line(to: CGPoint)
         case quadCurve(to: CGPoint, control: CGPoint)
         case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
+    }
+
+    /// Returns selected-font bounds in design units, independently of size and DPI.
+    /// Coordinates are baseline-relative with +Y up. Unsupported faces return nil.
+    public func designGlyphBounds(at glyphIndex: UInt32) -> CGRect? {
+        self.state.withLock { state in
+            guard let font = state.layoutFont, glyphIndex < self.numGlyphs else { return nil }
+            var bounds = hb_glyph_extents_t()
+            guard hb_font_get_glyph_extents(font, glyphIndex, &bounds) != 0 else { return nil }
+            return CGRect(x: CGFloat(bounds.x_bearing) / 64,
+                          y: (CGFloat(bounds.y_bearing) + CGFloat(bounds.height)) / 64,
+                          width: CGFloat(bounds.width) / 64, height: -CGFloat(bounds.height) / 64)
+        }
+    }
+
+    package var glyphCompositionMetrics: GlyphComposer.Metrics? {
+        self.state.withLock { state in
+            guard let font = state.layoutFont,
+                  state.face.pointee.units_per_EM > 0 else { return nil }
+            let scale = state.pointSize * CGFloat(state.dpi.y) / 72 /
+                CGFloat(state.face.pointee.units_per_EM)
+            return FontMetricsReader.compositionMetrics(
+                face: state.face,
+                library: library.library,
+                font: font
+            )?.scaled(by: scale)
+        }
+    }
+
+    package func allowsMarkComposition(at glyphIndex: UInt32) -> Bool {
+        self.state.withLock { state in
+            guard let font = state.layoutFont,
+                  glyphIndex < self.numGlyphs else { return false }
+            let glyphClass = hb_ot_layout_get_glyph_class(
+                hb_font_get_face(font), glyphIndex
+            )
+            return glyphClass == HB_OT_LAYOUT_GLYPH_CLASS_UNCLASSIFIED ||
+                glyphClass == HB_OT_LAYOUT_GLYPH_CLASS_MARK
+        }
+    }
+
+    /// Decomposes the selected outline in design units without raster hinting.
+    /// Contours are implicitly closed. Empty supported glyphs succeed without commands.
+    /// The callback runs after releasing the font-state lock.
+    public func decomposeDesignGlyphOutline(
+        at glyphIndex: UInt32,
+        _ body: (OutlineCommand) -> Void
+    ) -> Bool {
+        var commands: [OutlineCommand] = []
+        let supported = self.state.withLock { state in
+            guard let font = state.layoutFont, glyphIndex < self.numGlyphs,
+                  let functions = hb_draw_funcs_create() else { return false }
+            defer { hb_draw_funcs_destroy(functions) }
+            hb_draw_funcs_set_move_to_func(functions, { _, data, _, x, y, _ in
+                data!.assumingMemoryBound(to: [OutlineCommand].self).pointee.append(
+                    .move(to: CGPoint(x: CGFloat(x) / 64, y: CGFloat(y) / 64)))
+            }, nil, nil)
+            hb_draw_funcs_set_line_to_func(functions, { _, data, _, x, y, _ in
+                data!.assumingMemoryBound(to: [OutlineCommand].self).pointee.append(
+                    .line(to: CGPoint(x: CGFloat(x) / 64, y: CGFloat(y) / 64)))
+            }, nil, nil)
+            hb_draw_funcs_set_quadratic_to_func(functions, { _, data, _, cx, cy, x, y, _ in
+                data!.assumingMemoryBound(to: [OutlineCommand].self).pointee.append(
+                    .quadCurve(to: CGPoint(x: CGFloat(x) / 64, y: CGFloat(y) / 64),
+                               control: CGPoint(x: CGFloat(cx) / 64, y: CGFloat(cy) / 64)))
+            }, nil, nil)
+            hb_draw_funcs_set_cubic_to_func(functions, { _, data, _, ax, ay, bx, by, x, y, _ in
+                data!.assumingMemoryBound(to: [OutlineCommand].self).pointee.append(
+                    .curve(to: CGPoint(x: CGFloat(x) / 64, y: CGFloat(y) / 64),
+                           control1: CGPoint(x: CGFloat(ax) / 64, y: CGFloat(ay) / 64),
+                           control2: CGPoint(x: CGFloat(bx) / 64, y: CGFloat(by) / 64)))
+            }, nil, nil)
+            return withUnsafeMutablePointer(to: &commands) {
+                hb_font_draw_glyph_or_fail(font, glyphIndex, functions, $0) != 0
+            }
+        }
+        guard supported else { return false }
+        commands.forEach(body)
+        return true
     }
 
     /// Decomposes an optionally emboldened or stroked glyph outline into path
@@ -1804,7 +2311,7 @@ public class Font: @unchecked Sendable {
         return metrics
     }
 
-    package func decomposeGlyphOutline(
+    public func decomposeGlyphOutline(
         at index: UInt32,
         embolden: CGFloat = 0,
         outline: CGFloat = 0,

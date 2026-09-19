@@ -82,7 +82,7 @@ public class TextureFont: Font, @unchecked Sendable {
         faceIndex: Int = 0
     ) {
         self.deviceContext = deviceContext
-        super.init(data: data, faceIndex: faceIndex)
+        super.init(data: data, faceIndex: faceIndex, source: nil, filePath: "")
     }
 
     public init?(
@@ -92,6 +92,20 @@ public class TextureFont: Font, @unchecked Sendable {
     ) {
         self.deviceContext = deviceContext
         super.init(path: path, faceIndex: faceIndex)
+    }
+
+    private init?(deviceContext: GraphicsDeviceContext, data: any FixedAddressStorageData,
+                  faceIndex: Int, source: Font.Source, filePath: String) {
+        self.deviceContext = deviceContext
+        super.init(data: data, faceIndex: faceIndex, source: source, filePath: filePath)
+    }
+
+    override func makeCopy(data: any FixedAddressStorageData) -> Font? {
+        guard let copy = TextureFont(deviceContext: deviceContext, data: data,
+                                    faceIndex: faceIndex, source: source, filePath: filePath) else { return nil }
+        copy._boldStrength = _boldStrength
+        copy._outlineThickness = _outlineThickness
+        return copy
     }
 
     override func clearCacheLocked() {
@@ -149,7 +163,7 @@ public class TextureFont: Font, @unchecked Sendable {
         }
     }
 
-    package func glyphData(at index: UInt32) -> GlyphData? {
+    public func glyphData(at index: UInt32) -> GlyphData? {
         self.withLockedFace { lockedFace in
             self.glyphData(at: index, using: lockedFace)
         }

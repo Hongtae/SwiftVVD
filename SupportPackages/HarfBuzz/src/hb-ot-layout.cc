@@ -2040,6 +2040,7 @@ inline void hb_ot_map_t::apply (const Proxy &proxy,
       if (accel->digest.may_intersect (buffer->digest))
       {
 	c.set_lookup_index (lookup_index);
+	c.optional_ligature = lookup.optional_ligature;
 	c.set_lookup_mask (lookup.mask, false);
 	c.set_auto_zwj (lookup.auto_zwj, false);
 	c.set_auto_zwnj (lookup.auto_zwnj, false);

@@ -22,6 +22,7 @@ final class FontDesignMetricsTests: XCTestCase {
         let glyph = try XCTUnwrap(font.glyphMetrics(for: "A"))
         let metrics = try XCTUnwrap(font.designMetrics)
         XCTAssertEqual(metrics.unitsPerEM, 2048)
+        XCTAssertEqual(metrics.capHeight, 1456)
         let clipping = try XCTUnwrap(metrics.clipping)
         XCTAssertEqual([clipping.ascent, clipping.descent], [1946, 512])
         XCTAssertEqual([metrics.ascender, metrics.descender, metrics.height, metrics.lineGap],
@@ -39,6 +40,39 @@ final class FontDesignMetricsTests: XCTestCase {
         XCTAssertEqual(after.advance, glyph.advance)
         XCTAssertEqual(after.bearing, glyph.bearing)
         XCTAssertEqual(after.size, glyph.size)
+    }
+
+    // ASSERTIONS fontCapHeight27Observed
+    func testCapHeightRoundsSelectedVariationBeforeScalingAndPreservesSnapshots() throws {
+        for (delta, caps): (Int16, [Int]) in [(21, [1400, 1405, 1411, 1421]),
+                                             (-21, [1400, 1395, 1389, 1379])] {
+            let data = try Self.fixture(variableMetrics: true) { tables in
+                Self.write16(1400, &tables["OS/2"]!, 88)
+                tables["MVAR"]!.replaceSubrange(12..<16, with: "cpht".utf8)
+                Self.write16(UInt16(bitPattern: delta), &tables["MVAR"]!, 88)
+            }
+            let font = try XCTUnwrap(Font(data: data))
+            let initial = try XCTUnwrap(font.designMetrics)
+            for (weight, cap) in zip([CGFloat(400), 525, 650, 900, 400], caps + [1400]) {
+                XCTAssertTrue(font.setVariationCoordinates([Self.weightTag: weight]))
+                for dpi: Font.DPI in [(72, 72), (96, 144)] {
+                    font.setPointSize(23.375, dpi: dpi)
+                    let glyph = try XCTUnwrap(font.glyphMetrics(for: "H"))
+                    XCTAssertEqual(font.designMetrics?.capHeight, cap)
+                    XCTAssertEqual(initial.capHeight, 1400)
+                    XCTAssertEqual(font.variationCoordinates[Self.weightTag], weight)
+                    let after = try XCTUnwrap(font.glyphMetrics(for: "H"))
+                    XCTAssertEqual(after.bearing, glyph.bearing)
+                    XCTAssertEqual(after.advance, glyph.advance)
+                }
+            }
+            XCTAssertTrue(font.setVariationCoordinates([:]))
+            XCTAssertEqual(font.designMetrics, initial)
+        }
+        let signed = try Self.fixture { tables in
+            Self.write16(UInt16(bitPattern: -17), &tables["OS/2"]!, 88)
+        }
+        XCTAssertEqual(try XCTUnwrap(Font(data: signed)).designMetrics?.capHeight, -17)
     }
 
     func testDesignMetricsAreIndependentOfPointSizeAndRasterDPI() throws {

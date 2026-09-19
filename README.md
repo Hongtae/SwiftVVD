@@ -13,7 +13,7 @@ Cross-Platform Game Engine for swift programming language.
 
 ---
 ## Things that require pre-installation
-* Windows 10/11 x64
+* Windows 10 (version 1903 or later) / Windows 11 x64
   * [Swift 6.4 or later](https://www.swift.org/)
   * [GIT (with LFS)](https://git-scm.com/)
   * [Vulkan SDK](https://vulkan.lunarg.com/)
@@ -31,6 +31,7 @@ Cross-Platform Game Engine for swift programming language.
     * Requires a graphics driver installed that supports Vulkan 1.3 or later.
   * [Swift 6.4 or later](https://www.swift.org/)
   * [Wayland-1.20 or later (libwayland-dev)](https://wayland.freedesktop.org/)
+  * [ICU development headers and library (libicu-dev)](https://icu.unicode.org/)
 
     > **Note**  
     > Using devcontainer(Docker) is recommended.  

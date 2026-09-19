@@ -113,8 +113,14 @@ struct MarkLigPosFormat1_2
     /* Now we search backwards for a non-mark glyph */
 
     auto &skippy_iter = c->iter_input;
+    skippy_iter.reset_fast (buffer->idx);
     skippy_iter.set_lookup_props (LookupFlag::IgnoreMarks);
 
+    if (buffer->positioning_run_boundary_count)
+    {
+      c->last_base_until = 0;
+      c->last_base = -1;
+    }
     if (c->last_base_until > buffer->idx)
     {
       c->last_base_until = 0;

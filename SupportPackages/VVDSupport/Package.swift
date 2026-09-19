@@ -7,6 +7,10 @@ let package = Package(
     name: "VVDSupport",
     products: [
         .library(name: "PNG", targets: ["_libpng"]),
+        .library(
+            name: "ICUTextAnalysis",
+            type: .static,
+            targets: ["ICUTextAnalysis"]),
         // Products define the executables and libraries a package produces, and make them visible to other packages.
         .library(
             name: "VVDSupport",
@@ -18,6 +22,16 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .target(
+            name: "ICUTextAnalysis",
+            path: "Sources/ICUTextAnalysis",
+            exclude: ["README.md"],
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedLibrary("icucore", .when(platforms: [.macOS, .iOS, .macCatalyst, .tvOS, .watchOS])),
+                .linkedLibrary("icu", .when(platforms: [.windows])),
+                .linkedLibrary("icuuc", .when(platforms: [.linux, .android])),
+            ]),
         .target(
             name: "VVDHelper",
             dependencies: [

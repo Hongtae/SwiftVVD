@@ -83,6 +83,14 @@ struct hb_buffer_t
   hb_codepoint_t not_found; /* 0 or something else. */
   hb_codepoint_t not_found_variation_selector; /* HB_CODEPOINT_INVALID or something else. */
 
+  /* Borrowed source boundaries for optional-ligature input matching. */
+  const unsigned int *optional_ligature_boundaries;
+  unsigned int optional_ligature_boundary_count;
+  /* Borrowed source boundaries for positioning input matching. */
+  const unsigned int *positioning_run_boundaries;
+  unsigned int positioning_run_boundary_count;
+  bool preserve_deleted_glyphs;
+
   /*
    * Buffer contents
    */

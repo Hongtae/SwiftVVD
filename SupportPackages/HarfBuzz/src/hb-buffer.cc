@@ -294,6 +294,12 @@ hb_buffer_t::reset ()
   not_found = 0;
   not_found_variation_selector = HB_CODEPOINT_INVALID;
 
+  optional_ligature_boundaries = nullptr;
+  optional_ligature_boundary_count = 0;
+  positioning_run_boundaries = nullptr;
+  positioning_run_boundary_count = 0;
+  preserve_deleted_glyphs = false;
+
   clear ();
 }
 
@@ -747,6 +753,11 @@ DEFINE_NULL_INSTANCE (hb_buffer_t) =
   0, /* invisible */
   0, /* not_found */
   HB_CODEPOINT_INVALID, /* not_found_variation_selector */
+  nullptr, /* optional_ligature_boundaries */
+  0, /* optional_ligature_boundary_count */
+  nullptr, /* positioning_run_boundaries */
+  0, /* positioning_run_boundary_count */
+  false, /* preserve_deleted_glyphs */
 
 
   HB_BUFFER_CONTENT_TYPE_INVALID,
