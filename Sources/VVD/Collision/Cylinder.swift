@@ -24,6 +24,57 @@ public struct Cylinder: ConvexPrimitive {
         point.x * point.x + point.z * point.z <= radius * radius
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let halfHeight = height * Scalar(0.5)
+        let radialLength = (point.x * point.x + point.z * point.z)
+            .squareRoot()
+        let radialDirection = radialLength > .ulpOfOne
+            ? Vector3(point.x / radialLength, 0, point.z / radialLength)
+            : Vector3(1, 0, 0)
+
+        if contains(point) {
+            let sideDistance = radius - radialLength
+            let capDistance = halfHeight - abs(point.y)
+            if sideDistance <= capDistance {
+                return PrimitiveClosestPoint(
+                    position: Vector3(radialDirection.x * radius,
+                                      point.y,
+                                      radialDirection.z * radius),
+                    normal: radialDirection,
+                    distance: Swift.max(sideDistance, .zero))
+            }
+
+            let normal = Vector3(0, point.y >= .zero ? 1 : -1, 0)
+            return PrimitiveClosestPoint(
+                position: Vector3(point.x,
+                                  normal.y * halfHeight,
+                                  point.z),
+                normal: normal,
+                distance: Swift.max(capDistance, .zero))
+        }
+
+        let surfaceRadius = Swift.min(radialLength, radius)
+        let position = Vector3(radialDirection.x * surfaceRadius,
+                               point.y.clamp(min: -halfHeight,
+                                             max: halfHeight),
+                               radialDirection.z * surfaceRadius)
+        let offset = point - position
+        let distance = offset.length
+        let normal: Vector3
+        if distance > .ulpOfOne {
+            normal = offset / distance
+        } else if radialLength >= radius {
+            normal = radialDirection
+        } else {
+            normal = Vector3(0, point.y >= .zero ? 1 : -1, 0)
+        }
+        return PrimitiveClosestPoint(position: position,
+                                     normal: normal,
+                                     distance: distance)
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

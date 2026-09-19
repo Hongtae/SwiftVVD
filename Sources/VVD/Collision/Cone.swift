@@ -28,6 +28,73 @@ public struct Cone: ConvexPrimitive {
         return point.x * point.x + point.z * point.z <= radiusAtY * radiusAtY
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let halfHeight = height * Scalar(0.5)
+        let radialLength = (point.x * point.x + point.z * point.z)
+            .squareRoot()
+        let radialDirection = radialLength > .ulpOfOne
+            ? Vector3(point.x / radialLength, 0, point.z / radialLength)
+            : Vector3(1, 0, 0)
+
+        if radius <= .ulpOfOne {
+            let position = Vector3(
+                0,
+                point.y.clamp(min: -halfHeight, max: halfHeight),
+                0)
+            let offset = point - position
+            let distance = offset.length
+            let normal = distance > .ulpOfOne
+                ? offset / distance
+                : Vector3(1, 0, 0)
+            return PrimitiveClosestPoint(position: position,
+                                         normal: normal,
+                                         distance: distance)
+        }
+
+        let segmentX = radius
+        let segmentY = -height
+        let fromA = (radialLength, point.y - halfHeight)
+        let parameter = ((fromA.0 * segmentX + fromA.1 * segmentY) /
+            (radius * radius + height * height))
+            .clamp(min: .zero, max: Scalar(1))
+        let lateralRadius = radius * parameter
+        let lateralPosition = Vector3(
+            radialDirection.x * lateralRadius,
+            halfHeight - height * parameter,
+            radialDirection.z * lateralRadius)
+        let lateralDistance = (point - lateralPosition).length
+        let lateralNormal = Vector3(radialDirection.x,
+                                    radius / height,
+                                    radialDirection.z).normalized()
+
+        let baseRadius = Swift.min(radialLength, radius)
+        let basePosition = Vector3(radialDirection.x * baseRadius,
+                                   -halfHeight,
+                                   radialDirection.z * baseRadius)
+        let baseOffset = point - basePosition
+        let baseDistance = baseOffset.length
+
+        if lateralDistance <= baseDistance {
+            return PrimitiveClosestPoint(position: lateralPosition,
+                                         normal: lateralNormal,
+                                         distance: lateralDistance)
+        }
+
+        let baseNormal: Vector3
+        if radialLength <= radius {
+            baseNormal = Vector3(0, -1, 0)
+        } else if baseDistance > .ulpOfOne {
+            baseNormal = baseOffset / baseDistance
+        } else {
+            baseNormal = radialDirection
+        }
+        return PrimitiveClosestPoint(position: basePosition,
+                                     normal: baseNormal,
+                                     distance: baseDistance)
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

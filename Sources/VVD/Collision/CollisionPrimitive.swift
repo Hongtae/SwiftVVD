@@ -11,6 +11,9 @@ public protocol CollisionPrimitive: Hashable {
 
     func contains(_ point: Vector3) -> Bool
 
+    /// Returns the closest represented surface point to a local-space query.
+    func closestPoint(to point: Vector3) -> PrimitiveClosestPoint?
+
     /// Returns the closest surface intersection with a nonnegative ray
     /// parameter. A ray that starts inside a closed primitive returns its exit
     /// intersection. The result is expressed in the primitive's local space.
@@ -36,6 +39,9 @@ public protocol CollisionShape<Primitive>: Hashable {
 
     func contains(_ point: Vector3) -> Bool
 
+    /// Forwards the local-space closest-surface query to `primitive`.
+    func closestPoint(to point: Vector3) -> PrimitiveClosestPoint?
+
     /// Forwards the local-space ray query to `primitive`.
     func rayTest(_ ray: Ray) -> PrimitiveRayHit?
 }
@@ -46,6 +52,10 @@ public extension CollisionShape {
 
     func contains(_ point: Vector3) -> Bool {
         primitive.contains(point)
+    }
+
+    func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        primitive.closestPoint(to: point)
     }
 
     func rayTest(_ ray: Ray) -> PrimitiveRayHit? {

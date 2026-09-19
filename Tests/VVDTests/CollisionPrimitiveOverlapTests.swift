@@ -77,7 +77,9 @@ final class CollisionPrimitiveOverlapTests: XCTestCase {
 
         let overlapping = Transform(position: Vector3(0.2, 0, 0))
         XCTAssertTrue(CollisionAlgorithms.intersects(cylinder, cone, frame: overlapping))
-        XCTAssertNil(CollisionAlgorithms.contactManifold(cylinder, cone, frame: overlapping))
+        XCTAssertNotNil(CollisionAlgorithms.contactManifold(cylinder,
+                                                             cone,
+                                                             frame: overlapping))
 
         let separated = Transform(position: Vector3(2.0, 0, 0))
         XCTAssertFalse(CollisionAlgorithms.intersects(cylinder, cone, frame: separated))
@@ -94,7 +96,12 @@ final class CollisionPrimitiveOverlapTests: XCTestCase {
         let overlapping = Transform(position: Vector3(0.75, 0, 0))
         XCTAssertTrue(CollisionAlgorithms.intersects(box, hull, frame: overlapping))
         XCTAssertTrue(CollisionAlgorithms.intersects(hull, hull, frame: overlapping))
-        XCTAssertNil(CollisionAlgorithms.contactManifold(box, hull, frame: overlapping))
+        XCTAssertEqual(CollisionAlgorithms.contactManifold(
+            box,
+            hull,
+            frame: overlapping)?.contacts.first?.penetrationDepth ?? -1,
+                       0.25,
+                       accuracy: 1.0e-6)
 
         let separated = Transform(position: Vector3(1.25, 0, 0))
         XCTAssertFalse(CollisionAlgorithms.intersects(box, hull, frame: separated))
@@ -145,7 +152,11 @@ final class CollisionPrimitiveOverlapTests: XCTestCase {
         ]))
 
         XCTAssertTrue(CollisionAlgorithms.intersects(box, mesh))
-        XCTAssertNil(CollisionAlgorithms.contactManifold(box, mesh))
+        XCTAssertEqual(CollisionAlgorithms.contactManifold(
+            box,
+            mesh)?.contacts.first?.penetrationDepth ?? -1,
+                       0.5,
+                       accuracy: 1.0e-6)
 
         let separated = Transform(position: Vector3(0, 0, 2))
         XCTAssertFalse(CollisionAlgorithms.intersects(box, mesh, frame: separated))

@@ -69,6 +69,19 @@ public struct Sphere: ConvexPrimitive {
         self.isValid && (point - center).lengthSquared <= (radius * radius)
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let offset = point - center
+        let length = offset.length
+        let normal = length > .ulpOfOne
+            ? offset / length
+            : Vector3(1, 0, 0)
+        return PrimitiveClosestPoint(position: center + normal * radius,
+                                     normal: normal,
+                                     distance: abs(length - radius))
+    }
+
     public var volume: Scalar {
         if self.isValid {
             // 4/3 PI * R cubed

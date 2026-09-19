@@ -316,7 +316,25 @@ final class CollisionAlgorithmRegistryTests: XCTestCase {
                         Collider(primitive: compoundB)],
             algorithms: makeRegistry())
 
-        XCTAssertEqual(space.collisionPairs().count, 1)
+        let pairs = space.collisionPairs()
+        XCTAssertEqual(pairs.count, 1)
+        XCTAssertEqual(pairs.first?.contactManifold?.contacts.count, 1)
+    }
+
+    func testExactCompoundRegistrationOverridesLeafContactTraversal() {
+        var registry = makeRegistry()
+        let compound = CompoundPrimitive(children: [
+            .init(RegistryPrimitiveB()),
+        ])
+
+        XCTAssertNotNil(registry.contactManifold(RegistryPrimitiveA(),
+                                                 compound))
+
+        registry.register(RegistryPrimitiveA.self,
+                          CompoundPrimitive.self) { _, _, _ in true }
+
+        XCTAssertNil(registry.contactManifold(RegistryPrimitiveA(),
+                                              compound))
     }
 
     func testColliderCanBeConstructedFromTypedShape() throws {
@@ -373,6 +391,8 @@ private struct RegistryPrimitiveA: CollisionPrimitive {
 
     func contains(_ point: Vector3) -> Bool { false }
 
+    func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? { nil }
+
     func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         nil
     }
@@ -383,6 +403,8 @@ private struct RegistryPrimitiveB: CollisionPrimitive {
     let isValid = true
 
     func contains(_ point: Vector3) -> Bool { false }
+
+    func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? { nil }
 
     func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         nil

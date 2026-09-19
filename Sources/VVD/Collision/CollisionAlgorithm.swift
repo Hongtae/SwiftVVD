@@ -405,6 +405,19 @@ public struct CollisionAlgorithmRegistry {
         if let entry = entries[key] {
             return entry.contactManifold?(a, b, frame)
         }
+
+        if a is CompoundPrimitive || b is CompoundPrimitive {
+            return _compoundLeafContactManifold(
+                a,
+                b,
+                frame: frame
+            ) { primitiveA, primitiveB, leafFrame in
+                contactManifold(primitiveA,
+                                primitiveB,
+                                frame: leafFrame)
+            }
+        }
+
         guard usesBuiltinFallback else { return nil }
         return Self.builtinContactManifold(a, b, frame: frame)
     }
@@ -475,24 +488,40 @@ private extension CollisionAlgorithmRegistry {
             Capsule.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Box.self,
             Cylinder.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Box.self,
             Cone.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Box.self,
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Box.self,
@@ -508,6 +537,10 @@ private extension CollisionAlgorithmRegistry {
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -533,18 +566,30 @@ private extension CollisionAlgorithmRegistry {
             Cylinder.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Sphere.self,
             Cone.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Sphere.self,
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Sphere.self,
@@ -560,6 +605,10 @@ private extension CollisionAlgorithmRegistry {
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -576,30 +625,50 @@ private extension CollisionAlgorithmRegistry {
             Cylinder.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Capsule.self,
             Cone.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Capsule.self,
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Capsule.self,
             StaticPlane.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapPlaneContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Capsule.self,
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -607,30 +676,50 @@ private extension CollisionAlgorithmRegistry {
             Cylinder.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cylinder.self,
             Cone.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cylinder.self,
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cylinder.self,
             StaticPlane.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapPlaneContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cylinder.self,
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -638,24 +727,40 @@ private extension CollisionAlgorithmRegistry {
             Cone.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cone.self,
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cone.self,
             StaticPlane.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapPlaneContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             Cone.self,
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -663,18 +768,30 @@ private extension CollisionAlgorithmRegistry {
             ConvexHull.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             ConvexHull.self,
             StaticPlane.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapPlaneContactManifold(
+                    a, b, frame: frame)
             })
         registerSymmetric(
             ConvexHull.self,
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.supportMapMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -688,6 +805,10 @@ private extension CollisionAlgorithmRegistry {
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.planeMeshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerSymmetric(
@@ -695,6 +816,10 @@ private extension CollisionAlgorithmRegistry {
             TriangleMesh.self,
             intersects: { a, b, frame in
                 CollisionAlgorithms.intersects(a, b, frame: frame)
+            },
+            contactManifold: { a, b, frame in
+                CollisionAlgorithms.meshContactManifold(
+                    a, b, frame: frame)
             })
 
         registerBuiltinSweepAlgorithms()

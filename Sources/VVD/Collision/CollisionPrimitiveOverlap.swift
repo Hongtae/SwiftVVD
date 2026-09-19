@@ -44,15 +44,15 @@ extension Sphere: _SupportMap {
 extension Capsule: _SupportMap {
     var center: Vector3 { .zero }
 
-    /// Capsule support point is an end-cap center plus radial support.
+    /// Capsule support point is an end-cap center plus spherical support.
     func support(_ direction: Vector3) -> Vector3 {
         let halfHeight = height * Scalar(0.5)
         let y = direction.y >= .zero ? halfHeight : -halfHeight
-        let radial = Vector3(direction.x, 0, direction.z)
-        if radial.lengthSquared <= _overlapEpsilon {
-            return Vector3(0, y, 0)
+        let endCenter = Vector3(0, y, 0)
+        if direction.lengthSquared <= _overlapEpsilon {
+            return endCenter + Vector3(radius, 0, 0)
         }
-        return Vector3(0, y, 0) + radial.normalized() * radius
+        return endCenter + direction.normalized() * radius
     }
 }
 

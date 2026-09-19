@@ -81,6 +81,24 @@ public struct TriangleMesh: ConcavePrimitive {
         storage.contains(point)
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        var closest: PrimitiveClosestPoint?
+        for index in 0..<triangleCount {
+            let triangle = triangle(at: index)
+            guard triangle.area > .ulpOfOne else { continue }
+            let position = triangle.closestPoint(to: point)
+            let distance = (point - position).length
+            if closest == nil || distance < closest!.distance {
+                closest = PrimitiveClosestPoint(position: position,
+                                                normal: triangle.normal,
+                                                distance: distance)
+            }
+        }
+        return closest
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         storage.rayTest(ray)
     }

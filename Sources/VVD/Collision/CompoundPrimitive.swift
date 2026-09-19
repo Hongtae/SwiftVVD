@@ -65,6 +65,29 @@ public struct CompoundPrimitive: CollisionPrimitive {
         }
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        var closest: PrimitiveClosestPoint?
+        for child in flattenedChildren() where child.primitive.isValid {
+            let inverseTransform = child.transform.inverted()
+            let childPoint = point.applying(inverseTransform)
+            guard let childClosest = child.primitive.closestPoint(to: childPoint)
+            else { continue }
+
+            let candidate = PrimitiveClosestPoint(
+                position: childClosest.position.applying(child.transform),
+                normal: childClosest.normal
+                    .applying(child.transform.orientation)
+                    .normalized(),
+                distance: childClosest.distance)
+            if closest == nil || candidate.distance < closest!.distance {
+                closest = candidate
+            }
+        }
+        return closest
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

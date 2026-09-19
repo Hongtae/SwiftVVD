@@ -59,6 +59,29 @@ public struct ConvexHull: ConvexPrimitive, Sendable {
         }
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid, let surfacePlanes else { return nil }
+
+        var closest: PrimitiveClosestPoint?
+        for (faceIndex, face) in faces.enumerated() {
+            let first = vertices[face[0]]
+            for index in 1..<(face.count - 1) {
+                let triangle = Triangle(first,
+                                        vertices[face[index]],
+                                        vertices[face[index + 1]])
+                let position = triangle.closestPoint(to: point)
+                let distance = (point - position).length
+                if closest == nil || distance < closest!.distance {
+                    closest = PrimitiveClosestPoint(
+                        position: position,
+                        normal: surfacePlanes[faceIndex].normal,
+                        distance: distance)
+                }
+            }
+        }
+        return closest
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid,
               ray.isValid,

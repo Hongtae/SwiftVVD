@@ -148,4 +148,20 @@ final class ConvexSweepTests: XCTestCase {
             frame: Transform(position: Vector3(3, 0, 0)),
             translation: Vector3(4, 0, 0)))
     }
+
+    func testCapsuleSweepIncludesSphericalSupportAlongAxis() throws {
+        let capsule = Capsule(radius: 0.5, height: 2)
+        let sphere = Sphere(center: .zero, radius: 0.5)
+
+        let impact = try XCTUnwrap(CollisionAlgorithms.timeOfImpact(
+            capsule,
+            sphere,
+            frame: Transform(position: Vector3(0, 4, 0)),
+            translation: Vector3(0, 4, 0)))
+
+        XCTAssertEqual(impact.fraction, 0.5, accuracy: 1.0e-7)
+        XCTAssertEqual(impact.pointOnA.y, 3.5, accuracy: 1.0e-7)
+        XCTAssertEqual(impact.pointOnB.y, 3.5, accuracy: 1.0e-7)
+        XCTAssertEqual(impact.normal, Vector3(0, 1, 0))
+    }
 }

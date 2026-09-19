@@ -25,6 +25,41 @@ public struct Box: ConvexPrimitive {
         abs(point.z) <= halfExtents.z
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let clamped = Vector3(
+            point.x.clamp(min: -halfExtents.x, max: halfExtents.x),
+            point.y.clamp(min: -halfExtents.y, max: halfExtents.y),
+            point.z.clamp(min: -halfExtents.z, max: halfExtents.z))
+        let offset = point - clamped
+        let distance = offset.length
+        if distance > .ulpOfOne {
+            return PrimitiveClosestPoint(position: clamped,
+                                         normal: offset / distance,
+                                         distance: distance)
+        }
+
+        var position = point
+        var normal = Vector3.zero
+        var axis = 0
+        var faceDistance = halfExtents.x - abs(point.x)
+        for candidate in 1..<Vector3.components {
+            let candidateDistance = halfExtents[candidate] -
+                abs(point[candidate])
+            if candidateDistance < faceDistance {
+                axis = candidate
+                faceDistance = candidateDistance
+            }
+        }
+        let sign: Scalar = point[axis] >= .zero ? 1 : -1
+        position[axis] = halfExtents[axis] * sign
+        normal[axis] = sign
+        return PrimitiveClosestPoint(position: position,
+                                     normal: normal,
+                                     distance: Swift.max(faceDistance, .zero))
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

@@ -32,6 +32,24 @@ public struct Capsule: ConvexPrimitive {
         return false
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let halfHeight = height * Scalar(0.5)
+        let axisPoint = Vector3(
+            0,
+            point.y.clamp(min: -halfHeight, max: halfHeight),
+            0)
+        let offset = point - axisPoint
+        let length = offset.length
+        let normal = length > .ulpOfOne
+            ? offset / length
+            : Vector3(1, 0, 0)
+        return PrimitiveClosestPoint(position: axisPoint + normal * radius,
+                                     normal: normal,
+                                     distance: abs(length - radius))
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

@@ -35,6 +35,77 @@ public struct Triangle: Hashable, Sendable {
         return AABB(min: minimum, max: maximum)
     }
 
+    /// Returns the closest point on this triangle, including its edges and
+    /// vertices. Degenerate triangles fall back to their closest edge.
+    public func closestPoint(to point: Vector3) -> Vector3 {
+        let ab = p1 - p0
+        let ac = p2 - p0
+        if Vector3.cross(ab, ac).lengthSquared <= .ulpOfOne {
+            let candidates = [
+                Self.closestPointOnSegment(to: point, p0, p1),
+                Self.closestPointOnSegment(to: point, p1, p2),
+                Self.closestPointOnSegment(to: point, p2, p0),
+            ]
+            return candidates.min {
+                ($0 - point).lengthSquared < ($1 - point).lengthSquared
+            } ?? p0
+        }
+
+        let ap = point - p0
+        let d1 = Vector3.dot(ab, ap)
+        let d2 = Vector3.dot(ac, ap)
+        if d1 <= .zero && d2 <= .zero { return p0 }
+
+        let bp = point - p1
+        let d3 = Vector3.dot(ab, bp)
+        let d4 = Vector3.dot(ac, bp)
+        if d3 >= .zero && d4 <= d3 { return p1 }
+
+        let vc = d1 * d4 - d3 * d2
+        if vc <= .zero && d1 >= .zero && d3 <= .zero {
+            let parameter = d1 / (d1 - d3)
+            return p0 + ab * parameter
+        }
+
+        let cp = point - p2
+        let d5 = Vector3.dot(ab, cp)
+        let d6 = Vector3.dot(ac, cp)
+        if d6 >= .zero && d5 <= d6 { return p2 }
+
+        let vb = d5 * d2 - d1 * d6
+        if vb <= .zero && d2 >= .zero && d6 <= .zero {
+            let parameter = d2 / (d2 - d6)
+            return p0 + ac * parameter
+        }
+
+        let va = d3 * d6 - d5 * d4
+        if va <= .zero && d4 - d3 >= .zero && d5 - d6 >= .zero {
+            let parameter = (d4 - d3) /
+                ((d4 - d3) + (d5 - d6))
+            return p1 + (p2 - p1) * parameter
+        }
+
+        let denominator = va + vb + vc
+        guard abs(denominator) > .ulpOfOne else {
+            return Self.closestPointOnSegment(to: point, p0, p1)
+        }
+        let inverseDenominator = Scalar(1) / denominator
+        let v = vb * inverseDenominator
+        let w = vc * inverseDenominator
+        return p0 + ab * v + ac * w
+    }
+
+    private static func closestPointOnSegment(to point: Vector3,
+                                              _ a: Vector3,
+                                              _ b: Vector3) -> Vector3 {
+        let edge = b - a
+        let lengthSquared = edge.lengthSquared
+        guard lengthSquared > .ulpOfOne else { return a }
+        let parameter = (Vector3.dot(point - a, edge) / lengthSquared)
+            .clamp(min: .zero, max: Scalar(1))
+        return a + edge * parameter
+    }
+
     public func barycentric(at p: Vector3) -> Vector3? {
         let v0 = p1 - p0
         let v1 = p2 - p0

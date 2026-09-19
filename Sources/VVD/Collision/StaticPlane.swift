@@ -18,6 +18,17 @@ public struct StaticPlane: ConcavePrimitive {
         isValid && abs(plane.dot(point)) <= .ulpOfOne
     }
 
+    public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
+        guard isValid else { return nil }
+
+        let normalLength = plane.normal.length
+        let normal = plane.normal / normalLength
+        let signedDistance = plane.dot(point) / normalLength
+        return PrimitiveClosestPoint(position: point - normal * signedDistance,
+                                     normal: normal,
+                                     distance: abs(signedDistance))
+    }
+
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 

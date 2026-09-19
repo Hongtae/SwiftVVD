@@ -559,7 +559,7 @@ private func _finiteBoundsAreSeparated(_ a: AABB, _ b: AABB) -> Bool {
     !a.isNull && !b.isNull && !a.intersects(b)
 }
 
-private struct _SweepTransformedSupport {
+struct _SweepTransformedSupport {
     let base: any _SupportMap
     let transform: Transform
 
@@ -579,7 +579,7 @@ private struct _SweepSupportVertex {
     let pointOnB: Vector3
 }
 
-private struct _SweepClosestResult {
+struct _SweepClosestResult {
     let pointOnA: Vector3
     let pointOnB: Vector3
     let distance: Scalar
@@ -604,7 +604,7 @@ private let _sweepWeightEpsilon: Scalar = {
 
 private let _sweepIterationLimit = 48
 
-private func _gjkClosestPoints(
+func _gjkClosestPoints(
     _ a: any _SupportMap,
     _ b: _SweepTransformedSupport,
     offset: Vector3,
