@@ -242,6 +242,71 @@ final class TextForegroundStyleTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textFontWidthHost27Observed
+    // ASSERTIONS viewFontWidthEnvironment27Observed
+    func testFontWidthReachesMountedBitmapAndVectorDrawingAtBothScales() throws {
+        try withDevice { device in
+            let font = VUI.Font.system(size: 23)
+            let text = Text(verbatim: "Hg0123")
+            let controls: [(AnyView, VUI.Font)] = [
+                (AnyView(text.fontWidth(.condensed)), font.width(.condensed)),
+                (AnyView(text.fontWidth(.condensed).fontWidth(.expanded)), font.width(.condensed)),
+                (AnyView(text.fontWidth(nil).fontWidth(.condensed)), font),
+                (AnyView(AnyView(text).fontWidth(.condensed).fontWidth(.expanded)), font.width(.condensed)),
+                (AnyView(AnyView(text).fontWidth(nil).fontWidth(.expanded)), font),
+                (AnyView(AnyView(text.fontWidth(nil)).fontWidth(.condensed)), font),
+                (AnyView(AnyView(text).fontWidth(nil).fontWidth(.expanded).font(font.width(.condensed))), font.width(.condensed)),
+                (AnyView(text.fontWidth(.standard).font(font.width(.condensed))), font)
+            ]
+            for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+                for scale: CGFloat in [1, 2] {
+                    for (view, expectedFont) in controls {
+                        let host = ForegroundTextHost(view.font(font)
+                            .environment(\.defaultFontRenderingMode, mode), scale: scale)
+                        let reference = ForegroundTextHost(text.font(expectedFont)
+                            .environment(\.defaultFontRenderingMode, mode), scale: scale)
+                        let actual = try pixels(host.list(), device: device, resources: host.rendererHost.sceneResources, scale: scale)
+                        let expected = try pixels(reference.list(), device: device, resources: reference.rendererHost.sceneResources, scale: scale)
+                        XCTAssertTrue(stride(from: 3, to: actual.count, by: 4).contains { actual[$0] > 0 })
+                        XCTAssertEqual(actual, expected)
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textFontWidthHost27Observed
+    func testChangingViewWidthInvalidatesTheMountedTextResolution() throws {
+        try withDevice { device in
+            let text = Text(verbatim: "Hg0123")
+            let font = VUI.Font.system(size: 23)
+            func content(_ width: VUI.Font.Width?) -> some View {
+                AnyView(text).fontWidth(width).fontWidth(.condensed).font(font)
+                    .environment(\.defaultFontRenderingMode, .vector())
+            }
+            var environment = EnvironmentValues()
+            environment.displayScale = 2
+            let renderer = TestViewRendererHost()
+            let graph = ViewGraph(replaceableContent: content(.condensed), rendererHost: renderer,
+                initialEnvironment: environment)
+            renderer.storage = graph
+            graph.setSize(size)
+            let values: [VUI.Font.Width?] = [.condensed, nil, .standard, .expanded, .condensed, nil]
+            for (index, width) in values.enumerated() {
+                try graph.data.withCurrent {
+                    try XCTUnwrap(graph.rootAnyViewContentInput).setValue(AnyView(content(width)))
+                }
+                graph.updateOutputs(at: Time(seconds: Double(index)))
+                let list = try graph.data.withCurrent { try XCTUnwrap(graph.displayList()) }
+                let actual = try pixels(list, device: device, resources: renderer.sceneResources, scale: 2)
+                let reference = ForegroundTextHost(text.font(font.width(width ?? .standard))
+                    .environment(\.defaultFontRenderingMode, .vector()), scale: 2)
+                let expected = try pixels(reference.list(), device: device, resources: reference.rendererHost.sceneResources, scale: 2)
+                XCTAssertEqual(actual, expected)
+            }
+        }
+    }
+
     private func resolvedStyle<S: ShapeStyle>(_ style: S) throws -> _ShapeStyle_Pack.Style {
         var shape = _ShapeStyle_Shape(operation: .resolveStyle(name: .foreground, levels: 0..<1), environment: .init())
         style._apply(to: &shape)
@@ -267,11 +332,12 @@ final class TextForegroundStyleTests: XCTestCase {
             contentScaleFactor: 1, resourceCommandQueue: nil)
     }
 
-    private func pixels(_ list: DisplayList, device: GraphicsDeviceContext, resources: SceneResources) throws -> [UInt8] {
+    private func pixels(_ list: DisplayList, device: GraphicsDeviceContext, resources: SceneResources, scale: CGFloat = 1) throws -> [UInt8] {
         let commands = try XCTUnwrap(device.renderQueue()?.makeCommandBuffer())
+        let resolution = CGSize(width: size.width * scale, height: size.height * scale)
         var context = try XCTUnwrap(GraphicsContext(sceneResources: resources, environment: .init(),
-            viewport: CGRect(origin: .zero, size: size), contentOffset: .zero, contentScaleFactor: 1,
-            resolution: size, commandBuffer: commands))
+            viewport: CGRect(origin: .zero, size: resolution), contentOffset: .zero, contentScaleFactor: scale,
+            resolution: resolution, commandBuffer: commands))
         context.clear(with: .clear)
         list.draw(in: context)
         let done = expectation(description: "foreground readback")
@@ -279,7 +345,7 @@ final class TextForegroundStyleTests: XCTestCase {
         XCTAssertTrue(commands.commit())
         wait(for: [done], timeout: 15)
         let buffer = try XCTUnwrap(device.makeCPUAccessible(texture: context.backdrop))
-        return Array(UnsafeRawBufferPointer(start: try XCTUnwrap(buffer.contents()), count: 128 * 80 * 4))
+        return Array(UnsafeRawBufferPointer(start: try XCTUnwrap(buffer.contents()), count: Int(resolution.width * resolution.height) * 4))
     }
 
     private func drawingContents(in list: DisplayList) -> [(any RBDisplayListContents, RasterizationOptions)] {
@@ -317,8 +383,10 @@ private final class ForegroundRecordingRenderer: TextRendererBoxBase {
 private final class ForegroundTextHost {
     let rendererHost = TestViewRendererHost()
     let graph: ViewGraph
-    init<V: View>(_ view: V) {
-        graph = ViewGraph(rootViewType: V.self, content: view, rendererHost: rendererHost)
+    init<V: View>(_ view: V, scale: CGFloat = 1) {
+        var environment = EnvironmentValues()
+        environment.displayScale = scale
+        graph = ViewGraph(rootViewType: V.self, content: view, rendererHost: rendererHost, initialEnvironment: environment)
         rendererHost.storage = graph
         graph.setSize(CGSize(width: 128, height: 80))
     }

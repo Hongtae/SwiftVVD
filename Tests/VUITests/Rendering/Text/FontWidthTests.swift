@@ -6,6 +6,44 @@ import XCTest
 final class FontWidthTests: XCTestCase {
     private let widthTag: UInt32 = 0x7764_7468
 
+    // ASSERTIONS textFontWidthRouting27Observed
+    func testTextWidthKeepsTypedOptionalOwnershipAndEquality() throws {
+        let text = Text(verbatim: "Hg").fontWidth(nil)
+        guard case let .anyTextModifier(owner) = text.modifiers.first else { return XCTFail() }
+        let width = try XCTUnwrap(owner as? TextWidthModifier)
+        XCTAssertNil(width.width)
+        XCTAssertFalse(width.isEqual(to: MonospacedDigitTextModifier()))
+        XCTAssertEqual(text, Text(verbatim: "Hg").fontWidth(nil))
+        XCTAssertNotEqual(text, Text(verbatim: "Hg").fontWidth(.standard))
+        XCTAssertEqual(Text(verbatim: "Hg").fontWidth(.condensed), Text(verbatim: "Hg").fontWidth(.condensed))
+        XCTAssertNotEqual(Text(verbatim: "Hg").fontWidth(.init(.nan)), Text(verbatim: "Hg").fontWidth(.init(.nan)))
+        let repeated = text.fontWidth(.init(2))
+        XCTAssertEqual(repeated.modifiers.count, 2)
+        guard case let .anyTextModifier(last) = repeated.modifiers.last else { return XCTFail() }
+        XCTAssertEqual((last as? TextWidthModifier)?.width, 2)
+        var first = Hasher(), second = Hasher()
+        width.hashResolution(into: &first)
+        TextWidthModifier(width: nil).hashResolution(into: &second)
+        XCTAssertEqual(first.finalize(), second.finalize())
+    }
+
+    // ASSERTIONS viewFontWidthEnvironment27Observed
+    func testViewWidthAppendsWithoutDeduplicationAndNilRemovesOnlyWidths() throws {
+        typealias Modified = ModifiedContent<EmptyView, _EnvironmentKeyTransformModifier<[AnyFontModifier]>>
+        let some = try XCTUnwrap(EmptyView().fontWidth(.condensed) as? Modified)
+        let none = try XCTUnwrap(EmptyView().fontWidth(nil) as? Modified)
+        XCTAssertEqual(some.modifier.keyPath, \EnvironmentValues.fontModifiers)
+        let italic = AnyFontModifier.static(VUI.Font.ItalicModifier.self)
+        let digit = AnyFontModifier.static(VUI.Font.MonospacedDigitModifier.self)
+        var modifiers: [AnyFontModifier] = [italic, .dynamic(VUI.Font.WidthModifier(width: 0.2)), digit]
+        some.modifier.transform(&modifiers)
+        some.modifier.transform(&modifiers)
+        XCTAssertEqual(modifiers.count, 5)
+        XCTAssertEqual(modifiers.compactMap { ($0 as? AnyDynamicFontModifier<VUI.Font.WidthModifier>)?.modifier.width }, [0.2, -0.2, -0.2])
+        none.modifier.transform(&modifiers)
+        XCTAssertEqual(modifiers, [italic, digit])
+    }
+
     private func provider(_ font: VUI.Font, environment: EnvironmentValues = .init()) throws -> BundledFontProvider {
         try XCTUnwrap(font.resolved(in: environment).typefaceProvider as? BundledFontProvider)
     }

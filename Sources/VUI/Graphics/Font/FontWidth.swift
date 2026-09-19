@@ -7,6 +7,18 @@
 
 import Foundation
 
+extension View {
+    public func fontWidth(_ width: Font.Width?) -> some View {
+        transformEnvironment(\.fontModifiers) { modifiers in
+            if let width {
+                modifiers.append(.dynamic(Font.WidthModifier(width: width.value)))
+            } else {
+                modifiers.removeAll { $0 is AnyDynamicFontModifier<Font.WidthModifier> }
+            }
+        }
+    }
+}
+
 extension Font {
     public struct Width: Hashable, Sendable {
         public var value: CGFloat

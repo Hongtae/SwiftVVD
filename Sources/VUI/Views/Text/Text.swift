@@ -1913,6 +1913,32 @@ final class ItalicTextModifier: AnyTextModifier {
     }
 }
 
+final class TextWidthModifier: AnyTextModifier {
+    let width: CGFloat?
+
+    init(width: CGFloat?) {
+        self.width = width
+    }
+
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
+        if let width {
+            style.addFontModifier(.dynamic(Font.WidthModifier(width: width)))
+        } else {
+            style.removeFontModifier(Font.WidthModifier.self)
+        }
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        guard let other = other as? TextWidthModifier else { return false }
+        return other.width == width
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(TextWidthModifier.self))
+        hasher.combine(width)
+    }
+}
+
 final class MonospacedTextModifier: AnyTextModifier {
     override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         if isActive { style.addFontModifier(.static(Font.MonospacedModifier.self)) }
@@ -2085,6 +2111,10 @@ extension Text {
 
     public func fontWeight(_ weight: Font.Weight?) -> Text {
         modified(with: .weight(weight))
+    }
+
+    public func fontWidth(_ width: Font.Width?) -> Text {
+        modified(with: .anyTextModifier(TextWidthModifier(width: width?.value)))
     }
 
     var fontWeight: Font.Weight? {

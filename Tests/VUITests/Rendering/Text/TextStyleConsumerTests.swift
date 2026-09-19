@@ -1126,6 +1126,44 @@ final class TextStyleConsumerTests {
         #expect((Font.FontCache.shared[try #require(provider.fontKey(in: environment))].provider as? SystemFontProvider)?.weight == .heavy)
     }
 
+    // ASSERTIONS textFontWidthRouting27Observed
+    @Test func fontWidthClearsInheritedTypesAndPreservesProviderAndSiblingWidths() throws {
+        var env = environment()
+        env.fontModifiers = [.dynamic(Font.WidthModifier(width: 0.2)), .static(Font.MonospacedDigitModifier.self)]
+        let text = Text(verbatim: "Hg0123")
+        let cases: [(Text, VUI.Font.Width)] = [
+            (text, .expanded), (text.fontWidth(nil), .standard),
+            (text.fontWidth(.standard), .standard), (text.fontWidth(.condensed), .condensed),
+            (text.fontWidth(.condensed).fontWidth(.expanded), .condensed),
+            (text.fontWidth(.condensed).fontWidth(nil), .condensed),
+            (text.fontWidth(nil).fontWidth(.condensed), .standard),
+            (text.fontWidth(nil).font(.system(size: 23).width(.condensed)), .condensed)
+        ]
+        for (text, expected) in cases {
+            let resolved = try resolve(text, environment: env)
+            let resource = try #require(attributes(resolved).first?.fontResource)
+            let provider = try #require(resource.provider as? SystemFontProvider)
+            #expect((provider.width ?? .standard) == expected)
+            #expect(resource.shapingFeatures == Font.MonospacedDigitModifier.shapingFeatures)
+            var reference = environment()
+            reference.font = .system(size: 23).width(expected).monospacedDigit()
+            let comparison = try resolve(Text(verbatim: "Hg0123"), environment: reference)
+            #expect(resolved.measure() == comparison.measure())
+        }
+        let key = try #require(style(text.fontWidth(nil)).fontKey(in: env))
+        #expect(key.context.fontModifiers.isEmpty)
+        #expect(key.modifiers == [.static(Font.MonospacedDigitModifier.self)])
+        let restored = style(text.fontWidth(.condensed).fontWidth(nil))
+        #expect(restored.clearedFontModifiers.contains(ObjectIdentifier(Font.WidthModifier.self)))
+        #expect(try #require(restored.fontKey(in: env)).modifiers == [
+            .static(Font.MonospacedDigitModifier.self), .dynamic(Font.WidthModifier(width: -0.2))])
+        let nested = Text(storage: .anyTextStorage(ConcatenatedTextStorage(
+            first: text.fontWidth(nil), second: text)), modifiers: []).fontWidth(.condensed)
+        let resources = attributes(try resolve(nested, environment: env)).compactMap(\.fontResource)
+        #expect(resources.map { ($0.provider as? SystemFontProvider)?.width ?? .standard } == [.standard, .condensed])
+        #expect(resources[0] !== resources[1])
+    }
+
     // ASSERTIONS textFontNestedStyleIsolationObserved
     // ASSERTIONS textParagraphNestedRunCacheObserved
     @Test
