@@ -1,5 +1,5 @@
 import XCTest
-@testable import VVD
+import VVD
 
 final class CompoundPrimitiveTests: XCTestCase {
     func testBoundsUnionUsesChildTransforms() {
@@ -56,5 +56,80 @@ final class CompoundPrimitiveTests: XCTestCase {
         XCTAssertFalse(compound.isValid)
         XCTAssertTrue(compound.bounds.isNull)
         XCTAssertTrue(compound.flattenedChildren().isEmpty)
+        XCTAssertFalse(CollisionAlgorithms.intersects(
+            Box(halfExtents: Vector3(1, 1, 1)),
+            compound))
+        XCTAssertFalse(CollisionAlgorithms.intersects(compound, compound))
+    }
+
+    func testPrimitiveIntersectionUsesFlattenedChildTransforms() {
+        let leaf = CompoundPrimitive.Child(
+            Sphere(center: .zero, radius: 0.5),
+            transform: Transform(position: Vector3(1, 0, 0)))
+        let nested = CompoundPrimitive(children: [leaf])
+        let compound = CompoundPrimitive(children: [
+            CompoundPrimitive.Child(
+                nested,
+                transform: Transform(position: Vector3(2, 0, 0)))
+        ])
+        let box = Box(halfExtents: Vector3(0.5, 0.5, 0.5))
+        let overlappingFrame = Transform(position: Vector3(-2.75, 0, 0))
+        let separatedFrame = Transform(position: Vector3(2, 0, 0))
+
+        XCTAssertTrue(CollisionAlgorithms.intersects(box,
+                                                      compound,
+                                                      frame: overlappingFrame))
+        XCTAssertTrue(CollisionAlgorithms.intersects(
+            compound,
+            box,
+            frame: overlappingFrame.inverted()))
+        XCTAssertFalse(CollisionAlgorithms.intersects(box,
+                                                       compound,
+                                                       frame: separatedFrame))
+    }
+
+    func testCompoundIntersectionComposesBothChildFrames() {
+        let compoundA = CompoundPrimitive(children: [
+            CompoundPrimitive.Child(
+                Box(halfExtents: Vector3(0.5, 0.5, 0.5)),
+                transform: Transform(position: Vector3(0, 2, 0)))
+        ])
+        let compoundB = CompoundPrimitive(children: [
+            CompoundPrimitive.Child(
+                Sphere(center: .zero, radius: 0.4),
+                transform: Transform(position: Vector3(1, 0, 0)))
+        ])
+        let overlappingFrame = Transform(
+            orientation: Quaternion(angle: Scalar.pi * 0.5,
+                                    axis: Vector3(0, 0, 1)),
+            position: Vector3(0, 1, 0))
+        let separatedFrame = Transform(position: Vector3(0, 4, 0))
+
+        XCTAssertTrue(CollisionAlgorithms.intersects(compoundA,
+                                                      compoundB,
+                                                      frame: overlappingFrame))
+        XCTAssertTrue(CollisionAlgorithms.intersects(
+            compoundB,
+            compoundA,
+            frame: overlappingFrame.inverted()))
+        XCTAssertFalse(CollisionAlgorithms.intersects(compoundA,
+                                                       compoundB,
+                                                       frame: separatedFrame))
+    }
+
+    func testCompoundIntersectionDoesNotRejectNullBoundsPrimitive() {
+        let plane = StaticPlane(Plane(normal: Vector3(0, 1, 0), point: .zero))
+        let overlapping = CompoundPrimitive(children: [
+            CompoundPrimitive.Child(Sphere(center: .zero, radius: 0.5))
+        ])
+        let separated = CompoundPrimitive(children: [
+            CompoundPrimitive.Child(
+                Sphere(center: .zero, radius: 0.5),
+                transform: Transform(position: Vector3(0, 2, 0)))
+        ])
+
+        XCTAssertTrue(CollisionAlgorithms.intersects(plane, overlapping))
+        XCTAssertTrue(CollisionAlgorithms.intersects(overlapping, plane))
+        XCTAssertFalse(CollisionAlgorithms.intersects(plane, separated))
     }
 }

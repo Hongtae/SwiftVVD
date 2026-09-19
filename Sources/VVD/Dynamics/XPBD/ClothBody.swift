@@ -5,5 +5,10 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public final class ClothBody {
+public final class ClothBody: XPBDBody {
+    public var particles: [XPBDParticle]
+
+    public init(particles: [XPBDParticle] = []) {
+        self.particles = particles
+    }
 }

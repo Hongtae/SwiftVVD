@@ -5,14 +5,32 @@
 //  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
-public protocol XPBDConstraint {
+/// Type-erased constraint state owned by an `XPBDSimulator`.
+/// Constraint projection requirements will be added with the solver slice.
+public protocol XPBDConstraint: AnyObject {
+    var isEnabled: Bool { get set }
 }
 
-public struct XPBDFixedJointConstraint: XPBDConstraint {
+public final class XPBDFixedJointConstraint: XPBDConstraint {
+    public var isEnabled: Bool
+
+    public init(isEnabled: Bool = true) {
+        self.isEnabled = isEnabled
+    }
 }
 
-public struct XPBDConfigurableJointConstraint: XPBDConstraint {
+public final class XPBDConfigurableJointConstraint: XPBDConstraint {
+    public var isEnabled: Bool
+
+    public init(isEnabled: Bool = true) {
+        self.isEnabled = isEnabled
+    }
 }
 
-public struct XPBDGearJointConstraint: XPBDConstraint {
+public final class XPBDGearJointConstraint: XPBDConstraint {
+    public var isEnabled: Bool
+
+    public init(isEnabled: Bool = true) {
+        self.isEnabled = isEnabled
+    }
 }

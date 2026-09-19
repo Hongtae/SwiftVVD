@@ -13,4 +13,12 @@ public struct Ray: Hashable, Sendable {
         self.origin = origin
         self.direction = direction
     }
+
+    public var isValid: Bool {
+        direction.lengthSquared > .ulpOfOne
+    }
+
+    public func point(at parameter: Scalar) -> Vector3 {
+        origin + direction * parameter
+    }
 }

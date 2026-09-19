@@ -281,7 +281,7 @@ extension CollisionAlgorithms {
 
     // Box, CompoundPrimitive
     static func intersects(_ a: Box, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: Box, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -367,7 +367,7 @@ extension CollisionAlgorithms {
 
     // Sphere, CompoundPrimitive
     static func intersects(_ a: Sphere, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: Sphere, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -439,7 +439,7 @@ extension CollisionAlgorithms {
 
     // Capsule, CompoundPrimitive
     static func intersects(_ a: Capsule, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: Capsule, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -489,7 +489,7 @@ extension CollisionAlgorithms {
 
     // Cylinder, CompoundPrimitive
     static func intersects(_ a: Cylinder, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: Cylinder, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -530,7 +530,7 @@ extension CollisionAlgorithms {
 
     // Cone, CompoundPrimitive
     static func intersects(_ a: Cone, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: Cone, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -562,7 +562,7 @@ extension CollisionAlgorithms {
 
     // ConvexHull, CompoundPrimitive
     static func intersects(_ a: ConvexHull, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: ConvexHull, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -603,7 +603,7 @@ extension CollisionAlgorithms {
 
     // StaticPlane, CompoundPrimitive
     static func intersects(_ a: StaticPlane, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: StaticPlane, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -617,7 +617,7 @@ extension CollisionAlgorithms {
 
     // TriangleMesh, CompoundPrimitive
     static func intersects(_ a: TriangleMesh, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _primitiveCompoundIntersects(a, b, frame: frame)
     }
     static func intersects(_ a: CompoundPrimitive, _ b: TriangleMesh, frame: Transform = .identity) -> Bool {
         intersects(b, a, frame: frame.inverted())
@@ -625,7 +625,7 @@ extension CollisionAlgorithms {
 
     // CompoundPrimitive, CompoundPrimitive
     static func intersects(_ a: CompoundPrimitive, _ b: CompoundPrimitive, frame: Transform = .identity) -> Bool {
-        false
+        _compoundIntersects(a, b, frame: frame)
     }
 }
 
@@ -703,6 +703,82 @@ private let _overlapEpsilon: Scalar = {
 /// Treats small negative numerical noise as overlap.
 private func _hasOverlapDepth(_ depth: Scalar) -> Bool {
     depth >= -_overlapEpsilon
+}
+
+/// Rejects two finite bounds that do not overlap. Null bounds represent an
+/// unbounded primitive or unavailable bounds and cannot reject a pair.
+private func _boundsAreSeparated(_ a: AABB, _ b: AABB) -> Bool {
+    !a.isNull && !b.isNull && !a.intersects(b)
+}
+
+/// Tests one primitive against the flattened leaf children of a compound.
+private func _primitiveCompoundIntersects(_ primitive: any CollisionPrimitive,
+                                          _ compound: CompoundPrimitive,
+                                          frame: Transform) -> Bool {
+    _compoundLeafIntersects(primitive, compound, frame: frame) {
+        CollisionAlgorithms.intersects($0, $1, frame: $2)
+    }
+}
+
+/// Tests flattened leaf pairs in compound A's local coordinate space.
+private func _compoundIntersects(_ a: CompoundPrimitive,
+                                 _ b: CompoundPrimitive,
+                                 frame: Transform) -> Bool {
+    _compoundLeafIntersects(a, b, frame: frame) {
+        CollisionAlgorithms.intersects($0, $1, frame: $2)
+    }
+}
+
+/// Expands compound operands and delegates exact leaf-pair dispatch to the
+/// supplied query function. At least one operand must be a compound.
+func _compoundLeafIntersects(
+    _ a: any CollisionPrimitive,
+    _ b: any CollisionPrimitive,
+    frame: Transform,
+    using intersects: (any CollisionPrimitive,
+                       any CollisionPrimitive,
+                       Transform) -> Bool
+) -> Bool {
+    guard a.isValid && b.isValid else { return false }
+    guard !_boundsAreSeparated(a.bounds, b.bounds.applying(frame)) else {
+        return false
+    }
+
+    let childrenA = _compoundLeaves(of: a)
+    let childrenB = _compoundLeaves(of: b)
+    let childrenBInA = childrenB.map { child in
+        (child: child, bounds: child.bounds.applying(frame))
+    }
+
+    for childA in childrenA {
+        for childBInA in childrenBInA {
+            if _boundsAreSeparated(childA.bounds, childBInA.bounds) {
+                continue
+            }
+
+            let childB = childBInA.child
+            let childFrame = childB.transform * frame *
+                childA.transform.inverted()
+            if intersects(childA.primitive,
+                          childB.primitive,
+                          childFrame) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+private func _compoundLeaves(
+    of primitive: any CollisionPrimitive
+) -> [CompoundPrimitive.Child] {
+    let children: [CompoundPrimitive.Child]
+    if let compound = primitive as? CompoundPrimitive {
+        children = compound.flattenedChildren()
+    } else {
+        children = [CompoundPrimitive.Child(primitive)]
+    }
+    return children.filter { $0.primitive.isValid }
 }
 
 /// Builds a one-point manifold when the supplied depth represents overlap.

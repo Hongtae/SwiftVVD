@@ -19,6 +19,10 @@ public protocol ConvexPrimitive: CollisionPrimitive {
 public protocol ConcavePrimitive: CollisionPrimitive {
 }
 
+/// A typed construction layer for a collision primitive.
+///
+/// Runtime collision dispatch uses the concrete primitive type. A collider
+/// created from a shape stores the shape's primitive representation.
 public protocol CollisionShape<Primitive>: Hashable {
     associatedtype Primitive: CollisionPrimitive
 
