@@ -193,21 +193,98 @@ public struct BVH: Sendable {
     }
 
     public func quantized() -> (any QuantizedBVH)? {
-        if nodes.count <= UInt16.max {
-            return quantized16()
-        } else if nodes.count <= UInt32.max {
-            return quantized32()
+        if let result = quantized16() {
+            return result
         }
-        Log.error("BVH node count exceeds UInt32.max. Cannot quantize BVH.")
+        if let result = quantized32() {
+            return result
+        }
+        Log.error("BVH nodes or primitive indices exceed the quantized formats.")
         return nil
     }
 
-    public func quantized32() -> QuantizedBVH32 {
-        QuantizedBVH32()
+    public func quantized32() -> QuantizedBVH32? {
+        guard let result: ([_QuantizedBVHNode<UInt32>], Vector3) =
+                makeQuantizedNodes()
+        else { return nil }
+        return QuantizedBVH32(nodes: result.0,
+                              bounds: bounds,
+                              quantizationStep: result.1)
     }
 
-    public func quantized16() -> QuantizedBVH16 {
-        QuantizedBVH16()
+    public func quantized16() -> QuantizedBVH16? {
+        guard let result: ([_QuantizedBVHNode<UInt16>], Vector3) =
+                makeQuantizedNodes()
+        else { return nil }
+        return QuantizedBVH16(nodes: result.0,
+                              bounds: bounds,
+                              quantizationStep: result.1)
+    }
+
+    private func makeQuantizedNodes<T>() -> ([_QuantizedBVHNode<T>], Vector3)?
+    where T: FixedWidthInteger,
+          T: UnsignedInteger,
+          T: SIMDScalar {
+        guard nodes.count <= Int(T.max) else { return nil }
+        if nodes.isEmpty {
+            return ([], .zero)
+        }
+
+        let maximumCode = Scalar(T.max)
+        let extents = bounds.extents
+        let step = Vector3(
+            extents.x > .zero ? extents.x / maximumCode : .zero,
+            extents.y > .zero ? extents.y / maximumCode : .zero,
+            extents.z > .zero ? extents.z / maximumCode : .zero)
+
+        func quantize(_ value: Scalar,
+                      axis: Int,
+                      rounding rule: FloatingPointRoundingRule) -> T {
+            let extent = extents[axis]
+            guard extent > .zero else { return .zero }
+            let normalized = ((value - bounds.min[axis]) / extent)
+                .clamp(min: .zero, max: Scalar(1))
+            let code = (normalized * maximumCode).rounded(rule)
+            var integerCode = UInt64(code)
+            let maximumIntegerCode = UInt64(T.max)
+            if rule == .down && integerCode > 0 {
+                integerCode -= 1
+            } else if rule == .up && integerCode < maximumIntegerCode {
+                integerCode += 1
+            }
+            return T(integerCode)
+        }
+
+        var result: [_QuantizedBVHNode<T>] = []
+        result.reserveCapacity(nodes.count)
+        for node in nodes {
+            let advanceValue: Int
+            let flags: T
+            if let primitiveIndex = node.primitiveIndex {
+                guard primitiveIndex >= 0,
+                      let encodedIndex = T(exactly: primitiveIndex)
+                else { return nil }
+                advanceValue = Int(encodedIndex)
+                flags = 1
+            } else {
+                advanceValue = node.escapeIndex
+                flags = 0
+            }
+            guard let advance = T(exactly: advanceValue) else { return nil }
+
+            result.append(_QuantizedBVHNode(
+                minAndAdvance: SIMD4(
+                    quantize(node.bounds.min.x, axis: 0, rounding: .down),
+                    quantize(node.bounds.min.y, axis: 1, rounding: .down),
+                    quantize(node.bounds.min.z, axis: 2, rounding: .down),
+                    advance),
+                maxAndFlags: SIMD4(
+                    quantize(node.bounds.max.x, axis: 0, rounding: .up),
+                    quantize(node.bounds.max.y, axis: 1, rounding: .up),
+                    quantize(node.bounds.max.z, axis: 2, rounding: .up),
+                    flags)))
+        }
+        return (result, step)
     }
 }
 
@@ -222,29 +299,64 @@ where T: FixedWidthInteger, T: UnsignedInteger, T: SIMDScalar {
     var flags: T { maxAndFlags.w }
 }
 
-public enum QuantizedBVHFormat {
+public enum QuantizedBVHFormat: Hashable, Sendable {
     case uint16
     case uint32
 }
 
+/// A conservative integer encoding of a CPU `BVH` snapshot.
+///
+/// Node bytes contain two native-endian integer vectors. XYZ store quantized
+/// minimum and maximum bounds. For internal nodes, `minAndAdvance.w` stores the
+/// preorder escape index and `maxAndFlags.w` is zero. For leaf nodes, the flag
+/// is one and `minAndAdvance.w` stores the nonnegative primitive index. Bounds
+/// and `quantizationStep` are supplied separately to consumers.
 public protocol QuantizedBVH {
     var format: QuantizedBVHFormat { get }
+    var bounds: AABB { get }
+    var quantizationStep: Vector3 { get }
     var nodeCount: Int { get }
     var nodeStride: Int { get }
     var byteCount: Int { get }
 
+    func nodeBounds(at index: Int) -> AABB?
+    func primitiveIndex(at nodeIndex: Int) -> Int?
+    func escapeIndex(at nodeIndex: Int) -> Int?
     func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R
     func copy(to buffer: GPUBuffer, destinationOffset: Int) -> Bool
 }
 
 public struct QuantizedBVH16: QuantizedBVH {
     typealias Node = _QuantizedBVHNode<UInt16>
-    let nodes: [Node] = []
+    let nodes: [Node]
+
+    public let bounds: AABB
+    public let quantizationStep: Vector3
+
+    init(nodes: [Node], bounds: AABB, quantizationStep: Vector3) {
+        self.nodes = nodes
+        self.bounds = bounds
+        self.quantizationStep = quantizationStep
+    }
 
     public var format: QuantizedBVHFormat { .uint16 }
     public var nodeCount: Int { nodes.count }
     public var nodeStride: Int { MemoryLayout<Node>.stride }
     public var byteCount: Int { nodes.count * MemoryLayout<Node>.stride }
+
+    public func nodeBounds(at index: Int) -> AABB? {
+        _quantizedNodeBounds(nodes, index: index,
+                             bounds: bounds,
+                             step: quantizationStep)
+    }
+
+    public func primitiveIndex(at nodeIndex: Int) -> Int? {
+        _quantizedPrimitiveIndex(nodes, index: nodeIndex)
+    }
+
+    public func escapeIndex(at nodeIndex: Int) -> Int? {
+        _quantizedEscapeIndex(nodes, index: nodeIndex)
+    }
 
     public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
         try nodes.withUnsafeBytes(body)
@@ -253,12 +365,35 @@ public struct QuantizedBVH16: QuantizedBVH {
 
 public struct QuantizedBVH32: QuantizedBVH {
     typealias Node = _QuantizedBVHNode<UInt32>
-    let nodes: [Node] = []
+    let nodes: [Node]
+
+    public let bounds: AABB
+    public let quantizationStep: Vector3
+
+    init(nodes: [Node], bounds: AABB, quantizationStep: Vector3) {
+        self.nodes = nodes
+        self.bounds = bounds
+        self.quantizationStep = quantizationStep
+    }
 
     public var format: QuantizedBVHFormat { .uint32 }
     public var nodeCount: Int { nodes.count }
     public var nodeStride: Int { MemoryLayout<Node>.stride }
     public var byteCount: Int { nodes.count * MemoryLayout<Node>.stride }
+
+    public func nodeBounds(at index: Int) -> AABB? {
+        _quantizedNodeBounds(nodes, index: index,
+                             bounds: bounds,
+                             step: quantizationStep)
+    }
+
+    public func primitiveIndex(at nodeIndex: Int) -> Int? {
+        _quantizedPrimitiveIndex(nodes, index: nodeIndex)
+    }
+
+    public func escapeIndex(at nodeIndex: Int) -> Int? {
+        _quantizedEscapeIndex(nodes, index: nodeIndex)
+    }
 
     public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
         try nodes.withUnsafeBytes(body)
@@ -266,9 +401,47 @@ public struct QuantizedBVH32: QuantizedBVH {
 }
 
 extension QuantizedBVH {
+    /// Returns quantized-tree overlap candidates. Quantization is conservative,
+    /// so this set may contain false positives but does not omit CPU-BVH hits.
+    public func primitiveIndices(overlapping queryBounds: AABB) -> [Int] {
+        var result: [Int] = []
+        query(overlapping: queryBounds) {
+            result.append($0)
+            return true
+        }
+        return result
+    }
+
+    /// Traverses the preorder nodes without decoding or rebuilding the tree.
+    @discardableResult
+    public func query(overlapping queryBounds: AABB,
+                      _ body: (Int) throws -> Bool) rethrows -> Bool {
+        guard queryBounds.isNull == false else { return true }
+
+        var nodeIndex = 0
+        while nodeIndex < nodeCount {
+            guard let nodeBounds = nodeBounds(at: nodeIndex),
+                  nodeBounds.intersects(queryBounds) else {
+                guard let escapeIndex = escapeIndex(at: nodeIndex) else {
+                    return true
+                }
+                nodeIndex = escapeIndex
+                continue
+            }
+
+            if let primitiveIndex = primitiveIndex(at: nodeIndex),
+               try body(primitiveIndex) == false {
+                return false
+            }
+            nodeIndex += 1
+        }
+        return true
+    }
+
     public func copy(to buffer: GPUBuffer, destinationOffset: Int = 0) -> Bool {
         guard destinationOffset >= 0,
-              destinationOffset + byteCount <= buffer.length,
+              byteCount <= buffer.length,
+              destinationOffset <= buffer.length - byteCount,
               let destination = buffer.contents()
         else { return false }
 
@@ -281,4 +454,50 @@ extension QuantizedBVH {
         buffer.flush()
         return true
     }
+}
+
+private func _quantizedNodeBounds<T>(
+    _ nodes: [_QuantizedBVHNode<T>],
+    index: Int,
+    bounds: AABB,
+    step: Vector3
+) -> AABB?
+where T: FixedWidthInteger,
+      T: UnsignedInteger,
+      T: SIMDScalar {
+    guard nodes.indices.contains(index) else { return nil }
+    let node = nodes[index]
+    return AABB(
+        min: Vector3(bounds.min.x + Scalar(node.min.0) * step.x,
+                     bounds.min.y + Scalar(node.min.1) * step.y,
+                     bounds.min.z + Scalar(node.min.2) * step.z),
+        max: Vector3(bounds.min.x + Scalar(node.max.0) * step.x,
+                     bounds.min.y + Scalar(node.max.1) * step.y,
+                     bounds.min.z + Scalar(node.max.2) * step.z))
+}
+
+private func _quantizedPrimitiveIndex<T>(
+    _ nodes: [_QuantizedBVHNode<T>],
+    index: Int
+) -> Int?
+where T: FixedWidthInteger,
+      T: UnsignedInteger,
+      T: SIMDScalar {
+    guard nodes.indices.contains(index), nodes[index].flags == 1 else {
+        return nil
+    }
+    return Int(nodes[index].advance)
+}
+
+private func _quantizedEscapeIndex<T>(
+    _ nodes: [_QuantizedBVHNode<T>],
+    index: Int
+) -> Int?
+where T: FixedWidthInteger,
+      T: UnsignedInteger,
+      T: SIMDScalar {
+    guard nodes.indices.contains(index) else { return nil }
+    return nodes[index].flags == 1
+        ? index + 1
+        : Int(nodes[index].advance)
 }
