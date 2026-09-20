@@ -39,10 +39,22 @@ public final class RigidBodySimulator {
     @discardableResult
     public func remove(_ body: RigidBody) -> Bool {
         guard let index = bodyStorage.firstIndex(of: body) else { return false }
+        let overlappingColliders = Set(collisionSpace.overlaps(with: body.collider))
         bodyStorage.remove(at: index)
         collisionSpace.remove(body.collider)
+
+        // Waking direct neighbors activates their remaining islands next step.
+        for neighbor in bodyStorage
+        where neighbor.isEnabled && neighbor.motionType == .dynamic &&
+            overlappingColliders.contains(neighbor.collider) {
+            neighbor.wakeUp()
+        }
         constraintStorage.removeAll { constraint in
-            constraint.bodyA === body || constraint.bodyB === body
+            guard constraint.bodyA === body || constraint.bodyB === body else {
+                return false
+            }
+            wakeBodies(connectedTo: constraint)
+            return true
         }
         return true
     }
@@ -64,7 +76,17 @@ public final class RigidBodySimulator {
             ObjectIdentifier($0) == identifier
         }) else { return false }
         constraintStorage.remove(at: index)
+        wakeBodies(connectedTo: constraint)
         return true
+    }
+
+    private func wakeBodies(connectedTo constraint: any RigidBodyConstraint) {
+        guard constraint.isEnabled else { return }
+        for body in bodyStorage
+        where body.isEnabled && body.motionType == .dynamic &&
+            (constraint.bodyA === body || constraint.bodyB === body) {
+            body.wakeUp()
+        }
     }
 
     /// Creates the solver input for a step without advancing simulation state.

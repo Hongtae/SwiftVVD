@@ -174,19 +174,20 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
             timeStep: timeStep)
 
         while true {
-            let sleepingTargets = Set(impacts.compactMap { impact ->
-                ObjectIdentifier? in
-                guard let body = impact.bodyB,
-                      body.motionType == .dynamic,
-                      body.isSleeping
-                else { return nil }
-                return ObjectIdentifier(body)
+            let sleepingBodies = Set(impacts.flatMap { impact in
+                [impact.bodyA, impact.bodyB].compactMap { body -> ObjectIdentifier? in
+                    guard let body,
+                          body.motionType == .dynamic,
+                          body.isSleeping
+                    else { return nil }
+                    return ObjectIdentifier(body)
+                }
             })
-            guard sleepingTargets.isEmpty == false else { break }
+            guard sleepingBodies.isEmpty == false else { break }
 
             var newlyActive: Set<ObjectIdentifier> = []
             for island in islands where island.bodies.contains(where: {
-                sleepingTargets.contains(ObjectIdentifier($0))
+                sleepingBodies.contains(ObjectIdentifier($0))
             }) {
                 for body in island.bodies {
                     let identifier = ObjectIdentifier(body)
@@ -235,41 +236,51 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
         let bodyByCollider = Dictionary(uniqueKeysWithValues: bodies.map {
             ($0.collider, $0)
         })
+        let movingBodies = bodies.filter { body in
+            body.isEnabled && body.linearVelocity.isFiniteVector &&
+                body.linearVelocity != .zero &&
+                (body.motionType == .kinematic ||
+                 activeBodyIdentifiers.contains(ObjectIdentifier(body)))
+        }
         var selected: [_SequentialCCDImpact] = []
 
         for bodyA in bodies {
             let identifierA = ObjectIdentifier(bodyA)
             guard bodyA.isEnabled,
                   bodyA.motionType == .dynamic,
-                  bodyA.isContinuousCollisionDetectionEnabled,
-                  activeBodyIdentifiers.contains(identifierA),
-                  bodyA.linearVelocity.isFiniteVector
+                  bodyA.isContinuousCollisionDetectionEnabled
             else { continue }
 
-            let translation = bodyA.linearVelocity * timeStep
-            guard translation.isFiniteVector,
-                  translation.lengthSquared > Scalar.ulpOfOne
-            else { continue }
+            let isActive = activeBodyIdentifiers.contains(identifierA)
+            let velocityA = isActive ? bodyA.linearVelocity : .zero
+            guard velocityA.isFiniteVector else { continue }
 
             var closest: _SequentialCCDImpact?
-            for hit in collisionSpace.sweepAll(bodyA.collider,
-                                               translation: translation) {
-                guard bodyByCollider[hit.collider] == nil,
-                      Vector3.dot(bodyA.linearVelocity, hit.normal) > .zero
-                else { continue }
-                closest = _SequentialCCDImpact(
-                    bodyA: bodyA,
-                    bodyB: nil,
-                    colliderB: hit.collider,
-                    fraction: hit.fraction,
-                    pointOnA: hit.pointOnMoving,
-                    pointOnB: hit.pointOnCollider,
-                    normal: hit.normal)
-                break
+            let translation = velocityA * timeStep
+            if isActive,
+               translation.isFiniteVector,
+               translation.lengthSquared > Scalar.ulpOfOne {
+                for hit in collisionSpace.sweepAll(bodyA.collider,
+                                                   translation: translation) {
+                    guard bodyByCollider[hit.collider] == nil,
+                          Vector3.dot(velocityA, hit.normal) > .zero
+                    else { continue }
+                    closest = _SequentialCCDImpact(
+                        bodyA: bodyA,
+                        bodyB: nil,
+                        colliderB: hit.collider,
+                        fraction: hit.fraction,
+                        pointOnA: hit.pointOnMoving,
+                        pointOnB: hit.pointOnCollider,
+                        normal: hit.normal)
+                    break
+                }
             }
 
+            // Only a moving partner can hit a stationary or sleeping CCD body.
             let inverseTransform = bodyA.transform.inverted()
-            for bodyB in bodies where bodyB !== bodyA {
+            let candidates = velocityA == .zero ? movingBodies : bodies
+            for bodyB in candidates where bodyB !== bodyA {
                 if discreteContacts.contains(where: {
                     ($0.bodyA === bodyA && $0.bodyB === bodyB) ||
                         ($0.bodyA === bodyB && $0.bodyB === bodyA)
@@ -279,10 +290,10 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                 guard bodyA.collider.canCollide(with: bodyB.collider) else {
                     continue
                 }
-                let velocityB = bodyB.motionType == .static
+                let velocityB = bodyB.motionType == .static || bodyB.isSleeping
                     ? Vector3.zero : bodyB.linearVelocity
                 guard velocityB.isFiniteVector else { continue }
-                let relativeVelocity = bodyA.linearVelocity - velocityB
+                let relativeVelocity = velocityA - velocityB
                 let relativeTranslation = (relativeVelocity * timeStep)
                     .applying(inverseTransform.orientation)
                 guard relativeTranslation.isFiniteVector,
@@ -1082,7 +1093,9 @@ private struct _SequentialContactConstraint {
 
     private mutating func solveFriction() {
         let maximumFriction = friction * normalImpulse
-        guard maximumFriction > .zero,
+        // A zero limit must still undo friction applied during warm starting.
+        guard maximumFriction > .zero ||
+                tangentImpulse1 != .zero || tangentImpulse2 != .zero,
               inverseTangentMass1 > .zero || inverseTangentMass2 > .zero
         else { return }
 

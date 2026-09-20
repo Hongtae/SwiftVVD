@@ -127,6 +127,79 @@ final class RigidBodySleepingTests: XCTestCase {
                        accuracy: 1.0e-9)
     }
 
+    func testRemovingGroundWakesSupportedIslandWithoutWakingOtherBodies() {
+        let ground = RigidBody(
+            primitive: StaticPlane(Plane(normal: Vector3(0, 1, 0),
+                                         point: .zero)),
+            motionType: .static)
+        let lower = sphereBody(position: Vector3(0, 0.5, 0))
+        let upper = sphereBody(position: Vector3(0, 1.5, 0))
+        let isolated = sphereBody(position: Vector3(10, 10, 0))
+        isolated.gravityScale = 0
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        for body in [ground, lower, upper, isolated] {
+            XCTAssertTrue(simulator.add(body))
+        }
+        for _ in 0..<120 { simulator.step(timeStep: 1.0 / 120.0) }
+
+        XCTAssertTrue(lower.isSleeping)
+        XCTAssertTrue(upper.isSleeping)
+        XCTAssertTrue(isolated.isSleeping)
+        let lowerPosition = lower.transform.position
+        let upperPosition = upper.transform.position
+
+        XCTAssertTrue(simulator.remove(ground))
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(lower.isSleeping)
+        XCTAssertFalse(upper.isSleeping)
+        XCTAssertLessThan(lower.transform.position.y, lowerPosition.y)
+        XCTAssertLessThan(upper.transform.position.y, upperPosition.y)
+        XCTAssertLessThan(lower.linearVelocity.y, 0)
+        XCTAssertLessThan(upper.linearVelocity.y, 0)
+        XCTAssertTrue(isolated.isSleeping)
+        XCTAssertEqual(isolated.transform.position, Vector3(10, 10, 0))
+    }
+
+    func testRemovingWorldJointWakesAttachedBody() {
+        let body = sphereBody(position: .zero)
+        let joint = FixedJointConstraint(bodyA: body)
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        XCTAssertTrue(simulator.add(body))
+        XCTAssertTrue(simulator.add(joint))
+        body.putToSleep()
+
+        XCTAssertTrue(simulator.remove(joint))
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+        XCTAssertEqual(body.transform.position.y, -0.1, accuracy: 1.0e-9)
+    }
+
+    func testRemovingJointAnchorWakesAttachedBodyWithoutContact() {
+        let anchor = sphereBody(position: Vector3(3, 0, 0),
+                                motionType: .static)
+        let body = sphereBody(position: .zero)
+        let joint = FixedJointConstraint(
+            bodyA: anchor,
+            bodyB: body,
+            frameA: Transform(position: Vector3(-3, 0, 0)))
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        XCTAssertTrue(simulator.add(anchor))
+        XCTAssertTrue(simulator.add(body))
+        XCTAssertTrue(simulator.add(joint))
+        body.putToSleep()
+
+        XCTAssertTrue(simulator.remove(anchor))
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertTrue(simulator.constraints.isEmpty)
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+        XCTAssertEqual(body.transform.position.y, -0.1, accuracy: 1.0e-9)
+    }
+
     func testDisablingSleepingReactivatesSleepingBodies() {
         let body = RigidBody(primitive: Sphere(center: .zero, radius: 1))
         body.putToSleep()
@@ -138,6 +211,15 @@ final class RigidBodySleepingTests: XCTestCase {
 
         XCTAssertFalse(body.isSleeping)
         XCTAssertEqual(body.sleepDuration, 0)
+    }
+
+    private func sphereBody(
+        position: Vector3,
+        motionType: RigidBodyMotionType = .dynamic
+    ) -> RigidBody {
+        RigidBody(primitive: Sphere(center: .zero, radius: 0.5),
+                  transform: Transform(position: position),
+                  motionType: motionType)
     }
 
     private func context(

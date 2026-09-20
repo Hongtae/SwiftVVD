@@ -197,11 +197,10 @@ public final class XPBDProjectionSolver: XPBDSolver {
         _ correction: Vector3,
         to reference: XPBDParticleReference
     ) {
-        guard correction.isFiniteVector else { return }
-        var particles = reference.body.particles
-        guard particles.indices.contains(reference.particleIndex) else { return }
-        particles[reference.particleIndex].position += correction
-        reference.body.particles = particles
+        guard correction.isFiniteVector,
+              reference.isValid else { return }
+        // Mutate body storage directly to avoid copying the array per correction.
+        reference.body.particles[reference.particleIndex].position += correction
     }
 
     private func updateVelocities(_ bodies: [any XPBDBody],

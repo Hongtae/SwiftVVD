@@ -250,6 +250,35 @@ final class SequentialImpulseRigidBodySolverTests: XCTestCase {
         XCTAssertEqual(bodyA.linearVelocity.z, 1, accuracy: 1.0e-9)
     }
 
+    func testSeparatingContactReleasesWarmStartedFriction() {
+        let material = PhysicsMaterial(friction: 1, restitution: 0)
+        let bodyA = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            material: material)
+        let bodyB = RigidBody(
+            primitive: Sphere(center: .zero, radius: 1),
+            transform: Transform(position: Vector3(2, 0, 0)),
+            motionType: .static,
+            material: material)
+        let solver = SequentialImpulseRigidBodySolver()
+        let simulator = RigidBodySimulator(gravity: .zero, solver: solver)
+        XCTAssertTrue(simulator.add(bodyA))
+        XCTAssertTrue(simulator.add(bodyB))
+
+        bodyA.linearVelocity = Vector3(1, 0.5, 0.5)
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertEqual(bodyA.linearVelocity.length, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(solver.cachedContactCount, 1)
+
+        bodyA.linearVelocity = Vector3(-1, 0, 0)
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertEqual(bodyA.linearVelocity.x, -1, accuracy: 1.0e-9)
+        XCTAssertEqual(bodyA.linearVelocity.y, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(bodyA.linearVelocity.z, 0, accuracy: 1.0e-9)
+    }
+
     func testDisablingWarmStartClearsContactCache() {
         let bodyA = RigidBody(
             primitive: Sphere(center: .zero, radius: 1),
