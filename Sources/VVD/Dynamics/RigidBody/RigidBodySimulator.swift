@@ -13,6 +13,10 @@ public final class RigidBodySimulator {
 
     private var bodyStorage: [RigidBody]
     private var constraintStorage: [any RigidBodyConstraint]
+    private var enabledBodyIdentifiers: Set<ObjectIdentifier> = []
+    private var activeConstraintIdentifiers: Set<ObjectIdentifier> = []
+    private var contactNeighbors: [ObjectIdentifier: Set<ObjectIdentifier>] = [:]
+    private var colliderSnapshots: [ObjectIdentifier: _RigidBodyColliderSnapshot] = [:]
 
     public var bodies: [RigidBody] { bodyStorage }
     public var constraints: [any RigidBodyConstraint] { constraintStorage }
@@ -28,32 +32,41 @@ public final class RigidBodySimulator {
         self.constraintStorage = []
     }
 
+    /// Registers a body unless it or another owner of its collider is present.
     @discardableResult
     public func add(_ body: RigidBody) -> Bool {
-        guard !bodyStorage.contains(body) else { return false }
+        guard !bodyStorage.contains(where: { $0.collider === body.collider }) else {
+            return false
+        }
         bodyStorage.append(body)
         collisionSpace.add(body.collider)
+        if body.isEnabled {
+            enabledBodyIdentifiers.insert(ObjectIdentifier(body))
+            colliderSnapshots[ObjectIdentifier(body)] = _RigidBodyColliderSnapshot(body.collider)
+        }
         return true
     }
 
     @discardableResult
     public func remove(_ body: RigidBody) -> Bool {
         guard let index = bodyStorage.firstIndex(of: body) else { return false }
-        let overlappingColliders = Set(collisionSpace.overlaps(with: body.collider))
+        wakeContactNeighbors(of: body)
         bodyStorage.remove(at: index)
         collisionSpace.remove(body.collider)
-
-        // Waking direct neighbors activates their remaining islands next step.
-        for neighbor in bodyStorage
-        where neighbor.isEnabled && neighbor.motionType == .dynamic &&
-            overlappingColliders.contains(neighbor.collider) {
-            neighbor.wakeUp()
+        let identifier = ObjectIdentifier(body)
+        enabledBodyIdentifiers.remove(identifier)
+        colliderSnapshots.removeValue(forKey: identifier)
+        for neighbor in contactNeighbors.removeValue(forKey: identifier) ?? [] {
+            contactNeighbors[neighbor]?.remove(identifier)
         }
         constraintStorage.removeAll { constraint in
             guard constraint.bodyA === body || constraint.bodyB === body else {
                 return false
             }
-            wakeBodies(connectedTo: constraint)
+            if constraint.isEnabled || activeConstraintIdentifiers.contains(ObjectIdentifier(constraint)) {
+                wakeBodies(connectedTo: constraint)
+            }
+            activeConstraintIdentifiers.remove(ObjectIdentifier(constraint))
             return true
         }
         return true
@@ -66,6 +79,10 @@ public final class RigidBodySimulator {
             return false
         }
         constraintStorage.append(constraint)
+        if constraint.isEnabled && constraint.bodyA.isEnabled && bodyStorage.contains(constraint.bodyA) &&
+            (constraint.bodyB.map { $0.isEnabled && bodyStorage.contains($0) } ?? true) {
+            activeConstraintIdentifiers.insert(identifier)
+        }
         return true
     }
 
@@ -76,17 +93,70 @@ public final class RigidBodySimulator {
             ObjectIdentifier($0) == identifier
         }) else { return false }
         constraintStorage.remove(at: index)
-        wakeBodies(connectedTo: constraint)
+        if constraint.isEnabled || activeConstraintIdentifiers.contains(identifier) {
+            wakeBodies(connectedTo: constraint)
+        }
+        activeConstraintIdentifiers.remove(identifier)
         return true
     }
 
     private func wakeBodies(connectedTo constraint: any RigidBodyConstraint) {
-        guard constraint.isEnabled else { return }
         for body in bodyStorage
         where body.isEnabled && body.motionType == .dynamic &&
             (constraint.bodyA === body || constraint.bodyB === body) {
             body.wakeUp()
         }
+    }
+
+    private func wakeContactNeighbors(of body: RigidBody) {
+        guard body.isEnabled || enabledBodyIdentifiers.contains(ObjectIdentifier(body)) else { return }
+        // Query an enabled copy so direct collider flag changes do not hide
+        // supports disabled before their first step. Never toggle live state.
+        let current = _RigidBodyColliderSnapshot(body.collider)
+        var overlapping = Set(collisionSpace.overlaps(with: current.makeCollider()))
+        if let previous = colliderSnapshots[ObjectIdentifier(body)], previous != current {
+            // Contacts formed during CCD/substeps may not be in the initial
+            // contact graph. Check the support's last solved geometry as well.
+            overlapping.formUnion(collisionSpace.overlaps(with: previous.makeCollider()))
+        }
+        let previous = contactNeighbors[ObjectIdentifier(body)] ?? []
+        for neighbor in bodyStorage
+        where neighbor !== body && neighbor.isEnabled && neighbor.motionType == .dynamic &&
+            (previous.contains(ObjectIdentifier(neighbor)) || overlapping.contains(neighbor.collider)) {
+            neighbor.wakeUp()
+        }
+    }
+
+    private func updateActivationState() {
+        let enabled = Set(bodyStorage.filter(\.isEnabled).map(ObjectIdentifier.init))
+        for body in bodyStorage {
+            let identifier = ObjectIdentifier(body)
+            if enabledBodyIdentifiers.contains(identifier) && !body.isEnabled {
+                wakeContactNeighbors(of: body)
+                colliderSnapshots.removeValue(forKey: identifier)
+            } else if body.isEnabled,
+                      let previous = colliderSnapshots[identifier],
+                      previous != _RigidBodyColliderSnapshot(body.collider) {
+                // A still-enabled support can disappear through a transform,
+                // primitive, or filter edit. Solver motion is already captured
+                // after each step, so only external edits reach this branch.
+                wakeContactNeighbors(of: body)
+                if body.motionType == .dynamic { body.wakeUp() }
+            }
+        }
+        var activeConstraints: Set<ObjectIdentifier> = []
+        for constraint in constraintStorage {
+            let identifier = ObjectIdentifier(constraint)
+            let active = constraint.isEnabled && enabled.contains(ObjectIdentifier(constraint.bodyA)) &&
+                (constraint.bodyB.map { enabled.contains(ObjectIdentifier($0)) } ?? true)
+            if active {
+                activeConstraints.insert(identifier)
+            } else if activeConstraintIdentifiers.contains(identifier) {
+                wakeBodies(connectedTo: constraint)
+            }
+        }
+        enabledBodyIdentifiers = enabled
+        activeConstraintIdentifiers = activeConstraints
     }
 
     /// Creates the solver input for a step without advancing simulation state.
@@ -115,7 +185,39 @@ public final class RigidBodySimulator {
 
     /// Delegates one simulation step to the configured solver.
     public func step(timeStep: Scalar) {
-        guard timeStep > .zero else { return }
-        solver?.solve(solverContext(timeStep: timeStep))
+        guard timeStep.isFinite, timeStep > .zero, let solver else { return }
+        updateActivationState()
+        let context = solverContext(timeStep: timeStep)
+        contactNeighbors.removeAll(keepingCapacity: true)
+        for contact in context.contacts {
+            let a = ObjectIdentifier(contact.bodyA), b = ObjectIdentifier(contact.bodyB)
+            contactNeighbors[a, default: []].insert(b)
+            contactNeighbors[b, default: []].insert(a)
+        }
+        solver.solve(context)
+        for body in bodyStorage where body.isEnabled {
+            colliderSnapshots[ObjectIdentifier(body)] = _RigidBodyColliderSnapshot(body.collider)
+        }
+    }
+}
+
+private struct _RigidBodyColliderSnapshot: Equatable {
+    let primitive: any CollisionPrimitive
+    let transform: Transform
+    let filter: CollisionFilter
+
+    init(_ collider: Collider) {
+        primitive = collider.primitive
+        transform = collider.transform
+        filter = collider.filter
+    }
+
+    func makeCollider() -> Collider {
+        Collider(primitive: primitive, transform: transform, filter: filter)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.transform == rhs.transform && lhs.filter == rhs.filter &&
+            AnyHashable(lhs.primitive) == AnyHashable(rhs.primitive)
     }
 }

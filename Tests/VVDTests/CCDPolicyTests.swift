@@ -53,6 +53,97 @@ final class CCDPolicyTests: XCTestCase {
         }
     }
 
+    func testCCDContinuesPastInitialCompoundFloorContact() {
+        let obstacle = CompoundPrimitive(children: [
+            .init(Box(halfExtents: Vector3(10, 0.5, 2)),
+                  transform: Transform(position: Vector3(0, -0.5, 0))),
+            .init(CompoundPrimitive(children: [
+                .init(Box(halfExtents: Vector3(0.1, 2, 2)))
+            ]), transform: Transform(position: Vector3(3, 1.5, 0)))
+        ])
+        assertGroundedCCDHitsWall(obstacle, expectedX: 2.4)
+    }
+
+    func testCCDContinuesPastInitialMeshFloorContact() {
+        let obstacle = TriangleMesh(triangles: [
+            Triangle(Vector3(-10, 0, -10), Vector3(10, 0, -10), Vector3(0, 0, 10)),
+            Triangle(Vector3(3, -5, -10), Vector3(3, 5, -10), Vector3(3, 0, 10))
+        ])
+        assertGroundedCCDHitsWall(obstacle, expectedX: 2.5)
+    }
+
+    func testCCDStillUsesRegisteredLeafSweepsPastInitialContact() {
+        var calls = 0
+        var algorithms = CollisionAlgorithmRegistry(usesBuiltinFallback: false)
+        algorithms.registerSweep(Sphere.self, Box.self) { a, b, frame, translation in
+            calls += 1
+            return CollisionAlgorithms.timeOfImpact(a, b, frame: frame, translation: translation)
+        }
+        let moving = body(0)
+        moving.transform = Transform(position: Vector3(0, 0.5, 0))
+        moving.linearVelocity = Vector3(10, 0, 0)
+        let target = RigidBody(primitive: CompoundPrimitive(children: [
+            .init(Box(halfExtents: Vector3(10, 0.5, 2)),
+                  transform: Transform(position: Vector3(0, -0.5, 0))),
+            .init(Box(halfExtents: Vector3(0.1, 2, 2)),
+                  transform: Transform(position: Vector3(3, 1.5, 0)))
+        ]), motionType: .static)
+        let (simulator, _) = simulator([moving, target], configuration: .init(mode: .timeOfImpact))
+        simulator.collisionSpace.algorithms = algorithms
+
+        simulator.step(timeStep: 0.5)
+
+        XCTAssertGreaterThanOrEqual(calls, 2)
+        XCTAssertEqual(moving.transform.position.x, 2.4, accuracy: 1.0e-5)
+    }
+
+    func testOpaqueCustomInitialContactStopsInsteadOfSkippingWholeCompound() {
+        var algorithms = CollisionAlgorithmRegistry()
+        algorithms.registerSweep(Sphere.self, CompoundPrimitive.self) { _, _, _, _ in
+            TimeOfImpact(fraction: 0, pointOnA: Vector3(0, -0.5, 0),
+                         pointOnB: Vector3(0, -0.5, 0), normal: Vector3(0, -1, 0))
+        }
+        let moving = body(0)
+        moving.transform = Transform(position: Vector3(0, 0.5, 0))
+        moving.linearVelocity = Vector3(10, 0, 0)
+        let target = RigidBody(primitive: CompoundPrimitive(children: [
+            .init(StaticPlane(Plane(normal: Vector3(0, 1, 0), point: .zero)))
+        ]), motionType: .static)
+        let (simulator, solver) = simulator([moving, target], configuration: .init(mode: .timeOfImpact))
+        simulator.collisionSpace.algorithms = algorithms
+
+        simulator.step(timeStep: 0.5)
+
+        XCTAssertEqual(moving.transform.position.x, 0)
+        XCTAssertEqual(solver.ccdStatistics.inconclusiveSweepCount, 1)
+        XCTAssertEqual(solver.ccdStatistics.clampedBodyCount, 1)
+    }
+
+    private func assertGroundedCCDHitsWall(_ obstacle: any CollisionPrimitive,
+                                           expectedX: Scalar,
+                                           file: StaticString = #filePath, line: UInt = #line) {
+        for mode in CCDConfiguration.Mode.allCases where mode != .discrete {
+            for compoundMovingBody in [false, true] {
+                let sphere = Sphere(center: .zero, radius: 0.5)
+                let primitive: any CollisionPrimitive = compoundMovingBody
+                    ? CompoundPrimitive(children: [.init(sphere)]) : sphere
+                let moving = RigidBody(primitive: primitive,
+                    transform: Transform(position: Vector3(0, 0.5, 0)),
+                    material: PhysicsMaterial(friction: 0))
+                moving.isContinuousCollisionDetectionEnabled = true
+                moving.linearVelocity = Vector3(300, 0, 0)
+                let target = RigidBody(primitive: obstacle, motionType: .static,
+                                      material: PhysicsMaterial(friction: 0))
+                let (simulator, _) = simulator([target, moving], configuration: .init(mode: mode))
+
+                simulator.step(timeStep: 1.0 / 60.0)
+
+                XCTAssertEqual(moving.transform.position.x, expectedX, accuracy: 1.0e-5,
+                    "\(mode), compound moving body: \(compoundMovingBody)", file: file, line: line)
+            }
+        }
+    }
+
     func testTOIResweepsAfterEachBounce() {
         let moving = body(0, restitution: 1)
         moving.linearVelocity = Vector3(20, 0, 0)

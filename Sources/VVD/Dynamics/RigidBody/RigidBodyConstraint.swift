@@ -13,7 +13,8 @@ public protocol RigidBodyConstraint: AnyObject {
     var bodyB: RigidBody? { get }
     var isEnabled: Bool { get set }
 
-    /// Produces scalar impulse rows from the current body state.
+    /// Produces scalar impulse rows from the current body state. Rows whose
+    /// presence or order can change must provide stable row identifiers.
     func solverRows(timeStep: Scalar) -> [RigidBodyConstraintRow]
 }
 
@@ -67,7 +68,7 @@ public final class FixedJointConstraint: RigidBodyConstraint {
 
         var rows: [RigidBodyConstraintRow] = []
         rows.reserveCapacity(6)
-        for axis in axes {
+        for (index, axis) in axes.enumerated() {
             rows.append(_jointLinearRow(
                 bodyA: bodyA,
                 bodyB: bodyB,
@@ -76,9 +77,10 @@ public final class FixedJointConstraint: RigidBodyConstraint {
                 offsetB: offsetB,
                 biasVelocity: Vector3.dot(positionError, axis) * factor,
                 lowerImpulse: -linearLimit,
-                upperImpulse: linearLimit))
+                upperImpulse: linearLimit,
+                identifier: index))
         }
-        for axis in axes {
+        for (index, axis) in axes.enumerated() {
             rows.append(RigidBodyConstraintRow(
                 bodyA: bodyA,
                 bodyB: bodyB,
@@ -88,7 +90,8 @@ public final class FixedJointConstraint: RigidBodyConstraint {
                 angularJacobianB: axis,
                 biasVelocity: Vector3.dot(orientationError, axis) * factor,
                 lowerImpulse: -angularLimit,
-                upperImpulse: angularLimit))
+                upperImpulse: angularLimit,
+                identifier: index + 3))
         }
         return rows
     }
@@ -171,7 +174,8 @@ public final class ConfigurableJointConstraint: RigidBodyConstraint {
                 offsetB: offsetB,
                 biasVelocity: parameters.biasVelocity,
                 lowerImpulse: parameters.lowerImpulse,
-                upperImpulse: parameters.upperImpulse))
+                upperImpulse: parameters.upperImpulse,
+                identifier: index))
         }
 
         for index in axes.indices {
@@ -191,7 +195,8 @@ public final class ConfigurableJointConstraint: RigidBodyConstraint {
                 angularJacobianB: axis,
                 biasVelocity: parameters.biasVelocity,
                 lowerImpulse: parameters.lowerImpulse,
-                upperImpulse: parameters.upperImpulse))
+                upperImpulse: parameters.upperImpulse,
+                identifier: index + 3))
         }
         return rows
     }
@@ -249,7 +254,8 @@ public final class GearJointConstraint: RigidBodyConstraint {
             angularJacobianB: worldAxisB,
             biasVelocity: -targetVelocity,
             lowerImpulse: -limit,
-            upperImpulse: limit)]
+            upperImpulse: limit,
+            identifier: 0)]
     }
 }
 
@@ -291,7 +297,8 @@ private func _jointLinearRow(bodyA: RigidBody,
                              offsetB: Vector3,
                              biasVelocity: Scalar,
                              lowerImpulse: Scalar,
-                             upperImpulse: Scalar) -> RigidBodyConstraintRow {
+                             upperImpulse: Scalar,
+                             identifier: Int) -> RigidBodyConstraintRow {
     RigidBodyConstraintRow(
         bodyA: bodyA,
         bodyB: bodyB,
@@ -301,7 +308,8 @@ private func _jointLinearRow(bodyA: RigidBody,
         angularJacobianB: Vector3.cross(offsetB, axis),
         biasVelocity: biasVelocity,
         lowerImpulse: lowerImpulse,
-        upperImpulse: upperImpulse)
+        upperImpulse: upperImpulse,
+        identifier: identifier)
 }
 
 private func _jointAxisParameters(

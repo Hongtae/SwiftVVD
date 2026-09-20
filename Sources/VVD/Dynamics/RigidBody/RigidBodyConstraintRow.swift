@@ -10,6 +10,10 @@
 /// The solver drives `J * velocity + biasVelocity` toward zero while clamping
 /// the accumulated impulse to `lowerImpulse...upperImpulse`.
 public struct RigidBodyConstraintRow {
+    /// Stable slot within the owning constraint, unique among its current rows.
+    /// Use the same identifier when an axis is rebuilt, omitted, or reordered
+    /// within a substep. Nil uses array position and requires a fixed row layout.
+    public let identifier: Int?
     public let bodyA: RigidBody
     public let bodyB: RigidBody?
     public let linearJacobianA: Vector3
@@ -28,7 +32,9 @@ public struct RigidBodyConstraintRow {
                 angularJacobianB: Vector3,
                 biasVelocity: Scalar = .zero,
                 lowerImpulse: Scalar = -.infinity,
-                upperImpulse: Scalar = .infinity) {
+                upperImpulse: Scalar = .infinity,
+                identifier: Int? = nil) {
+        self.identifier = identifier
         self.bodyA = bodyA
         self.bodyB = bodyB
         self.linearJacobianA = linearJacobianA

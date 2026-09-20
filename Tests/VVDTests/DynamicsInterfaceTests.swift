@@ -63,6 +63,49 @@ final class DynamicsInterfaceTests: XCTestCase {
                        accuracy: 1.0e-9)
     }
 
+    func testRigidBodySimulatorRejectsSharedColliderWithoutChangingOwnership() {
+        let collider = Collider(primitive: Sphere(center: .zero, radius: 1))
+        let owner = RigidBody(collider: collider,
+                              linearVelocity: Vector3(2, 0, 0))
+        let other = RigidBody(collider: collider)
+        let simulator = RigidBodySimulator(gravity: .zero)
+
+        XCTAssertTrue(simulator.add(owner))
+        XCTAssertFalse(simulator.add(owner))
+        guard simulator.add(other) == false else {
+            XCTFail("A collider cannot belong to two registered rigid bodies")
+            return
+        }
+        XCTAssertEqual(simulator.bodies, [owner])
+        XCTAssertEqual(simulator.collisionSpace.colliders, [collider])
+        XCTAssertFalse(simulator.remove(other))
+
+        simulator.step(timeStep: 0.25)
+
+        XCTAssertEqual(owner.transform.position, Vector3(0.5, 0, 0))
+        XCTAssertTrue(simulator.remove(owner))
+        XCTAssertFalse(simulator.collisionSpace.contains(collider))
+        XCTAssertTrue(simulator.add(other))
+        XCTAssertEqual(simulator.solverContext(timeStep: 0.25).bodies, [other])
+        XCTAssertTrue(simulator.collisionSpace.contains(collider))
+    }
+
+    func testRigidBodySimulatorAcceptsColliderAlreadyRegisteredInSpace() {
+        let collider = Collider(primitive: Sphere(center: .zero, radius: 1))
+        let space = CollisionSpace()
+        XCTAssertTrue(space.add(collider))
+        let body = RigidBody(collider: collider,
+                             linearVelocity: Vector3(2, 0, 0))
+        let simulator = RigidBodySimulator(collisionSpace: space, gravity: .zero)
+
+        XCTAssertTrue(simulator.add(body))
+        XCTAssertEqual(space.colliders, [collider])
+
+        simulator.step(timeStep: 0.25)
+
+        XCTAssertEqual(body.transform.position, Vector3(0.5, 0, 0))
+    }
+
     func testForceAccumulatorAndMassPropertiesExposeSolverInputs() {
         let body = RigidBody(primitive: Box(halfExtents: Vector3(1, 1, 1)),
                              massProperties: RigidBodyMassProperties(

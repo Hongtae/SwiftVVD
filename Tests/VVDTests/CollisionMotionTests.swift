@@ -15,6 +15,20 @@ final class CollisionMotionTests: XCTestCase {
         XCTAssertEqual(hit.pointOnA.x, hit.pointOnB.x, accuracy: 1.0e-9)
     }
 
+    func testPublicSweepStillReportsInitialNonclosingCompoundContact() {
+        let obstacle = CompoundPrimitive(children: [
+            .init(StaticPlane(Plane(normal: Vector3(0, 1, 0), point: .zero))),
+            .init(Box(halfExtents: Vector3(0.1, 2, 2)),
+                  transform: Transform(position: Vector3(3, 1.5, 0)))
+        ])
+        let result = algorithms.sweepMotion(Sphere(center: .zero, radius: 0.5),
+            motionA: CollisionMotion(start: Transform(position: Vector3(0, 0.5, 0)),
+                                     translation: Vector3(5, 0, 0)),
+            obstacle, motionB: CollisionMotion())
+        guard case .hit(let hit) = result else { return XCTFail("Expected initial contact") }
+        XCTAssertEqual(hit.fraction, 0)
+    }
+
     func testRotationFindsObstacleBetweenDisjointEndpoints() {
         let bar = Box(halfExtents: Vector3(2, 0.05, 0.05))
         let obstacle = Sphere(center: .zero, radius: 0.1)

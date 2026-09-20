@@ -125,6 +125,20 @@ extension CollisionAlgorithmRegistry {
                             motionB: CollisionMotion,
                             distanceTolerance: Scalar = 1.0e-6,
                             maximumIterations: Int = 64) -> MotionSweepResult {
+        _sweepMotion(a, motionA: motionA, b, motionB: motionB,
+            distanceTolerance: distanceTolerance, maximumIterations: maximumIterations,
+            filteringInitialContacts: false)
+    }
+
+    // CCD filters leaf hits before choosing the earliest result. Public queries
+    // retain fraction-zero overlap reporting, including for separating motion.
+    func _sweepMotion(_ a: any CollisionPrimitive,
+                      motionA: CollisionMotion,
+                      _ b: any CollisionPrimitive,
+                      motionB: CollisionMotion,
+                      distanceTolerance: Scalar,
+                      maximumIterations: Int,
+                      filteringInitialContacts: Bool) -> MotionSweepResult {
         guard a.isValid && b.isValid else { return .unsupported }
         guard motionA.isValid && motionB.isValid else { return .inconclusive(safeFraction: 0) }
         let tolerance = distanceTolerance.isFinite && distanceTolerance > 0
@@ -136,6 +150,26 @@ extension CollisionAlgorithmRegistry {
         }
         let translates = motionA.angularDisplacement == .zero &&
             motionB.angularDisplacement == .zero
+        func accepted(_ result: MotionSweepResult) -> MotionSweepResult {
+            guard filteringInitialContacts, case .hit(let hit) = result,
+                  hit.fraction == 0 else { return result }
+            let centerA = motionA.localPivot.applying(motionA.start)
+            let centerB = motionB.localPivot.applying(motionB.start)
+            let travelA = motionA.translation + Vector3.cross(
+                motionA.angularDisplacement, hit.pointOnA - centerA)
+            let travelB = motionB.translation + Vector3.cross(
+                motionB.angularDisplacement, hit.pointOnB - centerB)
+            guard Vector3.dot(travelA - travelB, hit.normal) <= Swift.max(tolerance, Scalar.ulpOfOne * 64)
+            else { return result }
+            let convexA = a is any _SupportMap, convexB = b is any _SupportMap
+            if translates && ((convexA && convexB) ||
+                (convexA && b is StaticPlane) || (a is StaticPlane && convexB)) {
+                return .miss
+            }
+            // Rotation or an opaque custom compound cast can meet again later.
+            // Without leaf separation evidence, stop instead of dropping it.
+            return .inconclusive(safeFraction: 0)
+        }
         let registered = isSweepRegistered(type(of: a), type(of: b))
         // Keep exact analytic sphere casts, and honor explicitly supplied casts.
         if translates && (registered || (usesBuiltinFallback && a is Sphere && b is Sphere)) {
@@ -146,15 +180,16 @@ extension CollisionAlgorithmRegistry {
                     .applying(inverse.orientation)) else { return .miss }
             guard hit.isValid else { return .inconclusive(safeFraction: 0) }
             let common = motionB.translation * hit.fraction
-            return .hit(MotionSweepHit(fraction: hit.fraction,
+            return accepted(.hit(MotionSweepHit(fraction: hit.fraction,
                 pointOnA: hit.pointOnA.applying(motionA.start) + common,
                 pointOnB: hit.pointOnB.applying(motionA.start) + common,
-                normal: hit.normal.applying(motionA.start.orientation).normalized()))
+                normal: hit.normal.applying(motionA.start.orientation).normalized())))
         }
         func recurse(_ childA: any CollisionPrimitive, _ moveA: CollisionMotion,
                      _ childB: any CollisionPrimitive, _ moveB: CollisionMotion) -> MotionSweepResult {
-            sweepMotion(childA, motionA: moveA, childB, motionB: moveB,
-                        distanceTolerance: tolerance, maximumIterations: maximumIterations)
+            _sweepMotion(childA, motionA: moveA, childB, motionB: moveB,
+                distanceTolerance: tolerance, maximumIterations: maximumIterations,
+                filteringInitialContacts: filteringInitialContacts)
         }
         func earliest(_ results: some Sequence<MotionSweepResult>) -> MotionSweepResult {
             var result: MotionSweepResult = .miss
@@ -197,15 +232,15 @@ extension CollisionAlgorithmRegistry {
                 plane: plane, planeMotion: motionA, tolerance: tolerance,
                 maximumIterations: maximumIterations)
             if case .hit(let hit) = result {
-                return .hit(MotionSweepHit(fraction: hit.fraction,
-                    pointOnA: hit.pointOnB, pointOnB: hit.pointOnA, normal: -hit.normal))
+                return accepted(.hit(MotionSweepHit(fraction: hit.fraction,
+                    pointOnA: hit.pointOnB, pointOnB: hit.pointOnA, normal: -hit.normal)))
             }
             return result
         }
         if let convex = a as? any _SupportMap, let plane = b as? StaticPlane {
-            return _convexPlaneMotion(convex, primitive: a, motion: motionA,
+            return accepted(_convexPlaneMotion(convex, primitive: a, motion: motionA,
                 plane: plane, planeMotion: motionB, tolerance: tolerance,
-                maximumIterations: maximumIterations)
+                maximumIterations: maximumIterations))
         }
         guard let supportA = a as? any _SupportMap,
               let supportB = b as? any _SupportMap,
@@ -232,8 +267,8 @@ extension CollisionAlgorithmRegistry {
                 normal = delta.length > Scalar.ulpOfOne ? delta.normalized() : Vector3(1, 0, 0)
             }
             if closest.distance <= tolerance {
-                return .hit(MotionSweepHit(fraction: fraction,
-                    pointOnA: closest.pointOnA, pointOnB: closest.pointOnB, normal: normal))
+                return accepted(.hit(MotionSweepHit(fraction: fraction,
+                    pointOnA: closest.pointOnA, pointOnB: closest.pointOnB, normal: normal)))
             }
             // Support planes give a lower bound on separation, even if GJK's
             // witness iteration has not converged to the exact closest points.

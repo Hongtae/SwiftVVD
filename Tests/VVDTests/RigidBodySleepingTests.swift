@@ -213,6 +213,182 @@ final class RigidBodySleepingTests: XCTestCase {
         XCTAssertEqual(body.sleepDuration, 0)
     }
 
+    func testDisablingGroundWakesSupportedIslandThroughEitherEnabledProperty() {
+        for changeColliderDirectly in [false, true] {
+            let ground = RigidBody(primitive: Box(halfExtents: Vector3(5, 0.5, 5)),
+                transform: Transform(position: Vector3(0, -0.5, 0)), motionType: .static)
+            let lower = sphereBody(position: Vector3(0, 0.5, 0))
+            let upper = sphereBody(position: Vector3(0, 1.5, 0))
+            let isolated = sphereBody(position: Vector3(10, 10, 0))
+            isolated.gravityScale = 0
+            let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+            for body in [ground, lower, upper, isolated] { simulator.add(body) }
+            for _ in 0..<120 { simulator.step(timeStep: 1.0 / 120.0) }
+            XCTAssertTrue(lower.isSleeping)
+            XCTAssertTrue(upper.isSleeping)
+            XCTAssertTrue(isolated.isSleeping)
+
+            if changeColliderDirectly { ground.collider.isEnabled = false }
+            else { ground.isEnabled = false }
+            // Preserve the old support connection even if the disabled collider
+            // is moved before the next step observes the change.
+            ground.transform = Transform(position: Vector3(100, 100, 0))
+            _ = simulator.solverContext(timeStep: 0.1)
+            XCTAssertTrue(lower.isSleeping, "Context queries must not wake bodies")
+            simulator.step(timeStep: 0.1)
+
+            XCTAssertFalse(lower.isSleeping)
+            XCTAssertFalse(upper.isSleeping)
+            XCTAssertLessThan(lower.linearVelocity.y, 0)
+            XCTAssertLessThan(upper.linearVelocity.y, 0)
+            XCTAssertTrue(isolated.isSleeping)
+        }
+    }
+
+    func testDisablingJointWakesItsBodyIncludingCustomConstraintsAndRemoval() {
+        for custom in [false, true] {
+            for removeBeforeStep in [false, true] {
+                let body = sphereBody(position: .zero)
+                let joint: any RigidBodyConstraint = custom
+                    ? SleepingTestJoint(bodyA: body) : FixedJointConstraint(bodyA: body)
+                let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+                simulator.add(body)
+                simulator.add(joint)
+                simulator.step(timeStep: 0.1)
+                body.putToSleep()
+
+                joint.isEnabled = false
+                if removeBeforeStep { XCTAssertTrue(simulator.remove(joint)) }
+                simulator.step(timeStep: 0.1)
+
+                XCTAssertFalse(body.isSleeping)
+                XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+                XCTAssertEqual(body.transform.position.y, -0.1, accuracy: 1.0e-9)
+                body.putToSleep()
+                simulator.step(timeStep: 0.1)
+                XCTAssertTrue(body.isSleeping, "A disabled joint must not wake every step")
+            }
+        }
+    }
+
+    func testDisablingJointAnchorWakesBodyWithoutContact() {
+        let anchor = sphereBody(position: Vector3(3, 0, 0), motionType: .static)
+        let body = sphereBody(position: .zero)
+        let joint = FixedJointConstraint(bodyA: anchor, bodyB: body,
+            frameA: Transform(position: Vector3(-3, 0, 0)))
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        simulator.add(anchor)
+        simulator.add(body)
+        simulator.add(joint)
+        simulator.step(timeStep: 0.1)
+        body.putToSleep()
+
+        anchor.collider.isEnabled = false
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+        XCTAssertEqual(body.transform.position.y, -0.1, accuracy: 1.0e-9)
+        body.putToSleep()
+        simulator.step(timeStep: 0.1)
+        XCTAssertTrue(body.isSleeping)
+    }
+
+    func testDisablingSupportBeforeFirstStepWakesManuallySleepingBody() {
+        let ground = RigidBody(primitive: StaticPlane(
+            Plane(normal: Vector3(0, 1, 0), point: .zero)), motionType: .static)
+        let body = sphereBody(position: Vector3(0, 0.5, 0))
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        simulator.add(ground)
+        simulator.add(body)
+        body.putToSleep()
+
+        ground.isEnabled = false
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+    }
+
+    func testDisablingMovedSupportWakesBodyThatSleptAfterNewCCDContact() {
+        let wall = sphereBody(position: Vector3(3, 0, 0), motionType: .static)
+        let body = sphereBody(position: .zero)
+        body.linearVelocity = Vector3(10, 0, 0)
+        body.isContinuousCollisionDetectionEnabled = true
+        let simulator = RigidBodySimulator(gravity: Vector3(10, 0, 0),
+            solver: SequentialImpulseRigidBodySolver(ccdConfiguration: .init(mode: .timeOfImpact)))
+        simulator.add(wall)
+        simulator.add(body)
+        simulator.step(timeStep: 0.5)
+        XCTAssertTrue(body.isSleeping)
+        XCTAssertEqual(body.transform.position.x, 2, accuracy: 1.0e-9)
+
+        wall.isEnabled = false
+        wall.transform = Transform(position: Vector3(100, 0, 0))
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.x, 1, accuracy: 1.0e-9)
+    }
+
+    func testChangingEnabledSupportGeometryOrFilterWakesOnlyAffectedIsland() {
+        for change in 0..<3 {
+            let ground = RigidBody(primitive: Box(halfExtents: Vector3(5, 0.5, 5)),
+                transform: Transform(position: Vector3(0, -0.5, 0)), motionType: .static)
+            let lower = sphereBody(position: Vector3(0, 0.5, 0))
+            let upper = sphereBody(position: Vector3(0, 1.5, 0))
+            let isolated = sphereBody(position: Vector3(20, 10, 0))
+            isolated.gravityScale = 0
+            let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+            for body in [ground, lower, upper, isolated] { simulator.add(body) }
+            for _ in 0..<120 { simulator.step(timeStep: 1.0 / 120.0) }
+            XCTAssertTrue(lower.isSleeping)
+            XCTAssertTrue(upper.isSleeping)
+            XCTAssertTrue(isolated.isSleeping)
+
+            switch change {
+            case 0: ground.transform = Transform(position: Vector3(100, 0, 0))
+            case 1: ground.collider.filter = CollisionFilter(mask: .none)
+            default: ground.collider.primitive = Box(halfExtents: Vector3(5, 0.1, 5))
+            }
+            _ = simulator.solverContext(timeStep: 0.1)
+            simulator.step(timeStep: .infinity)
+            XCTAssertTrue(lower.isSleeping, "Queries and invalid steps must not consume changes")
+            let solver = simulator.solver
+            simulator.solver = nil
+            simulator.step(timeStep: 0.1)
+            XCTAssertTrue(lower.isSleeping)
+            simulator.solver = solver
+            simulator.step(timeStep: 0.1)
+
+            XCTAssertFalse(lower.isSleeping, "change=\(change)")
+            XCTAssertFalse(upper.isSleeping, "change=\(change)")
+            XCTAssertLessThan(lower.linearVelocity.y, 0)
+            XCTAssertLessThan(upper.linearVelocity.y, 0)
+            XCTAssertTrue(isolated.isSleeping)
+            lower.putToSleep()
+            upper.putToSleep()
+            simulator.step(timeStep: 0.01)
+            XCTAssertTrue(lower.isSleeping, "An observed change must not wake every step")
+        }
+    }
+
+    func testMovingSupportBeforeFirstStepWakesSleepingBody() {
+        let ground = RigidBody(primitive: StaticPlane(
+            Plane(normal: Vector3(0, 1, 0), point: .zero)), motionType: .static)
+        let body = sphereBody(position: Vector3(0, 0.5, 0))
+        let simulator = RigidBodySimulator(gravity: Vector3(0, -10, 0))
+        simulator.add(ground)
+        simulator.add(body)
+        body.putToSleep()
+        ground.collider.transform = Transform(position: Vector3(0, -10, 0))
+
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertFalse(body.isSleeping)
+        XCTAssertEqual(body.linearVelocity.y, -1, accuracy: 1.0e-9)
+    }
+
     private func sphereBody(
         position: Vector3,
         motionType: RigidBodyMotionType = .dynamic
@@ -234,5 +410,15 @@ final class RigidBodySleepingTests: XCTestCase {
                                bodies: bodies,
                                contacts: contacts,
                                constraints: constraints)
+    }
+}
+
+private final class SleepingTestJoint: RigidBodyConstraint {
+    let bodyA: RigidBody
+    var bodyB: RigidBody? { nil }
+    var isEnabled = true
+    init(bodyA: RigidBody) { self.bodyA = bodyA }
+    func solverRows(timeStep: Scalar) -> [RigidBodyConstraintRow] {
+        isEnabled ? FixedJointConstraint(bodyA: bodyA).solverRows(timeStep: timeStep) : []
     }
 }

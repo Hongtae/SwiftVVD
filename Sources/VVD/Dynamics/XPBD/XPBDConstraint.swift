@@ -151,7 +151,8 @@ public final class XPBDConfigurableJointConstraint: XPBDConstraint {
             let axis = axes[index]
             let coordinate = Vector3.dot(error, axis)
             guard let parameters = _xpbdProjectionParameters(
-                settings[index], coordinate: coordinate) else { continue }
+                settings[index], coordinate: coordinate,
+                accumulatedMultiplier: accumulatedMultipliers[index]) else { continue }
             projections.append(XPBDConstraintProjection(
                 multiplierIndex: index,
                 value: parameters.value,
@@ -323,7 +324,8 @@ private func _xpbdSecondPosition(
 
 private func _xpbdProjectionParameters(
     _ settings: XPBDJointAxis,
-    coordinate: Scalar
+    coordinate: Scalar,
+    accumulatedMultiplier: Scalar
 ) -> _XPBDProjectionParameters? {
     guard coordinate.isFinite else { return nil }
     switch settings.motion {
@@ -337,12 +339,16 @@ private func _xpbdProjectionParameters(
         guard rawLower.isFinite, rawUpper.isFinite else { return nil }
         let lower = Swift.min(rawLower, rawUpper)
         let upper = Swift.max(rawLower, rawUpper)
-        if coordinate < lower {
+        // Keep the previously active side until its multiplier is released.
+        // Another projection may enter the interval or cross the opposite side.
+        if accumulatedMultiplier > .zero ||
+            (accumulatedMultiplier == .zero && coordinate < lower) {
             return _XPBDProjectionParameters(value: coordinate - lower,
                                              lowerMultiplier: .zero,
                                              upperMultiplier: .infinity)
         }
-        if coordinate > upper {
+        if accumulatedMultiplier < .zero ||
+            (accumulatedMultiplier == .zero && coordinate > upper) {
             return _XPBDProjectionParameters(value: coordinate - upper,
                                              lowerMultiplier: -.infinity,
                                              upperMultiplier: .zero)

@@ -100,6 +100,69 @@ final class XPBDCollisionConstraintTests: XCTestCase {
         XCTAssertTrue(constraint.projections().isEmpty)
     }
 
+    func testContactMultiplierReleasesAfterAnotherConstraintSeparatesParticle() {
+        let timeStep: Scalar = 1.0 / 60.0
+        for compliance in [Scalar.zero, timeStep * timeStep] {
+            for contactFirst in [true, false] {
+                let body = RopeBody(particles: [
+                    XPBDParticle(position: Vector3(0, -1, 0))
+                ])
+                let collider = Collider(
+                    primitive: Box(halfExtents: Vector3(10, 5, 10)),
+                    transform: Transform(position: Vector3(0, -5, 0)))
+                let contact = XPBDParticleCollisionConstraint(
+                    particle: reference(to: body),
+                    collider: collider,
+                    compliance: compliance)
+                let joint = XPBDFixedJointConstraint(
+                    particleA: reference(to: body),
+                    worldAnchor: Vector3(0, 2, 0),
+                    compliance: timeStep * timeStep)
+                let simulator = XPBDSimulator(gravity: .zero)
+                XCTAssertTrue(simulator.add(body))
+                if contactFirst {
+                    XCTAssertTrue(simulator.add(contact))
+                    XCTAssertTrue(simulator.add(joint))
+                } else {
+                    XCTAssertTrue(simulator.add(joint))
+                    XCTAssertTrue(simulator.add(contact))
+                }
+
+                simulator.step(timeStep: timeStep)
+
+                // The spring's equilibrium is above the surface, where the
+                // contact must contribute neither displacement nor velocity.
+                let scenario = "compliance=\(compliance), contactFirst=\(contactFirst)"
+                XCTAssertEqual(body.particles[0].position.y, 0.5,
+                               accuracy: 1.0e-9, scenario)
+                XCTAssertEqual(body.particles[0].velocity.y, 1.5 / timeStep,
+                               accuracy: 1.0e-9, scenario)
+                XCTAssertEqual(contact.accumulatedMultiplier, 0,
+                               accuracy: 1.0e-9, scenario)
+            }
+        }
+    }
+
+    func testSurfaceContactRetainsItsSupportingMultiplierAcrossIterations() {
+        let body = RopeBody(particles: [
+            XPBDParticle(position: Vector3(0, 0.25, 0))
+        ])
+        let collider = Collider(primitive: StaticPlane(
+            Plane(normal: Vector3(0, 1, 0), point: .zero)))
+        let contact = XPBDParticleCollisionConstraint(
+            particle: reference(to: body),
+            collider: collider,
+            particleRadius: 0.5)
+        let simulator = XPBDSimulator(gravity: .zero)
+        XCTAssertTrue(simulator.add(body))
+        XCTAssertTrue(simulator.add(contact))
+
+        simulator.step(timeStep: 0.1)
+
+        XCTAssertEqual(body.particles[0].position.y, 0.5, accuracy: 1.0e-9)
+        XCTAssertEqual(contact.accumulatedMultiplier, 0.25, accuracy: 1.0e-9)
+    }
+
     func testBodyFactoryBuildsConstraintsForCurrentParticles() {
         let body = ClothBody(particles: [XPBDParticle(), XPBDParticle()])
         let collider = Collider(primitive: Box(halfExtents: Vector3(1, 1, 1)))

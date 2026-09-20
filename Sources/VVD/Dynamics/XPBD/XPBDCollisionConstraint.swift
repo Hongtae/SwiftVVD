@@ -76,9 +76,11 @@ public final class XPBDParticleCollisionConstraint: XPBDConstraint {
         let value = signedDistance - particleRadius
         guard normal._xpbdIsFinite,
               normal.lengthSquared > Scalar.ulpOfOne,
-              value.isFinite,
-              value < .zero
+              value.isFinite
         else { return [] }
+        // A later projection can separate the particle after contact has
+        // already corrected it. Keep the row until that multiplier is released.
+        guard value < .zero || accumulatedMultiplier > .zero else { return [] }
 
         return [XPBDConstraintProjection(
             multiplierIndex: 0,

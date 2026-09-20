@@ -90,6 +90,71 @@ final class XPBDConstraintProjectionTests: XCTestCase {
         XCTAssertEqual(projections.map(\.compliance), [0.1, 0.2, 0])
     }
 
+    func testConfigurableLimitReleasesMultiplierInsideRangeInEitherConstraintOrder() {
+        let timeStep: Scalar = 1.0 / 60.0
+        for direction: Scalar in [-1, 1] {
+            for compliance in [Scalar.zero, timeStep * timeStep] {
+                for limitFirst in [false, true] {
+                    let body = RopeBody(particles: [XPBDParticle(position: Vector3(2 * direction, 0, 0))])
+                    let reference = XPBDParticleReference(body: body, particleIndex: 0)
+                    let limit = XPBDConfigurableJointConstraint(particleA: reference,
+                        worldAnchor: .zero, restOffset: .zero,
+                        xAxis: .limited(-1, 1, compliance: compliance))
+                    let spring = XPBDFixedJointConstraint(particleA: reference,
+                        worldAnchor: Vector3(-direction, 0, 0), compliance: timeStep * timeStep)
+                    let simulator = XPBDSimulator(gravity: .zero,
+                        solver: XPBDProjectionSolver(projectionIterations: 100))
+                    simulator.add(body)
+                    if limitFirst { simulator.add(limit); simulator.add(spring) }
+                    else { simulator.add(spring); simulator.add(limit) }
+
+                    simulator.step(timeStep: timeStep)
+
+                    let scenario = "direction=\(direction), compliance=\(compliance), limitFirst=\(limitFirst)"
+                    XCTAssertEqual(body.particles[0].position.x, direction * 0.5, accuracy: 1.0e-9, scenario)
+                    XCTAssertEqual(limit.accumulatedMultipliers.x, 0, accuracy: 1.0e-9, scenario)
+                }
+            }
+        }
+    }
+
+    func testConfigurableLimitRetainsSupportingMultiplierAtBoundary() {
+        let body = RopeBody(particles: [XPBDParticle(position: Vector3(2, 0, 0))])
+        let limit = XPBDConfigurableJointConstraint(
+            particleA: XPBDParticleReference(body: body, particleIndex: 0),
+            worldAnchor: .zero, restOffset: .zero, xAxis: .limited(-1, 1))
+        let simulator = XPBDSimulator(gravity: .zero)
+        simulator.add(body)
+        simulator.add(limit)
+
+        simulator.step(timeStep: 1)
+
+        XCTAssertEqual(body.particles[0].position.x, 1, accuracy: 1.0e-9)
+        XCTAssertEqual(limit.accumulatedMultipliers.x, 1, accuracy: 1.0e-9)
+        XCTAssertEqual(limit.projections().count, 1)
+    }
+
+    func testConfigurableLimitCanSwitchToOppositeBoundaryAfterReleasingMultiplier() {
+        for direction: Scalar in [-1, 1] {
+            let body = RopeBody(particles: [XPBDParticle(position: Vector3(2 * direction, 0, 0))])
+            let reference = XPBDParticleReference(body: body, particleIndex: 0)
+            let limit = XPBDConfigurableJointConstraint(particleA: reference,
+                worldAnchor: .zero, restOffset: .zero, xAxis: .limited(-1, 1))
+            let spring = XPBDFixedJointConstraint(particleA: reference,
+                worldAnchor: Vector3(-6 * direction, 0, 0), compliance: 1)
+            let simulator = XPBDSimulator(gravity: .zero,
+                solver: XPBDProjectionSolver(projectionIterations: 100))
+            simulator.add(body)
+            simulator.add(limit)
+            simulator.add(spring)
+
+            simulator.step(timeStep: 1)
+
+            XCTAssertEqual(body.particles[0].position.x, -direction, accuracy: 1.0e-9)
+            XCTAssertEqual(limit.accumulatedMultipliers.x, -2 * direction, accuracy: 1.0e-9)
+        }
+    }
+
     func testGearJointBuildsRatioGradientAndTargetError() throws {
         let bodyA = RopeBody(particles: [
             XPBDParticle(position: Vector3(1, 0, 0))
