@@ -1414,6 +1414,796 @@ final class TextMetricsTests: XCTestCase {
         }
     }
 
+    func testLineRunAndSliceDecorationGeometry() throws {
+        // ASSERTIONS textDecorationGrouping27Observed
+        // ASSERTIONS textDecorationMetricQuantization27Observed
+        // ASSERTIONS textDecorationSelection27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.geometry)
+        XCTAssertEqual(fixtures.count, 88)
+        for fixture in fixtures { try checkDecorationGeometry(fixture) }
+    }
+
+    func testTailTokenDecorationGeometry() throws {
+        // ASSERTIONS textTailDecorationSpans27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.tails)
+        XCTAssertEqual(fixtures.count, 63)
+        for fixture in fixtures { try checkDecorationGeometry(fixture) }
+    }
+
+    func testSignedOffsetDecorationFragmentsAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationBaselineOffset27Observed
+        // ASSERTIONS textDecorationBaselineFragments27Observed
+        // ASSERTIONS textDecorationOutlineProducer27Observed
+        // ASSERTIONS textDecorationGapEmission27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.offsets)
+        XCTAssertEqual(fixtures.count, 120)
+        for fixture in fixtures { try checkDecorationGeometry(fixture) }
+    }
+
+    func testSpacingDecorationFragmentsAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationSpacingProducer27Observed
+        // ASSERTIONS textDecorationSpacingSelection27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.spacing)
+        XCTAssertEqual(fixtures.count, 332)
+        for fixture in fixtures { try checkDecorationGeometry(fixture) }
+    }
+
+    func testExplicitDecorationColorsAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationExplicitColor27Observed
+        // ASSERTIONS textDecorationColorSelection27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.colors)
+        XCTAssertEqual(fixtures.count, 162)
+        for fixture in fixtures {
+            try checkDecorationGeometry(fixture)
+            try checkDecorationGeometry(fixture, attributed: true)
+        }
+    }
+
+    func testPatternedDecorationsAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationPatternProducer27Observed
+        // ASSERTIONS textDecorationPatternSelection27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.patterns)
+        XCTAssertEqual(fixtures.count, 248)
+        for fixture in fixtures {
+            try checkDecorationGeometry(fixture)
+            try checkDecorationGeometry(fixture, attributed: true)
+        }
+    }
+
+    func testMultilineDecorationGeometryAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationMultilineGroups27Observed
+        // ASSERTIONS textDecorationMultilineOrder27Observed
+        // ASSERTIONS textDecorationMultilineSelection27Observed
+        let fixtures = try TextDecorationMultilineFixture.decode()
+        XCTAssertEqual(fixtures.count, 32)
+        try checkDecorationLines(fixtures)
+    }
+
+    func testAlignedMultilineDecorationGeometryAndLineSpacing() throws {
+        // ASSERTIONS textDecorationLinePlacement27Observed
+        // ASSERTIONS textDecorationLineSpacing27Observed
+        // ASSERTIONS textDecorationAlignedPhase27Observed
+        let fixtures = try TextDecorationPlacementFixture.decode()
+        XCTAssertEqual(fixtures.count, 84)
+        for fixture in fixtures {
+            let alignment: TextAlignment = switch fixture.alignment {
+            case "leading": .leading
+            case "center": .center
+            case "trailing": .trailing
+            default: preconditionFailure("Unknown text alignment")
+            }
+            try checkDecorationLines([fixture.drawing], alignment: alignment, lineSpacing: fixture.lineSpacing)
+        }
+    }
+
+    func testReceivingTransformsPreserveDecorationCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationTransformMetrics27Observed
+        // ASSERTIONS textDecorationTransformPhase27Observed
+        // ASSERTIONS textDecorationTransformDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decode()
+        XCTAssertEqual(fixtures.count, 36)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testOrientedTransformsPreserveDecorationCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationOrientedMetrics27Observed
+        // ASSERTIONS textDecorationOrientedPhase27Observed
+        // ASSERTIONS textDecorationOrientedDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeOriented()
+        XCTAssertEqual(fixtures.count, 42)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testTransformedOutlineGapsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationGapTransformGeometry27Observed
+        // ASSERTIONS textDecorationGapTransformPhase27Observed
+        // ASSERTIONS textDecorationGapTransformDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeGapTransforms()
+        XCTAssertEqual(fixtures.count, 32)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testMultilineOutlineGapsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationGapMultilineGeometry27Observed
+        // ASSERTIONS textDecorationGapMultilineSelection27Observed
+        // ASSERTIONS textDecorationGapMultilineDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeMultilineGaps()
+        XCTAssertEqual(fixtures.count, 64)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testSpacedOutlineGapsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationGapSpacingGeometry27Observed
+        // ASSERTIONS textDecorationGapSpacingSelection27Observed
+        // ASSERTIONS textDecorationGapSpacingDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeSpacedGaps()
+        XCTAssertEqual(fixtures.count, 64)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testDescenderGapsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderGeometry27Observed
+        // ASSERTIONS textDecorationDescenderSelection27Observed
+        // ASSERTIONS textDecorationDescenderDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenders()
+        XCTAssertEqual(fixtures.count, 64)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testSignedDescenderOffsetsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderOffsetGeometry27Observed
+        // ASSERTIONS textDecorationDescenderOffsetDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenderOffsets()
+        XCTAssertEqual(fixtures.count, 8)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testScopedDescenderOffsetsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderScopeGeometry27Observed
+        // ASSERTIONS textDecorationDescenderScopeDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenderScopes()
+        XCTAssertEqual(fixtures.count, 16)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testScopedDescenderSelectionsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderScopedSelection27Observed
+        // ASSERTIONS textDecorationDescenderScopedSelectionDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenderSelections()
+        XCTAssertEqual(fixtures.count, 64)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    func testScopedDescenderOrientationsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderOrientedGeometry27Observed
+        // ASSERTIONS textDecorationDescenderOrientedDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenderOrientations()
+        XCTAssertEqual(fixtures.count, 64)
+        try checkDecorationTransforms(fixtures)
+    }
+
+    private func checkDecorationTransforms(_ fixtures: [TextDecorationTransformFixture]) throws {
+        for fixture in fixtures {
+            let t = fixture.transform
+            try checkDecorationLines([fixture.drawing], alignment: fixture.alignment == "center" ? .center : .leading,
+                lineSpacing: fixture.lineSpacing,
+                canvasTransform: CGAffineTransform(a: t[0], b: t[1], c: t[2], d: t[3], tx: t[4], ty: t[5]))
+        }
+    }
+
+    private func checkDecorationLines(_ fixtures: [TextDecorationMultilineFixture],
+                                      alignment: TextAlignment = .leading,
+                                      lineSpacing: CGFloat = 0,
+                                      canvasTransform: CGAffineTransform? = nil) throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        func check(_ actual: [CGFloat], _ expected: [CGFloat], _ label: String, accuracy: CGFloat = 1e-9) {
+            XCTAssertEqual(actual.count, expected.count, label)
+            for (a, b) in zip(actual, expected) { XCTAssertEqual(a, b, accuracy: accuracy, label) }
+        }
+        func components(_ color: VUI.Color.Resolved) -> [CGFloat] {
+            [color.linearRed, color.linearGreen, color.linearBlue, color.opacity].map(CGFloat.init)
+        }
+        for fixture in fixtures {
+            let parts = fixture.sample.split(separator: ":").map(String.init)
+            let multiline = parts[11].hasPrefix("two-")
+            let separator = parts[11].hasPrefix("two-lf") ? "\n" : "\u{2028}"
+            let second = parts[11].hasSuffix("-tail") ? "BBB BBB BBB BBB"
+                : parts[11].hasSuffix("-short") ? "BBB" : "BBB BBB"
+            func color(_ name: String) -> VUI.Color? {
+                switch name {
+                case "none": nil
+                case "green": .green
+                case "blue": .blue
+                default: preconditionFailure("Unknown decoration color")
+                }
+            }
+            func pattern(_ name: String) -> Text.LineStyle.Pattern {
+                switch name {
+                case "solid": .solid
+                case "dash": .dash
+                case "dashDot": .dashDot
+                default: preconditionFailure("Unknown decoration pattern")
+                }
+            }
+            for attributed in [false, true] {
+                func run(_ string: String, first: Bool) -> Text {
+                    let font = VUI.Font.file(file, size: CGFloat(Double(parts[first ? 3 : 4])!))
+                    let foreground: VUI.Color = parts[2] == "split" && !first ? .blue : .red
+                    let offset = CGFloat(Double(parts[6])!), spacing = CGFloat(Double(parts[9])!)
+                    let hasOffset = parts[7] == "both" || parts[7] == (first ? "first" : "second")
+                    let underline = Text.LineStyle(pattern: pattern(parts[14]), color: color(parts[12]))
+                    let strike = Text.LineStyle(pattern: pattern(parts[parts[1] == "combined" ? 18 : 14]),
+                                                color: color(parts[parts[1] == "combined" ? 16 : 12]))
+                    if attributed {
+                        var value = AttributedString(string)
+                        value.font = font; value.foregroundColor = foreground
+                        if hasOffset { value[AttributeScopes.CoreAttributes.BaselineOffsetAttribute.self] = offset }
+                        if parts[8] == "kern" {
+                            value[AttributeScopes.CoreAttributes.KerningAttribute.self] = spacing
+                        } else {
+                            value[AttributeScopes.CoreAttributes.TrackingAttribute.self] = spacing
+                        }
+                        if parts[1] != "strikethrough" { value.underlineStyle = underline }
+                        if parts[1] != "underline" { value.strikethroughStyle = strike }
+                        return Text(value)
+                    }
+                    var value = Text(verbatim: string).font(font).foregroundColor(foreground)
+                    if hasOffset { value = value.baselineOffset(offset) }
+                    value = parts[8] == "kern" ? value.kerning(spacing) : value.tracking(spacing)
+                    if parts[1] != "strikethrough" { value = value.underline(pattern: underline.pattern, color: underline.color) }
+                    if parts[1] != "underline" { value = value.strikethrough(pattern: strike.pattern, color: strike.color) }
+                    return value
+                }
+                var text = run("AAA ", first: true) + run("BBB BBB", first: false)
+                if parts[11] == "descenders" {
+                    text = run("gypq ", first: true) + run("gj", first: false)
+                } else if multiline {
+                    text = run("AAA ", first: true) + run("BBB BBB" + separator, first: false)
+                        + run("AAA ", first: true) + run(second, first: false)
+                }
+                try withOwner(text, configure: {
+                    $0.lineLimit = multiline ? 2 : 1; $0.minimumScaleFactor = 1; $0.displayScale = fixture.scale
+                    $0.multilineTextAlignment = alignment; $0.lineSpacing = lineSpacing
+                }) { ordinary in
+                    let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: ordinary.layoutProperties,
+                        layoutMargins: ordinary.layoutMargins, resolvedText: ordinary.resolvedText)
+                    for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                        let expected = custom ? fixture.custom : fixture.ordinary
+                        let label = "\(fixture.sample) \(fixture.draw) scale=\(fixture.scale) custom=\(custom) attributed=\(attributed) alignment=\(alignment) lineSpacing=\(lineSpacing) transform=\(String(describing: canvasTransform))"
+                        let request = CGSize(width: fixture.width, height: fixture.height)
+                        let metrics = owner.metrics(in: request, layoutMargins: nil)
+                        check([metrics.size.width, metrics.size.height, metrics.firstBaseline, metrics.lastBaseline], expected.metrics, label)
+                        let canvas = !custom && canvasTransform != nil
+                        let prepared = try XCTUnwrap(owner.prepareDrawing(in: .zero,
+                            with: canvas ? request : metrics.size, applyingMarginOffsets: !canvas))
+                        XCTAssertEqual(prepared.lines.count, expected.lines.count, label)
+                        let firstLine = try XCTUnwrap(prepared.lines.first)
+                        for (line, native) in zip(prepared.lines, expected.lines) {
+                            check([(line.originX - firstLine.originX) / prepared.source.scaleFactor,
+                                   (line.baseline - firstLine.baseline) / prepared.source.scaleFactor],
+                                  [native.origin[0] - expected.lines[0].origin[0],
+                                   native.origin[1] - expected.lines[0].origin[1]], label)
+                            if canvas {
+                                check([line.originX / prepared.source.scaleFactor + prepared.bounds.minX,
+                                       line.baseline / prepared.source.scaleFactor + prepared.bounds.minY], native.origin, label)
+                            }
+                            XCTAssertEqual(line.glyphs.count, native.glyphs.count, label)
+                            var position = CGPoint.zero
+                            for (index, pair) in zip(line.glyphs, native.glyphs).enumerated() {
+                                let (glyph, values) = pair
+                                if index != 0 { position += glyph.kerning }
+                                let unit = 1 / prepared.source.scaleFactor
+                                check([CGFloat(try XCTUnwrap(glyph.glyphIndex)), CGFloat(glyph.characterIndex),
+                                       (position.x + glyph.positionOffset.x) * unit,
+                                       (position.y + glyph.positionOffset.y + glyph.baselineOffset) * unit,
+                                       glyph.advance.width * unit],
+                                      [values[0], values[1] + CGFloat(native.sourceOffset), values[2], values[3], values[4]], label)
+                                position.x += glyph.advance.width
+                            }
+                        }
+                        let viewport = CGRect(x: 0, y: 0, width: 256, height: 160)
+                        var context = GraphicsContext(recording: RBDisplayList(viewport: viewport), environment: .init(),
+                            inputs: .init(sceneResources: SceneResources(), viewport: viewport,
+                                contentScaleFactor: fixture.scale, resourceCommandQueue: nil))
+                        context.transform = canvasTransform ?? .identity
+                        var strokes: [TextDecorationMultilineFixture.Stroke] = []
+                        if custom {
+                            let layout = try XCTUnwrap(owner.makeLayout(in: .zero, with: metrics.size,
+                                shading: .color(.black), layoutDirection: .leftToRight))
+                            XCTAssertEqual(layout.count, expected.lines.count, label)
+                            let firstOrigin = try XCTUnwrap(layout.first).origin
+                            for (rawLine, native) in zip(layout, expected.lines) {
+                                var line = rawLine
+                                check([line.origin.x - firstOrigin.x, line.origin.y - firstOrigin.y],
+                                      [native.origin[0] - expected.lines[0].origin[0], native.origin[1] - expected.lines[0].origin[1]], label)
+                                line.origin = CGPoint(x: native.origin[0], y: native.origin[1])
+                                var collections: [Text.Layout.Decorations] = []
+                                if fixture.draw == "line" {
+                                    collections.append(.init(line: line, scale: context.userToDeviceScale))
+                                    context.draw(line)
+                                } else {
+                                    for run in line {
+                                        if fixture.draw == "runs" {
+                                            collections.append(.init(run: run, scale: context.userToDeviceScale))
+                                            context.draw(run)
+                                        } else {
+                                            let lower = ["whole", "prefix"].contains(fixture.draw) ? 0 : min(1, run.endIndex)
+                                            let upper = fixture.draw == "empty" ? lower : ["prefix", "middle"].contains(fixture.draw)
+                                                ? max(lower, run.endIndex - 1) : run.endIndex
+                                            let slice = run[lower..<upper]
+                                            collections.append(.init(slice: slice, scale: context.userToDeviceScale))
+                                            context.draw(slice)
+                                        }
+                                    }
+                                }
+                                let expectedCollections = try XCTUnwrap(native.collections)
+                                XCTAssertEqual(collections.count, expectedCollections.count, label)
+                                for (collection, segments) in zip(collections, expectedCollections) {
+                                    XCTAssertEqual(collection.segments.count, segments.count, label)
+                                    for (segment, native) in zip(collection.segments, segments) {
+                                        XCTAssertEqual(segment.runs, native.runs[0]..<native.runs[1], label)
+                                        XCTAssertEqual(segment.thickness, native.width, accuracy: 1e-9, label)
+                                        check(segment.dashes, native.dashes, label)
+                                        check(components(segment.color), native.color, label, accuracy: 1e-6)
+                                        check(segment.fragments.flatMap { [$0.start.x, $0.start.y, $0.end.x, $0.end.y] },
+                                              native.fragments.flatMap { $0 }, label)
+                                        strokes += native.fragments.map { .init(width: native.width, points: $0,
+                                            color: native.color, dashes: native.dashes, phase: $0[0]) }
+                                    }
+                                }
+                            }
+                        } else {
+                            let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines)
+                            for (line, native) in zip(prepared.lines, expected.lines) {
+                                let scale = prepared.source.scaleFactor
+                                strokes += try XCTUnwrap(native.strokes).map { stroke in
+                                    var value = stroke
+                                    value.points = [stroke.points[0] + line.originX / scale, stroke.points[1] + line.baseline / scale,
+                                                    stroke.points[2] + line.originX / scale, stroke.points[3] + line.baseline / scale]
+                                    return value
+                                }
+                            }
+                            XCTAssertEqual(drawing.decorations.count, strokes.count, label)
+                            if canvas {
+                                let resolved = GraphicsContext.ResolvedText(resolved: owner, shared: context.storage.shared)
+                                XCTAssertEqual(resolved.measure(in: request), metrics.size, label)
+                                context.draw(resolved, in: CGRect(origin: .zero, size: request))
+                            } else {
+                                context.draw(drawing, in: CGRect(origin: .zero, size: metrics.size), shading: .color(.black), clipBounds: false)
+                            }
+                        }
+                        var order: [String] = []
+                        var strokeIndex = 0
+                        for item in try XCTUnwrap(context.recording).moveContents().items {
+                            XCTAssertEqual(item.state.transform, canvasTransform ?? .identity, label)
+                            guard case let .text(drawing, shading) = item.contents else { continue }
+                            switch drawing.contents {
+                            case .glyphs, .vectorGlyphs:
+                                if order.last != "glyphs" { order.append("glyphs") }
+                            case let .decoration(decoration):
+                                order.append("decoration")
+                                guard strokeIndex < strokes.count else { XCTFail(label); continue }
+                                let stroke = strokes[strokeIndex]; strokeIndex += 1
+                                check([decoration.lineWidth, decoration.start.x, decoration.start.y,
+                                       decoration.end.x, decoration.end.y].map { $0 * drawing.scale },
+                                      [stroke.width] + stroke.points, label)
+                                check(try XCTUnwrap(decoration.dashes).map { $0 * drawing.scale }, stroke.dashes, label)
+                                XCTAssertEqual(decoration.dashPhase * drawing.scale, stroke.phase, accuracy: 1e-9, label)
+                                XCTAssertEqual(shading.properties.count, 1, label)
+                                guard case let .color(color) = try XCTUnwrap(shading.properties.first) else { XCTFail(label); continue }
+                                check(components(color.resolve(in: .init())), stroke.color, label, accuracy: 1e-6)
+                            default: XCTFail("Unexpected text component: \(label)")
+                            }
+                        }
+                        XCTAssertEqual(strokeIndex, strokes.count, label)
+                        XCTAssertEqual(order, expected.order, label)
+                    }
+                }
+            }
+        }
+    }
+
+    func testMultilineDecorationsFollowEachLinesGlyphs() throws {
+        // ASSERTIONS textDecorationMultilineOrder27Observed
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        for separator in ["\n", "\u{2028}"] {
+            func run(_ string: String, size: CGFloat) -> Text {
+                Text(verbatim: string).font(.file(file, size: size))
+                    .foregroundColor(.red).underline().strikethrough()
+            }
+            let text = run("AAA ", size: 23) + run("BBB BBB" + separator, size: 31)
+                + run("AAA ", size: 23) + run("BBB BBB", size: 31)
+            try withOwner(text, configure: {
+                $0.displayScale = 2; $0.lineLimit = 2; $0.minimumScaleFactor = 1
+            }) { owner in
+                let metrics = owner.metrics(in: CGSize(width: 240, height: 120), layoutMargins: nil)
+                XCTAssertEqual(metrics.size, CGSize(width: 174.5, height: 74))
+                let prepared = try XCTUnwrap(owner.prepareDrawing(in: .zero, with: metrics.size, applyingMarginOffsets: true))
+                XCTAssertEqual(prepared.lines.count, 2)
+                let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines)
+                let viewport = CGRect(x: 0, y: 0, width: 256, height: 140)
+                let context = GraphicsContext(recording: RBDisplayList(viewport: viewport), environment: .init(),
+                    inputs: .init(sceneResources: SceneResources(), viewport: viewport,
+                        contentScaleFactor: 2, resourceCommandQueue: nil))
+                context.draw(drawing, in: CGRect(origin: .zero, size: metrics.size), shading: .color(.black), clipBounds: false)
+                var order: [String] = []
+                for item in try XCTUnwrap(context.recording).moveContents().items {
+                    guard case let .text(drawing, _) = item.contents else { continue }
+                    switch drawing.contents {
+                    case .glyphs, .vectorGlyphs:
+                        if order.last != "glyphs" { order.append("glyphs") }
+                    case .decoration: order.append("decoration")
+                    default: XCTFail("Unexpected text component")
+                    }
+                }
+                XCTAssertEqual(order, ["glyphs", "decoration", "decoration", "decoration",
+                                       "glyphs", "decoration", "decoration", "decoration"])
+            }
+        }
+    }
+
+    func testCombinedDecorationsAndSelectedSubranges() throws {
+        // ASSERTIONS textDecorationCombinedAttributes27Observed
+        // ASSERTIONS textDecorationCombinedOrder27Observed
+        // ASSERTIONS textRunSliceZeroLengthDrawing27Observed
+        let fixtures = try TextDecorationFixture.decode(TextDecorationFixture.combined)
+        XCTAssertEqual(fixtures.count, 116)
+        for fixture in fixtures {
+            try checkDecorationGeometry(fixture)
+            try checkDecorationGeometry(fixture, attributed: true)
+        }
+    }
+
+    func testZeroLengthRunSliceDrawsSuffixGlyphsAndKeepsDecorationBounds() throws {
+        // ASSERTIONS textRunSliceZeroLengthDrawing27Observed
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let text = Text(verbatim: "AAA").font(.file(file, size: 23)).underline(pattern: .dot)
+            + Text(verbatim: "BBB").font(.file(file, size: 31)).strikethrough(pattern: .dash)
+        try withOwner(text.baselineOffset(3).tracking(2)) { owner in
+            let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: owner.layoutProperties,
+                layoutMargins: owner.layoutMargins, resolvedText: owner.resolvedText)
+            let size = manager.metrics(in: CGSize(width: 240, height: 60), layoutMargins: nil).size
+            let layout = try XCTUnwrap(manager.makeLayout(in: .zero, with: size,
+                shading: .color(.black), layoutDirection: .leftToRight))
+            let line = try XCTUnwrap(layout.first)
+            func recordedGlyphs(_ slice: Text.Layout.RunSlice) throws -> [(VUI.Path, GraphicsContext.TextDrawing)] {
+                let viewport = CGRect(x: 0, y: 0, width: 256, height: 100)
+                let context = GraphicsContext(recording: RBDisplayList(viewport: viewport), environment: .init(),
+                    inputs: .init(sceneResources: SceneResources(), viewport: viewport,
+                        contentScaleFactor: 1, resourceCommandQueue: nil))
+                context.draw(slice)
+                return try XCTUnwrap(context.recording).moveContents().items.compactMap { item in
+                    guard case let .text(drawing, _) = item.contents,
+                          case let .vectorGlyphs(path) = drawing.contents else { return nil }
+                    return (path, drawing)
+                }
+            }
+            for run in line {
+                for lower in [run.startIndex, run.startIndex + 1, run.endIndex] {
+                    let empty = run[lower..<lower]
+                    XCTAssertTrue(empty.isEmpty)
+                    XCTAssertEqual(empty.typographicBounds.rect.size, .zero)
+                    if lower < run.endIndex {
+                        XCTAssertTrue(Text.Layout.Decorations(slice: empty, scale: 1).segments.allSatisfy { $0.fragments.isEmpty })
+                    }
+                    let actual = try recordedGlyphs(empty)
+                    let expected = try recordedGlyphs(run[lower..<run.endIndex])
+                    XCTAssertEqual(actual.count, lower == run.endIndex ? 0 : 1)
+                    XCTAssertEqual(actual.count, expected.count)
+                    for ((path, drawing), (expectedPath, expectedDrawing)) in zip(actual, expected) {
+                        XCTAssertEqual(path, expectedPath)
+                        XCTAssertEqual(drawing.origin, expectedDrawing.origin)
+                        XCTAssertEqual(drawing.frame, expectedDrawing.frame)
+                        XCTAssertEqual(drawing.scale, expectedDrawing.scale)
+                    }
+                }
+            }
+        }
+    }
+
+    private func checkDecorationGeometry(_ fixture: TextDecorationFixture, attributed: Bool = false) throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let parts = fixture.sample.split(separator: ":").map(String.init)
+        let geometry = parts[0] == "geometry"
+        let kind = parts[1], style = parts[2]
+        let sizes: [CGFloat] = geometry ? [CGFloat(Double(parts[3])!), CGFloat(Double(parts[4])!)] : [23, 31]
+        let plain = geometry && parts.count > 11 && parts[11] == "plain"
+        let separator = plain ? "" : geometry || parts[3] == "line" ? "\u{2028}" : parts[3] == "lf" ? "\n" : ""
+        func decorationColor(first: Bool, strike: Bool = false) -> VUI.Color? {
+            guard parts.count > 13 else { return nil }
+            switch parts[(kind == "combined" && strike ? 16 : 12) + (first ? 0 : 1)] {
+            case "none": return nil
+            case "red": return .red
+            case "green": return .green
+            case "blue": return .blue
+            default: preconditionFailure("Unknown decoration color")
+            }
+        }
+        func decorationPattern(first: Bool, strike: Bool = false) -> Text.LineStyle.Pattern {
+            guard parts.count > 15 else { return .solid }
+            switch parts[(kind == "combined" && strike ? 18 : 14) + (first ? 0 : 1)] {
+            case "solid": return .solid
+            case "dot": return .dot
+            case "dash": return .dash
+            case "dashDot": return .dashDot
+            case "dashDotDot": return .dashDotDot
+            default: preconditionFailure("Unknown decoration pattern")
+            }
+        }
+        func run(_ string: String, first: Bool) -> Text {
+            let size = sizes[style == "reverse" ? (first ? 1 : 0) : (first ? 0 : 1)]
+            let color: VUI.Color = (geometry ? style == "split" : true) && !first ? .blue : .red
+            if attributed {
+                precondition([14, 16, 21].contains(parts.count) && parts[7] == "both" && parts[10] == "both")
+                var value = AttributedString(string)
+                value.font = VUI.Font.file(file, size: size)
+                value.foregroundColor = color
+                value[AttributeScopes.CoreAttributes.BaselineOffsetAttribute.self] = CGFloat(Double(parts[6])!)
+                value[AttributeScopes.CoreAttributes.TrackingAttribute.self] = CGFloat(Double(parts[9])!)
+                let lineStyle = Text.LineStyle(pattern: decorationPattern(first: first), color: decorationColor(first: first))
+                if parts[5] == "both" || parts[5] == (first ? "first" : "second") {
+                    if kind == "underline" || kind == "combined" { value.underlineStyle = lineStyle }
+                    else { value.strikethroughStyle = lineStyle }
+                }
+                if kind == "combined", parts[20] == "both" || parts[20] == (first ? "first" : "second") {
+                    value.strikethroughStyle = .init(pattern: decorationPattern(first: first, strike: true),
+                        color: decorationColor(first: first, strike: true))
+                }
+                return Text(value)
+            }
+            var value = Text(verbatim: string).font(.file(file, size: size)).foregroundColor(color)
+            let decorationScope = geometry && parts.count > 5 ? parts[5] : style == "off" ? "first" : "both"
+            if geometry && parts.count > 6 {
+                let scope = parts.count > 7 ? parts[7] : decorationScope
+                if scope == "both" || scope == (first ? "first" : "second") {
+                    value = value.baselineOffset(CGFloat(Double(parts[6])!))
+                }
+            }
+            if geometry && parts.count > 10 && (parts[10] == "both" || parts[10] == (first ? "first" : "second")) {
+                let amount = CGFloat(Double(parts[9])!)
+                value = parts[8] == "tracking" ? value.tracking(amount) : value.kerning(amount)
+            }
+            let enabled = geometry ? decorationScope == "both" || decorationScope == (first ? "first" : "second") : kind != "none" &&
+                (style == "both" || (style == "first") == first)
+            if enabled {
+                value = kind == "underline" || kind == "combined"
+                    ? value.underline(pattern: decorationPattern(first: first), color: decorationColor(first: first))
+                    : value.strikethrough(pattern: decorationPattern(first: first), color: decorationColor(first: first))
+            }
+            if kind == "combined", parts[20] == "both" || parts[20] == (first ? "first" : "second") {
+                value = value.strikethrough(pattern: decorationPattern(first: first, strike: true),
+                    color: decorationColor(first: first, strike: true))
+            }
+            return value
+        }
+        func components(_ color: VUI.Color.Resolved) -> [CGFloat] {
+            [color.linearRed, color.linearGreen, color.linearBlue, color.opacity].map(CGFloat.init)
+        }
+        func checkColors(_ actual: [[CGFloat]], _ expected: [[CGFloat]], _ label: String) {
+            XCTAssertEqual(actual.count, expected.count, label)
+            for (a, b) in zip(actual, expected) {
+                XCTAssertEqual(a.count, b.count, label)
+                for (x, y) in zip(a, b) { XCTAssertEqual(x, y, accuracy: 1e-6, label) }
+            }
+        }
+        func recordedColors(_ items: [RBDisplayList.Item], _ label: String) throws -> [[CGFloat]] {
+            try items.compactMap { item in
+                guard case let .text(drawing, shading) = item.contents,
+                      case .decoration = drawing.contents else { return nil }
+                XCTAssertEqual(shading.properties.count, 1, label)
+                guard case let .color(color) = try XCTUnwrap(shading.properties.first) else {
+                    XCTFail("Expected explicit decoration color: \(label)")
+                    return nil
+                }
+                return components(color.resolve(in: .init()))
+            }
+        }
+        func recordedOrder(_ items: [RBDisplayList.Item]) -> [String] {
+            var order: [String] = []
+            for item in items {
+                guard case let .text(drawing, _) = item.contents else { continue }
+                let stage: String
+                switch drawing.contents {
+                case .decoration: stage = "decoration"
+                case .glyphs, .vectorGlyphs: stage = "glyphs"
+                default: continue
+                }
+                if stage != "glyphs" || order.last != stage { order.append(stage) }
+            }
+            return order
+        }
+        func recordedDecorations(_ items: [RBDisplayList.Item]) -> [(ResolvedTextSource.Drawing.Decoration, CGFloat)] {
+            items.compactMap { item in
+                guard case let .text(drawing, _) = item.contents,
+                      case let .decoration(decoration) = drawing.contents else { return nil }
+                return (decoration, drawing.scale)
+            }
+        }
+        var text = run("AAA ", first: true) + run("BBB BBB" + separator, first: false)
+        if !separator.isEmpty { text = text + Text(verbatim: "CCC").font(.file(file, size: 17)).foregroundColor(.green) }
+        try withOwner(text, configure: {
+            $0.displayScale = fixture.scale; $0.minimumScaleFactor = 1; $0.lineLimit = 1
+        }) { ordinary in
+            let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: ordinary.layoutProperties,
+                layoutMargins: ordinary.layoutMargins, resolvedText: ordinary.resolvedText)
+            let request = CGSize(width: fixture.width, height: fixture.height)
+            for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                let label = "\(fixture.sample) \(fixture.draw) scale=\(fixture.scale) custom=\(custom) attributed=\(attributed) width=\(fixture.width)"
+                let metrics = owner.metrics(in: request, layoutMargins: nil)
+                let size = metrics.size
+                if let expected = custom ? fixture.customMetrics : fixture.ordinaryMetrics {
+                    let actual = [size.width, size.height, metrics.firstBaseline, metrics.lastBaseline]
+                    XCTAssertEqual(actual, expected, label)
+                    XCTAssertEqual(owner.metrics(in: request, layoutMargins: nil), metrics, label)
+                }
+                let prepared = try XCTUnwrap(owner.prepareDrawing(in: .zero, with: size, applyingMarginOffsets: true))
+                XCTAssertEqual(prepared.lines.count, 1, label)
+                if let expected = custom ? fixture.customGlyphs : fixture.ordinaryGlyphs {
+                    let glyphs = try XCTUnwrap(prepared.lines.first).glyphs
+                    let unit = 1 / prepared.source.scaleFactor
+                    XCTAssertEqual(glyphs.count, expected.count, label)
+                    var position = CGPoint.zero
+                    for (index, pair) in zip(glyphs, expected).enumerated() {
+                        let (glyph, values) = pair
+                        if index != 0 { position += glyph.kerning }
+                        let actual = [CGFloat(try XCTUnwrap(glyph.glyphIndex)), CGFloat(glyph.characterIndex),
+                            (position.x + glyph.positionOffset.x) * unit,
+                            (position.y + glyph.positionOffset.y + glyph.baselineOffset) * unit,
+                            glyph.advance.width * unit]
+                        for (a, b) in zip(actual, values) { XCTAssertEqual(a, b, accuracy: 1e-9, label) }
+                        position.x += glyph.advance.width
+                    }
+                }
+                if custom {
+                    let layout = try XCTUnwrap(owner.makeLayout(in: .zero, with: size,
+                        shading: .color(.black), layoutDirection: .leftToRight))
+                    var line = try XCTUnwrap(layout.first)
+                    line.origin = CGPoint(x: fixture.origin[0], y: fixture.origin[1])
+                    let actual: [Text.Layout.Decorations]
+                    if fixture.draw == "line" {
+                        actual = [.init(line: line, scale: fixture.scale)]
+                    } else {
+                        actual = line.map { run in
+                            if fixture.draw == "runs" { return .init(run: run, scale: fixture.scale) }
+                            let lower = ["whole", "prefix"].contains(fixture.draw) ? 0 : min(1, run.endIndex)
+                            let upper = fixture.draw == "empty" ? lower : ["prefix", "middle"].contains(fixture.draw)
+                                ? max(lower, run.endIndex - 1) : run.endIndex
+                            return .init(slice: run[lower..<upper], scale: fixture.scale)
+                        }
+                    }
+                    let viewport = CGRect(x: 0, y: 0, width: 256, height: 100)
+                    let context = GraphicsContext(recording: RBDisplayList(viewport: viewport), environment: .init(),
+                        inputs: .init(sceneResources: SceneResources(), viewport: viewport,
+                            contentScaleFactor: fixture.scale, resourceCommandQueue: nil))
+                    if fixture.draw == "line" { context.draw(line) }
+                    else {
+                        for run in line {
+                            if fixture.draw == "runs" { context.draw(run) }
+                            else {
+                                let lower = ["whole", "prefix"].contains(fixture.draw) ? 0 : min(1, run.endIndex)
+                                let upper = fixture.draw == "empty" ? lower : ["prefix", "middle"].contains(fixture.draw)
+                                    ? max(lower, run.endIndex - 1) : run.endIndex
+                                context.draw(run[lower..<upper])
+                            }
+                        }
+                    }
+                    let commands = try XCTUnwrap(context.recording).moveContents().items
+                    if let expected = fixture.customOrder {
+                        XCTAssertEqual(recordedOrder(commands), expected, label)
+                    }
+                    var submitted: [[CGFloat]] = []
+                    var sawDecoration = false
+                    for command in commands {
+                        if case let .text(drawing, _) = command.contents {
+                            if case let .decoration(decoration) = drawing.contents {
+                                submitted.append([decoration.lineWidth, decoration.start.x, decoration.start.y,
+                                    decoration.end.x, decoration.end.y])
+                                sawDecoration = true
+                            } else if fixture.draw == "line" {
+                                XCTAssertFalse(sawDecoration, "Glyphs must precede line decorations: \(label)")
+                            }
+                        }
+                    }
+                    let expectedPaths = fixture.custom.flatMap { $0 }.flatMap { values in
+                        stride(from: 3, to: values.count, by: 4).map { [values[2]] + Array(values[$0..<$0 + 4]) }
+                    }
+                    XCTAssertEqual(submitted.count, expectedPaths.count, label)
+                    for (path, expected) in zip(submitted, expectedPaths) {
+                        for (a, b) in zip(path, expected) { XCTAssertEqual(a, b, accuracy: 1e-9, label) }
+                    }
+                    XCTAssertEqual(actual.count, fixture.custom.count, label)
+                    for (collection, expected) in zip(actual, fixture.custom) {
+                        XCTAssertEqual(collection.segments.count, expected.count, label)
+                        for (segment, values) in zip(collection.segments, expected) {
+                            XCTAssertEqual(segment.runs, Int(values[0])..<Int(values[1]), label)
+                            XCTAssertEqual(segment.thickness, values[2], accuracy: 1e-9, label)
+                            if fixture.customDashes == nil {
+                                XCTAssertTrue(segment.dashes.isEmpty, label)
+                            }
+                            let coordinates = segment.fragments.flatMap { [$0.start.x, $0.start.y, $0.end.x, $0.end.y] }
+                            XCTAssertEqual(coordinates.count, values.count - 3, label)
+                            for (a, b) in zip(coordinates, values.dropFirst(3)) { XCTAssertEqual(a, b, accuracy: 1e-9, label) }
+                        }
+                    }
+                    if let colors = fixture.customColors {
+                        XCTAssertEqual(actual.count, colors.count, label)
+                        for (collection, expected) in zip(actual, colors) {
+                            checkColors(collection.segments.map { components($0.color) }, expected, label)
+                        }
+                        let expected = zip(fixture.custom, colors).flatMap { segments, colors in
+                            zip(segments, colors).flatMap { segment, color in
+                                Array(repeating: color, count: (segment.count - 3) / 4)
+                            }
+                        }
+                        checkColors(try recordedColors(commands, label), expected, label)
+                    }
+                    if let dashes = fixture.customDashes {
+                        XCTAssertEqual(actual.map { $0.segments.map(\.dashes) }, dashes, label)
+                        let expected = zip(fixture.custom, dashes).flatMap { segments, dashes in
+                            zip(segments, dashes).flatMap { segment, dash in
+                                stride(from: 3, to: segment.count, by: 4).map { (dash, segment[$0]) }
+                            }
+                        }
+                        let records = recordedDecorations(commands)
+                        XCTAssertEqual(records.count, expected.count, label)
+                        for ((record, scale), (dash, phase)) in zip(records, expected) {
+                            XCTAssertEqual(scale, 1, label)
+                            XCTAssertEqual(record.dashes, dash, label)
+                            XCTAssertEqual(record.dashPhase, phase, accuracy: 1e-9, label)
+                        }
+                    }
+                } else {
+                    let drawing = prepared.source.makeDrawing(lineGlyphs: prepared.lines)
+                    let line = try XCTUnwrap(prepared.lines.first)
+                    let scale = prepared.source.scaleFactor
+                    XCTAssertEqual(drawing.decorations.count, fixture.ordinary.count, label)
+                    for (decoration, expected) in zip(drawing.decorations, fixture.ordinary) {
+                        let values = [decoration.lineWidth / scale,
+                            (decoration.start.x - line.originX) / scale, (decoration.start.y - line.baseline) / scale,
+                            (decoration.end.x - line.originX) / scale, (decoration.end.y - line.baseline) / scale]
+                        for (a, b) in zip(values, expected) { XCTAssertEqual(a, b, accuracy: 1e-9, label) }
+                    }
+                    if let colors = fixture.ordinaryColors {
+                        let actual = try drawing.decorations.map {
+                            components(try XCTUnwrap($0.foregroundColor).resolve(in: .init()))
+                        }
+                        checkColors(actual, colors, label)
+                        let viewport = CGRect(x: 0, y: 0, width: 256, height: 100)
+                        let context = GraphicsContext(recording: RBDisplayList(viewport: viewport), environment: .init(),
+                            inputs: .init(sceneResources: SceneResources(), viewport: viewport,
+                                contentScaleFactor: fixture.scale, resourceCommandQueue: nil))
+                        context.draw(drawing, in: CGRect(origin: .zero, size: size), shading: .color(.black), clipBounds: false)
+                        let commands = try XCTUnwrap(context.recording).moveContents().items
+                        if kind == "combined" {
+                            XCTAssertEqual(recordedOrder(commands),
+                                ["glyphs"] + Array(repeating: "decoration", count: drawing.decorations.count), label)
+                        }
+                        checkColors(try recordedColors(commands, label), colors, label)
+                        if let dashes = fixture.ordinaryDashes, let phases = fixture.ordinaryPhases {
+                            XCTAssertEqual(drawing.decorations.count, dashes.count, label)
+                            for (decoration, dash) in zip(drawing.decorations, dashes) {
+                                XCTAssertEqual(decoration.dashes?.map { $0 / scale }, dash, label)
+                            }
+                            let records = recordedDecorations(commands)
+                            XCTAssertEqual(records.count, phases.count, label)
+                            for ((record, drawingScale), phase) in zip(records, phases) {
+                                XCTAssertEqual(record.dashPhase * drawingScale, phase, accuracy: 1e-9, label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     func testTailTokensPreserveDecorationAttributesAndSourceRanges() throws {
         // ASSERTIONS textTailDecorationAttributes27Observed
         var root = URL(fileURLWithPath: #filePath)

@@ -630,7 +630,55 @@ extension Text {
     }
 }
 
+extension Text.Layout.Decorations {
+    private init(storage: _TextLayoutStorage, line: Int, origin: CGPoint, scale: CGFloat) {
+        let value = storage.lines[line]
+        segments = TextDecorationProducer.segments(glyphs: value.glyphs,
+            runs: value.runs.map(\.glyphRange), origin: origin,
+            glyphTransform: CGAffineTransform(scaleX: 1, y: -1),
+            scaleFactor: storage.source.scaleFactor, scale: scale, displayScale: storage.source.displayScale,
+            environment: storage.source.fontResolutionContext?.environment ?? EnvironmentValues()).map(\.segment)
+    }
+
+    init(line: Text.Layout.Line, scale: CGFloat) {
+        self.init(storage: line._line.storage, line: line._line.index, origin: line.origin, scale: scale)
+    }
+
+    init(run: Text.Layout.Run, scale: CGFloat) {
+        self.init(storage: run.line.storage, line: run.line.index, origin: run.lineOrigin, scale: scale)
+        let bounds = run.typographicBounds.rect
+        self = selecting(runs: run.index..<(run.index + 1), bounds: bounds.minX...bounds.maxX,
+                         keepsStart: true, keepsEnd: true)
+    }
+
+    init(slice: Text.Layout.RunSlice, scale: CGFloat) {
+        let run = slice.run
+        self.init(storage: run.line.storage, line: run.line.index, origin: run.lineOrigin, scale: scale)
+        // Empty selections carry a present zero rectangle, independently of origin.
+        let bounds = slice.isEmpty ? CGRect.zero : slice.typographicBounds.rect
+        self = selecting(runs: run.index..<(run.index + 1), bounds: bounds.minX...bounds.maxX,
+                         keepsStart: slice.startIndex == run.startIndex, keepsEnd: slice.endIndex == run.endIndex)
+    }
+}
+
 extension ResolvedTextSource {
+    static func drawingRunRanges(in glyphs: [Glyph]) -> [Range<Int>] {
+        var ranges: [Range<Int>] = []
+        for index in glyphs.indices {
+            let glyph = glyphs[index]
+            if let last = ranges.indices.last {
+                let first = glyphs[ranges[last].lowerBound]
+                if first.attributes == glyph.attributes && first.style == glyph.style &&
+                    !first.isTruncationToken && !glyph.isTruncationToken && first.face.isEqual(to: glyph.face) {
+                    ranges[last] = ranges[last].lowerBound..<(index + 1)
+                    continue
+                }
+            }
+            ranges.append(index..<(index + 1))
+        }
+        return ranges
+    }
+
     func makeLayout(
         in size: CGSize,
         layoutDirection: LayoutDirection,
@@ -666,29 +714,10 @@ extension ResolvedTextSource {
     ) -> Text.Layout {
         let scale = 1 / scaleFactor
         let lines = lineGlyphs.map { line -> _TextLayoutLineStorage in
-            var runs: [_TextLayoutRunStorage] = []
-            for glyphIndex in line.glyphs.indices {
-                let glyph = line.glyphs[glyphIndex]
-                if let last = runs.indices.last,
-                   runs[last].glyphRange.upperBound == glyphIndex,
-                   runs[last].attributes == glyph.attributes,
-                   runs[last].style == glyph.style,
-                   !glyph.isTruncationToken,
-                   !line.glyphs[
-                    runs[last].glyphRange.lowerBound
-                   ].isTruncationToken,
-                   line.glyphs[
-                    runs[last].glyphRange.lowerBound
-                   ].face.isEqual(to: glyph.face) {
-                    runs[last].glyphRange = runs[last].glyphRange.lowerBound..<(glyphIndex + 1)
-                } else {
-                    runs.append(_TextLayoutRunStorage(
-                        glyphRange: glyphIndex..<(glyphIndex + 1),
-                        clusterGlyphRanges: [],
-                        attributes: glyph.attributes,
-                        style: glyph.style
-                    ))
-                }
+            var runs = Self.drawingRunRanges(in: line.glyphs).map { range in
+                let glyph = line.glyphs[range.lowerBound]
+                return _TextLayoutRunStorage(glyphRange: range, clusterGlyphRanges: [],
+                    attributes: glyph.attributes, style: glyph.style)
             }
             for index in runs.indices {
                 let glyphRange = runs[index].glyphRange
@@ -733,29 +762,44 @@ extension GraphicsContext {
         options: Text.Layout.DrawingOptions = []
     ) {
         for run in line {
-            draw(run, options: options)
+            drawGlyphs(run[run.startIndex..<run.endIndex], options: options)
         }
+        draw(Text.Layout.Decorations(line: line, scale: userToDeviceScale),
+             shading: line._line.storage.source.shading)
     }
 
     public func draw(
         _ run: Text.Layout.Run,
         options: Text.Layout.DrawingOptions = []
     ) {
-        draw(run[run.startIndex..<run.endIndex], options: options)
+        drawGlyphs(run[run.startIndex..<run.endIndex], options: options)
+        draw(Text.Layout.Decorations(run: run, scale: userToDeviceScale),
+             shading: run.layoutRenderer.source.shading)
     }
 
     public func draw(
         _ slice: Text.Layout.RunSlice,
         options: Text.Layout.DrawingOptions = []
     ) {
+        drawGlyphs(slice, options: options)
+        draw(Text.Layout.Decorations(slice: slice, scale: userToDeviceScale),
+             shading: slice.run.layoutRenderer.source.shading)
+    }
+
+    private func drawGlyphs(_ slice: Text.Layout.RunSlice, options: Text.Layout.DrawingOptions) {
         let run = slice.run
-        let glyphRange = run.glyphRange(for: slice.indices)
+        var glyphRange = run.glyphRange(for: slice.indices)
+        // A zero-length draw range selects the remaining glyphs in its run.
+        // Decoration selection still uses the original slice bounds.
+        if glyphRange.isEmpty {
+            glyphRange = glyphRange.lowerBound..<run.glyphRange.upperBound
+        }
         guard let lineGlyphs = run.line.storage.lineGlyphs(line: run.line.index, glyphRange: glyphRange) else {
             return
         }
         let bounds = run.line.storage.bounds(line: run.line.index, glyphRange: glyphRange)
         let sourceLine = run.line.storage.lines[run.line.index]
-        let drawing = run.layoutRenderer.source.makeDrawing(lineGlyphs: [lineGlyphs])
+        let drawing = run.layoutRenderer.source.makeDrawing(lineGlyphs: [lineGlyphs], includesDecorations: false)
         let origin = CGPoint(
             x: run.lineOrigin.x + bounds.origin.x,
             y: run.lineOrigin.y - sourceLine.ascent

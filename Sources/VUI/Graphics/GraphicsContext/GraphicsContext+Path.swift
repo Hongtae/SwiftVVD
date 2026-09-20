@@ -894,7 +894,9 @@ extension GraphicsContext {
         encoder.setRenderPipelineState(pipelineState)
         encoder.setDepthStencilState(depthState)
 
-        encoder.setCullMode(.back)
+        // Reflections reverse the stroke triangles after conversion to clip space.
+        let determinant = transform.a * transform.d - transform.b * transform.c
+        encoder.setCullMode(determinant > 0 ? .front : .back)
         encoder.setVertexBuffer(
             vertexBuffer.buffer,
             offset: vertexBuffer.offset,

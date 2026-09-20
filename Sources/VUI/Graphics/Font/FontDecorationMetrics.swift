@@ -12,12 +12,16 @@ struct TypefaceDecorationMetrics {
     var xHeight: CGFloat?
     var underlinePosition: CGFloat
     var underlineThickness: CGFloat
+    var defaultAscent: CGFloat? = nil
+    var defaultDescent: CGFloat? = nil
 
     func scaled(by scale: CGFloat) -> TypefaceDecorationMetrics {
         TypefaceDecorationMetrics(
             xHeight: xHeight.map { $0 * scale },
             underlinePosition: underlinePosition * scale,
-            underlineThickness: underlineThickness * scale
+            underlineThickness: underlineThickness * scale,
+            defaultAscent: defaultAscent.map { $0 * scale },
+            defaultDescent: defaultDescent.map { $0 * scale }
         )
     }
 }
@@ -89,7 +93,8 @@ private struct OpenTypeDecorationMetrics {
             return nil
         }
 
-        let scale = font.yScale / 64
+        // Keep logical sizes independent of the rasterizer's fixed-point size.
+        let scale = font.pointSize * CGFloat(font.dpi.y) / 72 / CGFloat(unitsPerEm)
         guard scale.isFinite, scale > 0 else { return nil }
         let thickness = abs(CGFloat(underlineThickness) * scale)
         guard thickness > 0 else { return nil }
@@ -108,10 +113,13 @@ private struct OpenTypeDecorationMetrics {
             )?.bearing.y
         }
 
+        let design = font.designMetrics
         return TypefaceDecorationMetrics(
             xHeight: xHeight,
             underlinePosition: CGFloat(underlinePosition) * scale,
-            underlineThickness: thickness
+            underlineThickness: thickness,
+            defaultAscent: design.map { CGFloat($0.ascender) * scale },
+            defaultDescent: design.map { abs(CGFloat($0.descender)) * scale }
         )
     }
 

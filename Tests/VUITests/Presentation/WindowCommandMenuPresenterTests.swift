@@ -3,6 +3,76 @@ import XCTest
 @testable import VUI
 
 final class WindowCommandMenuPresenterTests: XCTestCase {
+    // ASSERTIONS textPlatformRepresentation27Observed
+    @MainActor
+    func testMenuTextRepresentationOmitsDefaultsAndPreservesExplicitRuns() throws {
+        let previousAppContext = appContext
+        appContext = WindowCommandMenuTestAppContext()
+        defer { appContext = previousAppContext }
+
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let presenter = WindowCommandMenuPresenter()
+        presenter.update(
+            items: [MainMenuItem(name: "Edit", id: .edit, groups: [
+                CommandAccumulator.Result(viewContent: AnyView(VStack {
+                    Button("Plain") {}
+                    Button("Disabled") {}.disabled(true)
+                    Button {} label: { Text("Explicit Red").foregroundStyle(.red) }
+                    Button {} label: { Text("Bold").bold() }
+                    Button {} label: { Text("Underline").underline() }
+                    Button {} label: { Text("Inherited").background(Color.clear) }
+                        .foregroundStyle(.green)
+                    Button {} label: { Text("Explicit Font").font(.system(size: 23)) }
+                    Button {} label: { Text("Color Reset").foregroundColor(nil) }
+                    Button {} label: { Text("Font Reset").font(nil) }
+                    Button {} label: {
+                        Text("Mixed Plain ") + Text("Red").foregroundStyle(.red)
+                    }
+                    Button {} label: { Text("Styled Request").background(Color.clear) }
+                        .foregroundStyle(.green)
+                        .modifier(ViewInputFlagModifier(flag: IncludesStyledText()))
+                }))
+            ])],
+            environment: environment,
+            hostEnvironment: environment,
+            sceneResources: SceneResources()
+        )
+        let controller = WindowController(
+            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            environment: environment,
+            scene: WindowKey(namespace: .app, sceneID: SceneID(Self.self))
+        )
+        var tick: UInt64 = 0
+        updateController(controller, tick: &tick)
+        let responder = try XCTUnwrap(menuResponders(in: controller)[.edit])
+        let items = controller.viewGraph.data.withCurrent { responder.itemList.value.items }
+        let labels = Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            (item.label ?? item.text).map { ($0.string, $0) }
+        })
+        XCTAssertEqual(labels.count, 11)
+        let fontKey = NSAttributedString.Key("VUI.Font")
+        let colorKey = NSAttributedString.Key("VUI.ForegroundColor")
+        for title in ["Plain", "Disabled", "Bold", "Underline", "Inherited",
+                      "Color Reset", "Font Reset", "Mixed Plain Red"] {
+            let attributes = try XCTUnwrap(labels[title]).attributes(at: 0, effectiveRange: nil)
+            XCTAssertNil(attributes[fontKey], title)
+            XCTAssertNil(attributes[colorKey], title)
+        }
+        XCTAssertFalse(try XCTUnwrap(items.first { ($0.label ?? $0.text)?.string == "Disabled" }).isEnabled)
+        let red = try XCTUnwrap(labels["Explicit Red"]?.attribute(colorKey, at: 0, effectiveRange: nil) as? VUI.Color)
+        XCTAssertEqual(red.resolveHDR(in: environment), VUI.Color.red.resolveHDR(in: environment))
+        XCTAssertNotNil(labels["Explicit Font"]?.attribute(fontKey, at: 0, effectiveRange: nil))
+        XCTAssertNotNil(labels["Underline"]?.attribute(NSAttributedString.Key("VUI.UnderlineStyle"), at: 0, effectiveRange: nil))
+        let mixed = try XCTUnwrap(labels["Mixed Plain Red"])
+        let mixedRed = try XCTUnwrap(mixed.attribute(colorKey, at: mixed.length - 1, effectiveRange: nil) as? VUI.Color)
+        XCTAssertEqual(mixedRed.resolveHDR(in: environment), VUI.Color.red.resolveHDR(in: environment))
+        let styled = try XCTUnwrap(labels["Styled Request"])
+        XCTAssertNotNil(styled.attribute(fontKey, at: 0, effectiveRange: nil))
+        let inherited = try XCTUnwrap(styled.attribute(colorKey, at: 0, effectiveRange: nil) as? VUI.Color)
+        XCTAssertEqual(inherited.resolveHDR(in: environment), VUI.Color.green.resolveHDR(in: environment))
+    }
+
     func testMenuBarClientAllocationPreservesSceneContentSize() {
         let sceneSize = CGSize(width: 900, height: 620)
         let platformSize = WindowCommandMenuPresenter.platformContentSize(

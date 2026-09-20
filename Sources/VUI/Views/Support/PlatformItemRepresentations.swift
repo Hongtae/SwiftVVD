@@ -20,6 +20,9 @@ struct PlatformTextRepresentationOptions: OptionSet {
     static let includeAccessibility = Self(rawValue: 1 << 1)
 }
 
+struct IncludesStyledText: ViewInputBoolFlag {}
+struct IncludesAccessibilityText: ViewInputBoolFlag {}
+
 struct PlatformTextRepresentableContext {
     var text: NSAttributedString?
 }
@@ -98,7 +101,15 @@ struct PlatformItemListTextRepresentable: PlatformTextRepresentable {
     static func representationOptions(
         inputs: _ViewInputs
     ) -> PlatformTextRepresentationOptions {
-        []
+        var options: PlatformTextRepresentationOptions = []
+        if inputs[IncludesAccessibilityText.self]
+            || inputs[PlatformItemListFlagsInput.self].rawValue & (1 << 4) != 0 {
+            options.insert(.includeAccessibility)
+        }
+        if inputs[IncludesStyledText.self] {
+            options.insert(.includeStyledText)
+        }
+        return options
     }
 
     static func makeRepresentation(

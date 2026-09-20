@@ -775,10 +775,13 @@ struct ResolvedTextSource {
             var end: CGPoint
             var lineWidth: CGFloat
             var lineStyle: Text.LineStyle
-            var foregroundColor: Color?
+            var foregroundColor: Color? = nil
+            var dashes: [CGFloat]? = nil
+            var dashPhase: CGFloat = 0
 
             func dashPattern(lineWidth: CGFloat) -> [CGFloat] {
-                switch lineStyle.pattern {
+                if let dashes { return dashes.map { $0 * lineWidth / self.lineWidth } }
+                return switch lineStyle.pattern {
                 case .dot:
                     [lineWidth * 3, lineWidth * 3]
                 case .dash:
@@ -805,10 +808,20 @@ struct ResolvedTextSource {
             }
         }
 
+        // Keep line submission boundaries when resources are stored in flat arrays.
+        struct LineRanges {
+            var batches: Range<Int> = 0..<0
+            var vectorBatches: Range<Int> = 0..<0
+            var attachments: Range<Int> = 0..<0
+            var customAttachments: Range<Int> = 0..<0
+            var decorations: Range<Int> = 0..<0
+        }
+
         var source: ResolvedTextSource
         // Point-space placement inside the expanded text drawing frame.
         let origin: CGPoint
         var lineGlyphs: [LineGlyphs]
+        var lineRanges: [LineRanges]
         var batches: [Batch]
         var vectorBatches: [VectorBatch]
         var attachments: [Attachment]
@@ -821,6 +834,7 @@ struct ResolvedTextSource {
             source: ResolvedTextSource,
             origin: CGPoint,
             lineGlyphs: [LineGlyphs],
+            lineRanges: [LineRanges],
             batches: [Batch],
             vectorBatches: [VectorBatch],
             attachments: [Attachment],
@@ -832,6 +846,7 @@ struct ResolvedTextSource {
             self.source = source
             self.origin = origin
             self.lineGlyphs = lineGlyphs
+            self.lineRanges = lineRanges
             self.batches = batches
             self.vectorBatches = vectorBatches
             self.attachments = attachments
@@ -1216,13 +1231,15 @@ struct ResolvedTextSource {
         return makeDrawing(lineGlyphs: lineGlyphs, origin: origin)
     }
 
-    func makeDrawing(lineGlyphs: [LineGlyphs], origin: CGPoint = .zero, layout: Text.Layout? = nil) -> Drawing {
+    func makeDrawing(lineGlyphs: [LineGlyphs], origin: CGPoint = .zero, layout: Text.Layout? = nil,
+                     includesDecorations: Bool = true) -> Drawing {
         if let layout {
-            return Drawing(source: self, origin: origin, lineGlyphs: [], batches: [], vectorBatches: [],
+            return Drawing(source: self, origin: origin, lineGlyphs: [], lineRanges: [], batches: [], vectorBatches: [],
                 attachments: [], customAttachments: [], backgrounds: [], decorations: [], layout: layout)
         }
 
         struct Quad {
+            var lineIndex: Int
             var vertices: [Drawing.Vertex]
             var texture: Texture
             var colorGlyphs: Bool
@@ -1235,6 +1252,9 @@ struct ResolvedTextSource {
         var customAttachments: [Drawing.CustomAttachment] = []
         var backgrounds: [Drawing.Background] = []
         var decorations: [Drawing.Decoration] = []
+        var lineRanges = Array(repeating: Drawing.LineRanges(), count: lineGlyphs.count)
+        var currentLine = 0
+        var firstVectorBatch = 0
 
         func appendTexture(
             texture: Texture?,
@@ -1289,6 +1309,7 @@ struct ResolvedTextSource {
                 texcoord: (uvMaxX, uvMaxY)
             )
             quads.append(Quad(
+                lineIndex: currentLine,
                 vertices: [lb, lt, rb, rb, lt, rt],
                 texture: texture,
                 colorGlyphs: colorGlyphs,
@@ -1306,7 +1327,7 @@ struct ResolvedTextSource {
                 translationX: baseline.x,
                 y: baseline.y
             )
-            if let index = vectorBatches.firstIndex(where: {
+            if let index = vectorBatches[firstVectorBatch...].firstIndex(where: {
                 $0.foregroundColor == foregroundColor
             }) {
                 vectorBatches[index].path.addPath(
@@ -1323,82 +1344,91 @@ struct ResolvedTextSource {
             }
         }
 
-        Self.forEachGlyph(in: lineGlyphs) { glyph, baseline in
-            switch glyph.content {
-            case .unresolved:
-                let content: TypefaceGlyph?
-                if let index = glyph.glyphIndex {
-                    content = glyph.face.glyph(at: index)
-                } else {
-                    content = glyph.face.glyph(for: glyph.scalar)
-                }
-                switch content {
-                case let .texture(data, scale):
+        for (index, line) in lineGlyphs.enumerated() {
+            currentLine = index
+            firstVectorBatch = vectorBatches.count
+            let firstAttachment = attachments.count
+            let firstCustomAttachment = customAttachments.count
+            Self.forEachGlyph(in: [line]) { glyph, baseline in
+                switch glyph.content {
+                case .unresolved:
+                    let content: TypefaceGlyph?
+                    if let index = glyph.glyphIndex {
+                        content = glyph.face.glyph(at: index)
+                    } else {
+                        content = glyph.face.glyph(for: glyph.scalar)
+                    }
+                    switch content {
+                    case let .texture(data, scale):
+                        appendTexture(
+                            texture: data.texture,
+                            frame: data.frame,
+                            offset: data.offset,
+                            baseline: CGPoint(
+                                x: baseline.x + data.offset.x * scale,
+                                y: baseline.y
+                            ),
+                            foregroundColor: glyph.foregroundColor,
+                            scale: scale
+                        )
+                    case let .vector(data):
+                        appendVector(
+                            path: data.path,
+                            baseline: baseline,
+                            foregroundColor: glyph.foregroundColor
+                        )
+                    case nil:
+                        break
+                    }
+
+                case let .texture(data):
+                    guard glyph.scalar != UnicodeScalar(0) else { return }
                     appendTexture(
                         texture: data.texture,
                         frame: data.frame,
                         offset: data.offset,
-                        baseline: CGPoint(
-                            x: baseline.x + data.offset.x * scale,
-                            y: baseline.y
-                        ),
-                        foregroundColor: glyph.foregroundColor,
-                        scale: scale
+                        baseline: baseline,
+                        foregroundColor: glyph.foregroundColor
                     )
+
                 case let .vector(data):
                     appendVector(
                         path: data.path,
                         baseline: baseline,
                         foregroundColor: glyph.foregroundColor
                     )
-                case nil:
+
+                case let .attachment(data):
+                    guard glyph.scalar == UnicodeScalar(0),
+                          let texture = data.texture else {
+                        return
+                    }
+                    attachments.append(Drawing.Attachment(
+                        texture: texture,
+                        frame: CGRect(
+                            x: baseline.x,
+                            y: baseline.y - data.offset.y,
+                            width: glyph.advance.width,
+                            height: glyph.advance.height
+                        ),
+                        textureFrame: data.frame
+                    ))
+
+                case let .customAttachment(attachment):
+                    var bounds = Text.Layout.TypographicBounds()
+                    bounds.origin = CGPoint(x: baseline.x / scaleFactor, y: baseline.y / scaleFactor)
+                    bounds.width = attachment.length
+                    bounds.ascent = attachment.ascent
+                    bounds.descent = attachment.descent
+                    customAttachments.append(.init(attachment: attachment, bounds: bounds))
+
+                case .missing:
                     break
                 }
-
-            case let .texture(data):
-                guard glyph.scalar != UnicodeScalar(0) else { return }
-                appendTexture(
-                    texture: data.texture,
-                    frame: data.frame,
-                    offset: data.offset,
-                    baseline: baseline,
-                    foregroundColor: glyph.foregroundColor
-                )
-
-            case let .vector(data):
-                appendVector(
-                    path: data.path,
-                    baseline: baseline,
-                    foregroundColor: glyph.foregroundColor
-                )
-
-            case let .attachment(data):
-                guard glyph.scalar == UnicodeScalar(0),
-                      let texture = data.texture else {
-                    return
-                }
-                attachments.append(Drawing.Attachment(
-                    texture: texture,
-                    frame: CGRect(
-                        x: baseline.x,
-                        y: baseline.y - data.offset.y,
-                        width: glyph.advance.width,
-                        height: glyph.advance.height
-                    ),
-                    textureFrame: data.frame
-                ))
-
-            case let .customAttachment(attachment):
-                var bounds = Text.Layout.TypographicBounds()
-                bounds.origin = CGPoint(x: baseline.x / scaleFactor, y: baseline.y / scaleFactor)
-                bounds.width = attachment.length
-                bounds.ascent = attachment.ascent
-                bounds.descent = attachment.descent
-                customAttachments.append(.init(attachment: attachment, bounds: bounds))
-
-            case .missing:
-                break
             }
+            lineRanges[index].vectorBatches = firstVectorBatch..<vectorBatches.count
+            lineRanges[index].attachments = firstAttachment..<attachments.count
+            lineRanges[index].customAttachments = firstCustomAttachment..<customAttachments.count
         }
 
         func appendBackground(_ frame: CGRect, color: Color) {
@@ -1416,32 +1446,6 @@ struct ResolvedTextSource {
                 backgrounds.append(Drawing.Background(
                     frame: frame,
                     color: color
-                ))
-            }
-        }
-
-        func appendDecoration(
-            start: CGPoint,
-            end: CGPoint,
-            lineWidth: CGFloat,
-            lineStyle: Text.LineStyle,
-            foregroundColor: Color?
-        ) {
-            if let index = decorations.lastIndex(where: {
-                $0.lineStyle == lineStyle &&
-                    $0.foregroundColor == foregroundColor &&
-                    abs($0.lineWidth - lineWidth) < .ulpOfOne &&
-                    abs($0.end.x - start.x) < .ulpOfOne &&
-                    abs($0.end.y - start.y) < .ulpOfOne
-            }) {
-                decorations[index].end = end
-            } else {
-                decorations.append(Drawing.Decoration(
-                    start: start,
-                    end: end,
-                    lineWidth: lineWidth,
-                    lineStyle: lineStyle,
-                    foregroundColor: foregroundColor
                 ))
             }
         }
@@ -1468,47 +1472,40 @@ struct ResolvedTextSource {
                     )
                 }
 
-                if let metrics = glyph.face.decorationMetrics {
-                    let rawLogicalWidth =
-                        metrics.underlineThickness / scaleFactor
-                    let logicalWidth = ceil(
-                        rawLogicalWidth * displayScale
-                    ) / displayScale
-                    let lineWidth = logicalWidth * scaleFactor
-                    let endX = cellOriginX + cellWidth
-                    if let lineStyle = glyph.style.underlineStyle {
-                        let y = baseline.y -
-                            metrics.underlinePosition
-                        appendDecoration(
-                            start: CGPoint(x: cellOriginX, y: y),
-                            end: CGPoint(x: endX, y: y),
-                            lineWidth: lineWidth,
-                            lineStyle: lineStyle,
-                            foregroundColor:
-                                lineStyle.color ??
-                                glyph.foregroundColor
-                        )
-                    }
-                    if let lineStyle =
-                        glyph.style.strikethroughStyle,
-                       let xHeight = metrics.xHeight {
-                        let y = baseline.y - xHeight * 0.5
-                        appendDecoration(
-                            start: CGPoint(x: cellOriginX, y: y),
-                            end: CGPoint(x: endX, y: y),
-                            lineWidth: lineWidth,
-                            lineStyle: lineStyle,
-                            foregroundColor:
-                                lineStyle.color ??
-                                glyph.foregroundColor
-                        )
-                    }
-                }
                 cellOriginX += cellWidth
             }
         }
 
+        if includesDecorations {
+            for (index, line) in lineGlyphs.enumerated() {
+                let firstDecoration = decorations.count
+                let ranges = Self.drawingRunRanges(in: line.glyphs)
+                let segments = TextDecorationProducer.segments(glyphs: line.glyphs, runs: ranges,
+                    origin: .zero, glyphTransform: .identity,
+                    scaleFactor: scaleFactor, scale: 1, displayScale: displayScale,
+                    environment: fontResolutionContext?.environment ?? EnvironmentValues())
+                let lineOrigin = CGPoint(x: line.originX, y: line.baseline)
+                for (segment, style) in segments {
+                    let glyph = line.glyphs[ranges[segment.runs.lowerBound].lowerBound]
+                    for fragment in segment.fragments {
+                        // Line placement moves the path without shifting its local dash phase.
+                        decorations.append(Drawing.Decoration(
+                            start: fragment.start * scaleFactor + lineOrigin,
+                            end: fragment.end * scaleFactor + lineOrigin,
+                            lineWidth: segment.thickness * scaleFactor, lineStyle: style,
+                            foregroundColor: style.color ?? glyph.foregroundColor,
+                            dashes: segment.dashes.map { $0 * scaleFactor },
+                            dashPhase: fragment.start.x * scaleFactor))
+                    }
+                }
+                lineRanges[index].decorations = firstDecoration..<decorations.count
+            }
+        }
+
         quads.sort { lhs, rhs in
+            if lhs.lineIndex != rhs.lineIndex {
+                return lhs.lineIndex < rhs.lineIndex
+            }
             if lhs.colorGlyphs != rhs.colorGlyphs {
                 return !lhs.colorGlyphs
             }
@@ -1516,8 +1513,15 @@ struct ResolvedTextSource {
         }
 
         var batches: [Drawing.Batch] = []
+        var batchLine: Int?
+        var firstBatch = 0
         for quad in quads {
+            if batchLine != quad.lineIndex {
+                batchLine = quad.lineIndex
+                firstBatch = batches.count
+            }
             if let last = batches.indices.last,
+               last >= firstBatch,
                batches[last].texture === quad.texture,
                batches[last].colorGlyphs == quad.colorGlyphs,
                batches[last].foregroundColor == quad.foregroundColor {
@@ -1530,12 +1534,14 @@ struct ResolvedTextSource {
                     foregroundColor: quad.foregroundColor
                 ))
             }
+            lineRanges[quad.lineIndex].batches = firstBatch..<batches.count
         }
 
         return Drawing(
             source: self,
             origin: origin,
             lineGlyphs: lineGlyphs,
+            lineRanges: lineRanges,
             batches: batches,
             vectorBatches: vectorBatches,
             attachments: attachments,

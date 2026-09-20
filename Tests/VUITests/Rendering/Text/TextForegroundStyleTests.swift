@@ -1173,6 +1173,7 @@ final class TextForegroundStyleTests: XCTestCase {
 
     func testDecoratedTailTokensPreserveBitmapVectorRecording() throws {
         // ASSERTIONS textTailDecorationAttributes27Observed
+        // ASSERTIONS textTailDecorationSpans27Observed
         try withDevice { device in
             var root = URL(fileURLWithPath: #filePath)
             for _ in 0..<5 { root.deleteLastPathComponent() }
@@ -1243,6 +1244,19 @@ final class TextForegroundStyleTests: XCTestCase {
                             XCTAssertTrue(stride(from: 3, to: direct.count, by: 4).contains { direct[$0] > 0 }, label)
                             let hasDecoration = kind != "none" && (scope != "second" || kept == 11 || !firstToken)
                             XCTAssertEqual(direct != plain, hasDecoration, label)
+                            if kind != "none" && scope == "both" && separator == "\u{2028}" && width == 240 {
+                                let literal = run("AAA ", first: true) + run("BBB BBB…", first: false)
+                                let literalCapture = FittingTextCapture()
+                                let literalContent = custom
+                                    ? AnyView(literal.textRenderer(FittingTextRenderer(capture: literalCapture))) : AnyView(literal)
+                                let literalHost = ForegroundTextHost(literalContent
+                                    .environment(\.defaultFontRenderingMode, mode)
+                                    .frame(width: canvas.width, height: canvas.height, alignment: .topLeading),
+                                    scale: scale, size: canvas)
+                                let expected = try pixels(literalHost.list(), device: device,
+                                    resources: literalHost.rendererHost.sceneResources, scale: scale, canvasSize: canvas)
+                                XCTAssertTrue(direct == expected, "Whole insertion and literal token: \(label)")
+                            }
                             let replay = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
                                 scale: scale, replay: true, canvasSize: canvas)
                             XCTAssertTrue(replay == direct, "Retained recording: \(label)")
@@ -1278,6 +1292,433 @@ final class TextForegroundStyleTests: XCTestCase {
                                 XCTAssertTrue(capture.truncationStates.allSatisfy { $0 == (kept < 11) }, label)
                                 XCTAssertTrue(referenceCapture.truncationStates.allSatisfy { $0 == (kept < 11) }, label)
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testDecorationSelectionsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationBaselineOffset27Observed
+        // ASSERTIONS textDecorationBaselineFragments27Observed
+        // ASSERTIONS textDecorationOutlineProducer27Observed
+        // ASSERTIONS textDecorationGapEmission27Observed
+        // ASSERTIONS textDecorationGrouping27Observed
+        // ASSERTIONS textDecorationMetricQuantization27Observed
+        // ASSERTIONS textDecorationSelection27Observed
+        try checkDecorationRecordings()
+    }
+
+    func testSpacingDecorationsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationSpacingProducer27Observed
+        // ASSERTIONS textDecorationSpacingSelection27Observed
+        try checkDecorationRecordings(spacing: "tracking")
+        try checkDecorationRecordings(spacing: "kern")
+    }
+
+    func testExplicitDecorationColorsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationExplicitColor27Observed
+        // ASSERTIONS textDecorationColorSelection27Observed
+        try checkDecorationRecordings(spacing: "tracking", decorationColors: (.green, .green))
+        try checkDecorationRecordings(spacing: "tracking", decorationColors: (.green, .blue))
+        try checkDecorationRecordings(spacing: "tracking", decorationColors: (nil, .red))
+    }
+
+    func testPatternedDecorationsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationPatternProducer27Observed
+        // ASSERTIONS textDecorationPatternSelection27Observed
+        for pattern: Text.LineStyle.Pattern in [.dot, .dash, .dashDot, .dashDotDot] {
+            try checkDecorationRecordings(spacing: "tracking", decorationColors: (.green, .green), pattern: pattern)
+        }
+    }
+
+    func testDecorationDashPhaseScalesWithStoredGeometry() throws {
+        // ASSERTIONS textDecorationPatternProducer27Observed
+        try withDevice { device in
+            let resources = SceneResources()
+            let canvas = CGSize(width: 256, height: 100)
+            let bounds = CGRect(origin: .zero, size: canvas)
+            let start = CGPoint(x: 50.716796875, y: 32)
+            let end = CGPoint(x: 175, y: 32)
+            for dashes: [CGFloat] in [[6, 6], [20, 10], [20, 6, 6, 6], [20, 6, 6, 6, 6, 6]] {
+                func reference(phase: CGFloat) -> DisplayList {
+                    var list = DisplayList()
+                    list.appendTextItem(foreground: .color(.red), bounds: bounds) { context in
+                        var path = Path()
+                        path.move(to: start)
+                        path.addLine(to: end)
+                        context.stroke(path, with: .color(.red), style: StrokeStyle(lineWidth: 2,
+                            lineCap: .butt, dash: dashes, dashPhase: phase))
+                    }
+                    return list
+                }
+                for displayScale: CGFloat in [1, 2] {
+                    let expected = try pixels(reference(phase: 50.716796875), device: device, resources: resources,
+                        scale: displayScale, canvasSize: canvas)
+                    XCTAssertTrue(stride(from: 3, to: expected.count, by: 4).contains { expected[$0] > 0 })
+                    let unphased = try pixels(reference(phase: 0), device: device, resources: resources,
+                        scale: displayScale, canvasSize: canvas)
+                    XCTAssertFalse(unphased == expected, "Phase must change the visible pattern: \(dashes)")
+                    for sourceScale: CGFloat in [1, 2] {
+                        let decoration = ResolvedTextSource.Drawing.Decoration(start: start * sourceScale,
+                            end: end * sourceScale, lineWidth: 2 * sourceScale, lineStyle: .single,
+                            dashes: dashes.map { $0 * sourceScale }, dashPhase: 50.716796875 * sourceScale)
+                        var list = DisplayList()
+                        list.appendTextItem(foreground: .color(.red), bounds: bounds) { context in
+                            context.draw(GraphicsContext.TextDrawing(contents: .decoration(decoration),
+                                origin: .zero, scale: 1 / sourceScale, frame: .zero, snapOrigin: false,
+                                snappingOrigin: nil, clipBounds: false), shading: .color(.red))
+                        }
+                        for replay in [false, true] {
+                            let actual = try pixels(list, device: device, resources: resources,
+                                scale: displayScale, replay: replay, canvasSize: canvas)
+                            XCTAssertTrue(actual == expected,
+                                "dashes=\(dashes) display=\(displayScale) source=\(sourceScale) replay=\(replay)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testCombinedDecorationsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationCombinedAttributes27Observed
+        // ASSERTIONS textDecorationCombinedOrder27Observed
+        // ASSERTIONS textRunSliceZeroLengthDrawing27Observed
+        try checkDecorationRecordings(spacing: "tracking", combined: true)
+        try checkDecorationRecordings(spacing: "tracking", decorationColors: (.green, .green),
+                                      pattern: .dash, combined: true)
+    }
+
+    func testMultilineDecorationsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationMultilineOrder27Observed
+        // ASSERTIONS textDecorationMultilineSelection27Observed
+        for separator in ["\n", "\u{2028}"] {
+            try checkDecorationRecordings(spacing: "tracking", decorationColors: (.green, .green),
+                pattern: .dash, combined: true, multilineSeparator: separator)
+        }
+    }
+
+    func testAlignedDecorationsPreserveBitmapVectorDrawingAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationLinePlacement27Observed
+        // ASSERTIONS textDecorationLineSpacing27Observed
+        // ASSERTIONS textDecorationAlignedPhase27Observed
+        let placements: [(String, TextAlignment, CGFloat)] = [
+            ("\n", .center, 0), ("\n", .trailing, 6), ("\n", .center, -6),
+            ("\u{2028}", .trailing, 0), ("\u{2028}", .center, 6), ("\u{2028}", .trailing, -6)
+        ]
+        for (separator, alignment, spacing) in placements {
+            try checkDecorationRecordings(decorationColors: (.green, .green), pattern: .dash,
+                combined: true, multilineSeparator: separator, placement: (alignment, spacing))
+        }
+    }
+
+    func testTransformedDecorationsPreserveCanvasRendererAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationTransformMetrics27Observed
+        // ASSERTIONS textDecorationTransformPhase27Observed
+        // ASSERTIONS textDecorationTransformDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decode())
+    }
+
+    func testOrientedDecorationsPreserveDashInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationOrientedMetrics27Observed
+        // ASSERTIONS textDecorationOrientedPhase27Observed
+        // ASSERTIONS textDecorationOrientedDrawing27Observed
+        // ASSERTIONS textDecorationFractionalOrigin27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeOriented(), referenceInk: true)
+    }
+
+    func testTransformedOutlineGapsPreserveDashInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationGapTransformGeometry27Observed
+        // ASSERTIONS textDecorationGapTransformPhase27Observed
+        // ASSERTIONS textDecorationGapTransformDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeGapTransforms(), referenceInk: true)
+    }
+
+    func testMultilineOutlineGapsPreserveDashInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationGapMultilineGeometry27Observed
+        // ASSERTIONS textDecorationGapMultilineSelection27Observed
+        // ASSERTIONS textDecorationGapMultilineDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeMultilineGaps(), referenceInk: true)
+    }
+
+    func testSpacedOutlineGapsPreserveDashInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationGapSpacingGeometry27Observed
+        // ASSERTIONS textDecorationGapSpacingSelection27Observed
+        // ASSERTIONS textDecorationGapSpacingDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeSpacedGaps(), referenceInk: true)
+    }
+
+    func testDescenderGapsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderGeometry27Observed
+        // ASSERTIONS textDecorationDescenderSelection27Observed
+        // ASSERTIONS textDecorationDescenderDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenders(), referenceInk: true)
+    }
+
+    func testSignedDescenderOffsetsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderOffsetGeometry27Observed
+        // ASSERTIONS textDecorationDescenderOffsetDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderOffsets(), referenceInk: true)
+    }
+
+    func testScopedDescenderOffsetsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderScopeGeometry27Observed
+        // ASSERTIONS textDecorationDescenderScopeDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderScopes(), referenceInk: true)
+    }
+
+    func testScopedDescenderSelectionsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderScopedSelection27Observed
+        // ASSERTIONS textDecorationDescenderScopedSelectionDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderSelections(), referenceInk: true)
+    }
+
+    func testScopedDescenderOrientationsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderOrientedGeometry27Observed
+        // ASSERTIONS textDecorationDescenderOrientedDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderOrientations(), referenceInk: true)
+    }
+
+    private func checkTransformedDecorationRecordings(_ fixtures: [TextDecorationTransformFixture],
+                                                      referenceInk: Bool = false) throws {
+        try withDevice { device in
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+            let canvas = CGSize(width: 640, height: 320)
+            for fixture in fixtures {
+                let drawing = fixture.drawing
+                let parts = drawing.sample.split(separator: ":")
+                let shape = parts[11]
+                let offset = CGFloat(Double(parts[6])!)
+                let spacing = CGFloat(Double(parts[9])!)
+                let multiline = shape.hasPrefix("two-")
+                let separator = shape.hasPrefix("two-lf") ? "\n" : "\u{2028}"
+                let t = fixture.transform
+                let transform = CGAffineTransform(a: t[0], b: t[1], c: t[2], d: t[3], tx: t[4], ty: t[5])
+                func run(_ string: String, first: Bool, foreground: VUI.Color) -> Text {
+                    let size = CGFloat(Double(parts[first ? 3 : 4])!)
+                    var value = Text(verbatim: string).font(.file(file, size: size)).foregroundColor(foreground)
+                    if parts[7] == "both" || parts[7] == (first ? "first" : "second") {
+                        value = value.baselineOffset(offset)
+                    }
+                    value = value.underline(pattern: parts[14] == "solid" ? .solid : .dash, color: .green)
+                        .strikethrough(pattern: parts[18] == "solid" ? .solid : .dashDot, color: .blue)
+                    if spacing != 0 {
+                        value = parts[8] == "kern" ? value.kerning(spacing) : value.tracking(spacing)
+                    }
+                    return value
+                }
+                func makeText(foreground: VUI.Color) -> Text {
+                    if shape == "descenders" {
+                        return run("gypq ", first: true, foreground: foreground)
+                            + run("gj", first: false, foreground: foreground)
+                    }
+                    if multiline {
+                        return run("AAA ", first: true, foreground: foreground)
+                            + run("BBB BBB" + separator, first: false, foreground: foreground)
+                            + run("AAA ", first: true, foreground: foreground)
+                            + run("BBB", first: false, foreground: foreground)
+                    }
+                    return run("AAA ", first: true, foreground: foreground)
+                        + run("BBB BBB", first: false, foreground: foreground)
+                }
+                for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+                    for custom in [false, true] {
+                        let capture = FittingTextCapture()
+                        let label = "\(shape) \(parts[14])/\(parts[18]) offset=\(parts[7]):\(offset) \(parts[8])=\(spacing) \(drawing.draw) custom=\(custom) scale=\(drawing.scale) \(mode) \(t)"
+                        func makeHost(reference: Bool = false, decorationsOnly: Bool = false) -> ForegroundTextHost {
+                            let text = makeText(foreground: decorationsOnly ? .clear : .red)
+                            let content: AnyView
+                            if custom {
+                                if reference {
+                                    content = AnyView(text.textRenderer(DecorationReferenceRenderer(
+                                        owner: drawing.custom, transform: transform)))
+                                } else {
+                                    content = AnyView(text.textRenderer(FittingTextRenderer(capture: capture,
+                                        drawMode: drawing.draw, transform: transform)))
+                                }
+                            } else {
+                                content = AnyView(Canvas { context, _ in
+                                    context.concatenate(transform)
+                                    if reference {
+                                        context.fill(decorationReferencePath(drawing.ordinary), with: .color(.green))
+                                        return
+                                    }
+                                    let resolved = context.resolve(text)
+                                    XCTAssertEqual(resolved.measure(in: CGSize(width: drawing.width, height: drawing.height)),
+                                        CGSize(width: drawing.ordinary.metrics[0], height: drawing.ordinary.metrics[1]), label)
+                                    context.draw(resolved, in: CGRect(x: 0, y: 0, width: drawing.width, height: drawing.height))
+                                })
+                            }
+                            return ForegroundTextHost(content
+                                .multilineTextAlignment(fixture.alignment == "center" ? .center : .leading)
+                                .lineSpacing(fixture.lineSpacing).lineLimit(multiline ? 2 : 1).minimumScaleFactor(1)
+                                .environment(\.defaultFontRenderingMode, mode)
+                                .frame(width: custom ? drawing.width : canvas.width,
+                                       height: custom ? drawing.height : canvas.height, alignment: .topLeading)
+                                .frame(width: canvas.width, height: canvas.height, alignment: .topLeading),
+                                scale: drawing.scale, size: canvas)
+                        }
+                        let host = makeHost()
+                        let list = try host.list()
+                        let direct = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
+                            scale: drawing.scale, canvasSize: canvas)
+                        XCTAssertTrue(stride(from: 3, to: direct.count, by: 4).contains { direct[$0] > 0 }, label)
+                        let green = stride(from: 0, to: direct.count, by: 4).contains {
+                            direct[$0 + 3] > 8 && direct[$0 + 1] > direct[$0] && direct[$0 + 1] > direct[$0 + 2]
+                        }
+                        XCTAssertEqual(green, !custom || drawing.draw != "empty", label)
+                        if referenceInk {
+                            // Half-covered decoration edges blend with red glyphs, so a
+                            // green-channel mask cannot isolate them in the composite.
+                            // Keep the glyph layout with transparent foreground for this
+                            // exact geometry comparison; recordings below retain red ink.
+                            let decorationHost = makeHost(decorationsOnly: true)
+                            let decorationPixels = try pixels(decorationHost.list(), device: device,
+                                resources: decorationHost.rendererHost.sceneResources,
+                                scale: drawing.scale, canvasSize: canvas)
+                            let referenceHost = makeHost(reference: true)
+                            let expected = try pixels(referenceHost.list(), device: device,
+                                resources: referenceHost.rendererHost.sceneResources,
+                                scale: drawing.scale, canvasSize: canvas)
+                            func greenMask(_ pixels: [UInt8]) -> [Bool] {
+                                stride(from: 0, to: pixels.count, by: 4).map {
+                                    pixels[$0 + 3] > 8 && pixels[$0 + 1] > pixels[$0]
+                                        && pixels[$0 + 1] > pixels[$0 + 2]
+                                }
+                            }
+                            XCTAssertTrue(greenMask(decorationPixels) == greenMask(expected), "Decoration rectangles: \(label)")
+                        }
+                        let retained = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
+                            scale: drawing.scale, replay: true, canvasSize: canvas)
+                        XCTAssertTrue(retained == direct, "Retained: \(label)")
+                        let freshHost = makeHost()
+                        let fresh = try pixels(freshHost.list(), device: device, resources: freshHost.rendererHost.sceneResources,
+                            scale: drawing.scale, canvasSize: canvas)
+                        XCTAssertTrue(fresh == direct, "Fresh: \(label)")
+                        if custom { XCTAssertGreaterThan(capture.draws, 0, label) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func checkDecorationRecordings(spacing: String? = nil,
+                                          decorationColors: (VUI.Color?, VUI.Color?)? = nil,
+                                          pattern: Text.LineStyle.Pattern = .solid,
+                                          combined: Bool = false,
+                                          multilineSeparator: String? = nil,
+                                          placement: (alignment: TextAlignment, lineSpacing: CGFloat)? = nil) throws {
+        try withDevice { device in
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+            let canvas = CGSize(width: 256, height: multilineSeparator == nil ? 100 : 160)
+            func textValue(_ list: DisplayList) -> DisplayList.Content.TextValue? {
+                for item in list.items {
+                    switch item.value {
+                    case let .content(content):
+                        if case let .text(text) = content.value { return text }
+                        if case let .flattened(child, _, _) = content.value, let value = textValue(child) { return value }
+                    case let .effect(_, child): if let value = textValue(child) { return value }
+                    default: break
+                    }
+                }
+                return nil
+            }
+            let cases: [(Bool, CGFloat)] = placement != nil ? [(false, 0)] : combined ? [(false, 3)] : spacing == nil
+                ? [(false, -3), (false, 0), (false, 3), (true, -3), (true, 0), (true, 3)]
+                : [(false, 3), (true, 3)]
+            let selections = placement != nil ? [(false, "line"), (true, "line"), (true, "prefix"), (true, "empty")]
+                : ["line", "runs", "whole", "slices", "prefix", "middle", "empty"].map { (true, $0) }
+                    + (spacing == nil ? [] : [(false, "line")])
+            for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+                for scale: CGFloat in [1, 2] {
+                    for (strike, offset) in cases {
+                        for (custom, selection) in selections {
+                            let label = "\(selection) custom=\(custom) spacing=\(spacing ?? "none") colors=\(String(describing: decorationColors)) pattern=\(pattern) combined=\(combined) strike=\(strike) offset=\(offset) \(mode) scale=\(scale) placement=\(String(describing: placement))"
+                            func run(_ string: String, size: CGFloat) -> Text {
+                                var value = Text(verbatim: string).font(.file(file, size: size))
+                                    .foregroundColor(spacing != nil && size == 31 ? .blue : .red).baselineOffset(offset)
+                                if spacing == "tracking" { value = value.tracking(2) }
+                                if spacing == "kern" { value = value.kerning(2) }
+                                let color = size == 23 ? decorationColors?.0 : decorationColors?.1
+                                if combined {
+                                    return value.underline(pattern: pattern, color: color)
+                                        .strikethrough(pattern: pattern == .solid ? .solid : .dashDot, color: decorationColors == nil ? nil : .blue)
+                                }
+                                return strike ? value.strikethrough(pattern: pattern, color: color)
+                                    : value.underline(pattern: pattern, color: color)
+                            }
+                            let text: Text
+                            if let separator = multilineSeparator {
+                                text = run("AAA ", size: 23) + run("BBB BBB" + separator, size: 31)
+                                    + run("AAA ", size: 23) + run(placement == nil ? "BBB BBB BBB BBB" : "BBB", size: 31)
+                            } else {
+                                text = run("AAA ", size: 23) + run("BBB BBB\u{2028}", size: 31)
+                                    + Text(verbatim: "CCC").font(.file(file, size: 17))
+                            }
+                            let capture = FittingTextCapture()
+                            let content = custom
+                                ? AnyView(text.textRenderer(FittingTextRenderer(capture: capture, drawMode: selection))) : AnyView(text)
+                            let host = ForegroundTextHost(content
+                                .multilineTextAlignment(placement?.alignment ?? .leading)
+                                .lineSpacing(placement?.lineSpacing ?? 0)
+                                .lineLimit(multilineSeparator == nil ? 1 : 2).minimumScaleFactor(1).environment(\.defaultFontRenderingMode, mode)
+                                .frame(width: spacing == nil || multilineSeparator != nil ? 240 : 190,
+                                       height: multilineSeparator == nil ? 60 : 120, alignment: .topLeading)
+                                .frame(width: canvas.width, height: canvas.height, alignment: .topLeading), scale: scale, size: canvas)
+                            let list = try host.list()
+                            let direct = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
+                                scale: scale, canvasSize: canvas)
+                            XCTAssertTrue(stride(from: 3, to: direct.count, by: 4).contains { direct[$0] > 0 }, label)
+                            if selection != "empty", let colors = decorationColors,
+                               colors.0 == .green || colors.1 == .green {
+                                XCTAssertTrue(stride(from: 0, to: direct.count, by: 4).contains {
+                                    direct[$0 + 3] > 100 && direct[$0 + 1] > direct[$0] && direct[$0 + 1] > direct[$0 + 2]
+                                }, "Explicit green decoration: \(label)")
+                            }
+                            let retained = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
+                                scale: scale, replay: true, canvasSize: canvas)
+                            XCTAssertTrue(retained == direct, "Retained: \(label)")
+                            let value = try XCTUnwrap(textValue(list))
+                            let owner = custom ? try XCTUnwrap(capture.owner) : value.view.text
+                            let source = try XCTUnwrap(owner.resolvedText)
+                            let glyphs = try XCTUnwrap(source.unwrappedGlyphLines().first).glyphs
+                            for (index, points): (Int, CGFloat) in [(0, 23), (4, 31)] {
+                                let raw = try XCTUnwrap(glyphs[index].face.decorationMetrics)
+                                    .scaled(by: 1 / source.scaleFactor)
+                                XCTAssertEqual(raw.underlineThickness, points * 100 / 2048, accuracy: 1e-12, label)
+                                XCTAssertEqual(raw.underlinePosition, points * -150 / 2048, accuracy: 1e-12, label)
+                                XCTAssertEqual(try XCTUnwrap(raw.defaultAscent), points * 1900 / 2048, accuracy: 1e-12, label)
+                                XCTAssertEqual(try XCTUnwrap(raw.defaultDescent), points * 500 / 2048, accuracy: 1e-12, label)
+                            }
+                            var environment = EnvironmentValues()
+                            environment.displayScale = scale; environment.defaultFontRenderingMode = mode
+                            let contents = host.graph.data.withCurrent {
+                                owner.makeRBDisplayList(for: value.size, renderer: value.view.renderer,
+                                    deviceScale: scale, environment: environment,
+                                    inputs: .init(sceneResources: host.rendererHost.sceneResources,
+                                        viewport: CGRect(origin: .zero, size: canvas), contentScaleFactor: scale,
+                                        resourceCommandQueue: nil))
+                            }
+                            var freshList = DisplayList()
+                            freshList.appendTextItem(foreground: .color(.black), bounds: CGRect(origin: .zero, size: canvas)) {
+                                contents.draw(in: $0)
+                            }
+                            let fresh = try pixels(freshList, device: device, resources: host.rendererHost.sceneResources,
+                                scale: scale, canvasSize: canvas)
+                            var local = DisplayList()
+                            local.appendTextItem(value.view, size: value.size, foreground: .color(.black),
+                                bounds: value.view.text.frame(in: value.size, renderer: value.view.renderer),
+                                seed: .init(), environment: environment)
+                            let expected = try pixels(local, device: device, resources: host.rendererHost.sceneResources,
+                                scale: scale, canvasSize: canvas)
+                            XCTAssertTrue(fresh == expected, "Fresh: \(label)")
+                            if custom { XCTAssertGreaterThan(capture.draws, 0) }
                         }
                     }
                 }
@@ -1783,8 +2224,64 @@ private final class FittingTextCapture {
     var lineWidths: [[CGFloat]] = []
 }
 
+private func decorationReferencePath(_ owner: TextDecorationMultilineFixture.Owner,
+                                     origins: [CGPoint]? = nil) -> Path {
+    var path = Path()
+    for (index, line) in owner.lines.enumerated() {
+        var strokes: [TextDecorationMultilineFixture.Stroke]
+        if let local = line.strokes {
+            strokes = local.map { stroke in
+                var value = stroke
+                value.points = [stroke.points[0] + line.origin[0], stroke.points[1] + line.origin[1],
+                                stroke.points[2] + line.origin[0], stroke.points[3] + line.origin[1]]
+                return value
+            }
+        } else {
+            let dx = origins![index].x - line.origin[0], dy = origins![index].y - line.origin[1]
+            strokes = line.collections!.flatMap { $0 }.flatMap { segment in
+                segment.fragments.map { points in
+                    .init(width: segment.width,
+                        points: [points[0] + dx, points[1] + dy, points[2] + dx, points[3] + dy],
+                        color: segment.color, dashes: segment.dashes, phase: points[0] + dx)
+                }
+            }
+        }
+        for stroke in strokes where stroke.color[1] > max(stroke.color[0], stroke.color[2]) {
+            if stroke.dashes.isEmpty {
+                path.addRect(CGRect(x: stroke.points[0], y: stroke.points[1] - stroke.width / 2,
+                                    width: stroke.points[2] - stroke.points[0], height: stroke.width))
+                continue
+            }
+            precondition(stroke.dashes.count == 2)
+            let start = stroke.points[0], end = stroke.points[2]
+            let period = stroke.dashes[0] + stroke.dashes[1], base = start - stroke.phase
+            let first = Int(floor((start - base) / period)), last = Int(ceil((end - base) / period))
+            for cycle in first..<last {
+                let lower = max(start, base + CGFloat(cycle) * period)
+                let upper = min(end, base + CGFloat(cycle) * period + stroke.dashes[0])
+                if lower < upper {
+                    path.addRect(CGRect(x: lower, y: stroke.points[1] - stroke.width / 2,
+                                        width: upper - lower, height: stroke.width))
+                }
+            }
+        }
+    }
+    return path
+}
+
+private struct DecorationReferenceRenderer: TextRenderer {
+    let owner: TextDecorationMultilineFixture.Owner
+    let transform: CGAffineTransform
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        context.concatenate(transform)
+        context.fill(decorationReferencePath(owner, origins: layout.map { $0.origin }), with: .color(.green))
+    }
+}
+
 private struct FittingTextRenderer: TextRenderer {
     let capture: FittingTextCapture
+    var drawMode: String = "line"
+    var transform: CGAffineTransform? = nil
     func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize {
         capture.owner = Mirror(reflecting: text).children.first?.value as? ResolvedStyledText.TextLayoutManager
         return text.sizeThatFits(proposal)
@@ -1793,7 +2290,21 @@ private struct FittingTextRenderer: TextRenderer {
         capture.draws += 1
         capture.truncationStates.append(layout.isTruncated)
         capture.lineWidths.append(layout.map { $0.typographicBounds.width })
-        for line in layout { context.draw(line) }
+        if let transform { context.concatenate(transform) }
+        for line in layout {
+            if drawMode == "line" { context.draw(line) }
+            else {
+                for run in line {
+                    if drawMode == "runs" { context.draw(run) }
+                    else {
+                        let lower = ["whole", "prefix"].contains(drawMode) ? 0 : min(1, run.endIndex)
+                        let upper = drawMode == "empty" ? lower : ["prefix", "middle"].contains(drawMode)
+                            ? max(lower, run.endIndex - 1) : run.endIndex
+                        context.draw(run[lower..<upper])
+                    }
+                }
+            }
+        }
     }
 }
 

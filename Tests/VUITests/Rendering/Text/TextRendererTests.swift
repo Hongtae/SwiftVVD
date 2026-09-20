@@ -48,6 +48,9 @@ final class TextRendererTests: XCTestCase {
         XCTAssertEqual(MemoryLayout<Text.Layout.CharacterIndex>.size, 8)
         XCTAssertEqual(MemoryLayout<Text.Layout.TypographicBounds>.size, 48)
         XCTAssertEqual(MemoryLayout<Text.Layout.DrawingOptions>.size, 4)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Decorations>.size, 8)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Decorations.Segment>.size, 56)
+        XCTAssertEqual(MemoryLayout<Text.Layout.Decorations.Fragment>.size, 32)
         XCTAssertEqual(Text.Layout.DrawingOptions.disablesSubpixelQuantization.rawValue, 1)
 
         let resolved = ResolvedTextSource(runs: [], scaleFactor: 1)

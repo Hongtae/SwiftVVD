@@ -229,10 +229,29 @@ final class GraphicsContextRenderPassTests: XCTestCase {
         ]
         context.encodeDrawCommand(renderPass: copy, shader: .vertexColor, stencil: .ignore,
                                   vertices: vertices, texture: nil, blendState: .opaque)
+        // Keep the fixed winding while each stroke selects its surviving face.
+        let orientations: [(CGAffineTransform, Bool, CullMode)] = [
+            (.init(scaleX: -1, y: 1), false, .front),
+            (.init(scaleX: 1, y: -1), false, .front),
+            (.init(a: 0, b: 1, c: -1, d: 0, tx: 8, ty: 0), false, .back),
+            (.init(a: 1, b: 0.5, c: 0, d: 1, tx: 0, ty: 0), false, .back),
+            (.identity, true, .front),
+            (.init(scaleX: -1, y: 1), true, .back),
+            (.identity, false, .back)
+        ]
+        for (transform, reflectView, _) in orientations {
+            var oriented = context
+            oriented.transform = transform
+            if reflectView {
+                oriented.viewTransform = oriented.viewTransform.concatenating(.init(scaleX: -1, y: 1))
+            }
+            XCTAssertTrue(oriented.encodeStencilPathStrokeCommand(
+                renderPass: pass, path: path, style: StrokeStyle(lineWidth: 1)))
+        }
         XCTAssertEqual(encoder.frontFacings, [.clockwise])
         XCTAssertEqual(encoder.stencilReferences, [0])
-        XCTAssertEqual(encoder.cullModes, [.back, .none, .none, .none, .none])
-        XCTAssertEqual(encoder.drawStates.count, 5)
+        XCTAssertEqual(encoder.cullModes, [.back, .none, .none, .none, .none] + orientations.map { $0.2 })
+        XCTAssertEqual(encoder.drawStates.count, 5 + orientations.count)
         for state in encoder.drawStates {
             XCTAssertEqual(state.0, .clockwise)
             XCTAssertEqual(state.1, 0)

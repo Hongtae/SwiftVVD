@@ -42,6 +42,8 @@ protocol Typeface {
     func glyph(at index: UInt32) -> TypefaceGlyph?
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics?
     func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics?
+    func glyphBounds(at index: UInt32) -> CGRect?
+    func glyphOutline(at index: UInt32) -> Path?
     func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint
     func hasGlyph(for: UnicodeScalar) -> Bool
     func shape(
@@ -72,6 +74,8 @@ extension Typeface {
     var isEmojiFallback: Bool { false }
     var hasColorGlyphs: Bool { false }
     func glyph(at index: UInt32) -> TypefaceGlyph? { nil }
+    func glyphBounds(at index: UInt32) -> CGRect? { nil }
+    func glyphOutline(at index: UInt32) -> Path? { nil }
 
     func shape(
         _ text: String,
@@ -185,9 +189,47 @@ struct ResolvedFontMetrics: Equatable, Sendable {
 
 private protocol VVDFontBackedTypeface: Typeface {
     var font: VVD.Font { get }
+    var outlineSource: (font: VVD.Font, scale: CGFloat) { get }
 }
 
 extension VVDFontBackedTypeface {
+    private var outlineTransform: CGAffineTransform? {
+        let (font, scale) = outlineSource
+        guard let metrics = font.designMetrics else { return nil }
+        let unit = font.pointSize * scale / CGFloat(metrics.unitsPerEM)
+        let dpi = font.dpi
+        return CGAffineTransform(scaleX: unit * CGFloat(dpi.x) / 72,
+                                 y: unit * CGFloat(dpi.y) / 72)
+    }
+
+    func glyphBounds(at index: UInt32) -> CGRect? {
+        guard let transform = outlineTransform else { return nil }
+        return outlineSource.font.designGlyphBounds(at: index)?.applying(transform)
+    }
+
+    func glyphOutline(at index: UInt32) -> Path? {
+        guard let transform = outlineTransform else { return nil }
+        var path = Path()
+        var hasContour = false
+        let supported = outlineSource.font.decomposeDesignGlyphOutline(at: index) { command in
+            switch command {
+            case let .move(point):
+                if hasContour { path.closeSubpath() }
+                path.move(to: point.applying(transform))
+                hasContour = true
+            case let .line(point): path.addLine(to: point.applying(transform))
+            case let .quadCurve(point, control):
+                path.addQuadCurve(to: point.applying(transform), control: control.applying(transform))
+            case let .curve(point, a, b):
+                path.addCurve(to: point.applying(transform), control1: a.applying(transform),
+                              control2: b.applying(transform))
+            }
+        }
+        guard supported else { return nil }
+        if hasContour { path.closeSubpath() }
+        return path
+    }
+
     var hasColorGlyphs: Bool { font.hasColor }
     var lineHeight: CGFloat { font.height }
     var ascender: CGFloat { font.ascender }
@@ -367,6 +409,10 @@ struct TextureTypeface: VVDFontBackedTypeface {
 
     var font: VVD.Font { textureFont }
 
+    var outlineSource: (font: VVD.Font, scale: CGFloat) {
+        (layoutMetrics?.font ?? font, layoutMetrics?.renderScale ?? 1)
+    }
+
     var designMetrics: TypefaceDesignMetrics? {
         (layoutMetrics?.font ?? font).designMetrics
     }
@@ -537,6 +583,8 @@ final class DeferredGlyphTypeface: Typeface {
     func glyph(at index: UInt32) -> TypefaceGlyph? { glyphs?.glyph(at: index) }
     func glyphMetrics(for scalar: UnicodeScalar) -> TypefaceGlyphMetrics? { metrics.glyphMetrics(for: scalar) }
     func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? { metrics.glyphMetrics(at: index) }
+    func glyphBounds(at index: UInt32) -> CGRect? { metrics.glyphBounds(at: index) }
+    func glyphOutline(at index: UInt32) -> Path? { metrics.glyphOutline(at: index) }
     func hasGlyph(for scalar: UnicodeScalar) -> Bool { metrics.hasGlyph(for: scalar) }
     func kernAdvance(left: UnicodeScalar, right: UnicodeScalar) -> CGPoint {
         metrics.kernAdvance(left: left, right: right)
@@ -568,6 +616,10 @@ final class VectorTypeface: VVDFontBackedTypeface {
     let outlineThickness: CGFloat
     private let layoutMetrics: ScaleInvariantTypefaceMetrics?
     let decorationMetrics: TypefaceDecorationMetrics?
+
+    var outlineSource: (font: VVD.Font, scale: CGFloat) {
+        (layoutMetrics?.font ?? font, layoutMetrics?.renderScale ?? 1)
+    }
 
     struct GlyphData: @unchecked Sendable {
         let metrics: VVD.Font.GlyphMetrics

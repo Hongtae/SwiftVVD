@@ -202,7 +202,8 @@ extension Text {
 
         func resolveRun(_ string: String, context: any TextResolutionContext,
                         properties: inout ResolvedProperties, text: inout String, options: ResolveOptions = .includeTransitions) -> ResolvedTextSource.Run? {
-            let attributes = nsAttributes(in: context.environment, properties: &properties, options: options)
+            let attributes = nsAttributes(in: context.environment, properties: &properties,
+                options: options, includeDefaultAttributes: context.includeDefaultAttributes)
             guard !string.isEmpty else { return nil }
             let faces = typefaces(attributes: attributes, context: context)
             guard !faces.isEmpty else { return nil }
@@ -216,7 +217,16 @@ extension Text {
         }
 
         func typefaces(attributes: _ResolvedTextRunAttributes, context: any TextResolutionContext) -> [Typeface] {
-            guard let font = attributes.font else { return [] }
+            let font: Font
+            if let attributeFont = attributes.font {
+                font = attributeFont
+            } else if let key = fontKey(in: context.environment) {
+                // Glyph resources are still needed when exported text omits its
+                // inherited font. Keep that resource out of the run attributes.
+                font = Font(provider: FontBox(Font.PlatformFontProvider(font: Font.FontCache.shared[key])))
+            } else {
+                return []
+            }
             // The shared resource already consumed inherited modifiers. Keep the
             // original environment and its dependency tracker while creating glyph resources.
             return font.typefaceCascade(in: context.environment, forContext: context.sceneResources,

@@ -251,12 +251,16 @@ final class RecordedTextColorTests: XCTestCase {
         drawing!.backgrounds = [.init(frame: CGRect(x: 0, y: 0, width: 60, height: 30), color: .yellow)]
         drawing!.decorations = [.init(start: .zero, end: CGPoint(x: 60, y: 0), lineWidth: 1,
             lineStyle: .single, foregroundColor: .blue)]
+        XCTAssertEqual(drawing!.lineRanges.count, 1)
+        drawing!.lineRanges[0].customAttachments = drawing!.customAttachments.indices
+        drawing!.lineRanges[0].decorations = drawing!.decorations.indices
         let record = context.recordingContext(size: recordingSize)
         record.draw(drawing!, in: frame, shading: .foreground, snapOrigin: false)
         let saved = record.recording!.moveContents()
         XCTAssertEqual(counter.count, 1)
         XCTAssertEqual(saved.items.count, 4)
-        guard case let .text(first, _) = saved.items.first?.contents,
+        guard saved.items.count == 4,
+              case let .text(first, _) = saved.items.first?.contents,
               case .background = first.contents,
               case .fill = saved.items[2].contents,
               case let .text(last, _) = saved.items.last?.contents,

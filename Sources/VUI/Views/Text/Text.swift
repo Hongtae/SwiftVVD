@@ -65,11 +65,14 @@ protocol TextResolutionContext {
     var environment: EnvironmentValues { get set }
     var sceneResources: SceneResources { get }
     var contentScaleFactor: CGFloat { get }
+    var includeDefaultAttributes: Bool { get }
 
     func resolveTextAttachment(_ image: Image) -> ImageDrawing?
 }
 
 extension TextResolutionContext {
+    var includeDefaultAttributes: Bool { true }
+
     /// Resolves the independent missing-attribute font in logical points.
     func defaultTextLineMetrics() -> FontLineMetrics? {
         var environment = EnvironmentValues()
@@ -100,6 +103,7 @@ extension GraphicsContext: TextResolutionContext {
 struct GraphTextResolutionContext: TextResolutionContext {
     var environment: EnvironmentValues
     let sceneResources: SceneResources
+    var includeDefaultAttributes: Bool = true
 
     func resolveTextAttachment(_ image: Image) -> ImageDrawing? {
         var resolved: ImageDrawing
@@ -1125,7 +1129,8 @@ class AttachmentTextStorage: AnyTextStorage {
         guard let image = imageContext.resolveTextAttachment(self.image) else {
             return nil
         }
-        let attributes = style.nsAttributes(in: context.environment, properties: &properties, options: options)
+        let attributes = style.nsAttributes(in: context.environment, properties: &properties,
+            options: options, includeDefaultAttributes: context.includeDefaultAttributes)
         let typefaces = style.typefaces(attributes: attributes, context: context)
         properties.registerCustomAttachment(at: text.utf16.count)
         text += "\u{fffc}"
@@ -1642,7 +1647,8 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         }
         resolved.resolvedProperties = properties
         resolved.fontResolutionContext = GraphTextResolutionContext(
-            environment: context.environment.untrackedCopy(), sceneResources: context.sceneResources)
+            environment: context.environment.untrackedCopy(), sceneResources: context.sceneResources,
+            includeDefaultAttributes: context.includeDefaultAttributes)
         return resolved
     }
 
@@ -2587,10 +2593,24 @@ extension Text: View {
         )
         if let representable = inputs.requestedTextRepresentation,
            representable.shouldMakeRepresentation(inputs: inputs) {
-            _ = representable.representationOptions(inputs: inputs)
+            let options = representable.representationOptions(inputs: inputs)
+            // Keep inherited drawing styles out of representations that need
+            // to resolve their own state-dependent font and foreground.
+            let representationText = graph.makeStatefulRule(ResolvedTextFilter(
+                _text: view._attribute,
+                _environment: environmentAttr,
+                helper: ResolvedTextHelper(
+                    _time: timeAttr,
+                    _referenceDate: inputs[ReferenceDateInput.self],
+                    includeDefaultAttributes: options.contains(.includeStyledText),
+                    allowsKeyColors: false,
+                    archiveOptions: archiveOptions,
+                    allowsAccessibilityAttributes: options.contains(.includeAccessibility)
+                )
+            ))
             let context: Attribute<PlatformTextRepresentableContext> =
                 graph.makeRule(MakeRepresentableContext(
-                    _text: resolvedStyledTextAttr,
+                    _text: representationText,
                     _referenceDate: inputs[ReferenceDateInput.self],
                     _environment: environmentAttr
                 ))

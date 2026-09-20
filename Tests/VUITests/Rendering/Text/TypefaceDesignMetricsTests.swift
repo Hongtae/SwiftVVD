@@ -4,6 +4,33 @@ import VVD
 @testable import VUI
 
 struct TypefaceDesignMetricsTests {
+    // ASSERTIONS textDecorationOutlineProducer27Observed
+    @Test
+    func testOutlineCoordinatesUseLogicalFaceThroughDeferredAndFallbackOwners() throws {
+        let logical = try makeFont(), raster = try makeFont()
+        logical.setPointSize(23, dpi: (72, 72))
+        raster.setPointSize(47, dpi: (144, 144))
+        #expect(raster.setVariationCoordinates([0x7767_6874: 900]))
+        let base = VectorTypeface(font: raster, layoutFont: logical, renderScale: 2)
+        var artworkLoads = 0
+        let deferred = DeferredGlyphTypeface(metrics: base) { artworkLoads += 1; return nil }
+        let faces: [Typeface] = [base, deferred, TerminalFallbackTypeface(deferred),
+                                ShapingFeatureTypeface(base, features: VUI.Font.MonospacedDigitModifier.shapingFeatures)]
+        for face in faces {
+            #expect(face.glyphBounds(at: 37) == CGRect(x: 0.6513671875, y: 0,
+                width: 28.7724609375, height: 32.703125))
+            let path = try #require(face.glyphOutline(at: 37))
+            var first: CGPoint?
+            path.forEach { if case let .move(point) = $0, first == nil { first = point } }
+            #expect(first == CGPoint(x: 15.90234375, y: 29.8056640625))
+            #expect(face.glyphBounds(at: 4) == .zero)
+            #expect(face.glyphOutline(at: 4)?.isEmpty == true)
+        }
+        #expect(artworkLoads == 0)
+        #expect(logical.pointSize == 23 && raster.pointSize == 47)
+        #expect(raster.variationCoordinates[0x7767_6874] == 900)
+    }
+
     private func resource(_ name: String) -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

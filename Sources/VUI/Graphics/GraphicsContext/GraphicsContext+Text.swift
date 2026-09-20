@@ -97,48 +97,69 @@ extension GraphicsContext {
         }
 
         func drawComponent(_ contents: TextDrawing.Contents, shading: Shading) {
+            // Decoration paths retain fractional line placement through rasterization.
+            let componentSnapOrigin: Bool
+            if case .decoration = contents { componentSnapOrigin = false }
+            else { componentSnapOrigin = snapOrigin }
             self.draw(TextDrawing(contents: contents, origin: drawing.origin,
                 scale: 1 / drawing.source.scaleFactor, frame: rect,
-                snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
+                snapOrigin: componentSnapOrigin, snappingOrigin: snappingOrigin,
                 clipBounds: clipBounds), shading: shading)
         }
         for background in drawing.backgrounds {
             drawComponent(.background(background.frame), shading: .color(background.color))
         }
-        for batch in drawing.vectorBatches {
-            drawComponent(.vectorGlyphs(batch.path), shading: runShading(batch.foregroundColor))
-        }
-        var foregroundColors: [Color?] = []
-        for batch in drawing.batches where !batch.colorGlyphs {
-            if !foregroundColors.contains(batch.foregroundColor) {
-                foregroundColors.append(batch.foregroundColor)
+        for line in drawing.lineRanges {
+            for batch in drawing.vectorBatches[line.vectorBatches] {
+                drawComponent(.vectorGlyphs(batch.path), shading: runShading(batch.foregroundColor))
             }
-        }
-        for color in foregroundColors {
-            let batches = drawing.batches.filter { !$0.colorGlyphs && $0.foregroundColor == color }
-            drawComponent(.glyphs(batches), shading: runShading(color))
-        }
-        let colorGlyphs = drawing.batches.filter { $0.colorGlyphs }
-        if !colorGlyphs.isEmpty || !drawing.attachments.isEmpty {
-            drawComponent(.images(colorGlyphs, drawing.attachments), shading: .color(.white))
-        }
-        if !drawing.customAttachments.isEmpty,
-           let placement = textDrawingPlacement(frame: rect, origin: drawing.origin,
-               snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
-               clipBounds: clipBounds && recording == nil) {
-            // Recorded commands can later be replayed into a different viewport.
-            for item in drawing.customAttachments {
-                var context = self
-                if clipBounds { context.clip(to: Path(placement.rect)) }
-                var bounds = item.bounds
-                bounds.origin += placement.rect.origin + drawing.origin
-                item.attachment.draw(with: bounds, in: &context)
+            var foregroundColors: [Color?] = []
+            for batch in drawing.batches[line.batches] where !batch.colorGlyphs {
+                if !foregroundColors.contains(batch.foregroundColor) {
+                    foregroundColors.append(batch.foregroundColor)
+                }
             }
-        }
-        for decoration in drawing.decorations {
-            drawComponent(.decoration(decoration), shading: runShading(decoration.foregroundColor))
+            for color in foregroundColors {
+                let batches = drawing.batches[line.batches].filter { !$0.colorGlyphs && $0.foregroundColor == color }
+                drawComponent(.glyphs(batches), shading: runShading(color))
+            }
+            let colorGlyphs = drawing.batches[line.batches].filter { $0.colorGlyphs }
+            if !colorGlyphs.isEmpty || !line.attachments.isEmpty {
+                drawComponent(.images(colorGlyphs, Array(drawing.attachments[line.attachments])), shading: .color(.white))
+            }
+            if !line.customAttachments.isEmpty,
+               let placement = textDrawingPlacement(frame: rect, origin: drawing.origin,
+                   snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
+                   clipBounds: clipBounds && recording == nil) {
+                // Recorded commands can later be replayed into a different viewport.
+                for item in drawing.customAttachments[line.customAttachments] {
+                    var context = self
+                    if clipBounds { context.clip(to: Path(placement.rect)) }
+                    var bounds = item.bounds
+                    bounds.origin += placement.rect.origin + drawing.origin
+                    item.attachment.draw(with: bounds, in: &context)
+                }
+            }
+            for decoration in drawing.decorations[line.decorations] {
+                drawComponent(.decoration(decoration), shading: runShading(decoration.foregroundColor))
+            }
         }
         self.recordContentBounds(rect)
+    }
+
+    func draw(_ decorations: Text.Layout.Decorations, shading: Shading) {
+        for segment in decorations.segments {
+            let color = segment.color
+            let foreground = color.linearRed == -1 && color.linearGreen == -1 && color.linearBlue == -1
+            for fragment in segment.fragments {
+                let decoration = ResolvedTextSource.Drawing.Decoration(start: fragment.start, end: fragment.end,
+                    lineWidth: segment.thickness, lineStyle: .single, dashes: segment.dashes,
+                    dashPhase: fragment.start.x)
+                draw(TextDrawing(contents: .decoration(decoration), origin: .zero, scale: 1,
+                    frame: .zero, snapOrigin: false, snappingOrigin: nil, clipBounds: false),
+                    shading: foreground ? shading : .color(Color(color)))
+            }
+        }
     }
 
     // A component owns only the geometry/resources needed for its draw command.
@@ -307,7 +328,7 @@ extension GraphicsContext {
             path.addLine(to: decoration.end.applying(transform))
             let width = decoration.lineWidth * scale
             stroke(path, with: shading, style: StrokeStyle(lineWidth: width, lineCap: .butt,
-                dash: decoration.dashPattern(lineWidth: width)))
+                dash: decoration.dashPattern(lineWidth: width), dashPhase: decoration.dashPhase * scale))
         }
         recordContentBounds(rect)
     }

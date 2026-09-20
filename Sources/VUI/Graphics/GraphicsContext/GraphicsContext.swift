@@ -145,6 +145,14 @@ public struct GraphicsContext {
         }
     }
 
+    var userToDeviceScale: CGFloat {
+        let value = transform
+        let x = value.a * value.a + value.b * value.b
+        let y = value.c * value.c + value.d * value.d
+        let scale = x == 1 && y == 1 ? 1 : (sqrt(x) + sqrt(y)) * 0.5
+        return scale * contentScaleFactor
+    }
+
     final class ContentBoundsState {
         var bounds: CGRect = .null
     }

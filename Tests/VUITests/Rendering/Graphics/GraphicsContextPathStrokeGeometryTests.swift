@@ -33,7 +33,10 @@ final class GraphicsContextPathStrokeGeometryTests: XCTestCase {
         func setVertexBuffers(_ buffers: [GPUBuffer], offsets: [Int], index: Int) {}
         func setDepthStencilState(_ state: DepthStencilState?) {}
         func setDepthClipMode(_ mode: DepthClipMode) {}
-        func setCullMode(_ mode: CullMode) { XCTAssertEqual(mode, .back) }
+        func setCullMode(_ mode: CullMode) {
+            // Render-pass tests cover the selected face; this capture compares vertex bytes.
+            XCTAssertTrue(mode == .back || mode == .front)
+        }
         func setFrontFacing(_ winding: Winding) { XCTAssertEqual(winding, .clockwise) }
         func setBlendColor(red: Float, green: Float, blue: Float, alpha: Float) {}
         func setStencilReferenceValue(_ value: UInt32) { XCTAssertEqual(value, 0) }

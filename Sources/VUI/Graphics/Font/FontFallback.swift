@@ -33,6 +33,9 @@ final class TerminalFallbackTypeface: Typeface {
         base.glyphMetrics(at: index)
     }
 
+    func glyphBounds(at index: UInt32) -> CGRect? { base.glyphBounds(at: index) }
+    func glyphOutline(at index: UInt32) -> Path? { base.glyphOutline(at: index) }
+
     func kernAdvance(
         left: UnicodeScalar,
         right: UnicodeScalar
@@ -113,6 +116,9 @@ final class ShapingFeatureTypeface: Typeface {
     func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
         base.glyphMetrics(at: index)
     }
+
+    func glyphBounds(at index: UInt32) -> CGRect? { base.glyphBounds(at: index) }
+    func glyphOutline(at index: UInt32) -> Path? { base.glyphOutline(at: index) }
 
     func kernAdvance(
         left: UnicodeScalar,
@@ -228,6 +234,9 @@ final class DeferredTypeface: Typeface {
     func glyphMetrics(at index: UInt32) -> TypefaceGlyphMetrics? {
         resolved.glyphMetrics(at: index)
     }
+
+    func glyphBounds(at index: UInt32) -> CGRect? { resolved.glyphBounds(at: index) }
+    func glyphOutline(at index: UInt32) -> Path? { resolved.glyphOutline(at: index) }
 
     func kernAdvance(
         left: UnicodeScalar,

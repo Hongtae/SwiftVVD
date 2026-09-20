@@ -454,7 +454,8 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
         let referenceDate = _referenceDate.value.flatMap { $0 } ?? Date()
         let context = GraphTextResolutionContext(
             environment: trackedEnvironment,
-            sceneResources: rendererHost.sceneResources
+            sceneResources: rendererHost.sceneResources,
+            includeDefaultAttributes: includeDefaultAttributes
         )
         var options: Text.ResolveOptions = .includeTransitions
         if allowsKeyColors { options.insert(.allowsKeyColors) }
