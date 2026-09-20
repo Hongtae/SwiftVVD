@@ -559,9 +559,11 @@ private func _finiteBoundsAreSeparated(_ a: AABB, _ b: AABB) -> Bool {
     !a.isNull && !b.isNull && !a.intersects(b)
 }
 
-struct _SweepTransformedSupport {
+struct _SweepTransformedSupport: _SupportMap {
     let base: any _SupportMap
     let transform: Transform
+
+    var isSupportMappingValid: Bool { base.isSupportMappingValid }
 
     var center: Vector3 { base.center.applying(transform) }
     var bounds: AABB { base.bounds.applying(transform) }
@@ -634,8 +636,11 @@ func _gjkClosestPoints(
 
         let supportGap = Vector3.dot(vertex.point, searchDirection) +
             distanceSquared
+        // supportGap is a squared-distance quantity. Scaling by the actual
+        // search length avoids terminating with sqrt(tolerance) position error
+        // when a motion sweep approaches a small positive separation.
         if supportGap <= tolerance *
-            Swift.max(searchDirection.length, Scalar(1)) {
+            Swift.max(searchDirection.length, tolerance) {
             break
         }
 

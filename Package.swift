@@ -153,10 +153,17 @@ let package = Package(
             dependencies: [
                 .target(name: "VVD"),
                 .target(name: "VUI"),
+                .target(name: "VGame"),
             ]),
         .testTarget(
             name: "VVDTests",
             dependencies: [
+                .target(name: "VVD"),
+            ]),
+        .testTarget(
+            name: "VGameTests",
+            dependencies: [
+                .target(name: "VGame"),
                 .target(name: "VVD"),
             ]),
         .testTarget(
@@ -167,6 +174,13 @@ let package = Package(
             ],
             resources: [
                 .process("Resources")
+            ]),
+        .testTarget(
+            name: "VEditorTests",
+            dependencies: [
+                .target(name: "VEditor"),
+                .target(name: "VGame"),
+                .target(name: "VVD"),
             ]),
         .executableTarget(
             name: "TestApp1",

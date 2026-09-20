@@ -31,6 +31,10 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
     /// Continuous low-velocity duration required before an island sleeps.
     public var sleepDelay: Scalar
 
+    /// Scene policy; bodies still opt in individually through their CCD flag.
+    public var ccdConfiguration: CCDConfiguration
+    public private(set) var ccdStatistics = CCDStatistics()
+
     /// Number of contact features retained by the most recent valid step.
     public var cachedContactCount: Int { contactCache.count }
 
@@ -46,7 +50,9 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                 isSleepingEnabled: Bool = true,
                 linearSleepThreshold: Scalar = 0.05,
                 angularSleepThreshold: Scalar = 0.05,
-                sleepDelay: Scalar = 0.5) {
+                sleepDelay: Scalar = 0.5,
+                ccdConfiguration: CCDConfiguration = .default) {
+        self.ccdConfiguration = ccdConfiguration
         self.velocityIterations = velocityIterations
         self.positionCorrectionFactor = positionCorrectionFactor
         self.penetrationSlop = penetrationSlop
@@ -66,66 +72,93 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
     }
 
     public func solve(_ context: RigidBodySolverContext) {
+        guard context.timeStep.isFinite, context.timeStep > 0 else { return }
+        ccdStatistics = CCDStatistics()
+        let count = Swift.max(ccdConfiguration.substepCount, 1)
+        let timeStep = context.timeStep / Scalar(count)
+        guard timeStep > 0 else { return }
+        for index in 0..<count {
+            let contacts = index == 0 ? context.contacts : currentContacts(context)
+            let substep = RigidBodySolverContext(timeStep: timeStep,
+                gravity: context.gravity, bodies: context.bodies, contacts: contacts,
+                constraints: context.constraints, collisionSpace: context.collisionSpace)
+            solveSubstep(substep)
+        }
+        // External forces act for the entire caller-supplied interval.
+        for body in context.bodies { body.removeAllForces() }
+    }
+
+    private func solveSubstep(_ context: RigidBodySolverContext) {
         let timeStep = context.timeStep
-        guard timeStep.isFinite, timeStep > .zero else { return }
-
-        let bodyIdentifiers = Set(context.bodies.map(ObjectIdentifier.init))
-        let islands = makeDynamicIslands(context,
-                                         bodyIdentifiers: bodyIdentifiers,
+        let identifiers = Set(context.bodies.map(ObjectIdentifier.init))
+        let islands = makeDynamicIslands(context, bodyIdentifiers: identifiers,
                                          timeStep: timeStep)
-        var activeBodyIdentifiers = activateIslands(islands)
-        integrateForces(context.bodies,
-                        gravity: context.gravity,
-                        timeStep: timeStep,
-                        activeBodyIdentifiers: activeBodyIdentifiers)
-        let ccdStep = makeCCDStep(
-            context,
-            islands: islands,
-            activeBodyIdentifiers: &activeBodyIdentifiers,
-            timeStep: timeStep)
-
-        var contactConstraints = makeContactConstraints(
-            context.contacts,
-            bodyIdentifiers: bodyIdentifiers,
-            activeBodyIdentifiers: activeBodyIdentifiers,
-            timeStep: timeStep)
-        contactConstraints.append(contentsOf: makeCCDConstraints(
-            ccdStep.impacts,
-            timeStep: timeStep))
-        var jointRows = makeJointRows(
-            context.constraints,
-            bodyIdentifiers: bodyIdentifiers,
-            activeBodyIdentifiers: activeBodyIdentifiers,
-            timeStep: timeStep)
-
+        var active = activateIslands(islands)
+        integrateForces(context.bodies, gravity: context.gravity,
+                        timeStep: timeStep, activeBodyIdentifiers: active)
+        var contacts = makeContactConstraints(context.contacts,
+            bodyIdentifiers: identifiers, activeBodyIdentifiers: active, timeStep: timeStep)
+        var joints = makeJointRows(context.constraints, bodyIdentifiers: identifiers,
+                                   activeBodyIdentifiers: active, timeStep: timeStep)
         if isWarmStartingEnabled {
-            for constraint in contactConstraints {
-                constraint.warmStart()
+            for contact in contacts { contact.warmStart() }
+        }
+        solveRows(contacts: &contacts, joints: &joints)
+        updateContactCache(contacts, contacts: context.contacts, bodyIdentifiers: identifiers)
+
+        // All trajectories below use velocities AFTER contacts and joints solve.
+        var frozen: Set<ObjectIdentifier> = []
+        var participants: Set<ObjectIdentifier> = []
+        let hasCCD = context.collisionSpace != nil && context.bodies.contains {
+            $0.isEnabled && $0.motionType == .dynamic && $0.isContinuousCollisionDetectionEnabled
+        }
+        let mode: CCDConfiguration.Mode = hasCCD ? ccdConfiguration.mode : .discrete
+        if mode == .speculative || mode == .hybrid {
+            let impacts = discoverImpacts(context, islands: islands, active: &active,
+                                          frozen: frozen, participants: participants, timeStep: timeStep)
+            trackParticipants(impacts, into: &participants)
+            let predictive = makeCCDConstraints(impacts, speculative: true, timeStep: timeStep)
+            ccdStatistics.predictiveContactCount += predictive.count
+            // Rebuild ordinary rows to include newly awakened islands without
+            // applying cached impulses a second time.
+            if !predictive.isEmpty {
+                contacts = makeContactConstraints(currentContacts(context),
+                    bodyIdentifiers: identifiers, activeBodyIdentifiers: active,
+                    timeStep: timeStep, usesCache: false)
+                contacts.append(contentsOf: predictive)
+                joints = makeJointRows(context.constraints, bodyIdentifiers: identifiers,
+                                      activeBodyIdentifiers: active, timeStep: timeStep)
+                solveRows(contacts: &contacts, joints: &joints)
+            }
+            for impact in impacts where impact.hit == nil {
+                freeze(impact, into: &frozen)
             }
         }
+        if mode == .discrete || mode == .speculative || context.collisionSpace == nil {
+            integrateTransforms(context.bodies, timeStep: timeStep,
+                                activeBodyIdentifiers: active, frozen: frozen)
+        } else {
+            advanceContinuously(context, islands: islands, active: &active,
+                                frozen: &frozen, participants: &participants, resolvesImpacts: mode == .timeOfImpact)
+        }
+        updateSleeping(islands, activeBodyIdentifiers: active, timeStep: timeStep)
+    }
 
+    private func solveRows(contacts: inout [_SequentialContactConstraint],
+                           joints: inout [_SequentialJointRow]) {
         for _ in 0..<Swift.max(velocityIterations, 0) {
-            for index in jointRows.indices {
-                jointRows[index].solve()
-            }
-            for index in contactConstraints.indices {
-                contactConstraints[index].solve()
-            }
+            for index in joints.indices { joints[index].solve() }
+            for index in contacts.indices { contacts[index].solve() }
         }
+    }
 
-        updateContactCache(contactConstraints,
-                           contacts: context.contacts,
-                           bodyIdentifiers: bodyIdentifiers)
-
-        integrateTransforms(context.bodies,
-                            timeStep: timeStep,
-                            activeBodyIdentifiers: activeBodyIdentifiers,
-                            ccdAdvances: ccdStep.advances)
-        updateSleeping(islands,
-                       activeBodyIdentifiers: activeBodyIdentifiers,
-                       timeStep: timeStep)
-        for body in context.bodies {
-            body.removeAllForces()
+    private func currentContacts(_ context: RigidBodySolverContext) -> [RigidBodyContact] {
+        guard let space = context.collisionSpace else { return context.contacts }
+        let owners = Dictionary(uniqueKeysWithValues: context.bodies.map { ($0.collider, $0) })
+        return space.collisionPairs().compactMap { pair in
+            guard let a = owners[pair.colliderA], let b = owners[pair.colliderB],
+                  let manifold = pair.worldContactManifold, !manifold.isEmpty else { return nil }
+            return RigidBodyContact(bodyA: a, bodyB: b, manifold: manifold)
         }
     }
 
@@ -156,259 +189,236 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
         }
     }
 
-    private func makeCCDStep(
+    private func discoverImpacts(
         _ context: RigidBodySolverContext,
         islands: [_SequentialBodyIsland],
-        activeBodyIdentifiers: inout Set<ObjectIdentifier>,
+        active: inout Set<ObjectIdentifier>,
+        frozen: Set<ObjectIdentifier>,
+        participants: Set<ObjectIdentifier>,
         timeStep: Scalar
-    ) -> _SequentialCCDStep {
-        guard let collisionSpace = context.collisionSpace else {
-            return _SequentialCCDStep()
-        }
-
-        var impacts = ccdImpacts(
-            bodies: context.bodies,
-            discreteContacts: context.contacts,
-            collisionSpace: collisionSpace,
-            activeBodyIdentifiers: activeBodyIdentifiers,
-            timeStep: timeStep)
-
+    ) -> [_SequentialCCDImpact] {
         while true {
-            let sleepingBodies = Set(impacts.flatMap { impact in
-                [impact.bodyA, impact.bodyB].compactMap { body -> ObjectIdentifier? in
-                    guard let body,
-                          body.motionType == .dynamic,
-                          body.isSleeping
-                    else { return nil }
-                    return ObjectIdentifier(body)
-                }
-            })
-            guard sleepingBodies.isEmpty == false else { break }
-
+            let impacts = ccdImpacts(context, active: active, frozen: frozen, participants: participants, timeStep: timeStep)
+            let sleeping = Set(impacts.flatMap { [$0.bodyA, $0.bodyB].compactMap { body in
+                body?.isSleeping == true ? body.map(ObjectIdentifier.init) : nil
+            } })
             var newlyActive: Set<ObjectIdentifier> = []
             for island in islands where island.bodies.contains(where: {
-                sleepingBodies.contains(ObjectIdentifier($0))
+                sleeping.contains(ObjectIdentifier($0))
             }) {
                 for body in island.bodies {
-                    let identifier = ObjectIdentifier(body)
-                    if activeBodyIdentifiers.insert(identifier).inserted {
-                        newlyActive.insert(identifier)
+                    if active.insert(ObjectIdentifier(body)).inserted {
+                        newlyActive.insert(ObjectIdentifier(body))
                     }
                     if body.isSleeping { body.wakeUp() }
                 }
             }
-            guard newlyActive.isEmpty == false else { break }
-
-            integrateForces(context.bodies,
-                            gravity: context.gravity,
-                            timeStep: timeStep,
-                            activeBodyIdentifiers: newlyActive)
-            impacts = ccdImpacts(
-                bodies: context.bodies,
-                discreteContacts: context.contacts,
-                collisionSpace: collisionSpace,
-                activeBodyIdentifiers: activeBodyIdentifiers,
-                timeStep: timeStep)
+            guard !newlyActive.isEmpty else { return impacts }
+            // A newly awakened body receives this substep's force exactly once.
+            integrateForces(context.bodies, gravity: context.gravity,
+                timeStep: context.timeStep, activeBodyIdentifiers: newlyActive)
+            let identifiers = Set(context.bodies.map(ObjectIdentifier.init))
+            var contacts = makeContactConstraints(currentContacts(context),
+                bodyIdentifiers: identifiers, activeBodyIdentifiers: active,
+                timeStep: context.timeStep, usesCache: false)
+            var joints = makeJointRows(context.constraints, bodyIdentifiers: identifiers,
+                activeBodyIdentifiers: active, timeStep: context.timeStep)
+            solveRows(contacts: &contacts, joints: &joints)
         }
-
-        var advances: [ObjectIdentifier: _SequentialCCDAdvance] = [:]
-        for impact in impacts {
-            updateCCDAdvance(body: impact.bodyA,
-                             fraction: impact.fraction,
-                             advances: &advances)
-            if let bodyB = impact.bodyB,
-               bodyB.motionType == .dynamic {
-                updateCCDAdvance(body: bodyB,
-                                 fraction: impact.fraction,
-                                 advances: &advances)
-            }
-        }
-        return _SequentialCCDStep(impacts: impacts, advances: advances)
     }
 
-    private func ccdImpacts(
-        bodies: [RigidBody],
-        discreteContacts: [RigidBodyContact],
-        collisionSpace: CollisionSpace,
-        activeBodyIdentifiers: Set<ObjectIdentifier>,
-        timeStep: Scalar
-    ) -> [_SequentialCCDImpact] {
-        let bodyByCollider = Dictionary(uniqueKeysWithValues: bodies.map {
-            ($0.collider, $0)
-        })
-        let movingBodies = bodies.filter { body in
-            body.isEnabled && body.linearVelocity.isFiniteVector &&
-                body.linearVelocity != .zero &&
-                (body.motionType == .kinematic ||
-                 activeBodyIdentifiers.contains(ObjectIdentifier(body)))
+    private func ccdImpacts(_ context: RigidBodySolverContext,
+                            active: Set<ObjectIdentifier>,
+                            frozen: Set<ObjectIdentifier>,
+                            participants: Set<ObjectIdentifier>,
+                            timeStep: Scalar) -> [_SequentialCCDImpact] {
+        guard let space = context.collisionSpace else { return [] }
+        let colliders = space.colliders
+        let configuredTolerance = ccdConfiguration.distanceTolerance
+        let allowedTravel = configuredTolerance.isFinite && configuredTolerance > 0
+            ? Swift.max(configuredTolerance, Scalar.ulpOfOne * 64) : Scalar(1.0e-6)
+        let owners = Dictionary(uniqueKeysWithValues: context.bodies.map { ($0.collider, $0) })
+        let motions = colliders.map { collider -> CollisionMotion in
+            guard let body = owners[collider], body.isEnabled,
+                  body.motionType != .static, !body.isSleeping,
+                  !frozen.contains(ObjectIdentifier(body)),
+                  body.motionType == .kinematic || active.contains(ObjectIdentifier(body)),
+                  body.linearVelocity.isFiniteVector, body.angularVelocity.isFiniteVector
+            else { return CollisionMotion(start: collider.transform) }
+            var angular = ccdConfiguration.motion == .translationAndRotation
+                ? body.angularVelocity * timeStep : .zero
+            if let sphere = collider.primitive as? Sphere,
+               sphere.center == body.massProperties.centerOfMass { angular = .zero }
+            return CollisionMotion(start: body.transform,
+                translation: body.linearVelocity * timeStep, angularDisplacement: angular,
+                localPivot: body.massProperties.centerOfMass)
         }
-        var selected: [_SequentialCCDImpact] = []
-
-        for bodyA in bodies {
-            let identifierA = ObjectIdentifier(bodyA)
-            guard bodyA.isEnabled,
+        let bounds = colliders.indices.map { motions[$0].sweptBounds(of: colliders[$0].primitive) }
+        let bvh = BVH(bounds.enumerated().map { BVH.Element(bounds: $0.element, primitiveIndex: $0.offset) })
+        let unbounded = bounds.indices.filter { bounds[$0].isNull }
+        var visited: Set<_SequentialCCDPair> = []
+        var impacts: [_SequentialCCDImpact] = []
+        for indexA in colliders.indices {
+            guard let bodyA = owners[colliders[indexA]], bodyA.isEnabled,
                   bodyA.motionType == .dynamic,
-                  bodyA.isContinuousCollisionDetectionEnabled
+                  bodyA.isContinuousCollisionDetectionEnabled || participants.contains(ObjectIdentifier(bodyA))
             else { continue }
-
-            let isActive = activeBodyIdentifiers.contains(identifierA)
-            let velocityA = isActive ? bodyA.linearVelocity : .zero
-            guard velocityA.isFiniteVector else { continue }
-
-            var closest: _SequentialCCDImpact?
-            let translation = velocityA * timeStep
-            if isActive,
-               translation.isFiniteVector,
-               translation.lengthSquared > Scalar.ulpOfOne {
-                for hit in collisionSpace.sweepAll(bodyA.collider,
-                                                   translation: translation) {
-                    guard bodyByCollider[hit.collider] == nil,
-                          Vector3.dot(velocityA, hit.normal) > .zero
-                    else { continue }
-                    closest = _SequentialCCDImpact(
-                        bodyA: bodyA,
-                        bodyB: nil,
-                        colliderB: hit.collider,
-                        fraction: hit.fraction,
-                        pointOnA: hit.pointOnMoving,
-                        pointOnB: hit.pointOnCollider,
-                        normal: hit.normal)
-                    break
+            let candidates = bounds[indexA].isNull ? Array(colliders.indices)
+                : (bvh.primitiveIndices(overlapping: bounds[indexA]) + unbounded).sorted()
+            for indexB in candidates where indexA != indexB {
+                let colliderB = colliders[indexB]
+                guard colliders[indexA].canCollide(with: colliderB),
+                      visited.insert(_SequentialCCDPair(indexA, indexB)).inserted else { continue }
+                let moveA = motions[indexA], moveB = motions[indexB]
+                if moveA.translation == moveB.translation &&
+                    moveA.angularDisplacement == .zero && moveB.angularDisplacement == .zero { continue }
+                ccdStatistics.sweepCount += 1
+                var result = space.algorithms.sweepMotion(colliders[indexA].primitive,
+                    motionA: moveA, colliderB.primitive, motionB: moveB,
+                    distanceTolerance: ccdConfiguration.distanceTolerance,
+                    maximumIterations: ccdConfiguration.maximumSweepIterations)
+                if case .hit(let hit) = result, hit.fraction == 0 {
+                    let centerA = moveA.localPivot.applying(moveA.start)
+                    let centerB = moveB.localPivot.applying(moveB.start)
+                    let velocityA = moveA.translation + Vector3.cross(moveA.angularDisplacement, hit.pointOnA - centerA)
+                    let velocityB = moveB.translation + Vector3.cross(moveB.angularDisplacement, hit.pointOnB - centerB)
+                    if Vector3.dot(velocityA - velocityB, hit.normal) <= allowedTravel {
+                        if moveA.angularDisplacement == .zero && moveB.angularDisplacement == .zero {
+                            // Remaining normal travel is within the configured
+                            // spatial error, or the pair is separating. Avoid
+                            // repeated zero-time impulses for solver roundoff.
+                            continue
+                        }
+                        // A rotating, initially touching pair could meet again. Without
+                        // a positive separating interval, conservatively stop its motion.
+                        result = .inconclusive(safeFraction: 0)
+                    }
                 }
-            }
-
-            // Only a moving partner can hit a stationary or sleeping CCD body.
-            let inverseTransform = bodyA.transform.inverted()
-            let candidates = velocityA == .zero ? movingBodies : bodies
-            for bodyB in candidates where bodyB !== bodyA {
-                if discreteContacts.contains(where: {
-                    ($0.bodyA === bodyA && $0.bodyB === bodyB) ||
-                        ($0.bodyA === bodyB && $0.bodyB === bodyA)
-                }) {
-                    continue
-                }
-                guard bodyA.collider.canCollide(with: bodyB.collider) else {
-                    continue
-                }
-                let velocityB = bodyB.motionType == .static || bodyB.isSleeping
-                    ? Vector3.zero : bodyB.linearVelocity
-                guard velocityB.isFiniteVector else { continue }
-                let relativeVelocity = velocityA - velocityB
-                let relativeTranslation = (relativeVelocity * timeStep)
-                    .applying(inverseTransform.orientation)
-                guard relativeTranslation.isFiniteVector,
-                      relativeTranslation.lengthSquared > Scalar.ulpOfOne,
-                      let impact = collisionSpace.algorithms.timeOfImpact(
-                        bodyA.collider.primitive,
-                        bodyB.collider.primitive,
-                        frame: bodyB.transform * inverseTransform,
-                        translation: relativeTranslation),
-                      impact.isValid
-                else { continue }
-
-                let normal = impact.normal
-                    .applying(bodyA.transform.orientation)
-                    .normalized()
-                guard Vector3.dot(relativeVelocity, normal) > .zero else {
-                    continue
-                }
-                let commonTranslation = velocityB *
-                    (timeStep * impact.fraction)
-                let candidate = _SequentialCCDImpact(
-                    bodyA: bodyA,
-                    bodyB: bodyB,
-                    colliderB: bodyB.collider,
-                    fraction: impact.fraction,
-                    pointOnA: impact.pointOnA.applying(bodyA.transform) +
-                        commonTranslation,
-                    pointOnB: impact.pointOnB.applying(bodyA.transform) +
-                        commonTranslation,
-                    normal: normal)
-                if closest == nil || candidate.fraction < closest!.fraction {
-                    closest = candidate
-                }
-            }
-
-            if let closest,
-               selected.contains(where: { $0.matchesPair(of: closest) }) == false {
-                selected.append(closest)
+                if result == .miss { continue }
+                if case .unsupported = result { ccdStatistics.unsupportedPairCount += 1 }
+                if case .inconclusive = result { ccdStatistics.inconclusiveSweepCount += 1 }
+                let hit: MotionSweepHit?
+                if case .hit(let witness) = result { hit = witness } else { hit = nil }
+                impacts.append(_SequentialCCDImpact(bodyA: bodyA, bodyB: owners[colliderB],
+                    fraction: result.safeFraction, hit: hit, motionA: moveA, motionB: moveB))
             }
         }
-        return selected
+        // Stable registration order breaks equal-TOI ties; hash iteration is never used.
+        return impacts.enumerated().sorted {
+            if $0.element.fraction == $1.element.fraction { return $0.offset < $1.offset }
+            return $0.element.fraction < $1.element.fraction
+        }.map(\.element)
     }
 
-    private func updateCCDAdvance(
-        body: RigidBody,
-        fraction: Scalar,
-        advances: inout [ObjectIdentifier: _SequentialCCDAdvance]
-    ) {
-        let identifier = ObjectIdentifier(body)
-        guard advances[identifier].map({ fraction < $0.fraction }) ?? true else {
-            return
+    private func advanceContinuously(_ context: RigidBodySolverContext,
+                                      islands: [_SequentialBodyIsland],
+                                      active: inout Set<ObjectIdentifier>,
+                                      frozen: inout Set<ObjectIdentifier>,
+                                      participants: inout Set<ObjectIdentifier>,
+                                      resolvesImpacts: Bool) {
+        var remaining = context.timeStep
+        var iterations = 0
+        let identifiers = Set(context.bodies.map(ObjectIdentifier.init))
+        while remaining > 0 {
+            let impacts = discoverImpacts(context, islands: islands, active: &active,
+                                          frozen: frozen, participants: participants, timeStep: remaining)
+            guard let first = impacts.first else {
+                integrateTransforms(context.bodies, timeStep: remaining,
+                                    activeBodyIdentifiers: active, frozen: frozen)
+                break
+            }
+            let elapsed = remaining * first.fraction
+            integrateTransforms(context.bodies, timeStep: elapsed,
+                                activeBodyIdentifiers: active, frozen: frozen)
+            remaining -= elapsed
+            let simultaneous = impacts.filter { $0.fraction == first.fraction }
+            trackParticipants(simultaneous, into: &participants)
+            let canResolve = resolvesImpacts && iterations < Swift.max(ccdConfiguration.maximumImpactIterations, 0)
+            if resolvesImpacts && !canResolve { ccdStatistics.reachedImpactLimit = true }
+            let requiresClamping = simultaneous.contains { impact in
+                impact.hit == nil || frozen.contains(ObjectIdentifier(impact.bodyA)) ||
+                    (impact.bodyB.map { frozen.contains(ObjectIdentifier($0)) } ?? false)
+            }
+            // A previously stopped pose no longer follows its retained velocity.
+            // Propagate clamping instead of solving against that stale motion.
+            if !canResolve || requiresClamping {
+                for impact in simultaneous { freeze(impact, into: &frozen) }
+            } else {
+                var contacts = makeContactConstraints(currentContacts(context),
+                    bodyIdentifiers: identifiers, activeBodyIdentifiers: active,
+                    timeStep: context.timeStep, usesCache: false)
+                // The explicit witness is needed even when the distance tolerance
+                // leaves a small positive gap and no discrete manifold exists yet.
+                contacts.append(contentsOf: makeCCDConstraints(simultaneous,
+                    speculative: false, timeStep: context.timeStep))
+                var joints = makeJointRows(context.constraints, bodyIdentifiers: identifiers,
+                    activeBodyIdentifiers: active, timeStep: context.timeStep)
+                solveRows(contacts: &contacts, joints: &joints)
+                ccdStatistics.impactCount += simultaneous.count
+                iterations += 1
+            }
+            // Impulses cached at the original poses must not be replayed after impacts.
+            contactCache.removeAll(keepingCapacity: true)
         }
-        advances[identifier] = _SequentialCCDAdvance(
-            fraction: fraction,
-            linearVelocity: body.linearVelocity,
-            angularVelocity: body.angularVelocity)
     }
 
-    private func makeCCDConstraints(
-        _ impacts: [_SequentialCCDImpact],
-        timeStep: Scalar
-    ) -> [_SequentialContactConstraint] {
-        let restitutionThreshold = sanitizedNonnegative(
-            restitutionVelocityThreshold)
-        var constraints: [_SequentialContactConstraint] = []
-        constraints.reserveCapacity(impacts.count)
-
+    private func trackParticipants(_ impacts: [_SequentialCCDImpact],
+                                   into participants: inout Set<ObjectIdentifier>) {
         for impact in impacts {
-            let centerA = impact.bodyA.massProperties.centerOfMass
-                .applying(impact.bodyA.transform) +
-                impact.bodyA.linearVelocity *
-                (timeStep * impact.fraction)
-            let velocityB = impact.bodyB.map {
-                $0.motionType == .static ? Vector3.zero : $0.linearVelocity
-            } ?? .zero
-            let centerB = impact.bodyB.map {
-                $0.massProperties.centerOfMass.applying($0.transform) +
-                    velocityB * (timeStep * impact.fraction)
-            } ?? impact.pointOnB
-            let offsetA = impact.pointOnA - centerA
-            let offsetB = impact.pointOnB - centerB
-            let initialVelocity = _sequentialRelativeVelocity(
-                bodyA: impact.bodyA,
-                bodyB: impact.bodyB,
-                offsetA: offsetA,
-                offsetB: offsetB)
-            let normalVelocity = Vector3.dot(initialVelocity, impact.normal)
-            let material = impact.bodyB.map {
-                impact.bodyA.material.combined(with: $0.material)
-            } ?? impact.bodyA.material.combined(with: .default)
-            let normalBias = normalVelocity < -restitutionThreshold
-                ? material.restitution * normalVelocity : Scalar.zero
-
-            if let constraint = _SequentialContactConstraint(
-                cacheKey: nil,
-                bodyA: impact.bodyA,
-                bodyB: impact.bodyB,
-                offsetA: offsetA,
-                offsetB: offsetB,
-                normal: impact.normal,
-                normalBias: normalBias,
-                friction: material.friction,
-                initialRelativeVelocity: initialVelocity,
-                cachedImpulse: nil) {
-                constraints.append(constraint)
+            participants.insert(ObjectIdentifier(impact.bodyA))
+            if let body = impact.bodyB, body.motionType == .dynamic {
+                participants.insert(ObjectIdentifier(body))
             }
         }
-        return constraints
+    }
+
+    private func freeze(_ impact: _SequentialCCDImpact,
+                         into frozen: inout Set<ObjectIdentifier>) {
+        // Clamping retains velocity for the next substep, including kinematic
+        // velocity, but stops the pose of BOTH moving participants this substep.
+        for body in [impact.bodyA, impact.bodyB].compactMap({ $0 }) where body.motionType != .static {
+            if frozen.insert(ObjectIdentifier(body)).inserted { ccdStatistics.clampedBodyCount += 1 }
+        }
+    }
+
+    private func makeCCDConstraints(_ impacts: [_SequentialCCDImpact],
+                                    speculative: Bool,
+                                    timeStep: Scalar) -> [_SequentialContactConstraint] {
+        impacts.compactMap { impact in
+            guard let hit = impact.hit else { return nil }
+            var pointA = hit.pointOnA, pointB = hit.pointOnB
+            if speculative {
+                pointA = pointA.applying(impact.motionA.transform(at: hit.fraction).inverted())
+                    .applying(impact.motionA.start)
+                pointB = pointB.applying(impact.motionB.transform(at: hit.fraction).inverted())
+                    .applying(impact.motionB.start)
+            }
+            let offsetA = pointA - impact.bodyA.massProperties.centerOfMass.applying(impact.bodyA.transform)
+            let offsetB = impact.bodyB.map { pointB - $0.massProperties.centerOfMass.applying($0.transform) } ?? .zero
+            let velocity = _sequentialRelativeVelocity(bodyA: impact.bodyA, bodyB: impact.bodyB,
+                                                      offsetA: offsetA, offsetB: offsetB)
+            let material = impact.bodyA.material.combined(with: impact.bodyB?.material ?? .default)
+            let normalVelocity = Vector3.dot(velocity, hit.normal)
+            let bias: Scalar
+            if speculative {
+                bias = Swift.max(Vector3.dot(pointB - pointA, hit.normal), 0) / timeStep
+            } else {
+                bias = normalVelocity < -sanitizedNonnegative(restitutionVelocityThreshold)
+                    ? material.restitution * normalVelocity : 0
+            }
+            return _SequentialContactConstraint(cacheKey: nil,
+                bodyA: impact.bodyA, bodyB: impact.bodyB, offsetA: offsetA, offsetB: offsetB,
+                normal: hit.normal, normalBias: bias, friction: speculative ? 0 : material.friction,
+                initialRelativeVelocity: velocity, cachedImpulse: nil)
+        }
     }
 
     private func makeContactConstraints(
         _ contacts: [RigidBodyContact],
         bodyIdentifiers: Set<ObjectIdentifier>,
         activeBodyIdentifiers: Set<ObjectIdentifier>,
-        timeStep: Scalar
+        timeStep: Scalar,
+        usesCache: Bool = true
     ) -> [_SequentialContactConstraint] {
         let correctionFactor = sanitizedNonnegative(positionCorrectionFactor)
             .clamp(min: .zero, max: Scalar(1))
@@ -480,7 +490,7 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                     normalBias: restitutionBias - correctionVelocity,
                     friction: material.friction,
                     initialRelativeVelocity: initialVelocity,
-                    cachedImpulse: isWarmStartingEnabled
+                    cachedImpulse: usesCache && isWarmStartingEnabled
                         ? contactCache[cacheKey] : nil) {
                     constraints.append(constraint)
                 }
@@ -739,54 +749,22 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
         }
     }
 
-    private func integrateTransforms(
-        _ bodies: [RigidBody],
-        timeStep: Scalar,
-        activeBodyIdentifiers: Set<ObjectIdentifier>,
-        ccdAdvances: [ObjectIdentifier: _SequentialCCDAdvance]
-    ) {
-        for body in bodies
-        where body.isEnabled && body.motionType != .static {
-            if body.motionType == .dynamic &&
-                (!activeBodyIdentifiers.contains(ObjectIdentifier(body)) ||
-                 body.isSleeping) {
-                continue
-            }
-            guard body.linearVelocity.isFiniteVector,
-                  body.angularVelocity.isFiniteVector
-            else { continue }
-
+    private func integrateTransforms(_ bodies: [RigidBody],
+                                     timeStep: Scalar,
+                                     activeBodyIdentifiers: Set<ObjectIdentifier>,
+                                     frozen: Set<ObjectIdentifier>) {
+        guard timeStep > 0 else { return }
+        for body in bodies where body.isEnabled && body.motionType != .static {
+            let identifier = ObjectIdentifier(body)
+            if frozen.contains(identifier) || (body.motionType == .dynamic &&
+                (!activeBodyIdentifiers.contains(identifier) || body.isSleeping)) { continue }
+            guard body.linearVelocity.isFiniteVector, body.angularVelocity.isFiniteVector else { continue }
             let localCenter = body.massProperties.centerOfMass
-            var worldCenter = localCenter.applying(body.transform)
-            if let advance = ccdAdvances[ObjectIdentifier(body)] {
-                let remainingFraction = Scalar(1) - advance.fraction
-                worldCenter += advance.linearVelocity *
-                    (timeStep * advance.fraction)
-                worldCenter += body.linearVelocity *
-                    (timeStep * remainingFraction)
-            } else {
-                worldCenter += body.linearVelocity * timeStep
-            }
-
-            var orientation = body.transform.orientation
-            if let advance = ccdAdvances[ObjectIdentifier(body)] {
-                orientation = integratedOrientation(
-                    orientation,
-                    angularVelocity: advance.angularVelocity,
-                    timeStep: timeStep * advance.fraction)
-                orientation = integratedOrientation(
-                    orientation,
-                    angularVelocity: body.angularVelocity,
-                    timeStep: timeStep * (Scalar(1) - advance.fraction))
-            } else {
-                orientation = integratedOrientation(
-                    orientation,
-                    angularVelocity: body.angularVelocity,
-                    timeStep: timeStep)
-            }
-            body.transform = Transform(
-                orientation: orientation,
-                position: worldCenter - localCenter.applying(orientation))
+            let worldCenter = localCenter.applying(body.transform) + body.linearVelocity * timeStep
+            let orientation = integratedOrientation(body.transform.orientation,
+                angularVelocity: body.angularVelocity, timeStep: timeStep)
+            body.transform = Transform(orientation: orientation,
+                                       position: worldCenter - localCenter.applying(orientation))
         }
     }
 
@@ -824,40 +802,19 @@ private struct _SequentialBodyIsland {
     let isActive: Bool
 }
 
-private struct _SequentialCCDStep {
-    let impacts: [_SequentialCCDImpact]
-    let advances: [ObjectIdentifier: _SequentialCCDAdvance]
-
-    init(impacts: [_SequentialCCDImpact] = [],
-         advances: [ObjectIdentifier: _SequentialCCDAdvance] = [:]) {
-        self.impacts = impacts
-        self.advances = advances
-    }
-}
-
-private struct _SequentialCCDAdvance {
-    let fraction: Scalar
-    let linearVelocity: Vector3
-    let angularVelocity: Vector3
+private struct _SequentialCCDPair: Hashable {
+    let a: Int
+    let b: Int
+    init(_ a: Int, _ b: Int) { self.a = Swift.min(a, b); self.b = Swift.max(a, b) }
 }
 
 private struct _SequentialCCDImpact {
     let bodyA: RigidBody
     let bodyB: RigidBody?
-    let colliderB: Collider
     let fraction: Scalar
-    let pointOnA: Vector3
-    let pointOnB: Vector3
-    let normal: Vector3
-
-    func matchesPair(of other: Self) -> Bool {
-        if let bodyB, let otherBodyB = other.bodyB {
-            return (bodyA === other.bodyA && bodyB === otherBodyB) ||
-                (bodyA === otherBodyB && bodyB === other.bodyA)
-        }
-        return bodyB == nil && other.bodyB == nil &&
-            bodyA === other.bodyA && colliderB === other.colliderB
-    }
+    let hit: MotionSweepHit?
+    let motionA: CollisionMotion
+    let motionB: CollisionMotion
 }
 
 private struct _SequentialJointRow {

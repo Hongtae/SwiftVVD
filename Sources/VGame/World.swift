@@ -6,6 +6,10 @@
 //
 
 public final class World {
-    public init<Content>(@EntityBuilder content: () -> Content) where Content: Entity {
+    public let physics: WorldPhysics
+
+    public init<Content>(physics: WorldPhysics = WorldPhysics(),
+                         @EntityBuilder content: () -> Content) where Content: Entity {
+        self.physics = physics
     }
 }

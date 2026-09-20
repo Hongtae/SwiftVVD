@@ -147,7 +147,7 @@ final class RigidBodyCCDTests: XCTestCase {
         let simulator = RigidBodySimulator(
             collisionSpace: collisionSpace,
             gravity: .zero,
-            solver: SequentialImpulseRigidBodySolver())
+            solver: SequentialImpulseRigidBodySolver(ccdConfiguration: .init(mode: .timeOfImpact)))
         XCTAssertTrue(simulator.add(moving))
 
         simulator.step(timeStep: 0.5)
@@ -170,7 +170,7 @@ final class RigidBodyCCDTests: XCTestCase {
     private func makeSimulator(_ bodies: RigidBody...) -> RigidBodySimulator {
         let simulator = RigidBodySimulator(
             gravity: .zero,
-            solver: SequentialImpulseRigidBodySolver())
+            solver: SequentialImpulseRigidBodySolver(ccdConfiguration: .init(mode: .timeOfImpact)))
         for body in bodies {
             XCTAssertTrue(simulator.add(body))
         }
