@@ -17,7 +17,7 @@ public final class DynamicsSimulator {
     }
 
     public func step(timeStep: Scalar) {
-        guard timeStep > .zero else { return }
+        guard timeStep.isFinite, timeStep > .zero else { return }
         rigidBodies.step(timeStep: timeStep)
         xpbd.step(timeStep: timeStep)
     }

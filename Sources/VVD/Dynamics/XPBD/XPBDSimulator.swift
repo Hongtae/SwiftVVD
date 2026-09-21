@@ -82,7 +82,7 @@ public final class XPBDSimulator {
     }
 
     public func step(timeStep: Scalar) {
-        guard timeStep > .zero else { return }
+        guard timeStep.isFinite, timeStep > .zero else { return }
         solver?.solve(solverContext(timeStep: timeStep))
     }
 }

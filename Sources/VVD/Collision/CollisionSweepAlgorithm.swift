@@ -11,6 +11,11 @@
 /// A in that same space while B remains fixed. Results use A's start-local
 /// space and must report the first fraction in `0...1`. Initial overlap returns
 /// fraction zero.
+///
+/// This optional query cannot distinguish a miss from numerical failure or an
+/// unsupported pair. Built-in `CollisionAlgorithmRegistry.sweepMotion` queries
+/// expose explicit failure states. Registered custom casts retain this optional
+/// result contract, including when invoked by a motion query.
 public protocol CollisionSweepAlgorithm {
     associatedtype PrimitiveA: CollisionPrimitive
     associatedtype PrimitiveB: CollisionPrimitive

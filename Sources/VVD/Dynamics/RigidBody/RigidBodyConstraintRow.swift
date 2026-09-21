@@ -72,9 +72,16 @@ public struct RigidBodyJointAxis: Hashable, Sendable {
              maximumForce: maximumForce)
     }
 
+    /// Free axes default to no drive; locks and limits default to no force cap.
+    public init(motion: RigidBodyJointMotion = .free,
+                targetVelocity: Scalar = .zero) {
+        self.init(motion: motion, targetVelocity: targetVelocity,
+                  maximumForce: motion == .free ? .zero : .infinity)
+    }
+
     public init(motion: RigidBodyJointMotion = .free,
                 targetVelocity: Scalar = .zero,
-                maximumForce: Scalar = .zero) {
+                maximumForce: Scalar) {
         self.motion = motion
         self.targetVelocity = targetVelocity
         self.maximumForce = maximumForce

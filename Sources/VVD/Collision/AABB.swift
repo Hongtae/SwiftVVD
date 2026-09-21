@@ -13,7 +13,9 @@ public struct AABB: Hashable, Sendable {
 
     public var center: Vector3 { (min + max) * 0.5 }
     public var extents: Vector3 { (max - min) }
-    public var isNull: Bool { max.x < min.x || max.y < min.y || max.z < min.z }
+    public var isNull: Bool {
+        !(min.x <= max.x && min.y <= max.y && min.z <= max.z)
+    }
 
     public static let null = AABB(min: Vector3(Scalar.greatestFiniteMagnitude,
                                                Scalar.greatestFiniteMagnitude,
@@ -153,7 +155,7 @@ public struct AABB: Hashable, Sendable {
     }
 
     public func rayTest1(rayOrigin origin: Vector3, direction dir: Vector3) -> Scalar {
-        if self.isNull { return -1.0 }
+        guard !isNull, Ray(origin: origin, direction: dir).isValid else { return -1.0 }
 
         // algorithm based on: http://www.codercorner.com/RayAABB.cpp
         // Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990

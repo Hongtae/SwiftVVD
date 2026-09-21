@@ -897,7 +897,9 @@ private func _boxBoxContact(_ a: Box, _ b: Box, frame: Transform) -> ContactMani
             if Vector3.dot(axis, t) < .zero {
                 axis = -axis
             }
-            guard updateAxis(axis, depth, &minDepth, &normal) else { return nil }
+            // SAT's cross-axis projections use the unnormalized axis. Compare
+            // penetration distances in the same units as the face-axis tests.
+            guard updateAxis(axis, depth / axis.length, &minDepth, &normal) else { return nil }
         }
     }
 

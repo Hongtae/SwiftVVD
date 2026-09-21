@@ -15,7 +15,8 @@ public struct Ray: Hashable, Sendable {
     }
 
     public var isValid: Bool {
-        direction.lengthSquared > .ulpOfOne
+        origin.x.isFinite && origin.y.isFinite && origin.z.isFinite &&
+            direction.lengthSquared.isFinite && direction.lengthSquared > .ulpOfOne
     }
 
     public func point(at parameter: Scalar) -> Vector3 {

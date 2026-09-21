@@ -115,15 +115,15 @@ extension CollisionAlgorithms {
         frame: Transform,
         translation: Vector3
     ) -> TimeOfImpact? {
-        guard a.isSupportMappingValid && b.isSupportMappingValid else {
+        guard a.isSupportMappingValid && b.isSupportMappingValid,
+              CollisionMotion(start: frame, translation: translation).isValid else {
             return nil
         }
 
         let transformedB = _SweepTransformedSupport(base: b, transform: frame)
         let scale = Swift.max(a.bounds.extents.length,
-                              transformedB.bounds.extents.length,
-                              Scalar(1))
-        let tolerance = scale * _sweepDistanceEpsilon
+                              transformedB.bounds.extents.length)
+        let tolerance = Swift.max(scale * _sweepDistanceEpsilon, Scalar.ulpOfOne * 32)
         var fraction = Scalar.zero
         var separatingNormal: Vector3?
 
@@ -153,17 +153,17 @@ extension CollisionAlgorithms {
 
             let normal = (closest.pointOnB - closest.pointOnA) /
                 closest.distance
+            // The GJK witness distance is an upper bound until convergence.
+            // Advance only across a separating support plane, whose gap is a
+            // lower bound even when witness refinement stopped early.
+            let gap = Vector3.dot(transformedB.support(-normal) - a.support(normal) - offset, normal)
+            guard gap.isFinite, gap > .zero else { return nil }
             separatingNormal = normal
             let closingSpeed = Vector3.dot(translation, normal)
-            guard closingSpeed > tolerance else { return nil }
+            guard closingSpeed.isFinite, closingSpeed > .zero else { return nil }
 
-            let advance = closest.distance / closingSpeed
-            guard advance.isFinite && advance > .ulpOfOne else {
-                return TimeOfImpact(fraction: fraction,
-                                    pointOnA: closest.pointOnA,
-                                    pointOnB: closest.pointOnB,
-                                    normal: normal)
-            }
+            let advance = gap / closingSpeed
+            guard advance.isFinite, fraction + advance > fraction else { return nil }
 
             fraction += advance
             guard fraction <= Scalar(1) + _sweepDistanceEpsilon else {
@@ -673,7 +673,16 @@ private func _sweepSupport(_ a: any _SupportMap,
 private func _reduceSweepSimplex(
     _ simplex: inout [_SweepSupportVertex]
 ) -> _SweepSimplexSolution {
-    let points = simplex.map(\.point)
+    var points = simplex.map(\.point)
+    // Barycentric weights are invariant under uniform scaling. Normalize the
+    // simplex before comparing squared lengths, areas, and volumes with the
+    // dimensionless degeneracy thresholds; retain original witness coordinates.
+    let scale = points.reduce(Scalar.zero) {
+        Swift.max($0, Swift.max(abs($1.x), abs($1.y), abs($1.z)))
+    }
+    if scale.isFinite && scale > .zero {
+        points = points.map { $0 / scale }
+    }
     let rawSolution: _SweepSimplexSolution
     switch points.count {
     case 1:

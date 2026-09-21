@@ -45,10 +45,6 @@ public struct CollisionMotion: Hashable, Sendable {
     /// the union of endpoint bounds. Null bounds remain unconditional candidates.
     public func sweptBounds(of primitive: any CollisionPrimitive) -> AABB {
         guard isValid else { return .null }
-        if let compound = primitive as? CompoundPrimitive,
-           compound.flattenedChildren().contains(where: { $0.primitive.isValid && $0.primitive.bounds.isNull }) {
-            return .null
-        }
         let bounds = primitive.bounds
         guard !bounds.isNull else { return .null }
         if angularDisplacement == .zero {

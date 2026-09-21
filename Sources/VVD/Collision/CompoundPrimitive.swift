@@ -37,8 +37,14 @@ public struct CompoundPrimitive: CollisionPrimitive {
 
     public init(children: [Child] = []) {
         self.children = children
-        self.bounds = children.reduce(into: AABB()) { bounds, child in
-            bounds.combine(child.bounds)
+        if children.contains(where: { $0.primitive.isValid && $0.bounds.isNull }) {
+            // A valid unbounded child (including a nested compound) makes the
+            // aggregate an unconditional broad-phase candidate.
+            self.bounds = .null
+        } else {
+            self.bounds = children.reduce(into: AABB()) { bounds, child in
+                if child.primitive.isValid { bounds.combine(child.bounds) }
+            }
         }
     }
 

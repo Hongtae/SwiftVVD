@@ -104,10 +104,10 @@ public struct Box: ConvexPrimitive {
 
         let parameter: Scalar
         let normal: Vector3
-        if nearParameter >= .zero {
+        if nearParameter.isFinite && nearParameter >= .zero {
             parameter = nearParameter
             normal = nearNormal
-        } else if farParameter >= .zero {
+        } else if farParameter.isFinite && farParameter >= .zero {
             parameter = farParameter
             normal = farNormal
         } else {

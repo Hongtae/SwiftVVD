@@ -8,14 +8,17 @@
 public struct StaticPlane: ConcavePrimitive {
     public let plane: Plane
     public var bounds: AABB { .null }
-    public var isValid: Bool { plane.normal.lengthSquared > .ulpOfOne }
+    public var isValid: Bool {
+        plane.d.isFinite && plane.normal.lengthSquared.isFinite &&
+            plane.normal.lengthSquared > .ulpOfOne
+    }
 
     public init(_ plane: Plane) {
         self.plane = plane
     }
 
     public func contains(_ point: Vector3) -> Bool {
-        isValid && abs(plane.dot(point)) <= .ulpOfOne
+        isValid && abs(plane.dot(point)) / plane.normal.length <= .ulpOfOne
     }
 
     public func closestPoint(to point: Vector3) -> PrimitiveClosestPoint? {
@@ -32,20 +35,23 @@ public struct StaticPlane: ConcavePrimitive {
     public func rayTest(_ ray: Ray) -> PrimitiveRayHit? {
         guard isValid && ray.isValid else { return nil }
 
-        let distance = plane.dot(ray.origin)
-        let denominator = Vector3.dot(plane.normal, ray.direction)
+        let normalLength = plane.normal.length
+        let normal = plane.normal / normalLength
+        let distance = plane.dot(ray.origin) / normalLength
+        let denominator = Vector3.dot(normal, ray.direction)
+        guard distance.isFinite, denominator.isFinite else { return nil }
         let parameter: Scalar
-        if abs(distance) <= .ulpOfOne {
+        if distance == .zero {
             parameter = .zero
         } else {
             guard abs(denominator) > .ulpOfOne else { return nil }
             parameter = -distance / denominator
-            guard parameter >= .zero else { return nil }
+            guard parameter.isFinite, parameter >= .zero else { return nil }
         }
 
         return PrimitiveRayHit(parameter: parameter,
                                position: ray.point(at: parameter),
-                               normal: plane.normal.normalized())
+                               normal: normal)
     }
 }
 

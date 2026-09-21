@@ -47,8 +47,9 @@ public struct RigidBodyMassProperties: Hashable, Sendable {
         self.inertiaTensor = inertiaTensor
     }
 
+    /// Nonpositive, nonfinite, or noninvertible mass has no linear response.
     public var inverseMass: Scalar {
-        mass > .zero ? Scalar(1) / mass : .zero
+        Self.finiteInverse(mass)
     }
 
     public var inverseInertia: Vector3 {
@@ -56,25 +57,59 @@ public struct RigidBodyMassProperties: Hashable, Sendable {
         return Vector3(inverse.m11, inverse.m22, inverse.m33)
     }
 
+    /// Diagonal zero/invalid axes are locked. Full tensors must be finite,
+    /// symmetric, and positive definite; otherwise angular response is disabled.
     public var inverseInertiaTensor: Matrix3 {
-        if let inverse = inertiaTensor.inverted() {
-            return inverse
-        }
-
         if inertiaTensor.isDiagonal {
             let diagonal = inertia
             return Self.diagonalMatrix(Vector3(
-                diagonal.x > .zero ? Scalar(1) / diagonal.x : .zero,
-                diagonal.y > .zero ? Scalar(1) / diagonal.y : .zero,
-                diagonal.z > .zero ? Scalar(1) / diagonal.z : .zero))
+                Self.finiteInverse(diagonal.x),
+                Self.finiteInverse(diagonal.y),
+                Self.finiteInverse(diagonal.z)))
         }
-        return Self.diagonalMatrix(.zero)
+
+        let zero = Self.diagonalMatrix(.zero)
+        guard inertiaTensor.hasFiniteInertiaComponents,
+              inertiaTensor.m11 > 0, inertiaTensor.m22 > 0, inertiaTensor.m33 > 0
+        else { return zero }
+        // Test symmetry and positive definiteness in normalized units so the
+        // determinant does not overflow or underflow with the body's scale.
+        let scale = Swift.max(inertiaTensor.m11, inertiaTensor.m22, inertiaTensor.m33)
+        var tensor = Matrix3(row1: inertiaTensor.row1 / scale,
+                             row2: inertiaTensor.row2 / scale,
+                             row3: inertiaTensor.row3 / scale)
+        let tolerance = Scalar.ulpOfOne * 64
+        guard abs(tensor.m12 - tensor.m21) <= tolerance,
+              abs(tensor.m13 - tensor.m31) <= tolerance,
+              abs(tensor.m23 - tensor.m32) <= tolerance else { return zero }
+        tensor = (tensor + tensor.transposed()) * Scalar(0.5)
+        guard tensor.m11 * tensor.m22 - tensor.m12 * tensor.m12 > 0,
+              tensor.determinant > 0,
+              let inverse = tensor.inverted() else { return zero }
+        let result = Matrix3(row1: inverse.row1 / scale,
+                             row2: inverse.row2 / scale,
+                             row3: inverse.row3 / scale)
+        return result.hasFiniteInertiaComponents ? result : zero
+    }
+
+    private static func finiteInverse(_ value: Scalar) -> Scalar {
+        guard value.isFinite, value > .zero else { return .zero }
+        let inverse = Scalar(1) / value
+        return inverse.isFinite ? inverse : .zero
     }
 
     private static func diagonalMatrix(_ diagonal: Vector3) -> Matrix3 {
         Matrix3(diagonal.x, 0, 0,
                 0, diagonal.y, 0,
                 0, 0, diagonal.z)
+    }
+}
+
+private extension Matrix3 {
+    var hasFiniteInertiaComponents: Bool {
+        m11.isFinite && m12.isFinite && m13.isFinite &&
+            m21.isFinite && m22.isFinite && m23.isFinite &&
+            m31.isFinite && m32.isFinite && m33.isFinite
     }
 }
 

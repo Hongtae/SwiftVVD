@@ -56,6 +56,9 @@ public enum CollisionAlgorithms {
         CollisionAlgorithmRegistry.builtinContactManifold(a, b, frame: frame)
     }
 
+    /// Returns a translational hit when established. Nil can also indicate an
+    /// unsupported pair or numerical failure; built-in `sweepMotion` queries
+    /// distinguish these states.
     public static func timeOfImpact(_ a: any CollisionShape,
                                     _ b: any CollisionShape,
                                     frame: Transform = .identity,
@@ -66,6 +69,8 @@ public enum CollisionAlgorithms {
                      translation: translation)
     }
 
+    /// Returns a translational hit when established. Use a registry's
+    /// built-in `sweepMotion` path for explicit failure states and a safe fraction.
     public static func timeOfImpact(_ a: any CollisionPrimitive,
                                     _ b: any CollisionPrimitive,
                                     frame: Transform = .identity,

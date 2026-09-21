@@ -767,9 +767,18 @@ private func _compoundContactFeature(
     _ indexB: Int,
     _ childFeature: ContactFeatureID
 ) -> ContactFeatureID {
-    let pair = (UInt64(truncatingIfNeeded: indexA) & 0xffff) << 48 |
-        (UInt64(truncatingIfNeeded: indexB) & 0xffff) << 32
-    return ContactFeatureID(pair | (childFeature.rawValue & 0xffff_ffff))
+    // Leaf features can already occupy all 64 bits (mesh/mesh triangle pairs).
+    // Use fixed integer mixing, independent of Swift's randomized Hasher. For
+    // a fixed leaf pair this is a permutation of the full child feature ID.
+    func mix(_ value: UInt64) -> UInt64 {
+        var value = value
+        value = (value ^ (value >> 30)) &* 0xbf58_476d_1ce4_e5b9
+        value = (value ^ (value >> 27)) &* 0x94d0_49bb_1331_11eb
+        return value ^ (value >> 31)
+    }
+    let a = mix(UInt64(truncatingIfNeeded: indexA) &+ 0x9e37_79b9_7f4a_7c15)
+    let pair = mix(a ^ UInt64(truncatingIfNeeded: indexB))
+    return ContactFeatureID(mix(pair ^ childFeature.rawValue))
 }
 
 private func _meshContactFeature(_ indexA: Int,

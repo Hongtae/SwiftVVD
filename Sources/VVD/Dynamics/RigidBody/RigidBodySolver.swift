@@ -26,6 +26,8 @@ public struct RigidBodyContact {
 }
 
 /// Immutable input assembled by `RigidBodySimulator` for one solver step.
+/// Each body and collider must occur once. The sequential solver ignores a
+/// directly constructed context with duplicate ownership without mutating it.
 public struct RigidBodySolverContext {
     public let timeStep: Scalar
     public let gravity: Vector3

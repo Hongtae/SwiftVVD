@@ -323,10 +323,10 @@ private func _jointAxisParameters(
     else { return nil }
     let limit = _jointImpulseLimit(settings.maximumForce,
                                    timeStep: timeStep)
+    guard limit > .zero else { return nil }
 
     switch settings.motion {
     case .free:
-        guard limit > .zero else { return nil }
         return _JointAxisParameters(
             biasVelocity: -settings.targetVelocity,
             lowerImpulse: -limit,
@@ -353,7 +353,7 @@ private func _jointAxisParameters(
                 lowerImpulse: -limit,
                 upperImpulse: .zero)
         }
-        guard limit > .zero && settings.targetVelocity != .zero else {
+        guard settings.targetVelocity != .zero else {
             return nil
         }
         return _JointAxisParameters(

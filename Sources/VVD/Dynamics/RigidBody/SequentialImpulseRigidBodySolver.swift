@@ -73,6 +73,9 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
 
     public func solve(_ context: RigidBodySolverContext) {
         guard context.timeStep.isFinite, context.timeStep > 0 else { return }
+        // Directly constructed contexts must follow the simulator's one-owner
+        // contract. Reject the whole invalid step before changing any state.
+        guard Set(context.bodies.map(\.collider)).count == context.bodies.count else { return }
         ccdStatistics = CCDStatistics()
         let count = Swift.max(ccdConfiguration.substepCount, 1)
         let timeStep = context.timeStep / Scalar(count)
@@ -187,7 +190,7 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                 body.angularVelocity += forces.torque
                     .applying(body.worldInverseInertiaTensor) * timeStep
             }
-            if body.gravityScale.isFinite {
+            if body.inverseMass > .zero && body.gravityScale.isFinite {
                 body.linearVelocity += finiteGravity * (body.gravityScale * timeStep)
             }
 
@@ -225,9 +228,10 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                 }
             }
             guard !newlyActive.isEmpty else { return impacts }
-            // A newly awakened body receives this substep's force exactly once.
+            // A newly awakened body receives forces once, for the interval it
+            // can still move. Earlier TOI advances may have consumed time.
             integrateForces(context.bodies, gravity: context.gravity,
-                timeStep: context.timeStep, activeBodyIdentifiers: newlyActive)
+                timeStep: timeStep, activeBodyIdentifiers: newlyActive)
             let identifiers = Set(context.bodies.map(ObjectIdentifier.init))
             let manifolds = currentContacts(context)
             var contacts = makeContactConstraints(manifolds,
@@ -341,7 +345,8 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
             if !canResolve || requiresClamping {
                 for impact in simultaneous { freeze(impact, into: &frozen) }
             } else {
-                var contacts = makeContactConstraints(currentContacts(context),
+                let manifolds = currentContacts(context)
+                var contacts = makeContactConstraints(manifolds,
                     bodyIdentifiers: identifiers, activeBodyIdentifiers: active,
                     timeStep: context.timeStep, states: contactStates, usesCache: false)
                 // The explicit witness is needed even when the distance tolerance
@@ -351,11 +356,23 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
                 var joints = makeJointRows(context.constraints, bodyIdentifiers: identifiers,
                     activeBodyIdentifiers: active, timeStep: context.timeStep, impulses: jointImpulses)
                 solveRows(contacts: &contacts, joints: &joints, contactStates: contactStates)
+                updateContactCache(contacts, contacts: manifolds, bodyIdentifiers: identifiers)
                 ccdStatistics.impactCount += simultaneous.count
                 iterations += 1
             }
-            // Impulses cached at the original poses must not be replayed after impacts.
-            contactCache.removeAll(keepingCapacity: true)
+            // Explicit CCD impulses have no persistent feature key. Discard
+            // incident features while retaining the updated ordinary contacts
+            // elsewhere; advancing a pose alone does not invalidate a warm start.
+            if !contactCache.isEmpty {
+                var impacted: Set<ObjectIdentifier> = []
+                for impact in simultaneous {
+                    impacted.insert(ObjectIdentifier(impact.bodyA))
+                    if let body = impact.bodyB { impacted.insert(ObjectIdentifier(body)) }
+                }
+                contactCache = contactCache.filter {
+                    !impacted.contains($0.key.bodyA) && !impacted.contains($0.key.bodyB)
+                }
+            }
         }
     }
 
@@ -671,6 +688,7 @@ public final class SequentialImpulseRigidBodySolver: RigidBodySolver {
             let hasActiveBias = constraint.solverRows(timeStep: timeStep)
                 .contains {
                     $0.biasVelocity.isFinite &&
+                        ($0.lowerImpulse < .zero || $0.upperImpulse > .zero) &&
                         abs($0.biasVelocity) > biasThreshold
                 }
             if hasActiveBias {

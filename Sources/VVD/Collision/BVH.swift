@@ -9,8 +9,8 @@ import Foundation
 
 /// An immutable bounding-volume hierarchy over integer primitive identifiers.
 ///
-/// A BVH is built from a bounds snapshot. Elements with null bounds are not
-/// included because they cannot be rejected by an AABB query; callers should
+/// A BVH is built from finite bounds. Invalid or nonfinite elements are excluded.
+/// Null bounds cannot be rejected by an AABB query; callers should
 /// retain those elements separately and include them as unconditional
 /// candidates.
 public struct BVH: Sendable {
@@ -51,7 +51,10 @@ public struct BVH: Sendable {
 
     public init(_ elements: [Element]) {
         var elements = elements.enumerated().compactMap { index, element in
-            element.bounds.isNull
+            element.bounds.isNull || !element.bounds.min.x.isFinite ||
+                !element.bounds.min.y.isFinite || !element.bounds.min.z.isFinite ||
+                !element.bounds.max.x.isFinite || !element.bounds.max.y.isFinite ||
+                !element.bounds.max.z.isFinite
                 ? nil
                 : BuildElement(element: element, insertionIndex: index)
         }
@@ -199,7 +202,7 @@ public struct BVH: Sendable {
         if let result = quantized32() {
             return result
         }
-        Log.error("BVH nodes or primitive indices exceed the quantized formats.")
+        Log.error("BVH bounds, nodes, or primitive indices cannot be represented by the quantized formats.")
         return nil
     }
 
@@ -232,6 +235,8 @@ public struct BVH: Sendable {
 
         let maximumCode = Scalar(T.max)
         let extents = bounds.extents
+        // Even finite endpoints can overflow when their extent is computed.
+        guard extents.x.isFinite, extents.y.isFinite, extents.z.isFinite else { return nil }
         let step = Vector3(
             extents.x > .zero ? extents.x / maximumCode : .zero,
             extents.y > .zero ? extents.y / maximumCode : .zero,
