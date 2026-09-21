@@ -1082,11 +1082,12 @@ private struct TextEditorResponderFilter: StatefulRule, RemovableAttribute {
                 - modifier.contentInsets.trailing,
             0
         )
+        let sceneResources = rendererHost.sceneResources
         let layout = TextEditorSelectionLayout.resolve(
             text: modifier.text.wrappedValue,
             width: contentWidth,
             environment: environment,
-            sceneResources: rendererHost.sceneResources
+            sceneResources: sceneResources
         )
         responder.updateSelectionLayout(
             layout,
@@ -1096,7 +1097,7 @@ private struct TextEditorResponderFilter: StatefulRule, RemovableAttribute {
                     text: text,
                     width: contentWidth,
                     environment: environment,
-                    sceneResources: rendererHost.sceneResources
+                    sceneResources: sceneResources
                 )
             }
         )

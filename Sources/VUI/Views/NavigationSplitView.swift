@@ -123,7 +123,6 @@ enum StateOrBinding<Value>: DynamicProperty {
         }
 
         let wiringSubgraph = AGSubgraph.current
-        let host = GraphHost.currentHost
         let signal: Attribute<Void> = AGSubgraph.withCurrent(wiringSubgraph) {
             graph.makeInput(value: ())
         }
@@ -148,7 +147,7 @@ enum StateOrBinding<Value>: DynamicProperty {
             } else {
                 let location = StoredLocation<Value>(
                     initialValue: state._value,
-                    host: host,
+                    host: GraphHost.currentHost,
                     signal: signal.asWeak().base
                 )
                 mountedLocation.value = location

@@ -770,7 +770,9 @@ class HostingScrollView {
         }
     }
 
-    private let graphRef: _AGGraphContext
+    // Presentation data may outlive the graph; graph-dependent work may not.
+    private let graphRef: _AGGraphRef
+    private var graphContext: _AGGraphContext { _AGGraphContext(graph: graphRef.graph) }
     private let layoutState: WeakAttribute<SystemScrollLayoutState>
     private let phaseState: WeakAttribute<ScrollPhaseState>
     private let containerSize: WeakAttribute<CGSize>
@@ -833,7 +835,7 @@ class HostingScrollView {
         phaseState: WeakAttribute<ScrollPhaseState> = WeakAttribute(),
         containerSize: WeakAttribute<CGSize> = WeakAttribute()
     ) {
-        self.graphRef = graphRef
+        self.graphRef = _AGGraphRef(graphRef.graph)
         self.layoutState = layoutState
         self.phaseState = phaseState
         self.containerSize = containerSize
@@ -918,10 +920,10 @@ class HostingScrollView {
         _ target: ((ScrollGeometry, LayoutDirection) -> ScrollTarget?)?,
         config: ScrollTargetConfiguration
     ) {
-        guard _AGGraph.current === graphRef.graph else {
+        guard _AGGraph.current === graphContext.graph else {
             fatalError("Target reapplication requires the owning graph context.")
         }
-        graphRef.graph.actionOutbox.append { [weak self] in
+        graphContext.graph.actionOutbox.append { [weak self] in
             guard let self else { return }
             Update.ensure {
                 let previousTarget = self.targetProvider
@@ -954,7 +956,7 @@ class HostingScrollView {
         )
         // The retained provider may evaluate attributes after the host update
         // that installed it has left its graph evaluation scope.
-        guard let target = graphRef.withCurrent({
+        guard let target = graphContext.withCurrent({
             targetProvider(geometry, layoutDirection)
         }) else {
             return
@@ -1501,7 +1503,7 @@ class HostingScrollView {
                     simulation: simulation,
                     // Gesture timestamps use event time, while inertial
                     // presentation advances on ViewGraph animation time.
-                    beginTime: (graphRef.context as? ViewGraph)?.currentTimestamp
+                    beginTime: (graphContext.context as? ViewGraph)?.currentTimestamp
                         ?? eventTime,
                     targetOffsetState: targetOffsetState
                 )
@@ -1956,14 +1958,14 @@ class HostingScrollView {
     }
 
     private func scheduleMotionUpdate() {
-        guard let viewGraph = graphRef.context as? ViewGraph else {
+        guard let viewGraph = graphContext.context as? ViewGraph else {
             return
         }
         viewGraph.nextUpdate.views.interval(1.0 / 60.0)
     }
 
     private func scheduleIndicatorUpdate(at time: Time) {
-        guard let viewGraph = graphRef.context as? ViewGraph else {
+        guard let viewGraph = graphContext.context as? ViewGraph else {
             return
         }
         viewGraph.nextUpdate.views.at(time)
@@ -2029,7 +2031,7 @@ class HostingScrollView {
     }
 
     private func revealOverlayIndicators(at time: Time? = nil) {
-        guard let viewGraph = graphRef.context as? ViewGraph else {
+        guard let viewGraph = graphContext.context as? ViewGraph else {
             return
         }
         overlayIndicatorOpacity = 1
@@ -2048,7 +2050,7 @@ class HostingScrollView {
     private func resumeOverlayIndicatorFade(at time: Time? = nil) {
         guard overlayIndicatorOpacity > 0,
               !indicatorVisibilityIsHeld,
-              let viewGraph = graphRef.context as? ViewGraph else {
+              let viewGraph = graphContext.context as? ViewGraph else {
             return
         }
         overlayIndicatorFadeStart = (time ?? viewGraph.currentTimestamp)
@@ -2358,7 +2360,9 @@ struct MakeHostingScrollView: StatefulRule {
     var _layoutState: Attribute<SystemScrollLayoutState>
     var _phaseState: Attribute<ScrollPhaseState>
     var _containerSize: Attribute<CGSize>
-    var graphRef: _AGGraphContext
+    // The graph owns this rule and its cached host, so neither owns the graph.
+    private let graphRef: _AGGraphRef
+    var graphContext: _AGGraphContext { _AGGraphContext(graph: graphRef.graph) }
 
     init(
         _layoutState: Attribute<SystemScrollLayoutState>,
@@ -2374,7 +2378,7 @@ struct MakeHostingScrollView: StatefulRule {
         self._containerSize = _containerSize ?? graph.makeInput(
             value: CGSize(width: -.infinity, height: -.infinity)
         )
-        self.graphRef = graphRef
+        self.graphRef = _AGGraphRef(graphRef.graph)
     }
 
     init(
@@ -2398,7 +2402,7 @@ struct MakeHostingScrollView: StatefulRule {
             return
         }
         _AGGraph.setStatefulOutput(HostingScrollView(
-            graphRef: graphRef,
+            graphRef: graphContext,
             layoutState: _layoutState.asWeak(),
             phaseState: _phaseState.asWeak(),
             containerSize: _containerSize.asWeak()

@@ -3,6 +3,54 @@ import XCTest
 @testable import VVD
 
 final class TextEditorInputTests: XCTestCase {
+    @MainActor
+    func testMountedEditorReleasesRendererHostGraphResponderAndResources() {
+        let previousContext = appContext
+        appContext = TextEditorTestAppContext()
+        defer { appContext = previousContext }
+        weak var controllerReference: WindowController?
+        weak var graphReference: ViewGraph?
+        weak var storageReference: _AGGraph?
+        weak var responderReference: TextEditorResponder?
+        weak var resourcesReference: SceneResources?
+        func populate() {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            let controller = WindowController(
+                content: TextEditor(text: .constant("First line\nSecond line"))
+                    .frame(width: 200, height: 100),
+                environment: environment,
+                scene: WindowKey(namespace: .app,
+                    sceneID: SceneID(TextEditorInputTests.self)))
+            controllerReference = controller
+            graphReference = controller.viewGraph
+            storageReference = controller.viewGraph.data.graph
+            resourcesReference = controller.sceneResources
+            var redraw = false
+            for tick in 0..<3 {
+                controller.updateView(tick: UInt64(tick), delta: 0,
+                    date: controller.date, contentSize: CGSize(width: 240, height: 160),
+                    redraw: &redraw) { _, _ in }
+                Update.dispatchActions()
+            }
+            _ = controller.responderNode?.visit { responder in
+                if let responder = responder as? TextEditorResponder {
+                    responderReference = responder
+                    return .cancel
+                }
+                return .next
+            }
+            XCTAssertNotNil(responderReference)
+        }
+        populate()
+        Update.dispatchActions()
+        XCTAssertNil(controllerReference)
+        XCTAssertNil(graphReference)
+        XCTAssertNil(storageReference)
+        XCTAssertNil(responderReference)
+        XCTAssertNil(resourcesReference)
+    }
+
     // ASSERTIONS textEditorStorageObserved
     // ASSERTIONS textEditorBodyRoutingObserved
     func testStringInitializersPreserveOptionalSelectionBinding() {

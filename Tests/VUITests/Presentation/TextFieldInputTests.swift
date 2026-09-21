@@ -3,6 +3,28 @@ import XCTest
 @testable import VVD
 
 final class TextFieldInputTests: XCTestCase {
+    func testFieldSelectionResolverReleasesResponderAndResources() {
+        for isSecure in [false, true] {
+            weak var responderReference: TextFieldResponder?
+            weak var resourcesReference: SceneResources?
+            func populate() {
+                let responder = TextFieldResponder()
+                let resources = SceneResources()
+                responderReference = responder
+                resourcesReference = resources
+                responder.isSecure = isSecure
+                responder.updateSelectionLayout(
+                    text: "", environment: EnvironmentValues(),
+                    sceneResources: resources, leadingInset: 0,
+                    viewportOffset: 0, viewportWidth: 200)
+                XCTAssertEqual(responder.selectionLayout?.characterOffsets, [0])
+            }
+            populate()
+            XCTAssertNil(responderReference, "Secure: \(isSecure)")
+            XCTAssertNil(resourcesReference, "Secure: \(isSecure)")
+        }
+    }
+
     // ASSERTIONS textSelectionStructureObserved
     func testTextSelectionStoresAutomaticAffinityAndInsertionState() {
         let text = "value"

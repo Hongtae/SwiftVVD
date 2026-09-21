@@ -2078,7 +2078,8 @@ final class TextFieldResponder: MultiViewResponder,
         viewportOffset: CGFloat,
         viewportWidth: CGFloat
     ) {
-        let resolver: (String, CGFloat) -> TextFieldSelectionLayout = {
+        // The resolver is stored and invoked only by this responder.
+        let resolver: (String, CGFloat) -> TextFieldSelectionLayout = { [unowned self]
             text, viewportOffset in
             TextFieldSelectionLayout.resolve(
                 text: text,

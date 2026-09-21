@@ -2,6 +2,61 @@ import XCTest
 @testable import VUI
 
 final class SystemScrollViewHostTests: XCTestCase {
+    func testScrollHostRuleReleasesGraphBeforeAndAfterEvaluation() {
+        for evaluate in [false, true] {
+            weak var graphReference: _AGGraph?
+            func populate() {
+                let graph = _AGGraph()
+                graphReference = graph
+                _AGGraphContext(graph: graph).withCurrent {
+                    let host = graph.makeStatefulRule(MakeHostingScrollView(
+                        _layoutState: graph.makeInput(value: SystemScrollLayoutState()),
+                        graphRef: _AGGraphContext(graph: graph)))
+                    if evaluate {
+                        _ = host.value
+                    }
+                }
+            }
+            populate()
+            XCTAssertNil(graphReference, "Evaluated: \(evaluate)")
+        }
+    }
+
+    func testRetainedPlatformContainerDoesNotKeepItsGraphAlive() throws {
+        weak var graphReference: _AGGraph?
+        weak var hostReference: HostingScrollView?
+        func makeContainer() -> HostingScrollView.PlatformContainer {
+            let graph = _AGGraph()
+            graphReference = graph
+            return _AGGraphContext(graph: graph).withCurrent {
+                let host = graph.makeStatefulRule(MakeHostingScrollView(
+                    _layoutState: graph.makeInput(value: SystemScrollLayoutState()),
+                    graphRef: _AGGraphContext(graph: graph)
+                )).value
+                hostReference = host
+                _ = host.updateContext(HostingScrollViewUpdateContext(
+                    contentOffset: CGPoint(x: 0, y: 25),
+                    contentFrame: CGRect(x: 0, y: 0, width: 100, height: 400),
+                    containingSize: CGSize(width: 100, height: 80),
+                    offsetMode: .system,
+                    safeInsets: EdgeInsets()
+                ))
+                return HostingScrollView.PlatformContainer(scrollView: host)
+            }
+        }
+
+        var container: HostingScrollView.PlatformContainer? = makeContainer()
+        XCTAssertNil(graphReference)
+        XCTAssertNotNil(hostReference)
+        let group = try XCTUnwrap(
+            container?.platformGroupContainer as? HostingScrollView.PlatformGroupContainer
+        )
+        XCTAssertEqual(group.bounds, CGRect(x: 0, y: 25, width: 100, height: 80))
+        container = nil
+        XCTAssertNil(hostReference)
+        XCTAssertNil(group.scrollView)
+    }
+
     func testFixedAreaScrollIndicatorsReserveViewportAndCornerByAxis() throws {
         let configuration = ScrollViewConfiguration(
             axes: [.horizontal, .vertical],
