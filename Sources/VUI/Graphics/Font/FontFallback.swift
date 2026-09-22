@@ -51,13 +51,15 @@ final class TerminalFallbackTypeface: Typeface {
         _ text: String,
         direction: TypefaceShapingDirection?,
         language: String?,
-        features: [TypefaceShapingFeature]
+        features: [TypefaceShapingFeature],
+        optionalLigatureBoundaries: [Int]
     ) -> TypefaceShapedText? {
         base.shape(
             text,
             direction: direction,
             language: language,
-            features: features
+            features: features,
+            optionalLigatureBoundaries: optionalLigatureBoundaries
         )
     }
 
@@ -135,13 +137,15 @@ final class ShapingFeatureTypeface: Typeface {
         _ text: String,
         direction: TypefaceShapingDirection?,
         language: String?,
-        features requestedFeatures: [TypefaceShapingFeature]
+        features requestedFeatures: [TypefaceShapingFeature],
+        optionalLigatureBoundaries: [Int]
     ) -> TypefaceShapedText? {
         base.shape(
             text,
             direction: direction,
             language: language,
-            features: features + requestedFeatures
+            features: features + requestedFeatures,
+            optionalLigatureBoundaries: optionalLigatureBoundaries
         )
     }
 
@@ -253,13 +257,15 @@ final class DeferredTypeface: Typeface {
         _ text: String,
         direction: TypefaceShapingDirection?,
         language: String?,
-        features: [TypefaceShapingFeature]
+        features: [TypefaceShapingFeature],
+        optionalLigatureBoundaries: [Int]
     ) -> TypefaceShapedText? {
         resolved.shape(
             text,
             direction: direction,
             language: language,
-            features: features
+            features: features,
+            optionalLigatureBoundaries: optionalLigatureBoundaries
         )
     }
 

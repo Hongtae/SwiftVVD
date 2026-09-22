@@ -4,13 +4,140 @@ import VVD
 @testable import VUI
 
 final class TextLineBreakDrawingTests: XCTestCase {
-    // ASSERTIONS textParagraphLineBreakDrawing27Observed
-    func testMountedCJKLineBreaksPreserveGlyphSlicesAndRecordedPixels() throws {
+    // ASSERTIONS textCombiningGeometry27Observed textCombiningDrawing27Observed
+    func testMountedCombiningMarksPreserveSlicesClippingAndRecordedPixels() throws {
+        try verifyCombiningDrawing(["q\u{301}x", "q\u{301}\u{300}", "q\u{300}\u{301}",
+                                    "가\u{301}\u{300} 나", "a\u{20dd}", "f\u{301}fi"], font: testFont())
+    }
+
+    // ASSERTIONS textCanonicalMarks27Observed
+    func testMountedCanonicalMarksPreserveSlicesClippingAndRecordedPixels() throws {
+        try verifyCombiningDrawing(["x\u{301}\u{323}", "e\u{301}\u{323}", "\u{e9}\u{323}",
+                                    "q\u{323}\u{301}", "e\u{301}\u{323}\u{300}", "x e\u{301}\u{323} z"],
+                                   font: testFont(cjk: false))
+    }
+
+    // ASSERTIONS textDefaultIgnorableEncoding27Observed
+    func testMountedIgnorableGlyphsPreserveSlicesClippingAndRecordedPixels() throws {
+        try verifyCombiningDrawing(["a\u{34f}\u{301}", "q\u{34f}\u{301}", "f\u{34f}i",
+                                    "\u{34f}a", "\u{34f}", "\u{34f}\u{34f}a", "a\u{200b}\u{301}",
+                                    "q\u{fe0e}\u{301}", "a\u{e0100}\u{301}", "\u{feff}a"],
+                                   font: testFont(cjk: false), emptyCases: [4])
+    }
+
+    private func verifyCombiningDrawing(_ cases: [String], font: VUI.Font,
+                                        emptyCases: Set<Int> = []) throws {
+        try verifyDrawing(cases.map { Text(verbatim: $0).font(font) }, emptyCases: emptyCases)
+    }
+
+    // ASSERTIONS textAttributedShapingContext27Observed
+    func testMountedPaintIntervalsPreserveSlicesClippingAndRecordedPixels() throws {
+        let font = testFont(cjk: false)
+        let cases = ["a\u{34f}\u{301}", "e\u{301}", "fi", "AV", "x\u{301}\u{323}", "\u{34f}\u{34f}a"]
+        let texts = cases.map { string -> Text in
+            var text = Text(verbatim: "")
+            for (index, scalar) in string.unicodeScalars.enumerated() {
+                var part = Text(verbatim: String(scalar)).font(font)
+                if index == 1 { part = part.foregroundColor(.red) }
+                text = text + part
+            }
+            return text
+        }
+        try verifyDrawing(texts)
+    }
+
+    // ASSERTIONS textLinePublication27Observed
+    func testMountedDeletedRunsPreserveFontHeightClippingAndRecordedPixels() throws {
+        let regular = testFont(cjk: false)
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let large = VUI.Font.file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 46, weight: .regular)
+        func text(_ value: String, _ font: VUI.Font) -> Text { Text(verbatim: value).font(font) }
+        let hidden = text("\u{34f}", large)
+        let cases = [
+            text("x", regular) + hidden + text("a", regular),
+            text("x", regular) + text("\u{34f}a", large),
+            hidden + text("a", regular),
+            text("x", regular) + hidden,
+            text("\u{34f}", regular) + hidden,
+            text("\u{34f}", regular) + hidden + text("a", regular),
+            text("a", regular) + hidden + text("\u{301}", regular),
+            text("x ", regular) + hidden + text("a", regular),
+            text("x", regular) + text("\u{34f}a", regular).foregroundColor(.red),
+            text("x", regular) + text("\u{34f}", regular).foregroundColor(.red) + text("a", regular),
+            text("\u{34f}", regular) + text("\u{34f}a", regular).foregroundColor(.red),
+            text("\u{34f}", regular).foregroundColor(.red) + text("\u{34f}a", regular),
+        ]
+        try verifyDrawing(cases, emptyCases: [4], emptyClippedCases: [0, 2, 3, 4, 5, 6, 7])
+    }
+
+    private func verifyDrawing(_ cases: [Text], emptyCases: Set<Int> = [],
+                               emptyClippedCases: Set<Int> = []) throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for (backend, rendering) in [("bitmap", VUI.Font.DefaultRenderingMode.bitmap()),
+                                     ("vector", VUI.Font.DefaultRenderingMode.vector())] {
+            for scale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.defaultFontRenderingMode = rendering
+                environment.displayScale = 2
+                environment._contentScaleFactor = scale
+                for (index, input) in cases.enumerated() {
+                    for clips in [false, true] {
+                        var images: [String: [UInt8]] = [:]
+                        for mode in ["ordinary", "default", "measured", "slices"] {
+                            let capture = LineBreakDrawingCapture()
+                            capture.drawsSlices = mode == "slices"
+                            let text = input.foregroundColor(.blue)
+                            let child = mode == "ordinary" ? AnyView(text) : mode == "measured"
+                                ? AnyView(text.textRenderer(LineBreakDrawingMeasuredRenderer(capture: capture)))
+                                : AnyView(text.textRenderer(LineBreakDrawingDefaultRenderer(capture: capture)))
+                            let measured = LineBreakDrawingMeasure(proposal: .init(width: 200, height: 100), capture: capture) {
+                                child
+                            }.padding(.top, 24).padding(.leading, 24)
+                            let value = measured.frame(width: 320, height: 160, alignment: .topLeading)
+                            let rendererHost = TestViewRendererHost()
+                            let host = ViewGraph(rootViewType: AnyView.self, content: AnyView(value),
+                                rendererHost: rendererHost, initialEnvironment: environment)
+                            rendererHost.storage = host
+                            host.setSize(CGSize(width: 320, height: 160))
+                            host.updateOutputs(at: .zero)
+                            let list = try host.data.withCurrent { try XCTUnwrap(host.displayList()) }
+                            let label = "\(backend) scale=\(scale) case=\(index) clips=\(clips) \(mode)"
+                            let direct = try render(list, device: device, resources: rendererHost.sceneResources,
+                                environment: environment, replay: false,
+                                clip: clips ? CGRect(x: 0, y: 0, width: 43, height: 48) : nil)
+                            let replay = try render(list, device: device, resources: rendererHost.sceneResources,
+                                environment: environment, replay: true,
+                                clip: clips ? CGRect(x: 0, y: 0, width: 43, height: 48) : nil)
+                            XCTAssertTrue(direct == replay, "replay " + label)
+                            let hasInk = stride(from: 3, to: direct.count, by: 4).contains { direct[$0] != 0 }
+                            XCTAssertEqual(hasInk, !emptyCases.contains(index) &&
+                                !(clips && emptyClippedCases.contains(index)), label)
+                            images[mode] = direct
+                        }
+                        let label = "\(backend) scale=\(scale) case=\(index) clips=\(clips)"
+                        for mode in ["default", "measured", "slices"] {
+                            XCTAssertTrue(images[mode]! == images["ordinary"]!, "owner \(mode) " + label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textParagraphLineBreakDrawing27Observed textHangulShapingDrawing27Observed
+    func testMountedCJKAndHangulLineBreaksPreserveGlyphSlicesAndRecordedPixels() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
         appContext = StyleTestAppContext(graphicsDeviceContext: device)
         defer { appContext = previous }
         let cases: [(String, CGFloat, Bool, [CGFloat], [CGFloat], [[CGFloat]])] = [
+            ("한국어 한글", 90, true, [69, 68, 27, 61], [68.54, 42.32], [[0, 21.16, 21.16, 21.16, 42.32, 21.16, 63.48, 5.06], [0, 21.16, 21.16, 21.16]]),
+            ("한국어 한글", 90, false, [69, 68, 27, 61], [68.54, 42.32], [[0, 21.16, 21.16, 21.16, 42.32, 21.16, 63.48, 5.06], [0, 21.16, 21.16, 21.16]]),
             ("A A A A 漢字", 45, true, [37, 136, 27, 129], [36.524, 36.524, 23, 23], [[0, 13.202, 13.202, 5.06, 18.262, 13.202, 31.464, 5.06], [0, 13.202, 13.202, 5.06, 18.262, 13.202, 31.464, 5.06], [0, 23], [0, 23]]),
             ("A A A A 漢字", 45, false, [37, 136, 27, 129], [36.524, 36.524, 23, 23], [[0, 13.202, 13.202, 5.06, 18.262, 13.202, 31.464, 5.06], [0, 13.202, 13.202, 5.06, 18.262, 13.202, 31.464, 5.06], [0, 23], [0, 23]]),
             ("A A A A 漢字", 90, true, [64.5, 68, 27, 61], [54.786, 64.262], [[0, 13.202, 13.202, 5.06, 18.262, 13.202, 31.464, 5.06, 36.524, 13.202, 49.726, 5.06], [0, 13.202, 13.202, 5.06, 18.262, 23, 41.262, 23]]),
@@ -124,28 +251,34 @@ final class TextLineBreakDrawingTests: XCTestCase {
         }
     }
 
-    private func testFont() -> VUI.Font {
+    private func testFont(cjk: Bool = true) -> VUI.Font {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         return .file(root.appendingPathComponent(
-            "Sources/VUI/Resources/Fonts/NotoSansKR/NotoSansKR-VariableFont_wght.ttf"), size: 23, weight: .thin)
+            cjk ? "Sources/VUI/Resources/Fonts/NotoSansKR/NotoSansKR-VariableFont_wght.ttf"
+                : "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"),
+            size: 23, weight: cjk ? .thin : .regular)
     }
 
     private func render(_ list: DisplayList, device: GraphicsDeviceContext, resources: SceneResources,
-                        environment: EnvironmentValues, replay: Bool) throws -> [UInt8] {
+                        environment: EnvironmentValues, replay: Bool, clip: CGRect? = nil) throws -> [UInt8] {
         let scale = environment._contentScaleFactor
         let size = CGSize(width: 320, height: 160)
         let extent = size * scale
         let commands = try XCTUnwrap(device.renderQueue()?.makeCommandBuffer())
-        let context = try XCTUnwrap(GraphicsContext(sceneResources: resources, environment: environment,
+        var context = try XCTUnwrap(GraphicsContext(sceneResources: resources, environment: environment,
             viewport: CGRect(origin: .zero, size: extent), contentOffset: .zero,
             contentScaleFactor: scale, resolution: extent, commandBuffer: commands))
         context.clear(with: .clear)
         if replay {
-            let recording = context.recordingContext(size: size)
+            var recording = context.recordingContext(size: size)
+            if let clip { recording.clip(to: Path(clip)) }
             list.draw(in: recording)
             try XCTUnwrap(recording.recording).draw(in: context)
-        } else { list.draw(in: context) }
+        } else {
+            if let clip { context.clip(to: Path(clip)) }
+            list.draw(in: context)
+        }
         let done = expectation(description: "Line break drawing readback")
         commands.addCompletedHandler { _ in done.fulfill() }
         XCTAssertTrue(commands.commit())
@@ -157,6 +290,7 @@ final class TextLineBreakDrawingTests: XCTestCase {
 
 // The fixture measures and draws synchronously on its test thread.
 private final class LineBreakDrawingCapture: @unchecked Sendable {
+    var drawsSlices = false
     var measures: [[CGFloat]] = []
     var widths: [[CGFloat]] = []
     var slices: [[[CGFloat]]] = []
@@ -165,7 +299,11 @@ private final class LineBreakDrawingCapture: @unchecked Sendable {
         slices.append(layout.map { line in
             line.flatMap { run in run.flatMap { [$0.typographicBounds.rect.minX, $0.typographicBounds.width] } }
         })
-        for line in layout { context.draw(line) }
+        for line in layout {
+            if drawsSlices {
+                for run in line { for slice in run { context.draw(slice) } }
+            } else { context.draw(line) }
+        }
     }
 }
 

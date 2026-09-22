@@ -39,6 +39,293 @@ final class TextParagraphAdmissionTests: XCTestCase {
             referenceDate: Date(timeIntervalSince1970: 0)))
     }
 
+    // ASSERTIONS textAttributedShapingContext27Observed
+    func testPaintIntervalsPreserveShapingContextAndOriginalPublicRuns() throws {
+        let cases: [(String, [UInt32], [[Int]], [CGFloat], [(CGFloat, CGFloat)])] = [
+            ("a\u{34f}\u{301}", [695], [[0]], [12.5107421875], [(0, 0)]),
+            ("e\u{301}", [703], [[0]], [12.1962890625], [(0, 0)]),
+            ("fi", [74, 77], [[0], [1]], [7.99609375, 5.5927734375], [(0, 0), (7.99609375, 0)]),
+            ("AV", [37, 58], [[0], [1]], [14.02685546875, 14.64453125], [(0, 0), (14.02685546875, 0)]),
+            ("x\u{301}\u{323}", [92, 169, 173], [[0], [1], [2]], [11.41015625, 0, 0],
+                [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("\u{34f}\u{34f}a", [65535, 69], [[0], [2]], [0, 12.5107421875], [(0, 0), (0, 0)]),
+        ]
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let font = VUI.Font.file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23, weight: .regular)
+        for scale: CGFloat in [1, 2] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            environment.displayScale = 2
+            environment._contentScaleFactor = scale
+            for (string, glyphs, runs, widths, positions) in cases {
+                var text = Text(verbatim: "")
+                for (index, scalar) in string.unicodeScalars.enumerated() {
+                    let part = Text(verbatim: String(scalar)).font(font)
+                        .foregroundColor(index == 1 ? .red : .blue)
+                    text = text + part
+                }
+                let source = try XCTUnwrap(text._resolve(context:
+                    GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                    referenceDate: Date(timeIntervalSince1970: 0)))
+                let layout = source.makeLayout(in: .init(width: 200, height: 100), layoutDirection: .leftToRight)
+                let line = try XCTUnwrap(layout.first)
+                let first = try XCTUnwrap(line.first?.characterIndices.first)
+                XCTAssertEqual(line.map { $0.characterIndices.map { first.distance(to: $0) } }, runs, string)
+                let slices = line.flatMap { Array($0) }
+                XCTAssertEqual(slices.count, widths.count, string)
+                for (slice, width) in zip(slices, widths) { XCTAssertEqual(slice.typographicBounds.width, width, accuracy: 1e-8, string) }
+                let shaped = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
+                let raw = try XCTUnwrap(shaped.first)
+                XCTAssertEqual(raw.glyphs.map(\.glyphIndex), glyphs, string)
+                var drawn: [CGPoint] = []
+                ResolvedTextSource.forEachGlyph(in: shaped) { _, position in drawn.append(position) }
+                XCTAssertEqual(drawn.count, positions.count, string)
+                for (position, expected) in zip(drawn, positions) {
+                    XCTAssertEqual((position.x - raw.originX) / scale, expected.0, accuracy: 1e-8, string)
+                    XCTAssertEqual((raw.ascender + raw.originY - position.y) / scale, expected.1, accuracy: 1e-8, string)
+                }
+                for glyph in raw.glyphs {
+                    let color: VUI.Color = glyph.characterIndex == 1 ? .red : .blue
+                    XCTAssertEqual(glyph.foregroundColor, VUI.Color(color.resolveHDR(in: environment)), string)
+                }
+                XCTAssertEqual(Set(layout.glyphAtoms().flatMap { Array($0.sourceRange) }), Set(0..<string.unicodeScalars.count), string)
+            }
+        }
+    }
+
+    // ASSERTIONS textLinePublication27Observed
+    func testLinePublicationPreservesFontMetricsAndOriginalRunBoundaries() throws {
+        let cases: [(String, Range<Int>, Bool, [[Int]], CGFloat)] = [
+            ("x\u{34f}a", 1..<2, true, [[0], [2]], 23.9208984375),
+            ("x\u{34f}a", 1..<3, true, [[0], [2]], 36.431640625),
+            ("\u{34f}a", 0..<1, true, [[0], [1]], 12.5107421875),
+            ("x\u{34f}", 1..<2, true, [[0]], 11.41015625),
+            ("\u{34f}\u{34f}", 1..<2, true, [[0]], 0),
+            ("\u{34f}\u{34f}a", 1..<2, true, [[0], [2]], 12.5107421875),
+            ("a\u{34f}\u{301}", 1..<2, true, [[0], [2]], 12.5107421875),
+            ("x \u{34f}a", 2..<3, true, [[0, 1], [3]], 29.6259765625),
+            ("x\u{34f}a", 1..<3, false, [[0], [2]], 23.9208984375),
+            ("x\u{34f}a", 1..<2, false, [[0], [2]], 23.9208984375),
+            ("\u{34f}\u{34f}a", 1..<3, false, [[0], [2]], 12.5107421875),
+            ("\u{34f}\u{34f}a", 0..<1, false, [[0], [2]], 12.5107421875),
+        ]
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let url = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let regular = VUI.Font.file(url, size: 23, weight: .regular)
+        let large = VUI.Font.file(url, size: 46, weight: .regular)
+        for scale: CGFloat in [1, 2] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            environment.displayScale = 2
+            environment._contentScaleFactor = scale
+            for (string, selected, changesFont, expectedRuns, width) in cases {
+                let scalars = Array(string.unicodeScalars)
+                let boundaries = Set([0, selected.lowerBound, selected.upperBound, scalars.count]).sorted()
+                var text = Text(verbatim: "")
+                for (start, end) in zip(boundaries, boundaries.dropFirst()) {
+                    var part = Text(verbatim: String(String.UnicodeScalarView(scalars[start..<end])))
+                        .font(changesFont && selected.contains(start) ? large : regular)
+                    if !changesFont && selected.contains(start) { part = part.foregroundColor(.red) }
+                    text = text + part
+                }
+                let source = try XCTUnwrap(text._resolve(context:
+                    GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                    referenceDate: Date(timeIntervalSince1970: 0)))
+                let layout = source.makeLayout(in: CGSize(width: 200, height: 100), layoutDirection: .leftToRight)
+                let line = try XCTUnwrap(layout.first)
+                let first = try XCTUnwrap(line.first?.characterIndices.first)
+                let label = "\(string.unicodeScalars.map(\.value)) font=\(changesFont) range=\(selected) scale=\(scale)"
+                XCTAssertEqual(layout.count, 1, label)
+                XCTAssertEqual(line.map { $0.characterIndices.map { first.distance(to: $0) } }, expectedRuns, label)
+                XCTAssertEqual(line.typographicBounds.width, width, accuracy: 1e-8, label)
+                XCTAssertEqual(line.typographicBounds.ascent, changesFont ? 43 : 21, accuracy: 1e-8, label)
+                XCTAssertEqual(line.typographicBounds.descent, changesFont ? 11 : 6, accuracy: 1e-8, label)
+                for (run, expected) in zip(line, expectedRuns) {
+                    for (index, slice) in run.enumerated() {
+                        XCTAssertEqual(slice.characterIndices.map { first.distance(to: $0) }, [expected[index]], label)
+                    }
+                }
+                // Public glyph projection must not remove source slots from
+                // the independent hit-testing and selection representation.
+                let atoms = layout.glyphAtoms()
+                XCTAssertEqual(Set(atoms.flatMap { Array($0.sourceRange) }), Set(scalars.indices), label)
+                XCTAssertEqual(atoms.map(\.sourceRange), source.glyphAtoms(in:
+                    CGSize(width: 200, height: 100)).map(\.sourceRange), label)
+            }
+        }
+    }
+
+    // ASSERTIONS textDefaultIgnorableEncoding27Observed
+    func testDefaultIgnorableGlyphSourcesAndPositionsReachPublicSlices() throws {
+        let cases: [(String, [UInt32], [Int], [CGFloat], [(CGFloat, CGFloat)])] = [
+            ("a\u{34f}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{34f}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{34f}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{34f}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{34f}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{34f}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{34f}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{34f}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{200b}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{200b}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{200b}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{200b}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{200b}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{200b}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{200b}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{200b}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{2060}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{2060}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{2060}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{2060}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{2060}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{2060}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{2060}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{2060}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{feff}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{feff}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{feff}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{feff}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{feff}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{feff}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{feff}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{feff}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{fe0e}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{fe0e}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{fe0e}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{fe0e}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{fe0e}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{fe0e}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{fe0e}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{fe0e}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{e0100}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{e0100}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{e0100}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{e0100}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{e0100}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{e0100}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{e0100}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{e0100}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{ad}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{ad}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{ad}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{ad}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{ad}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{ad}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{ad}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{ad}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+            ("a\u{2061}\u{301}", [695], [0], [12.5107421875], [(0, 0)]),
+            ("q\u{2061}\u{301}", [85, 169], [0, 2], [13.072265625, 0], [(0, 0), (12.38720703125, 0)]),
+            ("f\u{2061}i", [471], [0], [12.74658203125], [(0, 0)]),
+            ("\u{2061}a", [65535, 69], [0, 1], [0, 12.5107421875], [(0, 0), (0, 0)]),
+            ("a\u{2061}", [69], [0], [12.5107421875], [(0, 0)]),
+            ("\u{2061}", [65535], [0], [0], [(0, 0)]),
+            ("x\u{2061}\u{301}\u{323}", [92, 169, 173], [0, 2, 3], [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("a\u{301}\u{2061}\u{323}", [695, 173], [0, 3], [12.5107421875, 0], [(0, 0), (12.34228515625, 0)]),
+        ]
+        for scale: CGFloat in [1, 2] {
+            for (text, glyphs, indices, advances, expected) in cases {
+                let utf16Offsets = text.unicodeScalars.reduce(into: [0]) {
+                    $0.append($0.last! + $1.utf16.count)
+                }
+                let publicIndices = indices.map { utf16Offsets[$0] }
+                let source = try resolve(text, scale: scale)
+                let layout = source.makeLayout(in: CGSize(width: 200, height: 100), layoutDirection: .leftToRight)
+                let publicLine = try XCTUnwrap(layout.first)
+                XCTAssertEqual(publicLine.count, 1, text)
+                let run = try XCTUnwrap(publicLine.first)
+                let first = try XCTUnwrap(run.characterIndices.first)
+                XCTAssertEqual(run.characterIndices.map { first.distance(to: $0) }, publicIndices, text)
+                XCTAssertEqual(run.count, glyphs.count, text)
+                for (index, slice) in run.enumerated() {
+                    XCTAssertEqual(slice.characterIndices.map { first.distance(to: $0) }, [publicIndices[index]], text)
+                    XCTAssertEqual(slice.typographicBounds.width, advances[index], accuracy: 1e-8, text)
+                }
+                let lines = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
+                let line = try XCTUnwrap(lines.first)
+                XCTAssertEqual(line.glyphs.map(\.glyphIndex), glyphs, text)
+                var positions: [CGPoint] = []
+                ResolvedTextSource.forEachGlyph(in: lines) { _, position in positions.append(position) }
+                XCTAssertEqual(positions.count, expected.count, text)
+                for (position, value) in zip(positions, expected) {
+                    XCTAssertEqual((position.x - line.originX) / scale, value.0, accuracy: 1e-8, text)
+                    XCTAssertEqual((line.ascender + line.originY - position.y) / scale, value.1, accuracy: 1e-8, text)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textCanonicalMarks27Observed
+    func testCanonicalGlyphSourcesAndPositionsReachPublicSlices() throws {
+        let cases: [(String, [UInt32], [Int], [CGFloat], [(CGFloat, CGFloat)])] = [
+            ("x\u{301}\u{323}", [92, 169, 173], [0, 1, 2],
+             [11.41015625, 0, 0], [(0, 0), (12.0615234375, -0.1123046875), (12.443359375, 0.1123046875)]),
+            ("e\u{301}\u{323}", [1107, 169], [0, 2],
+             [12.1962890625, 0], [(0, 0), (12.70166015625, 0)]),
+            ("\u{e9}\u{323}", [703, 173], [0, 1],
+             [12.1962890625, 0], [(0, 0), (13.08349609375, 0)]),
+            ("q\u{323}\u{301}", [85, 173, 169], [0, 1, 2],
+             [13.072265625, 0, 0], [(0, 0), (16.99169921875, -4.57080078125), (12.38720703125, 0)]),
+            ("e\u{301}\u{323}\u{300}", [1107, 169, 168], [0, 2, 3],
+             [12.1962890625, 0, 0], [(0, 0), (12.70166015625, 0), (12.29736328125, 3.94189453125)]),
+            ("x e\u{301}\u{323} z", [92, 4, 1107, 169, 4, 94], [0, 1, 2, 4, 5, 6],
+             [11.41015625, 5.705078125, 12.1962890625, 0, 5.705078125, 11.41015625], [(0, 0), (11.41015625, 0), (17.115234375, 0), (29.81689453125, 0), (29.3115234375, 0), (35.0166015625, 0)]),
+        ]
+        for scale: CGFloat in [1, 2] {
+            for (text, glyphs, indices, advances, expected) in cases {
+                let source = try resolve(text, scale: scale)
+                let layout = source.makeLayout(in: CGSize(width: 200, height: 100), layoutDirection: .leftToRight)
+                let publicLine = try XCTUnwrap(layout.first)
+                XCTAssertEqual(publicLine.count, 1, text)
+                let run = try XCTUnwrap(publicLine.first)
+                let first = try XCTUnwrap(run.characterIndices.first)
+                XCTAssertEqual(run.characterIndices.map { first.distance(to: $0) }, indices, text)
+                XCTAssertEqual(run.count, glyphs.count, text)
+                for (index, slice) in run.enumerated() {
+                    XCTAssertEqual(slice.characterIndices.map { first.distance(to: $0) }, [indices[index]], text)
+                    XCTAssertEqual(slice.typographicBounds.width, advances[index], accuracy: 1e-8, text)
+                }
+                let lines = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
+                let line = try XCTUnwrap(lines.first)
+                XCTAssertEqual(line.glyphs.map(\.glyphIndex), glyphs, text)
+                var positions: [CGPoint] = []
+                ResolvedTextSource.forEachGlyph(in: lines) { _, position in positions.append(position) }
+                XCTAssertEqual(positions.count, expected.count, text)
+                for (position, value) in zip(positions, expected) {
+                    XCTAssertEqual((position.x - line.originX) / scale, value.0, accuracy: 1e-8, text)
+                    XCTAssertEqual((line.ascender + line.originY - position.y) / scale, value.1, accuracy: 1e-8, text)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textCombiningGeometry27Observed
+    func testCombiningGlyphPositionsReachResolvedDrawingCoordinates() throws {
+        let cases: [(String, [(CGFloat, CGFloat)])] = [
+            ("q\u{301}x", [(0, 0), (-0.0575, 4.8438), (13.685, 0)]),
+            ("가\u{301}\u{300} 나", [(0, 0), (3.68, 10.801375), (3.68, 20.72875), (21.16, 0), (26.22, 0)]),
+            ("a\u{20dd}", [(4.692, 0), (22.08, -2.6795)]),
+        ]
+        for scale: CGFloat in [1, 2] {
+            for (text, expected) in cases {
+                let source = try resolve(text, scale: scale, cjk: true)
+                let lines = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
+                XCTAssertEqual(lines.count, 1)
+                let line = try XCTUnwrap(lines.first)
+                var positions: [CGPoint] = []
+                ResolvedTextSource.forEachGlyph(in: lines) { _, position in positions.append(position) }
+                XCTAssertEqual(positions.count, expected.count)
+                for (position, value) in zip(positions, expected) {
+                    XCTAssertEqual((position.x - line.originX) / scale, value.0, accuracy: 1e-8)
+                    XCTAssertEqual((line.ascender + line.originY - position.y) / scale, value.1, accuracy: 1e-8)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textParagraphLineBreak27Observed textLineBoundaryBackend27Observed
     func testCJKLineBreakCandidatesRetainPunctuationAndWordArbitration() throws {
         let cases: [(String, CGFloat, Bool, [Int], [CGFloat])] = [
@@ -134,8 +421,8 @@ final class TextParagraphAdmissionTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS textParagraphLineBreak27Observed
-    func testHangulWordBoundaryPreservesTheTrailingSpaceRange() throws {
+    // ASSERTIONS textParagraphLineBreak27Observed textHangulShapingPolicy27Observed textShapingScriptSpans27Observed
+    func testHangulWordBoundaryPreservesSpaceAdvancesAndPublishedMetrics() throws {
         for avoids in [true, false] {
             for scale: CGFloat in [1, 2] {
                 let source = try resolve("한국어 한글", scale: scale, avoidsOrphans: avoids, cjk: true)
@@ -143,6 +430,57 @@ final class TextParagraphAdmissionTests: XCTestCase {
                 XCTAssertEqual(layout.lines.map {
                     $0.glyphs.first!.sourceRange!.lowerBound..<$0.glyphs.last!.sourceRange!.upperBound
                 }, [0..<4, 4..<6])
+                let widths: [CGFloat] = [68.54, 42.32]
+                let advances: [[CGFloat]] = [[21.16, 21.16, 21.16, 5.06], [21.16, 21.16]]
+                for (index, line) in layout.lines.enumerated() {
+                    XCTAssertEqual((line.fragmentWidth ?? line.width) / scale, widths[index], accuracy: 0.000_001)
+                    XCTAssertEqual(line.glyphs.count, advances[index].count)
+                    for (glyph, advance) in zip(line.glyphs, advances[index]) {
+                        XCTAssertEqual(glyph.advance.width / scale, advance, accuracy: 0.000_001)
+                    }
+                }
+                let size = CGSize(width: 90, height: 400)
+                let manager = ResolvedStyledText.TextLayoutManager(resolvedText: source)
+                let metrics = manager.metrics(in: size, layoutMargins: nil)
+                XCTAssertEqual(metrics.size, CGSize(width: 69, height: 68))
+                XCTAssertEqual(metrics.firstBaseline, 27)
+                XCTAssertEqual(metrics.lastBaseline, 61)
+                let ordinary = ResolvedStyledText.StringDrawing(resolvedText: source)
+                let ordinaryMetrics = ordinary.metrics(in: size, layoutMargins: nil)
+                XCTAssertEqual(ordinaryMetrics.size, metrics.size)
+                XCTAssertEqual(ordinaryMetrics.firstBaseline, 27)
+                XCTAssertEqual(ordinaryMetrics.lastBaseline, 61)
+            }
+        }
+    }
+
+    // ASSERTIONS textCombiningRunSlices27Observed
+    func testCombiningGlyphsKeepSeparateSlicesAndCharacterIndices() throws {
+        let cases: [(String, [Int], [CGFloat])] = [
+            ("가\u{301} 나", [0, 1, 2, 3], [21.16, 0, 5.06, 21.16]),
+            ("가\u{301} 나", [0, 2, 3, 4], [21.16, 0, 5.06, 21.16]),
+            ("가\u{301}\u{300} 나", [0, 1, 2, 3, 4], [21.16, 0, 0, 5.06, 21.16]),
+            ("q\u{301}x", [0, 1, 2], [13.685, 0, 9.982]),
+            ("e\u{301}x", [0, 2], [12.121, 9.982]),
+        ]
+        for (text, indices, widths) in cases {
+            for scale: CGFloat in [1, 2] {
+                let source = try resolve(text, scale: scale, cjk: true)
+                let layout = source.makeLayout(in: CGSize(width: 200, height: 400), layoutDirection: .leftToRight)
+                let line = try XCTUnwrap(layout.first)
+                XCTAssertEqual(line.count, 1, text)
+                let run = try XCTUnwrap(line.first)
+                XCTAssertEqual(run.count, widths.count, text)
+                let first = try XCTUnwrap(run.characterIndices.first)
+                XCTAssertEqual(run.characterIndices.map { first.distance(to: $0) }, indices, text)
+                for (index, slice) in run.enumerated() {
+                    let width = widths[index]
+                    XCTAssertEqual(slice.typographicBounds.width, width, accuracy: 0.000_001, text)
+                    XCTAssertEqual(slice.characterIndices.map { first.distance(to: $0) }, [indices[index]], text)
+                }
+                XCTAssertTrue(run[run.endIndex..<run.endIndex].isEmpty)
+                XCTAssertEqual(run[1..<run.endIndex].characterIndices.map { first.distance(to: $0) },
+                               Array(indices.dropFirst()), text)
             }
         }
     }

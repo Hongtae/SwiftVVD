@@ -80,7 +80,9 @@ public struct TextProxy {
 
 fileprivate struct _TextLayoutRunStorage: Equatable {
     var glyphRange: Range<Int>
-    var clusterGlyphRanges: [Range<Int>]
+    // Deleted source slots remain in the line for layout and source queries.
+    // Only runs with a filtered public collection need an index projection.
+    var glyphIndices: [Int]?
     var attributes: _TextAttributeValues
     var style: _ResolvedTextRunAttributes
 }
@@ -501,31 +503,26 @@ extension Text {
                 line.storage.lines[line.index].runs[index].glyphRange
             }
 
-            var clusterGlyphRanges: [Range<Int>] {
-                line.storage.lines[line.index].runs[index].clusterGlyphRanges
-            }
-
-            func glyphRange(for clusters: Range<Int>) -> Range<Int> {
+            func glyphRange(for indices: Range<Int>) -> Range<Int> {
                 precondition(
-                    clusters.lowerBound >= 0 &&
-                        clusters.upperBound <= clusterGlyphRanges.count
+                    indices.lowerBound >= 0 &&
+                        indices.upperBound <= endIndex
                 )
-                guard !clusters.isEmpty else {
-                    let position = clusters.lowerBound ==
-                        clusterGlyphRanges.count
-                        ? glyphRange.upperBound
-                        : clusterGlyphRanges[clusters.lowerBound].lowerBound
-                    return position..<position
+                if let glyphIndices = line.storage.lines[line.index].runs[index].glyphIndices {
+                    let lower = indices.lowerBound == glyphIndices.count
+                        ? glyphRange.upperBound : glyphIndices[indices.lowerBound]
+                    let upper = indices.isEmpty ? lower : glyphIndices[indices.upperBound - 1] + 1
+                    return lower..<upper
                 }
-                let lower = clusterGlyphRanges[clusters.lowerBound].lowerBound
-                let upper = clusterGlyphRanges[
-                    clusters.upperBound - 1
-                ].upperBound
+                let lower = glyphRange.lowerBound + indices.lowerBound
+                let upper = glyphRange.lowerBound + indices.upperBound
                 return lower..<upper
             }
 
             public var startIndex: Int { 0 }
-            public var endIndex: Int { clusterGlyphRanges.count }
+            public var endIndex: Int {
+                line.storage.lines[line.index].runs[index].glyphIndices?.count ?? glyphRange.count
+            }
 
             public subscript(index: Int) -> RunSlice {
                 self[index ..< index + 1]
@@ -545,7 +542,7 @@ extension Text {
             public var typographicBounds: TypographicBounds {
                 var bounds = line.storage.bounds(
                     line: line.index,
-                    glyphRange: glyphRange
+                    glyphRange: glyphRange(for: startIndex..<endIndex)
                 )
                 bounds.origin.x += lineOrigin.x
                 bounds.origin.y += lineOrigin.y
@@ -553,8 +550,10 @@ extension Text {
             }
 
             public var characterIndices: [CharacterIndex] {
-                clusterGlyphRanges.map {
-                    let index = line.storage.lines[line.index].glyphs[$0.lowerBound].characterIndex
+                let indices = line.storage.lines[line.index].runs[index].glyphIndices
+                return self.indices.map { ordinal in
+                    let glyphIndex = indices?[ordinal] ?? glyphRange.lowerBound + ordinal
+                    let index = line.storage.lines[line.index].glyphs[glyphIndex].characterIndex
                     return CharacterIndex(value: line.storage.utf16Indices?[index] ?? index)
                 }
             }
@@ -668,7 +667,8 @@ extension ResolvedTextSource {
             let glyph = glyphs[index]
             if let last = ranges.indices.last {
                 let first = glyphs[ranges[last].lowerBound]
-                if first.attributes == glyph.attributes && first.style == glyph.style &&
+                if first.sourceRunIndex == glyph.sourceRunIndex &&
+                    first.attributes == glyph.attributes && first.style == glyph.style &&
                     !first.isTruncationToken && !glyph.isTruncationToken && first.face.isEqual(to: glyph.face) {
                     ranges[last] = ranges[last].lowerBound..<(index + 1)
                     continue
@@ -714,20 +714,19 @@ extension ResolvedTextSource {
     ) -> Text.Layout {
         let scale = 1 / scaleFactor
         let lines = lineGlyphs.map { line -> _TextLayoutLineStorage in
-            var runs = Self.drawingRunRanges(in: line.glyphs).map { range in
-                let glyph = line.glyphs[range.lowerBound]
-                return _TextLayoutRunStorage(glyphRange: range, clusterGlyphRanges: [],
-                    attributes: glyph.attributes, style: glyph.style)
-            }
-            for index in runs.indices {
-                let glyphRange = runs[index].glyphRange
-                let glyphs = Array(line.glyphs[glyphRange])
-                runs[index].clusterGlyphRanges = Self.clusterRanges(
-                    in: glyphs
-                ).map {
-                    let lower = glyphRange.lowerBound + $0.lowerBound
-                    let upper = glyphRange.lowerBound + $0.upperBound
-                    return lower..<upper
+            var runs: [_TextLayoutRunStorage] = []
+            // Publication preserves the original run boundaries. A deleted
+            // middle run can separate otherwise identical visible runs, and
+            // its font still contributes to the already resolved line metrics.
+            for range in Self.drawingRunRanges(in: line.glyphs) {
+                var indices: [Int]?
+                if range.contains(where: { line.glyphs[$0].glyphIndex == 65535 && $0 != 0 }) {
+                    indices = range.filter { line.glyphs[$0].glyphIndex != 65535 || $0 == 0 }
+                }
+                if indices?.isEmpty != true {
+                    let input = line.glyphs[range.lowerBound]
+                    runs.append(_TextLayoutRunStorage(glyphRange: range, glyphIndices: indices,
+                        attributes: input.attributes, style: input.style))
                 }
             }
             let sourceStart = usesLineStartAttributes ? line.sourceStart ?? line.glyphs.first ?? line.trailingBoundary : nil
