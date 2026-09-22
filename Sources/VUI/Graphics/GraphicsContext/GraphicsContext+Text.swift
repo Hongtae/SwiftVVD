@@ -111,17 +111,25 @@ extension GraphicsContext {
         }
         for line in drawing.lineRanges {
             for batch in drawing.vectorBatches[line.vectorBatches] {
-                drawComponent(.vectorGlyphs(batch.path), shading: runShading(batch.foregroundColor))
+                drawComponent(.vectorGlyphs(batch.paths), shading: runShading(batch.foregroundColor))
             }
-            var foregroundColors: [Color?] = []
-            for batch in drawing.batches[line.batches] where !batch.colorGlyphs {
-                if !foregroundColors.contains(batch.foregroundColor) {
-                    foregroundColors.append(batch.foregroundColor)
+            var firstBatch = line.batches.lowerBound
+            while firstBatch < line.batches.upperBound {
+                let first = drawing.batches[firstBatch]
+                if first.colorGlyphs {
+                    firstBatch += 1
+                    continue
                 }
-            }
-            for color in foregroundColors {
-                let batches = drawing.batches[line.batches].filter { !$0.colorGlyphs && $0.foregroundColor == color }
-                drawComponent(.glyphs(batches), shading: runShading(color))
+                var endBatch = firstBatch + 1
+                while endBatch < line.batches.upperBound,
+                      !drawing.batches[endBatch].colorGlyphs,
+                      drawing.batches[endBatch].runIndex == first.runIndex,
+                      drawing.batches[endBatch].foregroundColor == first.foregroundColor {
+                    endBatch += 1
+                }
+                drawComponent(.glyphs(Array(drawing.batches[firstBatch..<endBatch])),
+                    shading: runShading(first.foregroundColor))
+                firstBatch = endBatch
             }
             let colorGlyphs = drawing.batches[line.batches].filter { $0.colorGlyphs }
             if !colorGlyphs.isEmpty || !line.attachments.isEmpty {
@@ -129,9 +137,10 @@ extension GraphicsContext {
             }
             if !line.customAttachments.isEmpty,
                let placement = textDrawingPlacement(frame: rect, origin: drawing.origin,
-                   snapOrigin: snapOrigin, snappingOrigin: snappingOrigin,
+                   snapOrigin: false, snappingOrigin: nil,
                    clipBounds: clipBounds && recording == nil) {
-                // Recorded commands can later be replayed into a different viewport.
+                // Attachments receive logical coordinates. Their emitted text
+                // commands snap in the receiving coordinate space.
                 for item in drawing.customAttachments[line.customAttachments] {
                     var context = self
                     if clipBounds { context.clip(to: Path(placement.rect)) }
@@ -166,7 +175,7 @@ extension GraphicsContext {
     struct TextDrawing {
         enum Contents {
             case background(CGRect)
-            case vectorGlyphs(Path)
+            case vectorGlyphs([Path])
             case glyphs([ResolvedTextSource.Drawing.Batch])
             case images([ResolvedTextSource.Drawing.Batch], [ResolvedTextSource.Drawing.Attachment])
             case decoration(ResolvedTextSource.Drawing.Decoration)
@@ -204,8 +213,8 @@ extension GraphicsContext {
             case let .background(rect):
                 bounds = rect
                 clipped = false
-            case let .vectorGlyphs(path):
-                bounds = path.boundingBoxOfPath
+            case let .vectorGlyphs(paths):
+                for path in paths { bounds = bounds.union(path.boundingBoxOfPath) }
             case let .glyphs(batches):
                 include(batches)
             case let .images(batches, attachments):
@@ -286,30 +295,76 @@ extension GraphicsContext {
         let offset = rect.origin + drawing.origin
         let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
             .scaledBy(x: scale, y: scale)
+        var glyphContext = self
+        var glyphShading = shading
+        var glyphColor: Color.Resolved?
+        switch drawing.contents {
+        case .glyphs, .vectorGlyphs:
+            if storage.state.pointee.style == nil,
+               storage.state.pointee.maskTexture == nil,
+               blendMode == .normal, opacity.isFinite, (0...1).contains(opacity),
+               case let .color(color) = resolvedDrawingShading(shading, bounds: rect).properties.first {
+                var resolved = color.resolve(in: environment)
+                if resolved.opacity.isFinite, (0...1).contains(resolved.opacity) {
+                    // Resolve command opacity with the fill before rasterization.
+                    // Applying it to a quantized intermediate changes overlap edges.
+                    resolved.opacity *= Float(opacity)
+                    glyphColor = resolved
+                    glyphShading = .color(Color(resolved))
+                    if opacity != 1 { glyphContext.opacity = 1 }
+                }
+            }
+        default:
+            break
+        }
         switch drawing.contents {
         case let .background(frame):
             fill(Path(frame.applying(transform)), with: shading)
-        case let .vectorGlyphs(path):
-            guard let pass = beginRenderPass(enableStencil: true,
-                enableMSAA: !environment.disableMSAA) else { return }
-            if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
-            if encodeStencilPathFillCommand(renderPass: pass, path: path, pathTransform: transform) {
-                encodeShadingBoxCommand(renderPass: pass, shading: shading,
-                    stencil: .testNonZero, blendState: .opaque, bounds: rect)
-                pass.end()
-                drawSource()
+        case let .vectorGlyphs(paths):
+            func drawPath(_ path: Path) {
+                guard let pass = glyphContext.beginRenderPass(enableStencil: true,
+                    enableMSAA: !environment.disableMSAA) else { return }
+                if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+                if glyphContext.encodeStencilPathFillCommand(renderPass: pass, path: path, pathTransform: transform) {
+                    glyphContext.encodeShadingBoxCommand(renderPass: pass, shading: glyphShading,
+                        stencil: .testNonZero, blendState: .opaque, bounds: rect)
+                    pass.end()
+                    glyphContext.drawSource()
+                } else {
+                    pass.end()
+                }
+            }
+            if glyphColor?.opacity == 1 {
+                // Opaque glyph edges composite in submission order, including
+                // coincident outlines. Translucent fills retain one coverage group.
+                for path in paths { drawPath(path) }
             } else {
-                pass.end()
+                var path = Path()
+                for glyph in paths { path.addPath(glyph) }
+                drawPath(path)
             }
         case let .glyphs(batches):
-            guard let pass = beginRenderPass(enableStencil: false) else { return }
-            if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
-            encodeDrawTextCommand(renderPass: pass, batches: batches, transform: transform,
-                color: .white, colorGlyphs: false)
-            encodeShadingBoxCommand(renderPass: pass, shading: shading,
-                stencil: .ignore, blendState: .multiply, bounds: rect)
-            pass.end()
-            drawSource()
+            if let glyphColor, glyphColor.opacity == 1 {
+                guard let pass = glyphContext.beginRenderPassBackdropTarget() else { return }
+                if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+                glyphContext.encodeDrawTextCommand(renderPass: pass, batches: batches, transform: transform,
+                    color: Color(glyphColor).backendColor(in: environment), colorGlyphs: false)
+                pass.end()
+            } else {
+                guard let pass = glyphContext.beginRenderPass(enableStencil: false) else { return }
+                if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
+                let coverageBlend: BlendState? = glyphColor == nil ? nil : BlendState(
+                    sourceBlendFactor: .one, destinationBlendFactor: .one,
+                    blendOperation: .max, writeMask: .alpha)
+                glyphContext.encodeDrawTextCommand(renderPass: pass, batches: batches, transform: transform,
+                    color: .white, colorGlyphs: false, blendState: coverageBlend)
+                let fillBlend = glyphColor == nil ? BlendState.multiply : BlendState(
+                    sourceRGBBlendFactor: .destinationAlpha, sourceAlphaBlendFactor: .destinationAlpha)
+                glyphContext.encodeShadingBoxCommand(renderPass: pass, shading: glyphShading,
+                    stencil: .ignore, blendState: fillBlend, bounds: rect)
+                pass.end()
+                glyphContext.drawSource()
+            }
         case let .images(batches, attachments):
             guard let pass = beginRenderPass(enableStencil: false) else { return }
             if let scissor = placement.scissor { pass.encoder.setScissorRect(scissor) }
@@ -351,11 +406,9 @@ extension GraphicsContext {
                      at point: CGPoint,
                      anchor: UnitPoint = .center) {
         let size = text.measure()
-        if size.width > 0 && size.height > 0 {
-            let origin = CGPoint(x: point.x - size.width * anchor.x,
-                                 y: point.y - size.height * anchor.y)
-            draw(text, in: CGRect(origin: origin, size: size))
-        }
+        let origin = CGPoint(x: point.x - size.width * anchor.x,
+                             y: point.y - size.height * anchor.y)
+        draw(text, in: CGRect(origin: origin, size: size))
     }
 
     public func draw(_ text: Text, in rect: CGRect) {
@@ -377,7 +430,8 @@ extension GraphicsContext {
                                batches: [ResolvedTextSource.Drawing.Batch],
                                transform: CGAffineTransform,
                                color: BackendColor,
-                               colorGlyphs: Bool) {
+                               colorGlyphs: Bool,
+                               blendState: BlendState? = nil) {
         let c = color.float4
         let transform = transform
             .concatenating(self.transform)
@@ -392,9 +446,9 @@ extension GraphicsContext {
                 )
             }
             let shader: _Shader = colorGlyphs ? .image : .rcImage
-            let blendState: BlendState = colorGlyphs
+            let blendState: BlendState = blendState ?? (colorGlyphs
                 ? .premultipliedAlphaBlend
-                : .alphaBlend
+                : .alphaBlend)
             self.encodeDrawCommand(
                 renderPass: renderPass,
                 shader: shader,

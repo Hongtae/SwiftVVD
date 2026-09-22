@@ -163,17 +163,17 @@ final class TextProxyTests: XCTestCase {
                 let drawing = try XCTUnwrap(item.makeDrawing())
                 let expected = selected.makeDrawing(in: request, layoutProperties: layout.text.layoutProperties)
                 XCTAssertFalse(drawing.vectorBatches.isEmpty)
-                XCTAssertEqual(drawing.vectorBatches.map { $0.path.boundingRect },
-                               expected.vectorBatches.map { $0.path.boundingRect })
+                XCTAssertEqual(drawing.vectorBatches.map { $0.paths.map(\.boundingRect) },
+                               expected.vectorBatches.map { $0.paths.map(\.boundingRect) })
                 XCTAssertEqual(try XCTUnwrap(item.glyphAtoms()).map(\.bounds),
                     selected.glyphAtoms(in: request, layoutProperties: layout.text.layoutProperties).map {
                         $0.bounds.offsetBy(dx: item.frame.minX + layout.text.drawingMargins.leading,
                                            dy: item.frame.minY + layout.text.drawingMargins.top)
                     })
                 if pointSize != 23 {
-                    XCTAssertNotEqual(drawing.vectorBatches.map { $0.path.boundingRect },
+                    XCTAssertNotEqual(drawing.vectorBatches.map { $0.paths.map(\.boundingRect) },
                         original.makeDrawing(in: request, layoutProperties: layout.text.layoutProperties)
-                            .vectorBatches.map { $0.path.boundingRect })
+                            .vectorBatches.map { $0.paths.map(\.boundingRect) })
                 }
                 XCTAssertEqual(layout.sizeThatFits(_ProposedSize(request)), measured)
                 XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
@@ -272,9 +272,9 @@ final class TextProxyTests: XCTestCase {
                 let reference = try engine(text, minimum: 1, limit: limit, pointSize: pointSize)
                 let expected = try XCTUnwrap(reference.text.resolvedText)
                 XCTAssertEqual(selected.makeDrawing(in: size, layoutProperties: layout.text.layoutProperties)
-                    .vectorBatches.map { $0.path.boundingRect },
+                    .vectorBatches.map { $0.paths.map(\.boundingRect) },
                     expected.makeDrawing(in: size, layoutProperties: reference.text.layoutProperties)
-                        .vectorBatches.map { $0.path.boundingRect }, label)
+                        .vectorBatches.map { $0.paths.map(\.boundingRect) }, label)
                 XCTAssertEqual(layout.sizeThatFits(_ProposedSize(size)), measured)
                 XCTAssertEqual(layout.text.metricsCacheEntryCount, 1)
             }
@@ -301,6 +301,7 @@ final class TextProxyTests: XCTestCase {
     // ASSERTIONS textIntrinsicBackendSelectionObserved textIntrinsicZeroWidthNormalizationObserved
     // ASSERTIONS textStringDrawingEmptyMetricProducerObserved
     // ASSERTIONS textEmptyFont27DrawingMarginsObserved
+    // ASSERTIONS textFontVerticalOutsets27Observed
     func testRealTextHostsMeasureEmptyBaselinesAndNarrowWidthsThroughTheirOwner() throws {
         let host = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
@@ -353,8 +354,8 @@ final class TextProxyTests: XCTestCase {
                                     at: ViewSize(size)), expectedBaseline, label)
                                 if displayScale == 2 {
                                     let frame = layout.text.frame(in: size, renderer: layout.renderer)
-                                    XCTAssertEqual(frame, CGRect(x: 0, y: -1,
-                                        width: expectedWidth, height: expectedHeight + 1.5), label)
+                                    XCTAssertEqual(frame, CGRect(x: 0, y: -3.5,
+                                        width: expectedWidth, height: expectedHeight + 10), label)
                                 }
                                 if custom {
                                     let proxy = try XCTUnwrap(capture.proxy)
@@ -481,6 +482,7 @@ final class TextProxyTests: XCTestCase {
     // ASSERTIONS textStringDrawingTrailingCoreTextProducerObserved
     // ASSERTIONS textStringDrawingLegacyPrefixRetryObserved textParagraphClippedContinuationOriginObserved
     // ASSERTIONS textStringDrawingFragmentRoundingObserved
+    // ASSERTIONS textFontVerticalOutsets27Observed
     func testRealTextHostsMeasureSeparatorFragmentsThroughTheirOwner() throws {
         let host = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
@@ -553,7 +555,7 @@ final class TextProxyTests: XCTestCase {
                         // Non-ASCII separators have separate scalar-dependent drawing outsets.
                         if content.unicodeScalars.allSatisfy(\.isASCII) {
                             XCTAssertEqual(layout.text.frame(in: size, renderer: layout.renderer),
-                                CGRect(x: 0, y: -1, width: expected[0], height: expected[1] + 1.5), label)
+                                CGRect(x: 0, y: -3.5, width: expected[0], height: expected[1] + 10), label)
                         }
                         XCTAssertEqual(layout.text.metricsCacheEntryCount, 1, label)
                         if custom {
@@ -607,6 +609,7 @@ final class TextProxyTests: XCTestCase {
     // ASSERTIONS textStringDrawingSeparatorSpacingAdmissionObserved
     // ASSERTIONS textStringDrawingSeparatorRetryRangeObserved
     // ASSERTIONS textStringDrawingStoredUsageInvalidationObserved
+    // ASSERTIONS textFontVerticalOutsets27Observed
     func testSeparatorSpacingRetainsUsageThroughRangeRetry() throws {
         let host = TestViewRendererHost()
         let viewGraph = ViewGraph(rootViewType: EmptyView.self, content: EmptyView(), rendererHost: host)
@@ -657,7 +660,7 @@ final class TextProxyTests: XCTestCase {
                         XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.firstTextBaseline.key, at: ViewSize(size)), expected[2], label)
                         XCTAssertEqual(layout.explicitAlignment(VerticalAlignment.lastTextBaseline.key, at: ViewSize(size)), expected[3], label)
                         XCTAssertEqual(layout.text.frame(in: size, renderer: layout.renderer),
-                            CGRect(x: 0, y: -1, width: expected[0], height: expected[1] + 1.5), label)
+                            CGRect(x: 0, y: -3.5, width: expected[0], height: expected[1] + 10), label)
                         XCTAssertEqual(layout.text.metricsCacheEntryCount, 1, label)
                         if custom {
                             XCTAssertEqual(try XCTUnwrap(capture.proxy).sizeThatFits(ProposedViewSize(proposal)), size, label)

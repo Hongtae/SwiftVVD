@@ -4,6 +4,49 @@ import VVD
 @testable import VUI
 
 final class FontOutsetTests: XCTestCase {
+    // ASSERTIONS textFontVerticalOutsets27Observed
+    func testOrdinaryFontMetricsUnionVerticalOutsetsBeforePixelRounding() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        for rendering: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for contentScale: CGFloat in [1, 2] {
+                for displayScale: CGFloat in [1, 2] {
+                    for size: CGFloat in [13, 23, 31] {
+                        for string in ["Hg", "A\nB", "Ågj", "A\u{2028}B"] {
+                            var environment = EnvironmentValues()
+                            environment.defaultFontRenderingMode = rendering
+                            environment._contentScaleFactor = contentScale
+                            environment.displayScale = displayScale
+                            let source = try XCTUnwrap(Text(verbatim: string).font(.file(resource(), size: size))
+                                ._resolve(context: GraphTextResolutionContext(environment: environment,
+                                    sceneResources: SceneResources()), referenceDate: Date(timeIntervalSince1970: 0)))
+                            let ordinary = ResolvedStyledText.StringDrawing(resolvedText: source)
+                            let manager = ResolvedStyledText.TextLayoutManager(resolvedText: source)
+                            let horizontal = string == "Ågj" || string.contains("\u{2028}")
+                            let expected = EdgeInsets(top: 0.142579 * size,
+                                leading: horizontal ? 0.186524 * size : 0,
+                                bottom: 0.282064 * size, trailing: horizontal ? 0.105001 * size : 0)
+                            for owner: ResolvedStyledText in [ordinary, manager] {
+                                XCTAssertEqual(owner.maxFontMetrics.outsets.top, expected.top, accuracy: 1e-12)
+                                XCTAssertEqual(owner.maxFontMetrics.outsets.leading, expected.leading, accuracy: 1e-12)
+                                XCTAssertEqual(owner.maxFontMetrics.outsets.bottom, expected.bottom, accuracy: 1e-12)
+                                XCTAssertEqual(owner.maxFontMetrics.outsets.trailing, expected.trailing, accuracy: 1e-12)
+                                XCTAssertEqual(owner.drawingMargins, EdgeInsets(
+                                    top: ceil(expected.top * displayScale) / displayScale,
+                                    leading: ceil(expected.leading * displayScale) / displayScale,
+                                    bottom: ceil(expected.bottom * displayScale) / displayScale,
+                                    trailing: ceil(expected.trailing * displayScale) / displayScale))
+                                XCTAssertEqual(owner.layoutMargins, .init())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func resource(_ name: String = "Roboto/Roboto-VariableFont_wdth,wght.ttf") -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

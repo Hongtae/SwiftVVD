@@ -124,7 +124,7 @@ fileprivate final class _TextLayoutStorage {
             switch run {
             case let .text(_, value), let .attributedText(_, value, _), let .styledText(_, value, _, _):
                 text = value
-            case .attachment, .attributedAttachment:
+            case .attachment, .attributedAttachment, .styledAttachment:
                 text = "\u{fffc}"
             }
             for scalar in text.unicodeScalars {

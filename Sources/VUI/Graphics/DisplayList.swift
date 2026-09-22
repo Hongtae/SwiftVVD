@@ -1322,6 +1322,8 @@ struct DisplayList: Equatable, CustomStringConvertible {
                         width: clipExtent, height: clipExtent
                     )
                     local.environment = renderer.environment
+                    let padding = renderer.displayPadding
+                    local.translateBy(x: padding.leading, y: padding.top)
                     let bounds = renderer.textLayoutBounds(size: size, text: TextProxy(view.text))
                     guard let layout = view.text.makeLayout(in: bounds, with: bounds.size,
                         shading: shading, layoutDirection: local.environment.layoutDirection) else { return }

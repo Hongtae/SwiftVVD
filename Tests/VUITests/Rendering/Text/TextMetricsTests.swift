@@ -4,6 +4,190 @@ import VVD
 @testable import VUI
 
 final class TextMetricsTests: XCTestCase {
+    // ASSERTIONS textNegativeMultilineFitting27Observed textNegativeMultilineDrawing27Observed
+    func testNegativeMultilineFittingRetainsParagraphMeasurementAndDrawingOwners() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        typealias Observation = (width: CGFloat, height: CGFloat, first: CGFloat, last: CGFloat,
+            scale: CGFloat, lines: UInt, truncated: Bool)
+        let ordinaryObservations: [Observation] = [
+            (55, 94, 29, 90, 1, 3, false), (14.5, 336, 21, 332, 1, 11, false),
+            (45, 40, 21, 37, 0.7265625, 2, false), (20, 31, 16, 29, 0.5703125, 2, false),
+            (55, 94, 29, 90, 1, 3, false), (14.5, 336, 21, 332, 1, 11, false),
+            (45, 40, 21, 37, 0.7265625, 2, false), (20, 31, 16, 29, 0.5703125, 2, false),
+            (33.5, 57, 29, 53, 1, 2, false), (20, 97, 29, 93, 1, 4, false),
+            (24, 40, 21, 37, 0.7265625, 2, false), (20, 33, 17, 31, 0.59375, 2, false),
+            (33.5, 57, 29, 53, 1, 2, false), (20, 97, 29, 93, 1, 4, false),
+            (24, 40, 21, 37, 0.7265625, 2, false), (20, 33, 17, 31, 0.59375, 2, false)
+        ]
+        var managerObservations = ordinaryObservations
+        managerObservations[2] = (52, 26, 21, 21, 0.7265625, 1, true)
+        managerObservations[10] = (0, 26, 21, 21, 0.7265625, 1, true)
+        managerObservations[11] = (0, 22, 17, 17, 0.6015625, 1, true)
+        managerObservations[14] = (24.5, 40, 21, 37, 0.7265625, 2, false)
+        managerObservations[15] = (20, 33, 17, 31, 0.6015625, 2, false)
+        let narrowWidths: [CGFloat] = [14.0078125, 7.00390625]
+            + Array(repeating: CGFloat(11.314453125), count: 6)
+            + Array(repeating: CGFloat(11.06494140625), count: 3)
+        let managerDrawingWidths: [[CGFloat]] = [
+            [54.955078125, 46.6806640625], narrowWidths, [12.31201171875], [17.55858612060547],
+            [54.955078125, 33.943359375, 33.19482421875], narrowWidths,
+            [44.90277099609375, 24.118114471435547], [19.76239013671875, 18.93142318725586],
+            [24.6240234375], [19.88671875, 11.06494140625, 11.06494140625, 11.06494140625],
+            [0], [0], [19.88671875, 33.19482421875],
+            [19.88671875, 11.06494140625, 11.06494140625, 11.06494140625],
+            [0, 24.118114471435547], [0, 19.968761444091797]
+        ]
+        for contentScale: CGFloat in [1, 2] {
+            for kind in ["kern", "tracking"] {
+                for index in ordinaryObservations.indices {
+                    let spacing: CGFloat = index < 8 ? -8 : -16
+                    let separator = index % 8 < 4 ? "\n" : "\u{2028}"
+                    let fitting = index % 4 >= 2
+                    func run(_ string: String, size: CGFloat, color: VUI.Color) -> Text {
+                        let value = Text(verbatim: string).font(.file(file, size: size)).foregroundColor(color)
+                        return kind == "kern" ? value.kerning(spacing) : value.tracking(spacing)
+                    }
+                    let text = run("AAA ", size: 23, color: .red)
+                        + run("BBB BBB" + separator, size: 31, color: .blue)
+                        + Text(verbatim: "CCC").font(.file(file, size: 17)).foregroundColor(.green)
+                    try withOwner(text, configure: {
+                        $0.minimumScaleFactor = fitting ? 0.5 : 1
+                        $0.lineLimit = fitting ? 2 : nil
+                        $0._contentScaleFactor = contentScale
+                    }) { ordinary in
+                        let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: ordinary.layoutProperties,
+                            layoutMargins: ordinary.layoutMargins, resolvedText: ordinary.resolvedText)
+                        for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                            let expected = custom ? managerObservations[index] : ordinaryObservations[index]
+                            let label = "\(kind) case=\(index + 1) custom=\(custom) contentScale=\(contentScale)"
+                            let request = CGSize(width: index % 2 == 0 ? 80 : 20, height: fitting ? 40 : 500)
+                            let metrics = owner.metrics(in: request, layoutMargins: nil)
+                            XCTAssertEqual(metrics.size, CGSize(width: expected.width, height: expected.height), label)
+                            XCTAssertEqual(metrics.firstBaseline, expected.first, label)
+                            XCTAssertEqual(metrics.lastBaseline, expected.last, label)
+                            XCTAssertEqual(metrics.scale, expected.scale, label)
+                            XCTAssertEqual(metrics.numberOfLines, expected.lines, label)
+                            XCTAssertEqual(metrics.hasTruncatedRanges, expected.truncated, label)
+                            if custom {
+                                let prepared = try XCTUnwrap(owner.prepareDrawing(in: .zero, with: metrics.size,
+                                    applyingMarginOffsets: true))
+                                let layout = try XCTUnwrap(owner.makeLayout(in: .zero, with: metrics.size,
+                                    shading: .color(.black), layoutDirection: .leftToRight))
+                                XCTAssertEqual(layout.map(\.typographicBounds.width), managerDrawingWidths[index], label)
+                                XCTAssertEqual(layout.isTruncated, index == 3, label)
+                                let drawingScale: CGFloat = [2, 10, 11].contains(index) ? 0.5 : expected.scale
+                                XCTAssertEqual(prepared.lines.first?.glyphs.first?.style.fontResource?.pointSize,
+                                    23 * drawingScale, label)
+                            }
+                            XCTAssertEqual(owner.metrics(in: request, layoutMargins: nil), metrics, label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textNegativeSpacingAdvance27Observed textNegativeSpacingFitting27Observed
+    // ASSERTIONS textNegativeSpacingToken27Observed
+    func testNegativeSpacingPreservesCollapsedGlyphsAndSelectsFittedTokens() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        typealias Observation = (width: CGFloat, height: CGFloat, baseline: CGFloat,
+            factor: CGFloat, kept: Int, tokenSize: CGFloat?)
+        var observations: [Observation] = [
+            (67, 37, 29, 1, 5, 31), (11.5, 37, 29, 1, 0, 23),
+            (80, 25, 20, 0.7109375, 11, nil), (17, 18, 14, 0.5, 3, 31),
+            (79.5, 37, 29, 1, 9, 31), (14.5, 37, 29, 1, 1, 23),
+            (80, 34, 27, 0.9453125, 11, nil), (20, 20, 16, 0.5703125, 11, nil)
+        ]
+        observations += Array(repeating: Observation(20, 37, 29, 1, 11, nil), count: 4)
+        observations += Array(repeating: Observation(0, 37, 29, 1, 11, nil), count: 4)
+        observations += [(0, 37, 29, 1, 3, nil), (5, 37, 29, 1, 3, 31), (0, 37, 29, 1, 0, 23)]
+        var inputs: [(spacing: CGFloat, width: CGFloat, minimum: CGFloat, wide: Bool)] = []
+        for spacing: CGFloat in [-4, -8, -16, -24] {
+            for (width, minimum): (CGFloat, CGFloat) in [(80, 1), (20, 1), (80, 0.5), (20, 0.5)] {
+                inputs.append((spacing, width, minimum, false))
+            }
+        }
+        inputs += [(-16, 1, 1, false), (-16, 8, 1, false), (-16, 1, 1, true)]
+        for contentScale: CGFloat in [1, 2] {
+            for kind in ["kern", "tracking"] {
+                for (index, input) in inputs.enumerated() {
+                    func run(_ string: String, size: CGFloat, color: VUI.Color) -> Text {
+                        let text = Text(verbatim: string).font(.file(file, size: size)).foregroundColor(color)
+                        return kind == "kern" ? text.kerning(input.spacing) : text.tracking(input.spacing)
+                    }
+                    let text = run(input.wide ? "WWW " : "AAA ", size: 23, color: .red)
+                        + run(input.wide ? "WWW WWW" : "BBB BBB", size: 31, color: .blue)
+                    try withOwner(text, configure: {
+                        $0.minimumScaleFactor = input.minimum; $0.lineLimit = 1
+                        $0._contentScaleFactor = contentScale
+                    }) { ordinary in
+                        let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: ordinary.layoutProperties,
+                            layoutMargins: ordinary.layoutMargins, resolvedText: ordinary.resolvedText)
+                        for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                            var expected = observations[index]
+                            if custom && index == 3 { expected = (14.5, 18, 14, 0.5, 3, 23) }
+                            if custom && index == 6 { expected = (79, 34, 27, 0.9375, 11, nil) }
+                            if custom && index == 17 { expected = (0, 37, 29, 1, 3, nil) }
+                            let label = "\(kind) case=\(index) custom=\(custom) contentScale=\(contentScale)"
+                            let request = CGSize(width: input.width, height: 60)
+                            let metrics = owner.metrics(in: request, layoutMargins: nil)
+                            XCTAssertEqual(metrics.size, CGSize(width: expected.width, height: expected.height), label)
+                            XCTAssertEqual(metrics.scale, expected.factor, label)
+                            XCTAssertEqual(metrics.firstBaseline, expected.baseline, label)
+                            XCTAssertEqual(metrics.lastBaseline, expected.baseline, label)
+                            XCTAssertEqual(metrics.numberOfLines, 1, label)
+                            XCTAssertEqual(metrics.hasTruncatedRanges, expected.kept < 11, label)
+                            let prepared = try XCTUnwrap(owner.prepareDrawing(in: .zero, with: metrics.size,
+                                applyingMarginOffsets: true))
+                            let line = try XCTUnwrap(prepared.lines.first)
+                            XCTAssertEqual(prepared.lines.count, 1, label)
+                            let body = Array((input.wide ? "WWW WWW WWW" : "AAA BBB BBB").unicodeScalars)
+                            let scalars = Array(body.prefix(expected.kept))
+                                + (expected.tokenSize == nil ? [] : Array("…".unicodeScalars))
+                            XCTAssertEqual(line.glyphs.map(\.scalar), scalars, label)
+                            XCTAssertEqual(line.glyphs.map(\.characterIndex), Array(scalars.indices), label)
+                            func selectedSize(_ size: CGFloat) -> CGFloat {
+                                let scaled = size * expected.factor
+                                return custom ? scaled : (scaled * 4).rounded() / 4
+                            }
+                            var expectedWidth: CGFloat = 0
+                            for (position, glyph) in line.glyphs.enumerated() {
+                                let token = position == expected.kept
+                                let size = selectedSize(token ? expected.tokenSize! : position < 4 ? 23 : 31)
+                                let units: CGFloat = token ? 1370 : scalars[position] == "A" ? 1336
+                                    : scalars[position] == "B" ? 1276 : 508
+                                let advance = max(units * size / 2048 + input.spacing, 0)
+                                XCTAssertEqual(glyph.advance.width / prepared.source.scaleFactor, advance, label)
+                                XCTAssertEqual(glyph.style.fontResource?.pointSize, size, label)
+                                XCTAssertEqual(glyph.isTruncationToken, token, label)
+                                XCTAssertEqual(glyph.style.tracking, kind == "tracking" ? input.spacing : nil, label)
+                                XCTAssertEqual(glyph.style.kern, kind == "kern" ? input.spacing : nil, label)
+                                expectedWidth += advance
+                            }
+                            XCTAssertEqual(line.glyphs.reduce(CGFloat.zero) { $0 + $1.advance.width + $1.kerning.x }
+                                / prepared.source.scaleFactor, expectedWidth, label)
+                            if custom {
+                                let layout = try XCTUnwrap(owner.makeLayout(in: .zero, with: metrics.size,
+                                    shading: .color(.black), layoutDirection: .leftToRight))
+                                XCTAssertEqual(layout.first?.typographicBounds.width, expectedWidth, label)
+                                XCTAssertEqual(layout.isTruncated, expected.kept < 11, label)
+                            }
+                            XCTAssertEqual(owner.metrics(in: request, layoutMargins: nil), metrics, label)
+                            if custom { manager.glyphLayoutCache.purgeResources(reason: .lowMemory) }
+                            else { ordinary.resetCache() }
+                            XCTAssertEqual(owner.metrics(in: request, layoutMargins: nil), metrics, label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textStringDrawingFullMetricsPayloadObserved
     func testMetricsEqualityRetainsFieldsOutsideSizeAndScale() {
         let value = NSAttributedString.Metrics(size: CGSize(width: 41.5, height: 81), scale: 0.5,
@@ -1888,7 +2072,9 @@ final class TextMetricsTests: XCTestCase {
                 context.draw(slice)
                 return try XCTUnwrap(context.recording).moveContents().items.compactMap { item in
                     guard case let .text(drawing, _) = item.contents,
-                          case let .vectorGlyphs(path) = drawing.contents else { return nil }
+                          case let .vectorGlyphs(paths) = drawing.contents else { return nil }
+                    var path = VUI.Path()
+                    for glyph in paths { path.addPath(glyph) }
                     return (path, drawing)
                 }
             }

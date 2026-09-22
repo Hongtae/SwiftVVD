@@ -22,11 +22,13 @@ extension ResolvedStyledText {
             environment: environment, inputs: inputs)
         context.clipBoundingRect = .infinite
         let bounds = frame(in: size, renderer: renderer)
-        var list = DisplayList()
-        list.appendTextItem(StyledTextContentView(text: self, renderer: renderer), size: size,
-            foreground: .color(Color(.sRGBLinear, red: -1, green: -1, blue: -1)),
-            bounds: bounds, seed: .init(), environment: environment)
-        list.draw(in: context)
+        // Record before the containing shape decides whether its display frame
+        // is visible. A zero advance does not make glyph commands empty.
+        let value = DisplayList.Content.TextValue(
+            view: StyledTextContentView(text: self, renderer: renderer), size: size,
+            frame: bounds, shading: .color(Color(.sRGBLinear, red: -1, green: -1, blue: -1)),
+            transform: .identity, command: .closure(bounds: bounds))
+        value.draw(in: context)
         return context.recording!.moveContents()
     }
 

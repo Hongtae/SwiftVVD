@@ -4,6 +4,93 @@ import VVD
 @testable import VUI
 
 final class TextSuffixTests: XCTestCase {
+    // ASSERTIONS textTabStops27Observed textTabReflow27Observed textSuffixRetainedMetricsLayoutObserved
+    func testTabsKeepTheirFragmentGeometryThroughAlwaysVisibleSuffixReplacement() throws {
+        let a: CGFloat = 15.00390625
+        let s: CGFloat = 58.76904296875
+        let token: CGFloat = 15.3857421875
+        let cases: [(String, CGFloat, Int?, CGSize, [CGFloat])] = [
+            ("A\tA",8,nil,.init(width:8,height:108),[8,8,8,8]),
+            ("A\tA",8,2,.init(width:8,height:54),[8,8,token,s]),
+            ("A\tA",30,nil,.init(width:30,height:81),[28,a,30]),
+            ("A\tA",30,2,.init(width:28,height:54),[28,a]),
+            ("A\tA",70,nil,.init(width:59,height:54),[28+a,s]),
+            ("A\tA",70,2,.init(width:59,height:54),[28+a,s]),
+            ("\tA",8,nil,.init(width:8,height:81),[8,8,8]),
+            ("\tA",8,2,.init(width:8,height:54),[8,8]),
+            ("\tA",30,nil,.init(width:30,height:81),[28,a,30]),
+            ("\tA",30,2,.init(width:28,height:54),[28,a]),
+            ("\tA",70,nil,.init(width:59,height:54),[28+a,s]),
+            ("\tA",70,2,.init(width:59,height:54),[28+a,s]),
+            ("A\t",8,nil,.init(width:8,height:81),[8,8,8]),
+            ("A\t",8,2,.init(width:8,height:54),[8,8,token,s]),
+            ("A\t",30,nil,.init(width:30,height:54),[28,30]),
+            ("A\t",30,2,.init(width:30,height:54),[28,30]),
+            ("A\t",70,nil,.init(width:59,height:54),[28,s]),
+            ("A\t",70,2,.init(width:59,height:54),[28,s]),
+            ("A\tA\tA",8,nil,.init(width:8,height:108),[8,8,8,8,token,s]),
+            ("A\tA\tA",8,2,.init(width:8,height:54),[8,8,token,s]),
+            ("A\tA\tA",30,nil,.init(width:30,height:108),[28,28,a,30]),
+            ("A\tA\tA",30,2,.init(width:28,height:54),[28,28]),
+            ("A\tA\tA",70,nil,.init(width:59,height:81),[56,a,s]),
+            ("A\tA\tA",70,2,.init(width:56,height:54),[56,a]),
+        ]
+        for (string, width, limit, expectedSize, widths) in cases {
+            for scale: CGFloat in [1, 2] {
+                try withSuffixManager(Text(verbatim: string), suffixSize: 23, alwaysVisible: true,
+                                      lineLimit: limit, contentScale: scale) { manager in
+                    let label = "\(string.debugDescription) width=\(width) limit=\(String(describing: limit)) scale=\(scale)"
+                    let size = CGSize(width: width, height: 120)
+                    let metrics = manager.computeMetrics(scale: 1, requestedSize: .init(size, majorAxis: .vertical),
+                        minorAxisIsFlexible: false)
+                    XCTAssertEqual(metrics.base.size, expectedSize, label)
+                    XCTAssertEqual(metrics.base.firstBaseline, 21, label)
+                    XCTAssertEqual(metrics.base.lastBaseline, expectedSize.height - 6, label)
+                    let layout = try XCTUnwrap(manager.makeLayout(in: .zero, with: size,
+                        shading: .foreground, layoutDirection: .leftToRight))
+                    XCTAssertEqual(layout.map { $0.typographicBounds.width }, widths, label)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS textAttachmentSuffixConfiguration27Observed textSuffixRetainedMetricsLayoutObserved
+    func testOneAndTwoLineSuffixLimitsPreserveDifferentFragmentFinalization() throws {
+        let proposals: [CGFloat] = [8, 42, 70, 100, 150]
+        let singleWidths: [CGFloat] = [8, 30.5, 51.5, 74.5, 131]
+        let doubleWidths: [CGFloat] = [8, 41.5, 62.5, 100, 124.5]
+        let singleFragments: [[CGFloat]] = [[], [30.3896484375], [51.0986328125],
+            [15.3857421875, 58.76904296875], [71.8076171875, 58.76904296875]]
+        let doubleFragments: [[CGFloat]] = [[8, 8], [41.41796875, 41.41796875],
+            [62.126953125, 62.126953125], [100, 15.3857421875, 58.76904296875], []]
+        for always in [false, true] {
+            for limit in [1, 2] {
+                for (index, width) in proposals.enumerated() {
+                    try withSuffixManager(Text(verbatim: "A A A A A A A A").foregroundColor(.blue),
+                                          suffixSize: 23, alwaysVisible: always, lineLimit: limit) { manager in
+                        let label = "always=\(always) limit=\(limit) width=\(width)"
+                        let metrics = manager.computeMetrics(scale: 1,
+                            requestedSize: .init(CGSize(width: width, height: 120), majorAxis: .vertical),
+                            minorAxisIsFlexible: false)
+                        let retained = limit == 1 ? index != 0 : index < 3 || (always && index == 3)
+                        XCTAssertEqual(metrics.base.size,
+                            CGSize(width: limit == 1 ? singleWidths[index] : doubleWidths[index], height: limit == 1 ? 27 : 54), label)
+                        XCTAssertEqual(metrics.base.firstBaseline, 21, label)
+                        XCTAssertEqual(metrics.base.lastBaseline, limit == 1 ? 21 : 48, label)
+                        XCTAssertEqual(metrics.base.numberOfLines, UInt(limit), label)
+                        XCTAssertEqual(metrics.base.hasTruncatedRanges, retained, label)
+                        XCTAssertEqual(metrics.layout != nil, retained, label)
+                        if let layout = metrics.layout {
+                            XCTAssertEqual(layout.isTruncated, limit == 1, label)
+                            XCTAssertEqual(layout.map(\.typographicBounds.width),
+                                limit == 1 ? singleFragments[index] : doubleFragments[index], label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textSuffixNativeProductionObserved
     func testModesPreserveTheirPayloadAndResolveOnlyOnePhysicalLine() throws {
         let text = Text(verbatim: " more")
@@ -512,11 +599,12 @@ final class TextSuffixTests: XCTestCase {
     }
 
     private func withSuffixManager(_ text: Text, alignment: TextAlignment = .leading, suffixSize: CGFloat = 11,
-                                   alwaysVisible: Bool = false, lineLimit: Int = 1,
+                                   alwaysVisible: Bool = false, lineLimit: Int? = 1, contentScale: CGFloat = 1,
                                    _ body: (ResolvedStyledText.TextLayoutManager) throws -> Void) throws {
         try withGraph { _, inputs, host in
             var environment = inputs.cachedEnvironment.value.environment.value
             environment.lineLimit = lineLimit
+            environment._contentScaleFactor = contentScale
             environment.multilineTextAlignment = alignment
             let context = GraphTextResolutionContext(environment: environment, sceneResources: host.sceneResources)
             let suffix = Text(verbatim: " more").font(testFont(size: suffixSize)).foregroundColor(.red)

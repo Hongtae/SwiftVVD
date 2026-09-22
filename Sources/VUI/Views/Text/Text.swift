@@ -107,7 +107,9 @@ struct GraphTextResolutionContext: TextResolutionContext {
 
     func resolveTextAttachment(_ image: Image) -> ImageDrawing? {
         var resolved: ImageDrawing
-        if let symbol = image.provider.makeVectorSymbol() {
+        if let provider = image.provider as? TextureImageProvider {
+            resolved = ImageDrawing(provider.resolvedImage)
+        } else if let symbol = image.provider.makeVectorSymbol() {
             resolved = ImageDrawing(
                 symbol: symbol.applyingEffectiveFontMetrics(in: environment)
             )
@@ -1132,10 +1134,11 @@ class AttachmentTextStorage: AnyTextStorage {
         let attributes = style.nsAttributes(in: context.environment, properties: &properties,
             options: options, includeDefaultAttributes: context.includeDefaultAttributes)
         let typefaces = style.typefaces(attributes: attributes, context: context)
-        properties.registerCustomAttachment(at: text.utf16.count)
+        var custom = _TextAttributeValues()
+        for modifier in style.customAttributes { modifier.apply(to: &custom) }
         text += "\u{fffc}"
         return .init(
-            runs: [.attachment(typefaces, image)],
+            runs: [.styledAttachment(typefaces, image, custom, attributes)],
             scaleFactor: context.contentScaleFactor,
             displayScale: context.displayScale
         )

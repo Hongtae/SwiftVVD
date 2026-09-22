@@ -143,6 +143,10 @@ final class TextParagraphStyle: Codable, Equatable {
     var minimumLineHeight: CGFloat = 0
     var hyphenationFactor: Float = 0
     var firstLineHeadIndent: CGFloat = 0
+    // Left-aligned tab stop positions use paragraph points, independent of font size.
+    static let defaultTabStops: [CGFloat] = (1...12).map { CGFloat($0 * 28) }
+    var tabStops: [CGFloat] = defaultTabStops
+    var defaultTabInterval: CGFloat = 0
     var allowsTightening = false
     var baselineInterval: TextLineHeight = .variable
     var compositionLanguage: Int = 0

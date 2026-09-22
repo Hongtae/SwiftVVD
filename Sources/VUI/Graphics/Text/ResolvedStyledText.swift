@@ -916,6 +916,12 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
         return !storage._isDynamicText
     }
 
+    var needsRBDisplayList: Bool {
+        guard storage?._isDynamicText != true else { return false }
+        return features.contains(.customRenderer)
+            || (archiveOptions.isArchived && archiveOptions.preciseTextLayout)
+    }
+
     func frame(
         in size: CGSize,
         renderer: TextRendererBoxBase?
@@ -928,9 +934,6 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
             text: TextProxy(self)
         ) ?? sizeThatFits(_ProposedSize(size))
         var frame = CGRect(origin: .zero, size: measured)
-        if measured.height < size.height {
-            frame.origin.y = (size.height - measured.height) * 0.5
-        }
         let margins = drawingMargins
         let top = layoutMargins.top - margins.top
         let leading = layoutMargins.leading - margins.leading
@@ -1295,8 +1298,19 @@ extension ResolvedStyledText {
                 var startsParagraph = false
                 var text = ""
                 for run in source.runs {
-                    guard case let .styledText(_, value, _, attributes) = run,
-                          attributes.customAttachment == nil,
+                    let value: String
+                    let attributes: _ResolvedTextRunAttributes
+                    switch run {
+                    case let .styledText(_, string, _, style):
+                        value = string
+                        attributes = style
+                    case let .styledAttachment(_, _, _, style):
+                        value = "\u{fffc}"
+                        attributes = style
+                    default:
+                        return nil
+                    }
+                    guard attributes.customAttachment == nil,
                           attributes.fontResource?.requestedPointSize != nil,
                           startsParagraph || attributes.paragraphStyle == paragraphStyle,
                           (attributes.paragraphStyle?.firstLineHeadIndent ?? 0) == 0,
@@ -1869,9 +1883,14 @@ extension ResolvedStyledText {
             // Font runs share one fitting scale. Attachments keep their fixed-scale producer.
             let canScaleTextRuns = layoutProperties.writingMode == .horizontalTopToBottom &&
                 source.fontResolutionContext != nil && source.runs.allSatisfy { run in
-                    guard case let .styledText(_, _, _, attributes) = run,
-                          attributes.customAttachment == nil,
-                          let font = attributes.fontResource else { return false }
+                    let attributes: _ResolvedTextRunAttributes
+                    switch run {
+                    case let .styledText(_, _, _, style), let .styledAttachment(_, _, _, style):
+                        attributes = style
+                    default:
+                        return false
+                    }
+                    guard let font = attributes.fontResource else { return false }
                     return font.requestedPointSize != nil
                 }
             guard source.uniformFont != nil || storage?.length == 0 || canScaleTextRuns else {

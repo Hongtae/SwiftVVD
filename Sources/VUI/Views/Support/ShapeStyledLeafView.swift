@@ -473,7 +473,23 @@ struct _ShapeStyle_RenderedShape {
     ) {
         layers.beginLayer(id: .unstyled, style: nil, shape: &self)
 
-        if let resolvedText = text.text.resolvedText {
+        if text.text.needsRBDisplayList {
+            guard let viewGraph = _AGGraphContext.current?.context as? ViewGraph,
+                  let host = viewGraph.rendererHost else {
+                fatalError("Text recording requires an active ViewGraph renderer host.")
+            }
+            let environment = _environment.value.untrackedCopy()
+            let viewport = CGRect(origin: .zero, size: CGSize(width: frame.width * environment.displayScale,
+                height: frame.height * environment.displayScale))
+            let contents = text.text.makeRBDisplayList(for: frame.size, renderer: text.renderer,
+                deviceScale: environment.displayScale, environment: environment,
+                inputs: .init(sceneResources: host.sceneResources, viewport: viewport,
+                    contentScaleFactor: environment.displayScale, resourceCommandQueue: nil))
+            item = DisplayList.Item(content: DisplayList.Content(drawing: contents, origin: .zero,
+                options: RasterizationOptions(), seed: contentSeed),
+                frame: contents.boundingRect.offsetBy(dx: frame.minX, dy: frame.minY),
+                identity: item.identity, version: item.version)
+        } else if let resolvedText = text.text.resolvedText {
             let localFrame = text.text.frame(
                 in: frame.size,
                 renderer: text.renderer

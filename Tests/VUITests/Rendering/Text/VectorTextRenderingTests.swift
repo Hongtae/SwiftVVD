@@ -31,13 +31,14 @@ final class VectorTextRenderingTests: XCTestCase {
         XCTAssertEqual(drawing.vectorBatches.count, 2)
         XCTAssertEqual(drawing.vectorBatches[0].foregroundColor, .red)
         XCTAssertEqual(
-            drawing.vectorBatches[0].path.boundingRect,
-            CGRect(x: 1, y: 0, width: 6, height: 10)
+            drawing.vectorBatches[0].paths.map(\.boundingRect),
+            [CGRect(x: 1, y: 0, width: 6, height: 10)]
         )
         XCTAssertEqual(drawing.vectorBatches[1].foregroundColor, .blue)
         XCTAssertEqual(
-            drawing.vectorBatches[1].path.boundingRect,
-            CGRect(x: 9, y: 0, width: 14, height: 10)
+            drawing.vectorBatches[1].paths.map(\.boundingRect),
+            [CGRect(x: 9, y: 0, width: 6, height: 10),
+             CGRect(x: 17, y: 0, width: 6, height: 10)]
         )
     }
 }

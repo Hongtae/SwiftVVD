@@ -313,6 +313,10 @@ final class TextureImageProvider: AnyImageProviderBox, @unchecked Sendable {
     }
 
     override func resolveImage(in context: GraphicsContext) -> Image.Resolved {
+        resolvedImage
+    }
+
+    var resolvedImage: Image.Resolved {
         Image.Resolved(image: GraphicsImage(contents: .texture(resource), scale: scale,
             unrotatedPixelSize: resource.pixelSize, orientation: orientation),
             decorative: label == nil, label: label.map(AccessibilityImageLabel.text))

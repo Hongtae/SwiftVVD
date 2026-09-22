@@ -796,6 +796,7 @@ final class TextStyleConsumerTests {
 
     // ASSERTIONS textDrawingMarginClippingOutsetsObserved
     // ASSERTIONS textDrawingFrameCompensationObserved
+    // ASSERTIONS textFontVerticalOutsets27Observed
     @Test
     func testClippingMarginsExpandDrawingFramesWithoutChangingTypographicMetrics() throws {
         let names = ["Roboto/Roboto-VariableFont_wdth,wght.ttf",
@@ -816,10 +817,18 @@ final class TextStyleConsumerTests {
                         let baseline = source.firstBaseline(in: measured)
                         let rawTop = fontIndex == 0 ? 46 * pointSize / 2048 : 0
                         let rawBottom = fontIndex == 0 ? 12 * pointSize / 2048 : 0
-                        #expect(abs(metrics.outsets.top - rawTop) < 1e-12)
-                        #expect(abs(metrics.outsets.bottom - rawBottom) < 1e-12)
-                        let top: CGFloat = fontIndex != 0 ? 0 : (displayScale == 1 || pointSize == 23 ? 1 : 0.5)
-                        let bottom: CGFloat = fontIndex != 0 ? 0 : 1 / displayScale
+                        guard case let .styledText(faces, _, _, attributes) = source.runs[0] else {
+                            Issue.record("Missing resolved font run"); continue
+                        }
+                        let raw = try #require(attributes.fontResource?.resolvedMetrics(for: faces[0], scaleFactor: source.scaleFactor))
+                        #expect(abs(raw.outsets.top - rawTop) < 1e-12)
+                        #expect(abs(raw.outsets.bottom - rawBottom) < 1e-12)
+                        let verticalTop = 0.142579 * pointSize
+                        let verticalBottom = 0.282064 * pointSize
+                        #expect(abs(metrics.outsets.top - verticalTop) < 1e-12)
+                        #expect(abs(metrics.outsets.bottom - verticalBottom) < 1e-12)
+                        let top = ceil(verticalTop * displayScale) / displayScale
+                        let bottom = ceil(verticalBottom * displayScale) / displayScale
                         #expect(styled.drawingMargins == EdgeInsets(top: top, leading: 0, bottom: bottom, trailing: 0))
                         let frame = styled.frame(in: measured, renderer: nil)
                         #expect(frame == CGRect(x: 0, y: -top, width: measured.width, height: measured.height + top + bottom))
@@ -847,8 +856,14 @@ final class TextStyleConsumerTests {
             let metrics = try #require(source.maximumFontMetrics)
             #expect(metrics.ascender == 12.060546875)
             #expect(metrics.descender == -3.173828125)
-            #expect(metrics.outsets == EdgeInsets())
-            #expect(ResolvedStyledText.StringDrawing(resolvedText: source).drawingMargins == EdgeInsets())
+            guard case let .styledText(faces, _, _, attributes) = source.runs[0] else {
+                Issue.record("Missing resolved font run"); continue
+            }
+            let raw = try #require(attributes.fontResource?.resolvedMetrics(for: faces[0], scaleFactor: source.scaleFactor))
+            #expect(raw.outsets == EdgeInsets())
+            #expect(abs(metrics.outsets.top - 1.853527) < 1e-12)
+            #expect(abs(metrics.outsets.bottom - 3.666832) < 1e-12)
+            #expect(ResolvedStyledText.StringDrawing(resolvedText: source).drawingMargins == EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0))
         }
         // A half-design-unit difference can cross a half-point ceiling. Retain
         // the integer snapshot's actual result instead of hiding that boundary.
@@ -878,21 +893,21 @@ final class TextStyleConsumerTests {
             let source = try resolve(Text(string), environment: environment)
             let styled = ResolvedStyledText.StringDrawing(stylePadding: EdgeInsets(top: 0.3, leading: 1.2, bottom: 0.6, trailing: 0.2),
                                              resolvedText: source)
-            #expect(styled.drawingMargins == EdgeInsets(top: 1, leading: 1.5, bottom: 1, trailing: 0.5))
+            #expect(styled.drawingMargins == EdgeInsets(top: 2.5, leading: 1.5, bottom: 4.5, trailing: 0.5))
             let size = source.measure()
             let frame = styled.frame(in: size, renderer: nil)
             let value = DisplayList.Content.TextValue(
                 view: StyledTextContentView(text: styled, renderer: nil), size: size, frame: frame,
                 shading: .color(.black), transform: .identity, command: .closure(bounds: nil))
             let drawing = try #require(value.makeDrawing())
-            #expect(drawing.origin == CGPoint(x: 1.5, y: 1))
+            #expect(drawing.origin == CGPoint(x: 1.5, y: 2.5))
             #expect(frame.origin + drawing.origin == .zero)
             let atoms = try #require(value.glyphAtoms())
             #expect(atoms.map(\.bounds) == source.glyphAtoms(in: size).map(\.bounds))
             let original = source.makeDrawing(in: size)
             #expect(drawing.backgrounds.map(\.frame) == original.backgrounds.map(\.frame))
             #expect(drawing.decorations.map(\.start) == original.decorations.map(\.start))
-            #expect(drawing.vectorBatches.map { $0.path.boundingRect } == original.vectorBatches.map { $0.path.boundingRect })
+            #expect(drawing.vectorBatches.map { $0.paths.map(\.boundingRect) } == original.vectorBatches.map { $0.paths.map(\.boundingRect) })
             #expect(drawing.backgrounds.count == 2 && drawing.decorations.count == 4)
         }
     }
@@ -1051,7 +1066,7 @@ final class TextStyleConsumerTests {
             try #require(baseAtoms.count == 3 && atoms.count == 3)
             for index in 0..<3 {
                 let delta = CGFloat(index) * 7
-                #expect(drawing.vectorBatches[index].path.boundingRect.minY == baseDrawing.vectorBatches[index].path.boundingRect.minY + delta * scale)
+                #expect(drawing.vectorBatches[index].paths.map { $0.boundingRect.minY } == baseDrawing.vectorBatches[index].paths.map { $0.boundingRect.minY + delta * scale })
                 #expect(drawing.decorations[index].start.y == baseDrawing.decorations[index].start.y + delta * scale)
                 #expect(drawing.backgrounds[index].frame.minY == baseDrawing.backgrounds[index].frame.minY + delta * scale)
                 #expect(atoms[index].bounds.minY == baseAtoms[index].bounds.minY + delta)

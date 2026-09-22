@@ -7,6 +7,7 @@ final class FractionalClippingTests: XCTestCase {
     // ASSERTIONS fontClippingFractionalTextConsumerObserved
     // ASSERTIONS fontClippingFractionalInterpolationObserved
     // ASSERTIONS fontClippingCoordinateNormalizationObserved
+    // ASSERTIONS textFontVerticalOutsets27Observed
     func testFileAndDataTextPreserveFractionalCeilingsInBothRenderingModes() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
@@ -43,10 +44,18 @@ final class FractionalClippingTests: XCTestCase {
                                 let styled = ResolvedStyledText.TextLayoutManager(resolvedText: resolved)
                                 let top = CGFloat(ascent) * size / 2048 - metrics.ascender
                                 let bottom = CGFloat(descent) * size / 2048 + metrics.descender
+                                guard case let .styledText(faces, _, _, attributes) = resolved.runs[0] else {
+                                    XCTFail("Missing resolved font run"); continue
+                                }
+                                let raw = try XCTUnwrap(attributes.fontResource?.resolvedMetrics(
+                                    for: faces[0], scaleFactor: resolved.scaleFactor))
+                                XCTAssertEqual(raw.outsets.top, top)
+                                XCTAssertEqual(raw.outsets.bottom, bottom, accuracy: 1e-14)
+                                let verticalBottom = max(bottom, (kind == .mapped ? 0.282064 : 0.286064) * size)
                                 XCTAssertEqual(metrics.outsets.top, top)
-                                XCTAssertEqual(metrics.outsets.bottom, bottom, accuracy: 1e-14)
+                                XCTAssertEqual(metrics.outsets.bottom, verticalBottom, accuracy: 1e-14)
                                 XCTAssertEqual(styled.drawingMargins.top, ceil(top * scale) / scale)
-                                XCTAssertEqual(styled.drawingMargins.bottom, ceil(bottom * scale) / scale)
+                                XCTAssertEqual(styled.drawingMargins.bottom, ceil(verticalBottom * scale) / scale)
                                 XCTAssertEqual(styled.drawingMargins.leading, 0)
                                 XCTAssertEqual(styled.drawingMargins.trailing, 0)
                                 if size == boundary, scale == 2 {

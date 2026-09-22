@@ -4,6 +4,83 @@ import VVD
 @testable import VUI
 
 final class TextDrawingMarginTests: XCTestCase {
+    // ASSERTIONS textNegativeSpacingAdvance27Observed textNegativeSpacingFitting27Observed
+    // ASSERTIONS textNegativeSpacingToken27Observed textNegativeSpacingDrawOrder27Observed
+    func testNegativeSpacingInkSurvivesPreparedDrawingAndRecordings() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        for mode: VUI.Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            for scale: CGFloat in [1, 2] {
+                for kind in ["kern", "tracking"] {
+                    for (spacing, width, minimum, sample): (CGFloat, CGFloat, CGFloat, String) in [
+                        (-4, 80, 0.5, "plain"), (-8, 80, 0.5, "plain"),
+                        (-16, 1, 1, "plain"), (-16, 8, 1, "plain"),
+                        (-16, 1, 1, "wide"), (-24, 80, 1, "plain"),
+                        (-16, 80, 1, "return")
+                    ] {
+                        let wide = sample == "wide"
+                        var environment = EnvironmentValues()
+                        environment.defaultFontRenderingMode = mode
+                        environment.displayScale = 2
+                        environment._contentScaleFactor = scale
+                        environment.lineLimit = 1
+                        environment.minimumScaleFactor = minimum
+                        func run(_ string: String, size: CGFloat, color: VUI.Color) -> Text {
+                            let value = Text(verbatim: string).font(.file(file, size: size)).foregroundColor(color)
+                            return kind == "kern" ? value.kerning(spacing) : value.tracking(spacing)
+                        }
+                        var text = run(wide ? "WWW " : "AAA ", size: 23, color: .red)
+                            + run(wide ? "WWW WWW" : sample == "return" ? "BBB " : "BBB BBB", size: 31, color: .blue)
+                        if sample == "return" { text = text + run("AAA", size: 23, color: .red) }
+                        let source = try resolve(text, environment: environment)
+                        let properties = TextLayoutProperties(from: environment)
+                        let ordinary = ResolvedStyledText.StringDrawing(layoutProperties: properties, resolvedText: source)
+                        let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: properties, resolvedText: source)
+                        for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                            let size = owner.metrics(in: CGSize(width: width, height: 60), layoutMargins: nil).size
+                            var item = DisplayList.Content.TextValue(view: StyledTextContentView(text: owner, renderer: nil),
+                                size: size, frame: owner.frame(in: size, renderer: nil), shading: .foreground,
+                                transform: .identity, command: .closure(bounds: nil))
+                            let prepared = try XCTUnwrap(item.makeDrawing())
+                            let label = "\(kind)=\(spacing) width=\(width) sample=\(sample) custom=\(custom) \(mode) scale=\(scale)"
+                            if sample == "return" {
+                                let colors = prepared.vectorBatches.map(\.foregroundColor)
+                                    + prepared.batches.map(\.foregroundColor)
+                                var transitions: [VUI.Color?] = []
+                                for color in colors where transitions.isEmpty || transitions.last! != color {
+                                    transitions.append(color)
+                                }
+                                XCTAssertEqual(transitions.map { $0?.resolve(in: environment) },
+                                    [VUI.Color.red, .blue, .red].map { Optional($0.resolve(in: environment)) }, label)
+                            }
+                            let immediate = try render(device: device, environment: environment) { item.draw(in: $0) }
+                            XCTAssertTrue(immediate.contains { $0 != 0 }, label)
+                            XCTAssertTrue(try render(device: device, environment: environment) {
+                                item.draw(prepared, in: $0)
+                            } == immediate, label)
+                            XCTAssertTrue(try render(device: device, environment: environment) { target in
+                                let recording = target.recordingContext(size: CGSize(width: 128, height: 128))
+                                item.draw(in: recording)
+                                recording.recording!.draw(in: target)
+                            } == immediate, label)
+                            if custom {
+                                item.view.renderer = MarginRenderer(environment: environment, operation: .line)
+                                XCTAssertTrue(try render(device: device, environment: environment) {
+                                    item.draw(in: $0)
+                                } == immediate, label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textSuffixDrawingConsumersObserved
     func testRetainedSuffixLayoutDrawsThroughOrdinaryPreparedRecordedAndCustomRoutes() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
@@ -53,6 +130,7 @@ final class TextDrawingMarginTests: XCTestCase {
     }
 
     // ASSERTIONS textSuffixCustomAttachmentObserved
+    // ASSERTIONS textAttachmentLogicalCoordinates27Observed
     func testLineSuffixDrawsItsOwnFontAndColorThroughPreparedAndRecordedDrawing() throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
         let previous = appContext
@@ -98,7 +176,27 @@ final class TextDrawingMarginTests: XCTestCase {
                 let renderer = MarginRenderer(environment: environment, operation: .line)
                 let custom = try value(owner, renderer: renderer)
                 let rendered = try render(device: device, environment: environment) { custom.draw(in: $0) }
-                XCTAssertTrue(rendered == immediate, "\(mode) \(scale)")
+                XCTAssertTrue(rendered == immediate, "\(mode) scale=\(scale)")
+                for offset: CGFloat in [0.25, 0.5, 1] {
+                    let moved = try render(device: device, environment: environment) { target in
+                        var target = target
+                        target.translateBy(x: offset, y: offset)
+                        item.draw(in: target)
+                    }
+                    for recorded in [false, true] {
+                        let actual = try render(device: device, environment: environment) { target in
+                            var target = target
+                            target.translateBy(x: offset, y: offset)
+                            if recorded {
+                                let recording = target.recordingContext(size: CGSize(width: 128, height: 128))
+                                custom.draw(in: recording)
+                                recording.recording!.draw(in: target)
+                            } else { custom.draw(in: target) }
+                        }
+                        XCTAssertTrue(actual == moved,
+                            "\(mode) scale=\(scale) offset=\(offset) recorded=\(recorded)")
+                    }
+                }
                 // Drawing the attachment relocates a copy, preserving the retained suffix value.
                 XCTAssertEqual(suffix.line, originalLine)
                 XCTAssertEqual(originalLine.drawingOptions.rawValue, 0)
@@ -809,7 +907,9 @@ final class TextDrawingMarginTests: XCTestCase {
                     environment.displayScale = displayScale
                     environment._contentScaleFactor = renderScale
                     for string in ["Hg\nHg", "Ågj\nHg"] {
-                        let source = try resolve(Text(verbatim: string), environment: environment)
+                        // Position comparisons use an opaque fill. Translucent
+                        // glyph groups have different overlap semantics from slices.
+                        let source = try resolve(Text(verbatim: string).foregroundColor(.black), environment: environment)
                         let styled = ResolvedStyledText.StringDrawing(resolvedText: source)
                         let plain = try value(styled)
                         let expected = try render(device: device, environment: environment) {
@@ -840,24 +940,7 @@ final class TextDrawingMarginTests: XCTestCase {
                             switch operation {
                             case .line, .run, .slice:
                                 let differences = actual.indices.filter { actual[$0] != expected[$0] }
-                                if case .bitmap = mode, operation == .slice, !differences.isEmpty {
-                                    // Separate masks quantize coverage before compositing. Restrict
-                                    // the resulting error to overlapping, nonzero alpha samples.
-                                    XCTAssertTrue(differences.allSatisfy { $0 % 4 == 3 && abs(Int(actual[$0]) - Int(expected[$0])) <= 2 })
-                                    XCTAssertTrue(actual.indices.allSatisfy { (actual[$0] == 0) == (expected[$0] == 0) })
-                                    var overlapping = Array(repeating: 0, count: differences.count)
-                                    let glyphCount = source.makeGlyphs(maxWidth: .max, maxHeight: .max).reduce(0) { $0 + $1.glyphs.count }
-                                    for ordinal in 0..<glyphCount {
-                                        let isolated = MarginRenderer(environment: environment, operation: .slice)
-                                        isolated.onlyGlyph = ordinal
-                                        let selected = try value(styled, renderer: isolated)
-                                        let pixels = try render(device: device, environment: environment) { selected.draw(in: $0) }
-                                        for index in differences.indices where pixels[differences[index]] > 0 { overlapping[index] += 1 }
-                                    }
-                                    XCTAssertTrue(overlapping.allSatisfy { $0 >= 2 })
-                                } else {
-                                    XCTAssertTrue(differences.isEmpty, "Renderer \(operation), \(mode), \(string.debugDescription), size \(pointSize), display \(displayScale), render \(renderScale): \(differences.count) changed bytes")
-                                }
+                                XCTAssertTrue(differences.isEmpty, "Renderer \(operation), \(mode), \(string.debugDescription), size \(pointSize), display \(displayScale), render \(renderScale): \(differences.count) changed bytes")
                             case .shift: shifted = actual
                             case .translate: XCTAssertTrue(actual == shifted)
                             }
@@ -1096,7 +1179,6 @@ private final class MarginRenderer: TextRendererBoxBase {
     var clipBounds: CGRect?
     var opacity: Double?
     var drawMarker = false
-    var onlyGlyph: Int?
     var recordsProxy = false
     var proxySize: CGSize?
     var layoutLineCount: Int?
@@ -1119,16 +1201,12 @@ private final class MarginRenderer: TextRendererBoxBase {
             return
         }
         if operation == .translate { context.translateBy(x: 3, y: 5) }
-        var ordinal = 0
         for var line in layout {
             if operation == .shift { line.origin.x += 3; line.origin.y += 5 }
             switch operation {
             case .line, .shift, .translate: context.draw(line)
             case .run: for run in line { context.draw(run) }
-            case .slice: for run in line { for slice in run {
-                if onlyGlyph == nil || onlyGlyph == ordinal { context.draw(slice) }
-                ordinal += 1
-            } }
+            case .slice: for run in line { for slice in run { context.draw(slice) } }
             }
         }
     }

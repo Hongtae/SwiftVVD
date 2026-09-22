@@ -27,7 +27,12 @@ struct ResolvedTextSource {
             _TextAttributeValues,
             _ResolvedTextRunAttributes
         )
-
+        case styledAttachment(
+            [Typeface],
+            ImageDrawing,
+            _TextAttributeValues,
+            _ResolvedTextRunAttributes
+        )
     }
 
     final class Storage: AppLifetimeResource, @unchecked Sendable {
@@ -67,7 +72,7 @@ struct ResolvedTextSource {
                     switch run {
                     case let .text(_, text), let .attributedText(_, text, _), let .styledText(_, text, _, _):
                         text.unicodeScalars.contains(where: predicate)
-                    case .attachment, .attributedAttachment:
+                    case .attachment, .attributedAttachment, .styledAttachment:
                         predicate("\u{fffc}")
                     }
                 }
@@ -181,7 +186,8 @@ struct ResolvedTextSource {
         var attributes = _TextAttributeValues()
         var style = _ResolvedTextRunAttributes()
         switch runs.last {
-        case let .styledText(lastFaces, _, lastAttributes, lastStyle):
+        case let .styledText(lastFaces, _, lastAttributes, lastStyle),
+             let .styledAttachment(lastFaces, _, lastAttributes, lastStyle):
             faces = lastFaces
             attributes = lastAttributes
             style = lastStyle
@@ -272,12 +278,10 @@ struct ResolvedTextSource {
             resizedFonts[key] = value
             return value
         }
-        let scaledRuns = runs.map { run -> Run in
-            guard case let .styledText(_, text, custom, originalAttributes) = run,
-                  let original = originalAttributes.fontResource else { return run }
-            guard let resized = resized(original) else {
-                return run
-            }
+        func scaledAttributes(_ originalAttributes: _ResolvedTextRunAttributes)
+            -> ([Typeface], _ResolvedTextRunAttributes)? {
+            guard let original = originalAttributes.fontResource,
+                  let resized = resized(original) else { return nil }
             guard let context = fontResolutionContext else {
                 preconditionFailure("Scaling resolved font attributes requires their resolution context")
             }
@@ -287,7 +291,19 @@ struct ResolvedTextSource {
             attributes.font = font
             let faces = font.typefaceCascade(in: context.environment, forContext: context.sceneResources,
                 contentScaleFactor: scaleFactor, applyEnvironmentModifiers: false).runFaces
-            return .styledText(faces, text, custom, attributes)
+            return (faces, attributes)
+        }
+        let scaledRuns = runs.map { run -> Run in
+            switch run {
+            case let .styledText(_, text, custom, original):
+                guard let (faces, attributes) = scaledAttributes(original) else { return run }
+                return .styledText(faces, text, custom, attributes)
+            case let .styledAttachment(_, image, custom, original):
+                guard let (faces, attributes) = scaledAttributes(original) else { return run }
+                return .styledAttachment(faces, image, custom, attributes)
+            default:
+                return run
+            }
         }
         var result = Self(runs: scaledRuns, scaleFactor: scaleFactor, displayScale: displayScale,
             drawMissingGlyphs: drawMissingGlyphs, outsetData: storage.outsetData,
@@ -323,6 +339,10 @@ struct ResolvedTextSource {
                     string: "\u{fffc}",
                     attributes: [.resolvedTextAttachment: true]
                 ))
+            case let .styledAttachment(_, _, _, style):
+                var attributes = style.nsAttributes
+                attributes[.resolvedTextAttachment] = true
+                result.append(NSAttributedString(string: "\u{fffc}", attributes: attributes))
             }
         }
         return result
@@ -331,7 +351,7 @@ struct ResolvedTextSource {
     var hasAttachments: Bool {
         runs.contains { run in
             switch run {
-            case .attachment, .attributedAttachment: true
+            case .attachment, .attributedAttachment, .styledAttachment: true
             case .text, .attributedText, .styledText: false
             }
         }
@@ -355,7 +375,7 @@ struct ResolvedTextSource {
                  let .attributedAttachment(runFaces, _, _):
                 faces = runFaces
                 resource = nil
-            case let .styledText(runFaces, _, _, style):
+            case let .styledText(runFaces, _, _, style), let .styledAttachment(runFaces, _, _, style):
                 faces = runFaces
                 resource = style.fontResource
             }
@@ -407,6 +427,11 @@ struct ResolvedTextSource {
            let outsets = languageAwareOutsets(for: face, resource: resource) {
             // A successful tuple replaces clipping, including a zero tuple.
             metrics.outsets = outsets
+        } else if let outsets = languageAwareOutsets(for: face, resource: resource) {
+            // Ordinary file faces retain clipping and also cover the vertical
+            // language outsets. Horizontal expansion uses the separate gate.
+            metrics.outsets.top = max(metrics.outsets.top, outsets.top)
+            metrics.outsets.bottom = max(metrics.outsets.bottom, outsets.bottom)
         }
         return metrics
     }
@@ -630,6 +655,7 @@ struct ResolvedTextSource {
         var width: CGFloat
         // Retained fragment geometry can differ from the glyph advance width.
         var fragmentWidth: CGFloat? = nil
+        var tabOverflowIndex: Int? = nil
         var trailingBoundary: Glyph? = nil
         var paragraphIndex: Int = 0
         var paragraphInput: Glyph? = nil
@@ -747,6 +773,7 @@ struct ResolvedTextSource {
             var vertices: [Vertex]
             var colorGlyphs: Bool
             var foregroundColor: Color?
+            var runIndex: Int
         }
 
         struct Attachment {
@@ -756,8 +783,9 @@ struct ResolvedTextSource {
         }
 
         struct VectorBatch {
-            var path: Path
+            var paths: [Path]
             var foregroundColor: Color?
+            var runIndex: Int
         }
 
         struct CustomAttachment {
@@ -935,7 +963,7 @@ struct ResolvedTextSource {
                 let range = scalarIndex..<(scalarIndex + characterScalars.count)
                 scalarIndex = range.upperBound
                 let visibleScalars = characterScalars.filter {
-                    !$0.properties.isDefaultIgnorableCodePoint && $0.value != 0x0b
+                    !$0.properties.isDefaultIgnorableCodePoint && $0.value != 0x0b && $0.value != 0x09
                 }
                 let emojiRequested = characterScalars.contains { $0.value == 0xfe0f }
                 let textRequested = characterScalars.contains { $0.value == 0xfe0e }
@@ -1240,6 +1268,7 @@ struct ResolvedTextSource {
 
         struct Quad {
             var lineIndex: Int
+            var runIndex: Int
             var vertices: [Drawing.Vertex]
             var texture: Texture
             var colorGlyphs: Bool
@@ -1254,6 +1283,7 @@ struct ResolvedTextSource {
         var decorations: [Drawing.Decoration] = []
         var lineRanges = Array(repeating: Drawing.LineRanges(), count: lineGlyphs.count)
         var currentLine = 0
+        var currentRun = 0
         var firstVectorBatch = 0
 
         func appendTexture(
@@ -1310,6 +1340,7 @@ struct ResolvedTextSource {
             )
             quads.append(Quad(
                 lineIndex: currentLine,
+                runIndex: currentRun,
                 vertices: [lb, lt, rb, rb, lt, rt],
                 texture: texture,
                 colorGlyphs: colorGlyphs,
@@ -1327,29 +1358,36 @@ struct ResolvedTextSource {
                 translationX: baseline.x,
                 y: baseline.y
             )
-            if let index = vectorBatches[firstVectorBatch...].firstIndex(where: {
-                $0.foregroundColor == foregroundColor
-            }) {
-                vectorBatches[index].path.addPath(
-                    path,
-                    transform: transform
-                )
+            var transformedPath = Path()
+            transformedPath.addPath(path, transform: transform)
+            if let index = vectorBatches.indices.last,
+               index >= firstVectorBatch,
+               vectorBatches[index].runIndex == currentRun,
+               vectorBatches[index].foregroundColor == foregroundColor {
+                vectorBatches[index].paths.append(transformedPath)
             } else {
-                var transformedPath = Path()
-                transformedPath.addPath(path, transform: transform)
                 vectorBatches.append(Drawing.VectorBatch(
-                    path: transformedPath,
-                    foregroundColor: foregroundColor
+                    paths: [transformedPath],
+                    foregroundColor: foregroundColor,
+                    runIndex: currentRun
                 ))
             }
         }
 
         for (index, line) in lineGlyphs.enumerated() {
             currentLine = index
+            currentRun = 0
             firstVectorBatch = vectorBatches.count
             let firstAttachment = attachments.count
             let firstCustomAttachment = customAttachments.count
+            let runRanges = Self.drawingRunRanges(in: line.glyphs)
+            var glyphIndex = 0
             Self.forEachGlyph(in: [line]) { glyph, baseline in
+                while currentRun + 1 < runRanges.count,
+                      glyphIndex >= runRanges[currentRun].upperBound {
+                    currentRun += 1
+                }
+                defer { glyphIndex += 1 }
                 switch glyph.content {
                 case .unresolved:
                     let content: TypefaceGlyph?
@@ -1502,16 +1540,8 @@ struct ResolvedTextSource {
             }
         }
 
-        quads.sort { lhs, rhs in
-            if lhs.lineIndex != rhs.lineIndex {
-                return lhs.lineIndex < rhs.lineIndex
-            }
-            if lhs.colorGlyphs != rhs.colorGlyphs {
-                return !lhs.colorGlyphs
-            }
-            return ObjectIdentifier(lhs.texture) > ObjectIdentifier(rhs.texture)
-        }
-
+        // Adjacent compatible glyphs can share a batch. Reordering by texture
+        // changes compositing when glyphs from different runs overlap.
         var batches: [Drawing.Batch] = []
         var batchLine: Int?
         var firstBatch = 0
@@ -1522,6 +1552,7 @@ struct ResolvedTextSource {
             }
             if let last = batches.indices.last,
                last >= firstBatch,
+               batches[last].runIndex == quad.runIndex,
                batches[last].texture === quad.texture,
                batches[last].colorGlyphs == quad.colorGlyphs,
                batches[last].foregroundColor == quad.foregroundColor {
@@ -1531,7 +1562,8 @@ struct ResolvedTextSource {
                     texture: quad.texture,
                     vertices: quad.vertices,
                     colorGlyphs: quad.colorGlyphs,
-                    foregroundColor: quad.foregroundColor
+                    foregroundColor: quad.foregroundColor,
+                    runIndex: quad.runIndex
                 ))
             }
             lineRanges[quad.lineIndex].batches = firstBatch..<batches.count
@@ -1586,61 +1618,62 @@ struct ResolvedTextSource {
         hasTextSuffix: Bool = false,
         layoutScope: LayoutScope = .paragraph
     ) -> GlyphLayout {
-        let breakables = CharacterSet.whitespaces.union(.init(charactersIn: "-/?!}|"))
-        let decimalNumbers = CharacterSet.decimalDigits
-        // No wrap if character is followed by a decimal number
-        let breakableNotBeforeDN = CharacterSet(charactersIn: "-")
-        // No wrap if character is between decimal numbers
-        let breakableNotBetweenDN = CharacterSet(charactersIn: "/")
+        let sourceScalars = runs.flatMap { run -> [UnicodeScalar] in
+            switch run {
+            case let .text(_, text), let .attributedText(_, text, _), let .styledText(_, text, _, _):
+                return Array(text.unicodeScalars)
+            case .attachment, .attributedAttachment, .styledAttachment:
+                return ["\u{fffc}"]
+            }
+        }
+        let lineBreaks = ParagraphLineBreaks(sourceScalars)
+        let defaultLanguage = storage.preferredLanguages.first ?? Locale.current.identifier
 
+        let tabStopTolerance = max(truncationTolerance / scaleFactor, 0.0002)
         let getGlyphsWidth = { (glyphs: [Glyph]) -> CGFloat in
-            glyphs.reduce(CGFloat.zero) { result, glyph in
+            var measured = glyphs
+            Self.applyTabStops(to: &measured, scaleFactor: scaleFactor, tolerance: tabStopTolerance)
+            return measured.reduce(CGFloat.zero) { result, glyph in
                 result + glyph.advance.width + glyph.kerning.x
-            } - (glyphs.first?.kerning.x ?? 0) // ignore first kerning
+            } - (measured.first?.kerning.x ?? 0) // ignore first kerning
         }
         let wrappingWidth = { (glyphs: [Glyph]) -> CGFloat in
-            let trailing = glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }.count
+            let trailing = glyphs.reversed().prefix {
+                $0.scalar != "\t" && CharacterSet.whitespaces.contains($0.scalar)
+            }.count
             let content = Array(glyphs.dropLast(trailing))
             // Positive tracking on the last visible glyph belongs to the
             // trailing extent, independently of trailing whitespace characters.
             return getGlyphsWidth(content) - max(content.last?.style.tracking ?? 0, 0) * scaleFactor
         }
-        // Returns the glyph index immediately after a breakable cluster.
-        let getBreakableSplitIndex = { (glyphs: [Glyph]) -> Int? in
+        // Retain full source context while selecting a boundary in a glyph prefix.
+        func getBreakableSplitIndex(_ glyphs: [Glyph], strictlyBeforeEnd: Bool = false) -> Int? {
             let clusters = Self.clusterRanges(in: glyphs)
-            for clusterIndex in clusters.indices.reversed() {
-                let cluster = clusters[clusterIndex]
-                let scalar = glyphs[cluster.lowerBound].scalar
-                if breakables.contains(scalar) {
-                    var beforeNumber = false
-                    var afterNumber = false
-                    if clusterIndex + 1 < clusters.endIndex {
-                        beforeNumber = decimalNumbers.contains(
-                            glyphs[clusters[clusterIndex + 1].lowerBound].scalar
-                        )
-                    }
-                    if clusterIndex > clusters.startIndex {
-                        afterNumber = decimalNumbers.contains(
-                            glyphs[clusters[clusterIndex - 1].lowerBound].scalar
-                        )
-                    }
-                    if breakableNotBeforeDN.contains(scalar) && beforeNumber {
-                        continue
-                    }
-                    if breakableNotBetweenDN.contains(scalar) && beforeNumber && afterNumber {
-                        continue
-                    }
+            guard let first = glyphs.first?.sourceRange?.lowerBound,
+                  let last = glyphs.last, var sourceEnd = last.sourceRange?.upperBound else { return nil }
+            let language = last.style.language ?? defaultLanguage
+            let keepsHangulWords = (last.style.paragraphStyle?.lineBreakStrategy ?? .max) & 2 != 0
+            var inclusive = !strictlyBeforeEnd
+            while let boundary = lineBreaks.boundary(before: sourceEnd, inclusive: inclusive,
+                                                     language: language, keepsHangulWords: keepsHangulWords),
+                  boundary > first {
+                if let cluster = clusters.last(where: { glyphs[$0.upperBound - 1].sourceRange?.upperBound == boundary }) {
                     return cluster.upperBound
                 }
+                sourceEnd = boundary
+                inclusive = false
             }
             return nil
         }
         // Wrap long lines to satisfy line break conditions.
         let splitLineGlyphs = {
-            (glyphs: [Glyph], maxWidth: Int) -> (first: [Glyph], second: [Glyph]) in
-            let trailing = glyphs.reversed().prefix { CharacterSet.whitespaces.contains($0.scalar) }.count
-            var first = Array(glyphs.dropLast(trailing))
-            var second = Array(glyphs.suffix(trailing))
+            (glyphs: [Glyph], maxWidth: Int, tabOverflow: Int?) -> (first: [Glyph], second: [Glyph]) in
+            let trailing = glyphs.reversed().prefix {
+                $0.scalar != "\t" && CharacterSet.whitespaces.contains($0.scalar)
+            }.count
+            let end = min(tabOverflow ?? glyphs.count, glyphs.count - trailing)
+            var first = Array(glyphs[..<end])
+            var second = Array(glyphs[end...])
             while Self.clusterRanges(in: first).count > 1 &&
                     Int(ceil(wrappingWidth(first))) > maxWidth {
                 if let splitIndex = getBreakableSplitIndex(first),
@@ -1659,12 +1692,62 @@ struct ResolvedTextSource {
                     first.removeSubrange(cluster)
                 }
             }
+            // Removing the overflow cluster can leave a forbidden punctuation
+            // boundary. Select the preceding legal break before publishing it.
+            if let boundary = getBreakableSplitIndex(first), boundary < first.count {
+                second.insert(contentsOf: first[boundary...], at: second.startIndex)
+                first.removeSubrange(boundary...)
+            }
+            // Whitespace following an admitted cluster belongs to that line,
+            // including when the cluster itself exceeds the available width.
+            let continuation = second.prefix {
+                $0.scalar != "\t" && CharacterSet.whitespaces.contains($0.scalar)
+            }.count
+            first.append(contentsOf: second.prefix(continuation))
+            second.removeFirst(continuation)
             return (first: first, second: second)
+        }
+
+        func adjustedOrphanSplit(_ split: (first: [Glyph], second: [Glyph]),
+                                 in line: LineGlyphs) -> (first: [Glyph], second: [Glyph]) {
+            guard let firstInput = line.paragraphInput ?? line.glyphs.first,
+                  firstInput.characterIndex == line.glyphs.first?.characterIndex,
+                  (firstInput.style.paragraphStyle?.lineBreakStrategy ?? 0) & 1 != 0,
+                  split.first.count != line.tabOverflowIndex,
+                  line.isParagraphEnd, !split.second.isEmpty else { return split }
+            let body = line.glyphs
+            guard split.first.count < body.count, let last = body.last else { return split }
+            let start = split.second[0].characterIndex
+            let end = line.trailingBoundary?.sourceRange?.upperBound ??
+                last.sourceRange?.upperBound ?? last.characterIndex + 1
+            guard start < end, end <= sourceScalars.count else { return split }
+            let remaining = String(String.UnicodeScalarView(sourceScalars[start..<end]))
+            guard remaining.utf16.count <= 10,
+                  ParagraphWordBoundary.isSingleWord(remaining) else { return split }
+            let trailing = split.first.reversed().prefix {
+                $0.scalar != "\t" && CharacterSet.whitespaces.contains($0.scalar)
+            }.count
+            let prefix = Array(split.first.dropLast(trailing))
+            let previousBreak = prefix.last?.scalar == "\t"
+                ? prefix.count - 1 : getBreakableSplitIndex(prefix, strictlyBeforeEnd: true)
+            guard let candidate = previousBreak,
+                  candidate > 0, candidate < split.first.count else { return split }
+            func raggedness(at index: Int) -> CGFloat {
+                let remainder = getGlyphsWidth(Array(body[index...]))
+                return remainder > 0 ? getGlyphsWidth(Array(body[..<index])) / remainder : 0
+            }
+            let adjusted = raggedness(at: candidate)
+            guard adjusted >= 0.6, abs(1 - adjusted) <= abs(1 - raggedness(at: split.first.count)) else {
+                return split
+            }
+            return (Array(line.glyphs[..<candidate]), Array(line.glyphs[candidate...]))
         }
 
         func updateMetrics(_ line: inout LineGlyphs) {
             guard !line.glyphs.isEmpty else { return }
             line.glyphs[0].kerning = .zero
+            line.tabOverflowIndex = Self.applyTabStops(to: &line.glyphs,
+                scaleFactor: scaleFactor, tolerance: tabStopTolerance)
             line.ascender = line.glyphs.reduce(.zero) {
                 max($0, $1.lineAscender)
             }
@@ -1686,9 +1769,11 @@ struct ResolvedTextSource {
             var wrappedLines: [LineGlyphs] = []
             for sourceLine in lines {
                 var line = sourceLine
+                if line.glyphs.contains(where: { $0.scalar == "\t" }) { updateMetrics(&line) }
                 while Self.clusterRanges(in: line.glyphs).count > 1,
-                      Int(ceil(wrappingWidth(line.glyphs))) > maxWidth {
-                    let split = splitLineGlyphs(line.glyphs, maxWidth)
+                      line.tabOverflowIndex != nil || Int(ceil(wrappingWidth(line.glyphs))) > maxWidth {
+                    let split = adjustedOrphanSplit(
+                        splitLineGlyphs(line.glyphs, maxWidth, line.tabOverflowIndex), in: line)
                     guard !split.second.isEmpty else { break }
 
                     var first = line
@@ -1701,9 +1786,7 @@ struct ResolvedTextSource {
                     first.forcedClusterBreak = boundary != first.glyphs.endIndex &&
                         !CharacterSet.whitespaces.contains(split.second[0].scalar)
                     updateMetrics(&first)
-                    if Int(ceil(wrappingWidth(first.glyphs))) <= maxWidth {
-                        first.width = min(first.width, CGFloat(maxWidth))
-                    }
+                    first.width = min(first.width, CGFloat(maxWidth))
                     wrappedLines.append(first)
 
                     line.glyphs = split.second
@@ -1711,7 +1794,7 @@ struct ResolvedTextSource {
                 }
                 // Trailing whitespace stays in the glyph range even when it
                 // extends beyond the wrapping width. Clip its reported extent.
-                if Int(ceil(wrappingWidth(line.glyphs))) <= maxWidth {
+                if hasTextSuffix || Int(ceil(wrappingWidth(line.glyphs))) <= maxWidth {
                     line.width = min(line.width, CGFloat(maxWidth))
                 }
                 wrappedLines.append(line)
@@ -1739,6 +1822,10 @@ struct ResolvedTextSource {
                            leading: input?.leading(usesSystemLeading: usesSystemLeading,
                                                    usesNegativeLeading: usesNegativeLeading) ?? 0,
                            baselineOffset: glyph.baselineOffset)
+                if case .attachment = glyph.content, input != nil {
+                    result.add(ascent: glyph.ascender, height: glyph.ascender - glyph.descender,
+                               leading: 0, baselineOffset: glyph.baselineOffset)
+                }
             }
             return result
         }
@@ -1968,6 +2055,10 @@ struct ResolvedTextSource {
         }
         placeParagraphs()
 
+        // Multiline suffix layout collects the wrapped body before its separate
+        // final-line replacement. A one-line limit retains its token producer.
+        if hasTextSuffix, lineLimit != 1 { return result() }
+
         guard let lastVisibleIndex = visibleLines.indices.last else {
             return result()
         }
@@ -2072,11 +2163,15 @@ struct ResolvedTextSource {
                 glyph.characterIndex = characterIndex
                 glyph.sourceRange = characterIndex..<(characterIndex + 1)
                 glyph.isTruncationToken = true
-                glyph.advance.width += (
+                let spacing = (
                     source.style.tracking ??
                     source.style.kern ??
                     0
                 ) * scaleFactor
+                if spacing != 0 {
+                    glyph.advance.width += spacing
+                    if glyph.advance.width < 0 { glyph.advance.width = 0 }
+                }
                 if previous == nil {
                     glyph.kerning = .zero
                 }
@@ -2161,8 +2256,16 @@ struct ResolvedTextSource {
                     // no trailing character extent until body text is removed.
                     let trailingWidth = keptCount == clusters.count ? 0
                         : max(ellipsis.style.tracking ?? 0, 0) * scaleFactor
+                    let tokenWidth = ellipsis.advance.width - trailingWidth
+                    // An empty prefix uses token insertion; an existing prefix
+                    // keeps its glyphs when the replacement token has no extent.
+                    if tokenWidth == 0 && !prefix.isEmpty {
+                        if getGlyphsWidth(prefix) - truncationWidth > truncationTolerance { continue }
+                        prefix[0].kerning = .zero
+                        return (prefix, truncatedRange(clusters[keptCount...]))
+                    }
                     let fittedWidth = getGlyphsWidth(prefix)
-                        + (ellipsis.advance.width - trailingWidth)
+                        + tokenWidth
                         + (prefix.isEmpty ? 0 : ellipsis.kerning.x)
                     prefix.append(ellipsis)
                     prefix[0].kerning = .zero
@@ -2363,6 +2466,37 @@ struct ResolvedTextSource {
         return truncateLastLine()
     }
 
+    /// Applies paragraph stops to a line or measured range and reports the first exhausted stop.
+    @discardableResult
+    private static func applyTabStops(to glyphs: inout [Glyph], scaleFactor: CGFloat,
+                                      tolerance: CGFloat) -> Int? {
+        guard glyphs.contains(where: { $0.scalar == "\t" }) else { return nil }
+        var position: CGFloat = 0
+        for index in glyphs.indices {
+            if glyphs[index].scalar == "\t" {
+                let style = glyphs[index].style.paragraphStyle
+                let stops = style?.tabStops ?? TextParagraphStyle.defaultTabStops
+                let location = position / scaleFactor
+                let stop: CGFloat
+                if let next = stops.first(where: { $0 - location > tolerance }) {
+                    stop = next
+                } else if let interval = style?.defaultTabInterval, interval > 0 {
+                    let last = stops.last ?? 0
+                    stop = last + interval * (floor((location + 0.00000011920928955078125 - last) / interval) + 1)
+                } else {
+                    glyphs[index].advance.width = 0
+                    return index
+                }
+                glyphs[index].kerning = .zero
+                glyphs[index].advance.width = stop * scaleFactor - position
+            } else if index != glyphs.startIndex {
+                position += glyphs[index].kerning.x
+            }
+            position += glyphs[index].advance.width
+        }
+        return nil
+    }
+
     private static func _makeGlyphs(
         runs: [Run],
         scaleFactor: CGFloat,
@@ -2384,8 +2518,13 @@ struct ResolvedTextSource {
         var previousWasCR = false
 
         func addLine(_ boundary: Glyph?, isParagraphEnd: Bool) {
+            let tabOverflow = applyTabStops(to: &glyphs, scaleFactor: scaleFactor, tolerance: 0.0002)
+            if glyphs.contains(where: { $0.scalar == "\t" }) {
+                offset.x = glyphs.reduce(CGFloat.zero) { $0 + $1.advance.width + $1.kerning.x }
+            }
             lines.append(LineGlyphs(glyphs: glyphs,
                 ascender: ascender, descender: descender, width: offset.x,
+                tabOverflowIndex: tabOverflow,
                 trailingBoundary: boundary, paragraphIndex: paragraphIndex,
                 paragraphInput: paragraphInput,
                 isSimpleParagraph: boundary != nil && isParagraphEnd && paragraphLength == 1,
@@ -2405,7 +2544,7 @@ struct ResolvedTextSource {
                 textRun = (faces, text, attributes, nil)
             case let .styledText(faces, text, attributes, style):
                 textRun = (faces, text, attributes, style)
-            case .attachment, .attributedAttachment:
+            case .attachment, .attributedAttachment, .styledAttachment:
                 textRun = nil
             }
             if let (faces, text, attributes, style) = textRun {
@@ -2529,7 +2668,11 @@ struct ResolvedTextSource {
                         glyph.style = resolvedStyle
                         glyph.baselineOffset = baselineOffset
                         glyph.foregroundColor = resolvedStyle.foregroundColor
-                        glyph.advance.width += spacing
+                        if spacing != 0 {
+                            glyph.advance.width += spacing
+                            // Spacing can collapse an advance without removing its glyph.
+                            if glyph.advance.width < 0 { glyph.advance.width = 0 }
+                        }
                         if glyphs.isEmpty { glyph.kerning = .zero }
                         let kerning = glyphs.isEmpty ? CGFloat.zero : glyph.kerning.x
                         glyphs.append(glyph)
@@ -2539,22 +2682,27 @@ struct ResolvedTextSource {
                     }
                 }
             }
-            let attachmentRun: ([Typeface], ImageDrawing, _TextAttributeValues)?
+            let attachmentRun: ([Typeface], ImageDrawing, _TextAttributeValues, _ResolvedTextRunAttributes?)?
             switch s {
             case let .attachment(faces, image):
-                attachmentRun = (faces, image, _TextAttributeValues())
+                attachmentRun = (faces, image, _TextAttributeValues(), nil)
             case let .attributedAttachment(faces, image, attributes):
-                attachmentRun = (faces, image, attributes)
+                attachmentRun = (faces, image, attributes, nil)
+            case let .styledAttachment(faces, image, attributes, style):
+                attachmentRun = (faces, image, attributes, style)
             case .text, .attributedText, .styledText:
                 attachmentRun = nil
             }
-            if let (faces, image, attributes) = attachmentRun {
+            if let (faces, image, attributes, style) = attachmentRun {
                 guard !faces.isEmpty else { continue }
                 let face = faces.first { $0.hasGlyph(for: ".") } ?? faces[0]
                 let size = image.size
                 let baseline = image.baseline * scaleFactor
                 let height = size.height * scaleFactor
                 let width = size.width * scaleFactor
+                let fontInput = TextGlyphs.from(unicodeScalars: "".unicodeScalars,
+                    with: faces, drawMissingGlyphs: false, prevFace: nil, prevChar: UnicodeScalar(0),
+                    fontResource: style?.fontResource, scaleFactor: scaleFactor)
 
                 var glyph = Glyph(scalar: UnicodeScalar(0), face: face)
                 var frame: CGRect = .zero
@@ -2566,11 +2714,14 @@ struct ResolvedTextSource {
                                                    offset: CGPoint(x: 0, y: baseline)))
                 glyph.ascender = baseline
                 glyph.descender = min(0, baseline - height)
-                glyph.lineBoxAscender = glyph.ascender
-                glyph.lineBoxDescender = glyph.descender
+                glyph.lineBoxAscender = style == nil ? glyph.ascender : max(glyph.ascender, fontInput.ascender)
+                glyph.lineBoxDescender = style == nil ? glyph.descender : min(glyph.descender, fontInput.descender)
+                glyph.fontLineMetrics = style == nil ? nil : fontInput.fontLineMetrics
                 glyph.advance.width = width
                 glyph.advance.height = height
                 glyph.attributes = attributes
+                glyph.style = style ?? _ResolvedTextRunAttributes()
+                glyph.foregroundColor = style?.foregroundColor
                 glyph.characterIndex = characterIndex
                 glyph.sourceRange =
                     characterIndex..<(characterIndex + 1)

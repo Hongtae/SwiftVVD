@@ -502,7 +502,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     owner = try XCTUnwrap(textValues(list).first?.view.text as? ResolvedStyledText.StringDrawing)
                                 }
                                 let metrics = owner.metrics(in: request, layoutMargins: nil)
-                                XCTAssertEqual(textValues(list).map(\.size), [metrics.size])
+                                XCTAssertEqual(custom ? capture.measuredSize.map { [$0] } ?? [] : textValues(list).map(\.size), [metrics.size])
                                 let unlaid = lineLimit == 1 && custom && separator == "\n"
                                 if unlaid {
                                     XCTAssertEqual(metrics.scale, minimum)
@@ -534,7 +534,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 var environment = EnvironmentValues()
                                 environment.displayScale = scale
                                 environment.defaultFontRenderingMode = mode
-                                let valueForRecording = try XCTUnwrap(textValues(list).first)
+                                let valueForRecording = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                                 let contents = host.graph.data.withCurrent {
                                     owner.makeRBDisplayList(for: metrics.size, renderer: valueForRecording.view.renderer,
                                         deviceScale: scale, environment: environment,
@@ -548,7 +548,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 }
                                 let fresh = try pixels(freshList, device: device,
                                     resources: host.rendererHost.sceneResources, scale: scale)
-                                let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                                let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                                 var localReference = DisplayList()
                                 localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                     foreground: .color(.black),
@@ -613,7 +613,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 owner = try XCTUnwrap(textValues(list).first?.view.text as? ResolvedStyledText.StringDrawing)
                             }
                             let metrics = owner.metrics(in: request, layoutMargins: nil)
-                            XCTAssertEqual(textValues(list).map(\.size), [metrics.size])
+                            XCTAssertEqual(custom ? capture.measuredSize.map { [$0] } ?? [] : textValues(list).map(\.size), [metrics.size])
                             XCTAssertEqual(metrics.scale, 1)
                             XCTAssertEqual(metrics.numberOfLines, 1)
                             XCTAssertEqual(metrics.hasTruncatedRanges, custom && separator == "\n")
@@ -642,7 +642,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             var environment = EnvironmentValues()
                             environment.displayScale = scale
                             environment.defaultFontRenderingMode = mode
-                            let valueForRecording = try XCTUnwrap(textValues(list).first)
+                            let valueForRecording = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                             let contents = host.graph.data.withCurrent {
                                 owner.makeRBDisplayList(for: metrics.size, renderer: valueForRecording.view.renderer,
                                     deviceScale: scale, environment: environment,
@@ -656,7 +656,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             }
                             let fresh = try pixels(freshList, device: device,
                                 resources: host.rendererHost.sceneResources, scale: scale)
-                            let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                            let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                             var localReference = DisplayList()
                             localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                 foreground: .color(.black),
@@ -725,7 +725,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                         .padding(.leading, origin.x).padding(.top, origin.y)
                                         .frame(width: size.width, height: size.height, alignment: .topLeading), scale: scale)
                                     let hostList = try host.list()
-                                    let textValue = try XCTUnwrap(textValues(hostList).first)
+                                    let textValue = try XCTUnwrap(custom ? capture.drawingValue : textValues(hostList).first)
                                     var list = hostList
                                     if clipped {
                                         // Keep the outer clip in viewport coordinates;
@@ -864,7 +864,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 owner = try XCTUnwrap(textValues(list).first?.view.text as? ResolvedStyledText.StringDrawing)
                             }
                             let metrics = owner.metrics(in: request, layoutMargins: nil)
-                            XCTAssertEqual(textValues(list).map(\.size), [metrics.size])
+                            XCTAssertEqual(custom ? capture.measuredSize.map { [$0] } ?? [] : textValues(list).map(\.size), [metrics.size])
                             XCTAssertEqual(metrics.scale, 1)
                             XCTAssertEqual(metrics.numberOfLines, 1)
                             XCTAssertEqual(metrics.hasTruncatedRanges, removed || (custom && separator == "\n"))
@@ -893,7 +893,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             var environment = EnvironmentValues()
                             environment.displayScale = scale
                             environment.defaultFontRenderingMode = mode
-                            let valueForRecording = try XCTUnwrap(textValues(list).first)
+                            let valueForRecording = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                             let contents = host.graph.data.withCurrent {
                                 owner.makeRBDisplayList(for: metrics.size, renderer: valueForRecording.view.renderer,
                                     deviceScale: scale, environment: environment,
@@ -907,7 +907,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             }
                             let fresh = try pixels(freshList, device: device,
                                 resources: host.rendererHost.sceneResources, scale: scale)
-                            let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                            let referenceValue = try XCTUnwrap(custom ? textValues(referenceList).first : referenceCapture.drawingValue)
                             var localReference = DisplayList()
                             localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                 foreground: .color(.black),
@@ -980,7 +980,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     owner = try XCTUnwrap(textValues(list).first?.view.text as? ResolvedStyledText.StringDrawing)
                                 }
                                 let metrics = owner.metrics(in: request, layoutMargins: nil)
-                                XCTAssertEqual(textValues(list).map(\.size), [metrics.size])
+                                XCTAssertEqual(custom ? capture.measuredSize.map { [$0] } ?? [] : textValues(list).map(\.size), [metrics.size])
                                 XCTAssertEqual(metrics.scale, 1)
                                 XCTAssertEqual(metrics.numberOfLines, 1)
                                 XCTAssertEqual(metrics.hasTruncatedRanges, truncated || (custom && separator == "\n"))
@@ -1010,7 +1010,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 var environment = EnvironmentValues()
                                 environment.displayScale = scale
                                 environment.defaultFontRenderingMode = mode
-                                let valueForRecording = try XCTUnwrap(textValues(list).first)
+                                let valueForRecording = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                                 let contents = host.graph.data.withCurrent {
                                     owner.makeRBDisplayList(for: metrics.size, renderer: valueForRecording.view.renderer,
                                         deviceScale: scale, environment: environment,
@@ -1024,7 +1024,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 }
                                 let fresh = try pixels(freshList, device: device,
                                     resources: host.rendererHost.sceneResources, scale: scale)
-                                let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                                let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                                 var localReference = DisplayList()
                                 localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                     foreground: .color(.black),
@@ -1102,7 +1102,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                         owner = try XCTUnwrap(textValues(list).first?.view.text as? ResolvedStyledText.StringDrawing)
                                     }
                                     let metrics = owner.metrics(in: request, layoutMargins: nil)
-                                    XCTAssertEqual(textValues(list).map(\.size), [metrics.size])
+                                    XCTAssertEqual(custom ? capture.measuredSize.map { [$0] } ?? [] : textValues(list).map(\.size), [metrics.size])
                                     XCTAssertEqual(metrics.scale, 1)
                                     XCTAssertEqual(metrics.numberOfLines, 1)
                                     XCTAssertEqual(metrics.firstBaseline, baseline)
@@ -1131,7 +1131,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     var environment = EnvironmentValues()
                                     environment.displayScale = scale
                                     environment.defaultFontRenderingMode = mode
-                                    let valueForRecording = try XCTUnwrap(textValues(list).first)
+                                    let valueForRecording = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                                     let contents = host.graph.data.withCurrent {
                                         owner.makeRBDisplayList(for: metrics.size, renderer: valueForRecording.view.renderer,
                                             deviceScale: scale, environment: environment,
@@ -1145,7 +1145,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     }
                                     let fresh = try pixels(freshList, device: device,
                                         resources: host.rendererHost.sceneResources, scale: scale)
-                                    let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                                    let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                                     var localReference = DisplayList()
                                     localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                         foreground: .color(.black),
@@ -1260,7 +1260,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             let replay = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
                                 scale: scale, replay: true, canvasSize: canvas)
                             XCTAssertTrue(replay == direct, "Retained recording: \(label)")
-                            let textValue = try XCTUnwrap(textValues(list).first)
+                            let textValue = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                             let owner: ResolvedStyledText = custom ? try XCTUnwrap(capture.owner) : textValue.view.text
                             let metrics = owner.metrics(in: request, layoutMargins: nil)
                             XCTAssertEqual(textValue.size, metrics.size, label)
@@ -1690,7 +1690,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             let retained = try pixels(list, device: device, resources: host.rendererHost.sceneResources,
                                 scale: scale, replay: true, canvasSize: canvas)
                             XCTAssertTrue(retained == direct, "Retained: \(label)")
-                            let value = try XCTUnwrap(textValue(list))
+                            let value = try XCTUnwrap(custom ? capture.drawingValue : textValue(list))
                             let owner = custom ? try XCTUnwrap(capture.owner) : value.view.text
                             let source = try XCTUnwrap(owner.resolvedText)
                             let glyphs = try XCTUnwrap(source.unwrappedGlyphLines().first).glyphs
@@ -1811,7 +1811,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     scale: scale, replay: replay, canvasSize: canvas)
                                 XCTAssertTrue(actual == expected, "\(label) replay=\(replay)")
                             }
-                            let textValue = try XCTUnwrap(textValues(list).first)
+                            let textValue = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                             let owner: ResolvedStyledText = custom ? try XCTUnwrap(capture.owner) : textValue.view.text
                             let metrics = owner.metrics(in: request, layoutMargins: nil)
                             XCTAssertEqual(textValue.size, metrics.size, label)
@@ -1830,7 +1830,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             freshList.appendTextItem(foreground: .color(.black), bounds: CGRect(origin: .zero, size: canvas)) { contents.draw(in: $0) }
                             let fresh = try pixels(freshList, device: device, resources: host.rendererHost.sceneResources,
                                 scale: scale, canvasSize: canvas)
-                            let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                            let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                             var localReference = DisplayList()
                             localReference.appendTextItem(referenceValue.view, size: referenceValue.size, foreground: .color(.black),
                                 bounds: referenceValue.view.text.frame(in: referenceValue.size, renderer: referenceValue.view.renderer),
@@ -1928,7 +1928,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                     scale: scale, replay: replay, canvasSize: canvas)
                                 XCTAssertTrue(actual == expected, "\(label) replay=\(replay)")
                             }
-                            let textValue = try XCTUnwrap(textValues(list).first)
+                            let textValue = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                             let owner: ResolvedStyledText = custom ? try XCTUnwrap(capture.owner) : textValue.view.text
                             let metrics = owner.metrics(in: request, layoutMargins: nil)
                             XCTAssertEqual(textValue.size, metrics.size, label)
@@ -1947,7 +1947,7 @@ final class TextForegroundStyleTests: XCTestCase {
                             freshList.appendTextItem(foreground: .color(.black), bounds: CGRect(origin: .zero, size: canvas)) { contents.draw(in: $0) }
                             let fresh = try pixels(freshList, device: device, resources: host.rendererHost.sceneResources,
                                 scale: scale, canvasSize: canvas)
-                            let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                            let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                             var localReference = DisplayList()
                             localReference.appendTextItem(referenceValue.view, size: referenceValue.size, foreground: .color(.black),
                                 bounds: referenceValue.view.text.frame(in: referenceValue.size, renderer: referenceValue.view.renderer),
@@ -2047,7 +2047,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                         scale: scale, replay: replay, canvasSize: canvas)
                                     XCTAssertTrue(actual == expected, "\(label) replay=\(replay)")
                                 }
-                                let textValue = try XCTUnwrap(textValues(list).first)
+                                let textValue = try XCTUnwrap(custom ? capture.drawingValue : textValues(list).first)
                                 let owner: ResolvedStyledText = custom ? try XCTUnwrap(capture.owner) : textValue.view.text
                                 let metrics = owner.metrics(in: request, layoutMargins: nil)
                                 XCTAssertEqual(textValue.size, metrics.size, label)
@@ -2067,7 +2067,7 @@ final class TextForegroundStyleTests: XCTestCase {
                                 }
                                 let fresh = try pixels(freshList, device: device, resources: host.rendererHost.sceneResources,
                                     scale: scale, canvasSize: canvas)
-                                let referenceValue = try XCTUnwrap(textValues(referenceList).first)
+                                let referenceValue = try XCTUnwrap(custom ? referenceCapture.drawingValue : textValues(referenceList).first)
                                 var localReference = DisplayList()
                                 localReference.appendTextItem(referenceValue.view, size: referenceValue.size,
                                     foreground: .color(.black),
@@ -2228,6 +2228,37 @@ private final class FittingTextCapture {
     var draws = 0
     var truncationStates: [Bool] = []
     var lineWidths: [[CGFloat]] = []
+    var measuredSize: CGSize?
+    var environment: EnvironmentValues?
+    var drawMode = "line"
+    var transform: CGAffineTransform?
+
+    // The mounted custom path retains recorded commands. Reconstruct only the
+    // inputs used by the independent fresh-recording control, not its pixels.
+    var drawingValue: DisplayList.Content.TextValue? {
+        guard let owner, let measuredSize, let environment else { return nil }
+        let renderer = FittingDrawingBox(capture: self, values: environment)
+        return DisplayList.Content.TextValue(view: StyledTextContentView(text: owner, renderer: renderer),
+            size: measuredSize, frame: owner.frame(in: measuredSize, renderer: renderer),
+            shading: .color(.black), transform: .identity, command: .closure(bounds: nil))
+    }
+}
+
+private final class FittingDrawingBox: TextRendererBoxBase {
+    let capture: FittingTextCapture
+    let values: EnvironmentValues
+    init(capture: FittingTextCapture, values: EnvironmentValues) {
+        self.capture = capture
+        self.values = values
+    }
+    override var environment: EnvironmentValues { values }
+    override var displayPadding: EdgeInsets { .init() }
+    override func textLayoutBounds(size: CGSize, text: TextProxy) -> CGRect { CGRect(origin: .zero, size: size) }
+    override func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize { text.sizeThatFits(proposal) }
+    override func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        FittingTextRenderer(capture: capture, drawMode: capture.drawMode, transform: capture.transform)
+            .draw(layout: layout, in: &context)
+    }
 }
 
 private func decorationReferencePath(_ owner: TextDecorationMultilineFixture.Owner,
@@ -2290,9 +2321,14 @@ private struct FittingTextRenderer: TextRenderer {
     var transform: CGAffineTransform? = nil
     func sizeThatFits(proposal: ProposedViewSize, text: TextProxy) -> CGSize {
         capture.owner = Mirror(reflecting: text).children.first?.value as? ResolvedStyledText.TextLayoutManager
-        return text.sizeThatFits(proposal)
+        let size = text.sizeThatFits(proposal)
+        capture.measuredSize = size
+        capture.drawMode = drawMode
+        capture.transform = transform
+        return size
     }
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        capture.environment = context.environment
         capture.draws += 1
         capture.truncationStates.append(layout.isTruncated)
         capture.lineWidths.append(layout.map { $0.typographicBounds.width })
