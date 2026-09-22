@@ -246,6 +246,19 @@ public struct GeometryProxy {
         read(_size).value
     }
 
+    public subscript<T>(anchor: Anchor<T>) -> T {
+        guard let graph = _AGGraph.current else {
+            fatalError("GeometryProxy anchor resolution requires an active AttributeGraph context.")
+        }
+        guard owner.isValid(in: graph), _position.isValid(in: graph),
+              _transform.isValid(in: graph) else {
+            return anchor.box.defaultValue
+        }
+        var transform = _transform.toStrong().value
+        transform.appendPosition(_position.toStrong().value)
+        return anchor.box.convert(to: transform)
+    }
+
     public var safeAreaInsets: EdgeInsets {
         readOptional(_safeAreaInsets)?.value ?? EdgeInsets()
     }

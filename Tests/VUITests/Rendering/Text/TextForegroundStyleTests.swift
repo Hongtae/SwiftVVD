@@ -1481,6 +1481,12 @@ final class TextForegroundStyleTests: XCTestCase {
         try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderOrientations(), referenceInk: true)
     }
 
+    func testOrientedDescenderSelectionsPreserveInkAndFreshRecordings() throws {
+        // ASSERTIONS textDecorationDescenderOrientedSelection27Observed
+        // ASSERTIONS textDecorationDescenderOrientedSelectionDrawing27Observed
+        try checkTransformedDecorationRecordings(TextDecorationTransformFixture.decodeDescenderOrientedSelections(), referenceInk: true)
+    }
+
     private func checkTransformedDecorationRecordings(_ fixtures: [TextDecorationTransformFixture],
                                                       referenceInk: Bool = false) throws {
         try withDevice { device in

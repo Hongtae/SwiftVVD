@@ -37,7 +37,7 @@ private func resolveSecondaryLayerGeometry(
     return ViewGeometry(origin: origin, dimensions: secondaryDimensions)
 }
 
-private struct SecondaryLayerGeometryQuery: Rule, AsyncAttribute {
+struct SecondaryLayerGeometryQuery: Rule, AsyncAttribute {
     var _alignment: OptionalAttribute<Alignment>
     var _layoutDirection: Attribute<LayoutDirection>
     var _primaryPosition: Attribute<CGPoint>

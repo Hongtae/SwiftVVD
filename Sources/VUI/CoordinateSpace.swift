@@ -16,6 +16,8 @@ public enum CoordinateSpace {
 }
 
 extension CoordinateSpace {
+    static var root: CoordinateSpace { .global }
+
     @_spi(Internal)
     public struct ID: Equatable, Hashable, Sendable {
         let value: UniqueID

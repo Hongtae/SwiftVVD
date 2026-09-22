@@ -26,6 +26,22 @@ struct _SafeAreaInsetsModifier: Equatable {
     }
 }
 
+extension _SafeAreaInsetsModifier {
+    struct Transform: Rule, AsyncAttribute {
+        var space: CoordinateSpace.ID
+        var _transform: Attribute<ViewTransform>
+        var _position: Attribute<CGPoint>
+        var _size: Attribute<ViewSize>
+
+        var value: ViewTransform {
+            var value = _transform.value
+            value.appendPosition(_position.value)
+            value.appendSizedSpace(id: space, size: _size.value.value)
+            return value
+        }
+    }
+}
+
 /// Measures the root child inside safe-area bounds and publishes its initial geometry.
 struct RootGeometry: Rule, AsyncAttribute {
     var layoutDirection: OptionalAttribute<LayoutDirection>

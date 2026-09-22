@@ -1582,6 +1582,14 @@ final class TextMetricsTests: XCTestCase {
         try checkDecorationTransforms(fixtures)
     }
 
+    func testOrientedDescenderSelectionsPreserveCoordinatesAndPhase() throws {
+        // ASSERTIONS textDecorationDescenderOrientedSelection27Observed
+        // ASSERTIONS textDecorationDescenderOrientedSelectionDrawing27Observed
+        let fixtures = try TextDecorationTransformFixture.decodeDescenderOrientedSelections()
+        XCTAssertEqual(fixtures.count, 256)
+        try checkDecorationTransforms(fixtures)
+    }
+
     private func checkDecorationTransforms(_ fixtures: [TextDecorationTransformFixture]) throws {
         for fixture in fixtures {
             let t = fixture.transform

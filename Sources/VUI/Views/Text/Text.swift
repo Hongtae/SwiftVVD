@@ -2342,7 +2342,13 @@ extension Text: View {
         }
         let textRendererAttr = inputs[TextRendererInput.self]
         let archiveOptions = inputs[ArchivedViewInput.self]
-        let textFeatures: ResolvedProperties.Features = archiveOptions.isArchived ? [] : .useTextSuffix
+        var textFeatures: ResolvedProperties.Features = archiveOptions.isArchived ? [] : .useTextSuffix
+        if inputs.preferences.keys.contains(Text.LayoutKey.self) {
+            textFeatures.insert(.produceTextLayout)
+        }
+        if inputs[PreferTextLayoutManagerInput.self] {
+            textFeatures.insert(.useTextLayoutManager)
+        }
         let resolvedTextFeatures = textRendererAttr.attribute == nil
             ? textFeatures
             : textFeatures.union([.customRenderer, .produceTextLayout])
@@ -2551,7 +2557,7 @@ extension Text: View {
             for: inputs
         )
         cachedEnvironmentAttr.value = cachedEnvironment
-        var outputs = StyledTextContentView.makeLeafView(
+        var outputs = StyledTextContentView._makeInnerView(
             view: _GraphValue(_attribute: textViewAttr),
             inputs: leafInputs,
             styles: styles,

@@ -550,6 +550,56 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
 
     // Coordinate conversion
 
+    enum Conversion {
+        case rootToSpace(CoordinateSpaceTag)
+        case spaceToRoot(CoordinateSpaceTag)
+        case localToSpace(CoordinateSpaceTag)
+        case spaceToLocal(CoordinateSpaceTag)
+        case spaceToSpace(CoordinateSpaceTag, CoordinateSpaceTag)
+    }
+
+    func convert(_ conversion: Conversion, _ body: (Item) -> Void) {
+        guard !_transformItems.isEmpty else { return }
+        let source: CoordinateSpaceTag
+        let destination: CoordinateSpaceTag
+        switch conversion {
+        case let .rootToSpace(space): (source, destination) = (.root, space)
+        case let .spaceToRoot(space): (source, destination) = (space, .root)
+        case let .localToSpace(space): (source, destination) = (.local, space)
+        case let .spaceToLocal(space): (source, destination) = (space, .local)
+        case let .spaceToSpace(from, to): (source, destination) = (from, to)
+        }
+        if source == destination { return }
+        let inverted: Bool
+        if source == .local || destination == .root {
+            inverted = true
+        } else if source == .root || destination == .local {
+            inverted = false
+        } else {
+            let first = _transformItems.first { item in
+                switch item {
+                case let .coordinateSpace(tag), let .sizedSpace(tag, _):
+                    return tag == source || tag == destination
+                default: return false
+                }
+            }
+            switch first {
+            case let .coordinateSpace(tag), let .sizedSpace(tag, _): inverted = tag == destination
+            default: inverted = false
+            }
+        }
+        var active = source == (inverted ? .local : .root)
+        forEach(inverted: inverted) { item, stop in
+            switch item {
+            case let .coordinateSpace(tag), let .sizedSpace(tag, _):
+                if tag == destination { stop = true }
+                if tag == source { active = true }
+            default: break
+            }
+            if active { body(item) }
+        }
+    }
+
     /// Converts `points` from global window coordinates into the view's local space.
     ///
     /// This is the canonical hit-test path. Stored items are already ordered
@@ -791,7 +841,7 @@ struct ViewTransform: Equatable, CustomStringConvertible, Sendable,
         }
     }
 
-    private func coordinateSpaceTag(
+    func coordinateSpaceTag(
         _ space: CoordinateSpace
     ) -> CoordinateSpaceTag? {
         switch space {

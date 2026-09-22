@@ -30,3 +30,6 @@ extension Group {
 
 extension Group: PrimitiveView where Content: View {
 }
+
+extension Group: MultiView where Content: View {
+}

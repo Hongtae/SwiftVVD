@@ -658,6 +658,27 @@ struct StyledTextContentView {
     static var animatesSize: Bool {
         false
     }
+
+    static func _makeInnerView(
+        view: _GraphValue<Self>, inputs: _ViewInputs,
+        styles: Attribute<_ShapeStyle_Pack>, interpolatorGroup: _ShapeStyle_InterpolatorGroup?
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("StyledTextContentView._makeInnerView requires an active AttributeGraph context.")
+        }
+        var outputs = makeLeafView(view: view, inputs: inputs,
+            styles: styles, interpolatorGroup: interpolatorGroup)
+        if inputs.preferences.keys.contains(Text.LayoutKey.self) {
+            let query = graph.makeRule(TextLayoutQuery(
+                _resolvedText: view[\.text]._attribute,
+                _position: inputs.position,
+                _size: _GraphValue(_attribute: inputs.size)[\.value]._attribute,
+                _transform: inputs.transform
+            ))
+            outputs.preferences.append(Text.LayoutKey.self, node: query.identifier)
+        }
+        return outputs
+    }
 }
 
 extension StyledTextContentView: ShapeStyledLeafView {
@@ -1000,6 +1021,11 @@ class ResolvedStyledText: AppLifetimeResource, InterpolatableContent, @unchecked
         return source.makeLayout(in: size, layoutDirection: layoutDirection,
             layoutProperties: layoutProperties,
             origin: CGPoint(x: rect.origin.x + margins.leading, y: rect.origin.y + margins.top))
+    }
+
+    func layoutValue(in rect: CGRect, with size: CGSize,
+                     applyingMarginOffsets: Bool = true) -> Text.Layout? {
+        nil
     }
 
     var needsDynamicRenderingInArchive: Bool {
@@ -1747,6 +1773,19 @@ extension ResolvedStyledText {
             }
             prepared.source.shading = shading
             return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines, layoutDirection: layoutDirection,
+                isTruncated: !prepared.layout.truncatedRanges.isEmpty,
+                origin: prepared.bounds.origin, usesLineStartAttributes: true)
+        }
+
+        override func layoutValue(in rect: CGRect, with size: CGSize,
+                                  applyingMarginOffsets: Bool = true) -> Text.Layout? {
+            guard let prepared = prepareGlyphLayout(in: .zero, with: size,
+                applyingMarginOffsets: applyingMarginOffsets) else { return nil }
+            if let layout = prepared.metrics.layout {
+                return layout.placed(at: prepared.bounds.origin, shading: prepared.source.shading)
+            }
+            return prepared.source.makeLayout(lineGlyphs: prepared.layout.lines,
+                layoutDirection: layoutProperties.layoutDirection,
                 isTruncated: !prepared.layout.truncatedRanges.isEmpty,
                 origin: prepared.bounds.origin, usesLineStartAttributes: true)
         }

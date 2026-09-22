@@ -996,11 +996,25 @@ class ViewGraph: ViewGraphHost {
                 )
                 let positionAttr = rootGeometry.origin()
                 let rootSizeAttr = rootGeometry.size()
+                // Each root boundary retains its own coordinate-space identity
+                // while position and size remain graph dependencies.
+                let containerTransform = g.makeRule(ContainerShapeTransform(
+                    _transform: transformAttr,
+                    _position: positionAttr,
+                    _size: rootSizeAttr[keyPath: \.value],
+                    id: CoordinateSpace.ID()
+                ))
+                let safeAreaTransform = g.makeRule(_SafeAreaInsetsModifier.Transform(
+                    space: CoordinateSpace.ID(),
+                    _transform: containerTransform,
+                    _position: positionAttr,
+                    _size: rootSizeAttr
+                ))
                 var viewInputs = _ViewInputs(
                     base: graphInputs,
                     customInputs: PropertyList(),
                     preferences: prefsInputs,
-                    transform: transformAttr,
+                    transform: safeAreaTransform,
                     position: positionAttr,
                     containerPosition: containerPosAttr,
                     size: rootSizeAttr,

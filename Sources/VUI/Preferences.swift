@@ -1131,6 +1131,28 @@ struct PreferencesOutputs {
     }
 }
 
+struct PairwisePreferenceCombinerVisitor: PreferenceKeyVisitor {
+    var outputs: (PreferencesOutputs, PreferencesOutputs)
+    var result: PreferencesOutputs
+
+    mutating func visit<K: PreferenceKey>(key: K.Type) {
+        switch (outputs.0.value(for: key), outputs.1.value(for: key)) {
+        case (nil, nil):
+            break
+        case let (attribute?, nil), let (nil, attribute?):
+            result.setValue(attribute, for: key)
+        case let (first?, second?):
+            guard let graph = _AGGraph.current else {
+                fatalError("PairwisePreferenceCombinerVisitor evaluated outside AG context.")
+            }
+            let combined = graph.makeRule(PairPreferenceCombiner<K>(
+                attributes: (Attribute(first), Attribute(second))
+            ))
+            result.setValue(combined.identifier, for: key)
+        }
+    }
+}
+
 struct MultiPreferenceCombinerVisitor: PreferenceKeyVisitor {
     var outputs: [PreferencesOutputs]
     var result: PreferencesOutputs
