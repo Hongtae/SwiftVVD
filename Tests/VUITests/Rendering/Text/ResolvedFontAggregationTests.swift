@@ -25,6 +25,62 @@ final class ResolvedFontAggregationTests: XCTestCase {
                      in: environment.fontResolutionContext)
     }
 
+    // ASSERTIONS fontCapHeight27Observed textResolvedFontsIdentityAndMetricsObserved
+    func testNaturalCapHeightReachesTextOwnersAggregationAndSpacing() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let cases: [(String, CGFloat, CGFloat)] = [
+            ("Roboto/Roboto-VariableFont_wdth,wght.ttf", 1456, 2048),
+            ("NanumSquareNeo/NanumSquareNeo-Variable.ttf", 695, 1000),
+            ("NotoSansCJK/NotoSansCJK-VF.otf.ttc", 733, 1000),
+        ]
+        for (relative, cap, units) in cases {
+            let url = root.appendingPathComponent("Sources/VUI/Resources/Fonts/" + relative)
+            let data = try Data(contentsOf: url)
+            for contentScale: CGFloat in [1, 2] {
+                var environment = environment
+                environment._contentScaleFactor = contentScale
+                environment.displayScale = contentScale
+                environment.defaultPixelLength = 1 / contentScale
+                let context = GraphTextResolutionContext(environment: environment, sceneResources: SceneResources())
+                for origin in 0..<3 {
+                    func font(_ size: CGFloat) throws -> VUI.Font {
+                        if origin == 0 { return .file(url, size: size) }
+                        if origin == 1 { return .data(data, size: size) }
+                        let backend = try XCTUnwrap(VVD.Font(data: data))
+                        backend.setPointSize(size, dpi: (UInt32(72 * contentScale), UInt32(72 * contentScale)))
+                        return VUI.Font(vector: backend)
+                    }
+                    let first = try font(13), second = try font(31.375)
+                    let texts: [(Text, CGFloat)] = [
+                        (Text(verbatim: "").font(first), 13),
+                        (Text(verbatim: "Hg").font(first), 13),
+                        (Text(verbatim: "H").font(first) + Text(verbatim: "g").font(second), 31.375),
+                    ]
+                    for (index, pair) in texts.enumerated() {
+                        for features: Text.ResolvedProperties.Features in [[], .produceTextLayout] {
+                            let owner = try XCTUnwrap(pair.0._resolveStyledText(context: context,
+                                referenceDate: Date(timeIntervalSince1970: 0), archiveOptions: .init(),
+                                features: features, sizeFitting: false))
+                            let expected = cap * (pair.1 / units)
+                            XCTAssertEqual(owner.layoutProperties.pixelLength, 1 / contentScale)
+                            XCTAssertEqual(owner.maxFontMetrics.capHeight, expected, accuracy: 1e-12,
+                                           "\(relative), source \(origin), scale \(contentScale), input \(index)")
+                            XCTAssertEqual(owner.maxFontMetrics.pointSize, pair.1)
+                            if relative.hasPrefix("Roboto/"), index == 1 {
+                                let spacing = owner.spacing().minima[.init(category: .edgeBelowText, edge: .bottom)]?.value
+                                XCTAssertEqual(try XCTUnwrap(spacing), 7.9921875)
+                            }
+                            let retained = owner.maxFontMetrics.capHeight
+                            owner.purgeResources(reason: .appTermination)
+                            XCTAssertEqual(owner.maxFontMetrics.capHeight, retained)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textResolvedFontsIdentityAndMetricsObserved textResolvedProperties27StructureObserved
     func testFontIdentityCollectionPreservesCopiesAndIndependentIterators() {
         let first = resource(23)
@@ -80,7 +136,7 @@ final class ResolvedFontAggregationTests: XCTestCase {
         for values in [inputs, inputs.reversed().map { $0 }] {
             var fonts = Text.ResolvedProperties.Fonts()
             for (metrics, size) in values {
-                let descriptor = FontDescriptor(source: .typeface(FixedFontProvider(AggregationTypeface(metrics))), pointSize: size)
+                let descriptor = FontDescriptor(source: .typeface(FixedFontProvider(AggregationTypeface(metrics), pointSize: size)), pointSize: size)
                 fonts.storage.insert(FontResource(descriptor: descriptor, in: environment.fontResolutionContext))
             }
             let result = fonts.maxMetrics(for: source)

@@ -22,7 +22,7 @@ final class TextAutomaticMarginTests: XCTestCase {
 
     private func fixture(leading: CGFloat = 0) -> ResolvedTextSource {
         let face = MarginTypeface(leading: leading)
-        let descriptor = FontDescriptor(source: .typeface(FixedFontProvider(face)), pointSize: 23)
+        let descriptor = FontDescriptor(source: .typeface(FixedFontProvider(face, pointSize: 23)), pointSize: 23)
         let resource = FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
         var properties = Text.ResolvedProperties()
         properties.fonts.storage.insert(resource)

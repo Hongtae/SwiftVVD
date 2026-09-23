@@ -446,7 +446,8 @@ struct ResolvedTextSource {
     private func languageAwareOutsets(for face: Typeface, resource: FontResource?) -> EdgeInsets? {
         guard let attributes = outsetAttributes(for: face, resource: resource),
               let outsets = storage.outsetData?.outsets(for: attributes,
-                  pointSize: resource?.requestedPointSize ?? attributes.pointSize / scaleFactor,
+                  pointSize: resource?.resolvedPointSize(for: face, scaleFactor: scaleFactor)
+                    ?? attributes.pointSize / scaleFactor,
                   preferredGroup: storage.outsetLanguageGroup) else { return nil }
         return resource?.adjustedOutsets(outsets) ?? outsets
     }

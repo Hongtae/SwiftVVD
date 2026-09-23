@@ -35,10 +35,13 @@ final class FontResourceCatalog: Sendable {
     final class Face: Sendable {
         let resource: BundledFontResource
         let metadata: VVD.Font.FaceMetadata
+        let featureCatalog: VVD.FontFeatures
 
-        fileprivate init(resource: BundledFontResource, metadata: VVD.Font.FaceMetadata) {
+        fileprivate init(resource: BundledFontResource, metadata: VVD.Font.FaceMetadata,
+                         featureCatalog: VVD.FontFeatures) {
             self.resource = resource
             self.metadata = metadata
+            self.featureCatalog = featureCatalog
         }
     }
 
@@ -56,8 +59,9 @@ final class FontResourceCatalog: Sendable {
                 if let cached = faces[index] {
                     return cached
                 }
-                let face = VVD.Font.metadata(path: url.path, faceIndex: index).map {
-                    Face(resource: BundledFontResource(url: url, faceIndex: index), metadata: $0)
+                let face = VVD.Font.resourceMetadata(path: url.path, faceIndex: index).map {
+                    Face(resource: BundledFontResource(url: url, faceIndex: index),
+                         metadata: $0.metadata, featureCatalog: $0.features)
                 }
                 // Cache failures as well; bundle resources do not change in place.
                 faces[index] = .some(face)

@@ -149,7 +149,12 @@ struct TypefaceFontProvider: FontProvider {
     }
 
     func resolveDescriptor(in context: Font.Context) -> FontDescriptor {
-        FontDescriptor(source: .typeface(base), pointSize: base.pointSize, shapingFeatures: features)
+        if let provider = base as? FixedFontProvider, provider.selection != nil {
+            let descriptor = FontDescriptor(source: .supplied(provider, context.resourceBundle),
+                                            pointSize: base.pointSize, shapingFeatures: features)
+            return context.shouldRedactContent ? descriptor.clearFeatures() : descriptor
+        }
+        return FontDescriptor(source: .typeface(base), pointSize: base.pointSize, shapingFeatures: features)
     }
 
     func serialize(to encoder: any Encoder) throws {

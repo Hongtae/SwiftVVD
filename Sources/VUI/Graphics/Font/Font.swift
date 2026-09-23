@@ -495,18 +495,23 @@ extension Font {
 extension Font {
 
     public init(_ font: TextureFont) {
-        let fontBox = FixedFontProvider(TextureTypeface(textureFont: font))
+        let metadata = font.metadata()
+        let selected = SelectedFont(supplied: font, syntheticWeight: 0, metadata: metadata)
+        let fontBox = FixedFontProvider(TextureTypeface(textureFont: font, selectedFont: selected),
+                                       pointSize: font.pointSize, metadata: metadata)
         self.init(typefaceProvider: fontBox)
     }
 
     public init(vector font: VVD.Font,
                 embolden: CGFloat = 0,
                 outlineThickness: CGFloat = 0) {
+        let metadata = font.metadata()
         let typeface = VectorTypeface(
             font: font,
             embolden: embolden,
-            outlineThickness: outlineThickness)
-        let fontBox = FixedFontProvider(typeface)
+            outlineThickness: outlineThickness,
+            selectedFont: SelectedFont(supplied: font, syntheticWeight: embolden, metadata: metadata))
+        let fontBox = FixedFontProvider(typeface, pointSize: font.pointSize, metadata: metadata)
         self.init(typefaceProvider: fontBox)
     }
 

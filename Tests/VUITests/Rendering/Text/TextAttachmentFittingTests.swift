@@ -4,6 +4,80 @@ import VVD
 @testable import VUI
 
 final class TextAttachmentFittingTests: XCTestCase {
+    // ASSERTIONS fontGraphicsFitting27Observed
+    func testMountedSuppliedFittingPreservesDrawingAndRecordedPixels() throws {
+        let device = try graphicsDevice()
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let data = try Data(contentsOf: file)
+        for bitmap in [false, true] {
+            for memory in [false, true] {
+                for scale: CGFloat in [1, 2] {
+                    var environment = EnvironmentValues()
+                    environment.defaultFontRenderingMode = bitmap ? .bitmap() : .vector()
+                    environment.displayScale = 2
+                    environment._contentScaleFactor = scale
+                    var images: [String: [UInt8]] = [:]
+                    for mode in ["ordinary", "default", "measured", "ordinaryReference", "managerReference"] {
+                        let reference = mode.hasSuffix("Reference")
+                        let custom = mode != "ordinary" && mode != "ordinaryReference"
+                        let factor: CGFloat = reference ? (custom ? 0.7421875 : 0.75) : 1
+                        var backends: [VVD.Font] = []
+                        func font(_ original: CGFloat) throws -> VUI.Font {
+                            let size = !custom && reference ? (original * factor * 4).rounded() / 4 : original * factor
+                            let backend: VVD.Font
+                            if bitmap {
+                                backend = try XCTUnwrap(memory ? TextureFont(deviceContext: device, data: data)
+                                    : TextureFont(deviceContext: device, path: file.path))
+                            } else {
+                                backend = try XCTUnwrap(memory ? VVD.Font(data: data) : VVD.Font(path: file.path))
+                            }
+                            backend.setPointSize(size, dpi: (UInt32(72 * scale), UInt32(72 * scale)))
+                            XCTAssertTrue(backend.setVariationCoordinates([0x77676874: 530.0013885498047, 0x77647468: 90]))
+                            backends.append(backend)
+                            return (backend as? TextureFont).map { VUI.Font($0) } ?? VUI.Font(vector: backend)
+                        }
+                        let text = try Text(verbatim: "AAA ").font(font(23.375)).foregroundColor(.red)
+                            + Text(verbatim: "BBB BBB").font(font(31.375)).foregroundColor(.blue)
+                        let capture = AttachmentFittingCapture()
+                        let child = !custom ? AnyView(text) : mode == "default"
+                            ? AnyView(text.textRenderer(AttachmentFittingDefaultRenderer(capture: capture)))
+                            : AnyView(text.textRenderer(AttachmentFittingMeasuredRenderer(capture: capture)))
+                        let value = AttachmentFittingMeasure(proposal: .init(width: 80, height: 120), capture: capture) {
+                            child.lineLimit(2).minimumScaleFactor(reference ? 1 : 0.5)
+                        }.foregroundStyle(.black).frame(width: 320, height: 160, alignment: .topLeading)
+                        let rendererHost = TestViewRendererHost()
+                        let host = ViewGraph(rootViewType: AnyView.self, content: AnyView(value),
+                            rendererHost: rendererHost, initialEnvironment: environment)
+                        rendererHost.storage = host
+                        host.setSize(CGSize(width: 320, height: 160))
+                        host.updateOutputs(at: .zero)
+                        let list = try host.data.withCurrent { try XCTUnwrap(host.displayList()) }
+                        let label = "bitmap=\(bitmap) memory=\(memory) scale=\(scale) \(mode)"
+                        let direct = try render(list, device: device, resources: rendererHost.sceneResources,
+                            environment: environment, replay: false)
+                        let replay = try render(list, device: device, resources: rendererHost.sceneResources,
+                            environment: environment, replay: true)
+                        XCTAssertTrue(direct == replay, "recording " + label)
+                        XCTAssertTrue(stride(from: 3, to: direct.count, by: 4).contains { direct[$0] != 0 }, label)
+                        XCTAssertFalse(capture.measures.isEmpty, label)
+                        for actual in capture.measures { XCTAssertEqual(actual, [80,56,22,50], label) }
+                        images[mode] = direct
+                        if !reference { XCTAssertEqual(backends.map(\.pointSize), [23.375, 31.375], label) }
+                        XCTAssertTrue(backends.allSatisfy { $0.dpi.y == UInt32(72 * scale) }, label)
+                    }
+                    XCTAssertTrue(images["ordinary"]! == images["ordinaryReference"]!)
+                    XCTAssertTrue(images["default"]! == images["measured"]!)
+                    XCTAssertTrue(images["measured"]! == images["managerReference"]!)
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textAttachmentFittingDrawing27Observed textAttachmentFittingMetrics27Observed textAttachmentSuffixConfiguration27Observed
     func testMountedAttachmentFittingPreservesDrawingAndRecordedPixels() throws {
         let device = try graphicsDevice()

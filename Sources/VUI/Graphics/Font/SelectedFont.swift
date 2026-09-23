@@ -8,13 +8,13 @@
 import Foundation
 import VVD
 
-/// Logical face inputs retained before the rasterizer lowers variation coordinates.
+/// Selected face inputs retained independently of device resources.
 /// Device resources and rendering modes do not identify a font for character composition.
 struct SelectedFont {
     enum Source: Equatable {
         case file(URL, faceIndex: Int, namedInstance: Int?)
         case data(ExternalFontData, faceIndex: Int)
-        case supplied(VVD.Font)
+        case supplied(VVD.Font.Source)
 
         static func == (lhs: Self, rhs: Self) -> Bool {
             switch (lhs, rhs) {
@@ -32,7 +32,8 @@ struct SelectedFont {
 
     struct Descriptor: Equatable {
         let source: Source
-        let postScriptName: String?
+        var postScriptName: String?
+        var derivesOpticalSize = false
         var isSystemFont = false
         // A cascade can retain an unnormalized descriptor, including an empty
         // feature array. Its requests are independent of the active settings.
@@ -41,8 +42,8 @@ struct SelectedFont {
     }
 
     var descriptor: Descriptor
-    let pointSize: CGFloat
-    let variation: [UInt32: CGFloat]
+    private(set) var pointSize: CGFloat
+    private(set) var variation: [UInt32: CGFloat]
     let syntheticWeight: CGFloat
     var features: [VVD.FontFeatures.Setting] = []
     var originalFeatures: [TypefaceShapingFeature] = []
@@ -51,6 +52,7 @@ struct SelectedFont {
     // This retained request controls construction even when the comparison
     // coordinates are empty or differ in precision.
     var variationExtras: [UInt32: CGFloat]?
+    var opticalConstruction: FontOpticalConstruction?
 
     var hasExtras: Bool {
         language != nil || variationExtras != nil || !features.isEmpty || !originalFeatures.isEmpty
@@ -64,11 +66,40 @@ struct SelectedFont {
         self.syntheticWeight = syntheticWeight
     }
 
-    init(supplied font: VVD.Font, syntheticWeight: CGFloat) {
-        self.descriptor = Descriptor(source: .supplied(font), postScriptName: font.postScriptName)
+    init(supplied font: VVD.Font, syntheticWeight: CGFloat, metadata: VVD.Font.FaceMetadata? = nil) {
+        let coordinates = font.variationCoordinates
+        let name = metadata.map { metadata in
+            FontVariationSelection(metadata: metadata, coordinates: metadata.variationAxes.map {
+                coordinates[$0.tag] ?? $0.defaultValue
+            }).postScriptName
+        } ?? font.postScriptName
+        self.descriptor = Descriptor(source: .supplied(font.source), postScriptName: name)
         self.pointSize = font.pointSize
-        self.variation = [:]
+        self.variation = font.variationAxes.reduce(into: [:]) { values, axis in
+            guard let selected = coordinates[axis.tag],
+                  let value = FontVariationSelection.comparisonCoordinate(selected, on: axis) else { return }
+            values[axis.tag] = value
+        }
         self.syntheticWeight = syntheticWeight
+    }
+
+    func copying(pointSize: CGFloat, comparison: [UInt32: CGFloat]) -> Self {
+        var copy = withSize(pointSize)
+        copy.variation = comparison
+        copy.variationExtras = comparison.isEmpty ? nil : comparison
+        return copy
+    }
+
+    func withSize(_ size: CGFloat) -> Self {
+        var copy = self
+        copy.pointSize = size
+        if let construction = opticalConstruction?.withSize(size) {
+            copy.opticalConstruction = construction
+            copy.descriptor.postScriptName = construction.postScriptName
+            copy.descriptor.derivesOpticalSize = construction.derivesOpticalSize
+            copy.variation = construction.resolved.comparison
+        }
+        return copy
     }
 
     func isEqual(to other: Self) -> Bool {
@@ -97,7 +128,7 @@ struct SelectedFont {
 
 /// Selected parser coordinates and their name have a different lifetime and precision
 /// from both the original variation request and the rasterizer's fixed-point coordinates.
-struct FontVariationSelection {
+struct FontVariationSelection: Hashable {
     /// The result crossing from descriptor matching into physical font construction.
     struct Resolved: Hashable {
         let coordinates: [CGFloat]
@@ -234,13 +265,17 @@ struct FontVariationSelection {
     func comparisonCoordinates(requested: [UInt32: CGFloat]) -> [UInt32: CGFloat] {
         var values: [UInt32: CGFloat] = [:]
         for (axis, selected) in zip(metadata.variationAxes, coordinates) {
-            let value = requested[axis.tag] ?? selected
-            let truncated = (value * 10000).rounded(.towardZero) / 10000
-            if truncated != axis.defaultValue {
-                values[axis.tag] = min(max(truncated, axis.minimumValue), axis.maximumValue)
+            if let value = Self.comparisonCoordinate(requested[axis.tag] ?? selected, on: axis) {
+                values[axis.tag] = value
             }
         }
         return values
+    }
+
+    static func comparisonCoordinate(_ value: CGFloat, on axis: VVD.Font.VariationAxis) -> CGFloat? {
+        let truncated = (value * 10000).rounded(.towardZero) / 10000
+        guard truncated != axis.defaultValue else { return nil }
+        return min(max(truncated, axis.minimumValue), axis.maximumValue)
     }
 
     /// Named faces obtain their axes from the base; generated faces publish a dictionary.
@@ -293,5 +328,59 @@ struct FontVariationSelection {
     private static func isNear(_ a: CGFloat, _ b: CGFloat) -> Bool {
         let difference = abs(a - b)
         return difference < 0.0001 || difference / max(abs(a), abs(b)) < 0.0001
+    }
+}
+
+/// Final size-dependent construction for an ordinary registered optical face.
+/// Candidate coordinates and the original name owner survive independently of
+/// the realized parser coordinates, comparison dictionary and descriptor identity.
+struct FontOpticalConstruction: Hashable {
+    private let nameSource: FontVariationSelection
+    private let axis: VVD.Font.VariationAxis
+    private(set) var resolved: FontVariationSelection.Resolved
+    private(set) var postScriptName: String?
+    private(set) var derivesOpticalSize: Bool
+
+    init?(metadata: VVD.Font.FaceMetadata, resolved: FontVariationSelection.Resolved,
+          derivesOpticalSize: Bool = false) {
+        guard metadata.sfntTableTags.contains(0x5354_4154),
+              let index = metadata.variationAxes.firstIndex(where: { $0.tag == 0x6f70_737a }),
+              resolved.extras?[0x6f70_737a] == nil else { return nil }
+        let axis = metadata.variationAxes[index]
+        // Registration publishes the whole named-instance set. A weight-only
+        // named tuple does not suppress optical realization for the family.
+        guard !metadata.variationInstances.contains(where: {
+            ($0.coordinates[index] * 10000).rounded(.towardZero) / 10000 != axis.defaultValue
+        }) else { return nil }
+        self.nameSource = FontVariationSelection(metadata: metadata, coordinates: resolved.coordinates)
+        self.axis = axis
+        self.resolved = resolved
+        self.postScriptName = nameSource.postScriptName
+        self.derivesOpticalSize = derivesOpticalSize
+    }
+
+    var selection: FontVariationSelection {
+        FontVariationSelection(metadata: nameSource.metadata, coordinates: resolved.coordinates)
+    }
+
+    func withSize(_ size: CGFloat) -> Self {
+        let target = min(max(size, axis.minimumValue), axis.maximumValue)
+        var copy = self
+        if let current = resolved.comparison[axis.tag] {
+            if abs(current - target) < 0.0001 { return copy }
+        } else if target == axis.defaultValue {
+            copy.derivesOpticalSize = true
+            return copy
+        }
+        var validated = resolved.comparison
+        validated[axis.tag] = target
+        // The validated construction uses bounded comparison inputs. Parser
+        // near-value retention remains distinct from dictionary publication.
+        let parser = FontVariationSelection(metadata: nameSource.metadata).applying(validated)
+        let comparison = validated.mapValues { ($0 * 10000).rounded(.towardZero) / 10000 }
+        copy.resolved = .init(coordinates: parser.coordinates, comparison: comparison, extras: resolved.extras)
+        copy.postScriptName = nameSource.descriptorVariation == nil ? nameSource.postScriptName : parser.postScriptName
+        copy.derivesOpticalSize = true
+        return copy
     }
 }

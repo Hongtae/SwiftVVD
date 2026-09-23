@@ -122,7 +122,8 @@ final class TextStyleConsumerTests {
 
     // ASSERTIONS fontCustomNamedOutsetTraitBoundaryObserved
     // ASSERTIONS textAutomaticMargins27ReferenceRowsObserved
-    @Test func suppliedFontWeightsRetainTheirPhysicalOutsetFallback() throws {
+    // ASSERTIONS fontSuppliedTraits27Observed
+    @Test func suppliedFontWeightsPreserveTheirOutsetTraits() throws {
         let url = fontURL("NanumSquareNeo/NanumSquareNeo-Variable.ttf")
         let bytes = try Data(contentsOf: url)
         let fixedCandidate = VVD.Font(path: url.path)
@@ -135,11 +136,12 @@ final class TextStyleConsumerTests {
             (.data(bytes, size: 23, weight: .thin), -0.6, [4.009291, 3.144560, 2.392023, 6.349472]),
             (.init(vector: fixed), -0.6, [4.009291, 3.144560, 2.392023, 6.349472])
         ]
-        for (font, weight, expected) in cases {
+        for (index, entry) in cases.enumerated() {
+            let (font, weight, expected) = entry
             for copy in [font, font.resolved(in: environment()).monospacedDigit()] {
                 let source = try resolve(Text(verbatim: "Ågj").font(copy))
                 let resource = try #require(attributes(source).first?.fontResource)
-                #expect(resource.selectedWeight == nil)
+                #expect(resource.selectedWeight == (index == 4 ? CGFloat(weight) : nil))
                 guard case let .styledText(faces, _, _, _) = source.runs.first else {
                     Issue.record("Expected a styled text run")
                     continue
@@ -781,17 +783,22 @@ final class TextStyleConsumerTests {
         }
     }
 
+    // ASSERTIONS fontGraphicsFitting27Observed fontRawMetricFormatQuantizationObserved
     @Test
-    func testSuppliedTypefaceKeepsItsMetricsWithoutAnIndependentPointSize() throws {
+    func testSuppliedTypefaceSeparatesNaturalTextMetricsFromRasterMetrics() throws {
         let candidate = VVD.Font(path: fontURL("Roboto/Roboto-VariableFont_wdth,wght.ttf").path)
         let font = try #require(candidate)
         font.setPointSize(13, dpi: (72, 72))
         let text = Text(verbatim: "Hg").font(VUI.Font(vector: font))
         let resolved = try resolve(text)
         let layout = resolved.makeLayout(in: .init(width: 300, height: 1000), layoutDirection: .leftToRight)
-        #expect(resolved.measure().height == 17)
-        #expect(layout[0][0].typographicBounds.ascent == 13)
-        #expect(layout[0][0].typographicBounds.descent == 4)
+        #expect(resolved.measure().height == 15)
+        #expect(layout[0][0].typographicBounds.ascent == 12.060546875)
+        #expect(layout[0][0].typographicBounds.descent == 3.173828125)
+        #expect(font.pointSize == 13)
+        #expect(font.dpi.x == 72 && font.dpi.y == 72)
+        #expect(font.baseMetrics.ascender == 13)
+        #expect(font.baseMetrics.descender == -4)
     }
 
     // ASSERTIONS textDrawingMarginClippingOutsetsObserved
@@ -1253,11 +1260,12 @@ final class TextStyleConsumerTests {
         #expect((resolved.makeGlyphs().first?.width ?? 0) > 0)
     }
 
+    // ASSERTIONS fontRatioPublication27Observed
     // ASSERTIONS textTypesettingAttributeProducerObserved
     // ASSERTIONS textTypesettingRatioFontInputsObserved
     // ASSERTIONS fontModifierTagsAndCodingObserved
     @Test
-    func testLanguageAndRatioFollowFontModifiersAndSurviveDescriptorCopies() throws {
+    func testLanguageAndRatioFollowFontModifiersThroughResourcePublication() throws {
         var style = Text.Style()
         style.fontModifiers = [.dynamic(Font.WeightModifier(weight: .heavy))]
         style.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "ja"))
@@ -1269,7 +1277,8 @@ final class TextStyleConsumerTests {
         let resource = Font.FontCache.shared[key]
         let descriptor = resource.descriptor().width(0.1).weight(.light).monospaced(true).adding(features: Font.MonospacedDigitModifier.shapingFeatures)
         #expect(descriptor.language == "ja-Jpan-JP")
-        #expect(descriptor.languageAwareLineHeightRatio == 0.5)
+        #expect(resource.languageAwareLineHeightRatio == 0.5)
+        #expect(descriptor.languageAwareLineHeightRatio == nil)
         let fonts = [
             Font(provider: FontBox(Font.ModifierProvider(base: .system(size: 23),
                 modifier: LanguageFontModifier(identifier: "ja-Jpan-JP")))),
@@ -1366,6 +1375,44 @@ final class TextStyleConsumerTests {
                 }
             }
         }
+    }
+
+    // ASSERTIONS fontRatioPublication27Observed
+    @Test
+    func wrappedFontTextUsesAutomaticMetricsUntilANewRatioIsApplied() throws {
+        let text = Text(verbatim: "Ågj\nÅgj")
+        var env = environment()
+        env.font = .body
+        env.typesettingConfiguration.language = .explicit(Locale.Language(identifier: "ur"))
+        env.typesettingConfiguration.languageAwareLineHeightRatio = .custom(0.5)
+        let original = try resolve(text, environment: env)
+        let resource = try #require(attributes(original).first?.fontResource)
+        let initial = try #require(original.maximumFontMetrics)
+        let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+        for ratio: TypesettingLanguageAwareLineHeightRatio in [.automatic, .custom(0.75)] {
+            env.typesettingConfiguration.languageAwareLineHeightRatio = ratio
+            let expected = try resolve(text, environment: env)
+            let result = try resolve(text.font(wrapped), environment: env)
+            let actual = try #require(result.maximumFontMetrics)
+            #expect(actual == expected.maximumFontMetrics)
+            #expect(result.measure() == expected.measure())
+            #expect(result.firstBaseline(in: result.measure()) == expected.firstBaseline(in: expected.measure()))
+            #expect(ResolvedStyledText.StringDrawing(resolvedText: result).drawingMargins ==
+                ResolvedStyledText.StringDrawing(resolvedText: expected).drawingMargins)
+            #expect(result.makeGlyphs().map(\.width) == expected.makeGlyphs().map(\.width))
+            #expect(actual.ascender != initial.ascender)
+            #expect(actual.descender != initial.descender)
+        }
+        env.typesettingConfiguration.languageAwareLineHeightRatio = .automatic
+        let automatic = try resolve(text, environment: env)
+        let scaled = original.scalingFonts(by: 0.5, toMultipleOf: nil)
+        let expectedScaled = automatic.scalingFonts(by: 0.5, toMultipleOf: nil)
+        #expect(scaled.maximumFontMetrics == expectedScaled.maximumFontMetrics)
+        #expect(scaled.measure() == expectedScaled.measure())
+        #expect(attributes(scaled).allSatisfy { $0.fontResource?.languageAwareLineHeightRatio == nil })
+        #expect(attributes(original.scalingFonts(by: 1)).first?.fontResource === resource)
+        #expect(resource.languageAwareLineHeightRatio == 0.5)
+        #expect(original.maximumFontMetrics == initial)
     }
 
     // ASSERTIONS textResolvedLineHeightAggregationObserved

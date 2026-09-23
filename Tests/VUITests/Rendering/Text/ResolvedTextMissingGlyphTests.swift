@@ -142,7 +142,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         let backend = try XCTUnwrap(VVD.Font(data: Data(contentsOf: XCTUnwrap(defaultFontURL))))
         backend.setPointSize(23, dpi: (72, 72))
         let face = VectorTypeface(font: backend)
-        let font = VUI.Font(typefaceProvider: FixedFontProvider(face), features: requests)
+        let font = VUI.Font(typefaceProvider: FixedFontProvider(face, pointSize: backend.pointSize), features: requests)
         var environment = EnvironmentValues()
         environment.locale = Locale(identifier: "ko")
         environment.defaultFontRenderingMode = .vector()
@@ -172,7 +172,7 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         environment.defaultFontRenderingMode = .vector()
         for values: [UInt32] in [[0, 1, 0], [1, 0, 1], [0, 1, 0, 1], [1, 0, 1, 0]] {
             let requests = values.map { TypefaceShapingFeature(tag: 0x6c69_6761, value: $0) }
-            let font = VUI.Font(typefaceProvider: FixedFontProvider(face), features: requests)
+            let font = VUI.Font(typefaceProvider: FixedFontProvider(face, pointSize: backend.pointSize), features: requests)
             let cascade = font.typefaceCascade(in: environment, forContext: SceneResources(),
                 contentScaleFactor: 1)
             let selected = try XCTUnwrap(cascade.runFaces.first)

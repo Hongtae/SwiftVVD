@@ -4,6 +4,37 @@ import VVD
 @testable import VUI
 
 struct TypefaceDesignMetricsTests {
+    // ASSERTIONS fontGraphicsFitting27Observed fontCapHeight27Observed
+    @Test
+    func testSuppliedFontMetricsFollowTheLayoutFaceThroughWrappers() throws {
+        let logical = try makeFont(), raster = try makeFont()
+        logical.setPointSize(23.375, dpi: (96, 144))
+        raster.setPointSize(47, dpi: (216, 216))
+        let resource = VUI.Font(vector: raster).platformFont(in: EnvironmentValues().fontResolutionContext)
+        let base = VectorTypeface(font: raster, layoutFont: logical, renderScale: 3)
+        var artworkLoads = 0
+        let deferred = DeferredGlyphTypeface(metrics: base) { artworkLoads += 1; return nil }
+        let faces: [Typeface] = [base, deferred, TerminalFallbackTypeface(deferred),
+            ShapingFeatureTypeface(deferred, features: VUI.Font.MonospacedDigitModifier.shapingFeatures)]
+        for face in faces {
+            let metrics = try #require(resource.resolvedMetrics(for: face, scaleFactor: 6))
+            #expect(metrics.ascender == 21.685791015625)
+            #expect(metrics.descender == -5.706787109375)
+            #expect(metrics.leading == 0)
+            #expect(metrics.capHeight == 16.6181640625)
+            #expect(resource.resolvedPointSize(for: face, scaleFactor: 6) == 23.375)
+        }
+        #expect(resource.requestedPointSize == 47)
+        #expect(artworkLoads == 0)
+        #expect(logical.pointSize == 23.375 && raster.pointSize == 47)
+        let fallback = try makeFont()
+        fallback.setPointSize(13, dpi: (72, 72))
+        let fallbackMetrics = try #require(resource.resolvedMetrics(for: VectorTypeface(font: fallback), scaleFactor: 1))
+        #expect(fallbackMetrics.ascender == 12.060546875)
+        #expect(fallbackMetrics.descender == -3.173828125)
+        #expect(fallbackMetrics.capHeight == 9.2421875)
+    }
+
     // ASSERTIONS textLinePublication27Observed textAttributedCharacterOwner27Observed
     @Test
     func testRawSlotsUseLogicalFaceAndStayZeroThroughWrappers() throws {

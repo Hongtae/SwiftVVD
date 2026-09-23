@@ -79,6 +79,18 @@ enum FontWeightScale {
         if fraction == 1 { return CGFloat(end) }
         return CGFloat(min(start.addingProduct(fraction, end - start), end))
     }
+
+    static func metadataWeight(forClass value: CGFloat) -> CGFloat {
+        let bounded = value.isFinite ? min(max(value, 0), 1000) : 400
+        let value = Double(bounded < 11 ? bounded * 100 : bounded)
+        let lower = min(Int(value / 100), 9)
+        let fraction = (value - Double(lower * 100)) / 100
+        // Catalog traits interpolate promoted table entries independently of
+        // the active variation's Float arithmetic.
+        let start = Double(values[lower])
+        let end = Double(values[lower + 1])
+        return CGFloat(start.addingProduct(fraction, end - start))
+    }
 }
 
 extension Font.Weight {

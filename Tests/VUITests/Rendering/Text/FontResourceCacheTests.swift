@@ -23,7 +23,7 @@ private struct CountingFontProvider: FontProvider {
 }
 
 final class FontResourceCacheTests: XCTestCase {
-    // ASSERTIONS fontPlatformRedaction27Observed
+    // ASSERTIONS fontPlatformRedaction27Observed fontRatioPublication27Observed
     func testPlatformFeaturesAreClearedOnAnIndependentRedactedDescriptor() throws {
         for mode: Font.DefaultRenderingMode in [.bitmap(), .vector()] {
             var environment = EnvironmentValues()
@@ -44,9 +44,11 @@ final class FontResourceCacheTests: XCTestCase {
                 XCTAssertEqual(cleared.pointSize, normal.pointSize)
                 XCTAssertEqual(cleared.resolvedWeight, normal.resolvedWeight)
                 XCTAssertEqual(cleared.language, "zh-Hant")
-                XCTAssertEqual(cleared.languageAwareLineHeightRatio, 1.2)
+                XCTAssertNil(normal.languageAwareLineHeightRatio)
+                XCTAssertNil(cleared.languageAwareLineHeightRatio)
                 XCTAssertEqual(cleared.stylePolicy, normal.stylePolicy)
                 XCTAssertEqual(cleared.renderingMode, mode)
+                XCTAssertEqual(resource.languageAwareLineHeightRatio, 1.2)
                 XCTAssertEqual(resource.shapingFeatures, normal.shapingFeatures)
                 XCTAssertEqual(font.resolveDescriptor(in: context).shapingFeatures, normal.shapingFeatures)
                 XCTAssertTrue(font.resolve(in: redacted).resource.shapingFeatures.isEmpty)

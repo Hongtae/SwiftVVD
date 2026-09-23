@@ -218,7 +218,7 @@ struct ResolvedFontMetrics: Equatable, Sendable {
     }
 }
 
-private protocol VVDFontBackedTypeface: Typeface {
+protocol VVDFontBackedTypeface: Typeface {
     var font: VVD.Font { get }
     var outlineSource: (font: VVD.Font, scale: CGFloat) { get }
 }
@@ -451,6 +451,26 @@ struct TextureTypeface: VVDFontBackedTypeface {
     }
 
     var font: VVD.Font { textureFont }
+
+    func withSize(_ size: CGFloat, selectedFont: SelectedFont? = nil,
+                  coordinates requestedCoordinates: [UInt32: CGFloat]? = nil) -> Self? {
+        guard let copy = textureFont.copy(pointSize: size) as? VVD.TextureFont else { return nil }
+        let selected = selectedFont ?? self.selectedFont?.withSize(size)
+        let coordinates = requestedCoordinates ?? selected?.opticalConstruction?.selection.rasterCoordinates
+        if let coordinates, coordinates != copy.variationCoordinates,
+           !copy.setVariationCoordinates(coordinates) { return nil }
+        var layoutFont: VVD.Font?
+        if let metrics = layoutMetrics {
+            guard let resized = metrics.font === textureFont ? copy : metrics.font.copy(pointSize: size) else { return nil }
+            layoutFont = resized
+            if let coordinates, resized !== copy, coordinates != resized.variationCoordinates,
+               !resized.setVariationCoordinates(coordinates) { return nil }
+        }
+        return Self(textureFont: copy, layoutFont: layoutFont,
+                    renderScale: layoutMetrics.map { $0.renderScale / $0.font.bitmapScale } ?? 1,
+                    logicalEmbolden: layoutMetrics?.embolden ?? self.selectedFont?.syntheticWeight ?? 0,
+                    selectedFont: selected)
+    }
 
     var outlineSource: (font: VVD.Font, scale: CGFloat) {
         (layoutMetrics?.font ?? font, layoutMetrics?.renderScale ?? 1)
@@ -714,6 +734,27 @@ final class VectorTypeface: VVDFontBackedTypeface {
         self.layoutMetrics = layoutMetrics
         self.decorationMetrics = layoutMetrics?.decorationMetrics ??
             typefaceDecorationMetrics(for: font)
+    }
+
+    func withSize(_ size: CGFloat, selectedFont: SelectedFont? = nil,
+                  coordinates requestedCoordinates: [UInt32: CGFloat]? = nil) -> VectorTypeface? {
+        guard let copy = font.copy(pointSize: size) else { return nil }
+        let selected = selectedFont ?? self.selectedFont?.withSize(size)
+        let coordinates = requestedCoordinates ?? selected?.opticalConstruction?.selection.rasterCoordinates
+        if let coordinates, coordinates != copy.variationCoordinates,
+           !copy.setVariationCoordinates(coordinates) { return nil }
+        var layoutFont: VVD.Font?
+        if let metrics = layoutMetrics {
+            guard let resized = metrics.font === font ? copy : metrics.font.copy(pointSize: size) else { return nil }
+            layoutFont = resized
+            if let coordinates, resized !== copy, coordinates != resized.variationCoordinates,
+               !resized.setVariationCoordinates(coordinates) { return nil }
+        }
+        return VectorTypeface(font: copy, embolden: embolden, outlineThickness: outlineThickness,
+                    layoutFont: layoutFont,
+                    renderScale: layoutMetrics.map { $0.renderScale / $0.font.bitmapScale } ?? 1,
+                    logicalEmbolden: layoutMetrics?.embolden ?? self.selectedFont?.syntheticWeight ?? embolden,
+                    selectedFont: selected)
     }
 
     var designMetrics: TypefaceDesignMetrics? {

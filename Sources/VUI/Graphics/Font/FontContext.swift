@@ -63,7 +63,7 @@ extension Font {
         }
 
         init(_ descriptor: FontDescriptor) {
-            pointSize = descriptor.pointSize
+            pointSize = descriptor.traitsPointSize
             weight = descriptor.resolvedWeight
             width = nil
         }

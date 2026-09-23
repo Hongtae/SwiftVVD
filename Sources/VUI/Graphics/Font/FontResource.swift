@@ -6,13 +6,57 @@
 //
 
 import Foundation
+import VVD
 
 /// Immutable resolution state shared independently of device and glyph resources.
 final class FontResource: Hashable, @unchecked Sendable {
+    /// Registered selection inputs used before any device resource is created.
+    private struct RegisteredConstruction {
+        let resource: BundledFontResource
+        let name: String?
+        let descriptorVariation: [UInt32: CGFloat]?
+        let comparisonVariation: [UInt32: CGFloat]
+        let derivesOpticalSize: Bool
+        let hasVariationExtras: Bool
+        let features: [VVD.FontFeatures.Setting]
+
+        init?(_ selection: FontDescriptor.Resolution, shapingFeatures: [TypefaceShapingFeature]) {
+            guard let candidate = selection.candidate,
+                  let provider = selection.provider as? BundledFontProvider,
+                  let resolved = provider.opticalConstruction?.resolved ?? provider.resolvedVariation else { return nil }
+            let variation = FontVariationSelection(metadata: candidate.face.metadata, coordinates: resolved.coordinates)
+            self.resource = provider.resource
+            self.name = provider.opticalConstruction?.postScriptName ?? variation.postScriptName
+            self.descriptorVariation = selection.usesVariationBase ? resolved.comparison : variation.descriptorVariation
+            self.comparisonVariation = resolved.comparison
+            self.derivesOpticalSize = provider.opticalConstruction?.derivesOpticalSize ?? false
+            self.hasVariationExtras = resolved.extras != nil
+            self.features = candidate.face.featureCatalog.select(shapingFeatures)
+        }
+
+        func isEqual(to other: Self) -> Bool {
+            resource == other.resource && name == other.name &&
+                descriptorVariation == other.descriptorVariation &&
+                comparisonVariation == other.comparisonVariation &&
+                derivesOpticalSize == other.derivesOpticalSize &&
+                VVD.FontFeatures.settingsEqual(features, other.features)
+        }
+
+        func hash(into hasher: inout Hasher, extraAttributeCount: Int) {
+            // Descriptor hashing uses the selected name. Original extras have
+            // a separate hash contribution even when comparison discards them.
+            hasher.combine(name)
+            hasher.combine(derivesOpticalSize)
+            let count = extraAttributeCount + (hasVariationExtras ? 1 : 0)
+            hasher.combine(count == 0 ? nil : count)
+        }
+    }
+
     let provider: any TypefaceProvider
     let pointSize: CGFloat
     /// Selected logical weight, independent of the shared physical glyph resource.
     let selectedWeight: CGFloat?
+    /// Physical-face requests; descriptor copies carry the selected settings.
     let shapingFeatures: [TypefaceShapingFeature]
     let textStyle: Font.TextStyle?
     let stylePolicy: FontStylePolicy?
@@ -23,7 +67,9 @@ final class FontResource: Hashable, @unchecked Sendable {
     private let source: FontDescriptor.Source
     private let variation: [UInt32: CGFloat]?
     private let selection: FontDescriptor.Resolution?
+    private let preservesSizeOnSymbolicCopy: Bool
     private let renderingMode: Font.DefaultRenderingMode
+    private let registeredConstruction: RegisteredConstruction?
 
     init(descriptor: FontDescriptor, in context: Font.Context) {
         var environment = EnvironmentValues()
@@ -35,16 +81,29 @@ final class FontResource: Hashable, @unchecked Sendable {
         self.language = descriptor.language
         self.languageAwareLineHeightRatio = descriptor.languageAwareLineHeightRatio
         self.stylePolicy = descriptor.stylePolicy
+        self.preservesSizeOnSymbolicCopy = descriptor.preservesSizeOnSymbolicCopy
         let data = descriptor.stylePolicy == nil ? nil : BundledFontCatalog.shared.outsetData
         self.preferredLanguageGroup = data?.preferredGroup(for: Locale.preferredLanguages) ?? 0
         self.metricLanguageGroup = descriptor.language.map { data?.preferredGroup(for: [$0]) ?? 0 }
             ?? preferredLanguageGroup
         let selection = descriptor.resolvedConstruction
+        let registered = RegisteredConstruction(selection, shapingFeatures: descriptor.shapingFeatures)
+        self.registeredConstruction = registered
         if let catalog = selection.catalog, let candidate = selection.candidate {
-            self.source = .selected(catalog, candidate, nil)
-            self.variation = (selection.provider as? BundledFontProvider)?.resolvedVariation?.extras
-                ?? candidate.variationSelection.descriptorVariation
-            self.selection = selection
+            let provider = selection.provider as? BundledFontProvider
+            if let optical = provider?.opticalConstruction {
+                self.source = .selected(catalog, candidate.selecting(optical.selection,
+                    comparison: optical.resolved.comparison), nil)
+                self.variation = optical.resolved.extras
+            } else {
+                self.source = .selected(catalog, candidate, nil)
+                self.variation = provider?.resolvedVariation?.extras ?? candidate.variationSelection.descriptorVariation
+            }
+            // A copied descriptor starts from this actual selected face, even
+            // when construction used the default for an unmatched request.
+            var copied = selection
+            copied.didMatchRequest = true
+            self.selection = copied
         } else {
             self.source = descriptor.source
             self.variation = descriptor.variation
@@ -59,45 +118,56 @@ final class FontResource: Hashable, @unchecked Sendable {
     }
 
     // Every descriptor remains consumer-owned, including its lazy selection state.
+    // The metric ratio belongs to this resolved font and is not a copied attribute.
     func descriptor() -> FontDescriptor {
-        FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
+        FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: descriptorFeatures,
                        renderingMode: renderingMode, language: language,
-                       languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy, variation: variation,
-                       resolution: selection)
+                       stylePolicy: stylePolicy, variation: variation,
+                       resolution: selection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
+    }
+
+    private var descriptorFeatures: [TypefaceShapingFeature] {
+        registeredConstruction?.features.map { TypefaceShapingFeature(tag: $0.tag, value: $0.value) }
+            ?? shapingFeatures
     }
 
     /// Copies the selected construction at another point size.
     func fontWithSize(_ requestedSize: CGFloat) -> FontResource? {
         let size = requestedSize == 0 ? pointSize : requestedSize
         guard size.isFinite, size > 0 else { return nil }
-        if size == pointSize { return self }
+        // An explicit unchanged size preserves the font. Zero reconstructs its
+        // published descriptor, including the automatic metric policy.
+        if size == pointSize &&
+            (requestedSize != 0 ||
+             (registeredConstruction == nil && languageAwareLineHeightRatio == nil)) {
+            return self
+        }
         var resizedSelection = selection
         if let selection, let value = selection.provider as? BundledFontProvider {
-            let provider = BundledFontProvider(resource: value.resource, size: size, weight: value.weight,
-                renderingMode: value.renderingMode, variations: value.variations,
-                appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex,
-                resolvedVariation: value.resolvedVariation)
+            let provider = value.withSize(size, variationExtras: variation)
             resizedSelection = FontDescriptor.Resolution(provider: provider, weight: selection.weight,
                 catalog: selection.catalog, candidate: selection.candidate,
                 usesVariationBase: selection.usesVariationBase)
         }
         let resizedSource: FontDescriptor.Source
-        if case let .typeface(provider) = source {
+        if case let .supplied(provider, bundle) = source {
+            guard let copy = provider.withSize(size) else { return nil }
+            resizedSource = .supplied(copy, bundle)
+        } else if case let .typeface(provider) = source {
             let resized: any TypefaceProvider
             switch provider {
             case let value as SystemFontProvider:
                 resized = SystemFontProvider(size: size, weight: value.weight, design: value.design,
                     renderingMode: value.renderingMode, isItalic: value.isItalic, width: value.width)
             case let value as BundledFontProvider:
-                resized = BundledFontProvider(resource: value.resource, size: size, weight: value.weight,
-                    renderingMode: value.renderingMode, variations: value.variations,
-                    appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex,
-                    resolvedVariation: value.resolvedVariation)
+                resized = value.withSize(size)
             case let value as ExternalFontProvider:
                 resized = ExternalFontProvider(source: value.source, size: size, weight: value.weight,
                     design: value.design, faceIndex: value.faceIndex, renderingMode: value.renderingMode)
+            case let value as FixedFontProvider:
+                guard let copy = value.withSize(size) else { return nil }
+                resized = copy
             default:
-                // A supplied face has no request from which to create another size.
                 return nil
             }
             resizedSource = .typeface(resized)
@@ -105,16 +175,27 @@ final class FontResource: Hashable, @unchecked Sendable {
             resizedSource = source
         }
         let descriptor = FontDescriptor(source: resizedSource, pointSize: size,
-            shapingFeatures: shapingFeatures, renderingMode: renderingMode, language: language,
-            languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy, variation: variation,
-            resolution: resizedSelection)
+            shapingFeatures: descriptorFeatures, renderingMode: renderingMode, language: language,
+            stylePolicy: stylePolicy, variation: variation,
+            resolution: resizedSelection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = renderingMode
         return FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
     }
 
     var requestedPointSize: CGFloat? {
-        if case let .typeface(provider) = source, provider is FixedFontProvider { return nil }
+        if let provider = source.fixedProvider,
+           !provider.supportsSizeCopy { return nil }
+        return pointSize
+    }
+
+    /// A supplied face retains the metric owner's DPI and layout scale.
+    func resolvedPointSize(for face: Typeface, scaleFactor: CGFloat) -> CGFloat? {
+        if let provider = source.fixedProvider {
+            guard provider.supportsSizeCopy, scaleFactor > 0,
+                  let size = face.outsetAttributes?.pointSize else { return nil }
+            return size / scaleFactor
+        }
         return pointSize
     }
 
@@ -135,11 +216,8 @@ final class FontResource: Hashable, @unchecked Sendable {
     /// Resolves natural metrics and independent clipping outsets in points.
     func resolvedMetrics(for face: Typeface, scaleFactor: CGFloat,
                          applyingStylePolicy: Bool = true) -> ResolvedFontMetrics? {
-        // A supplied face has no independent requested point size to resolve.
-        if case let .typeface(provider) = source, provider is FixedFontProvider {
-            return nil
-        }
-        guard pointSize.isFinite, pointSize > 0,
+        guard let pointSize = resolvedPointSize(for: face, scaleFactor: scaleFactor),
+              pointSize.isFinite, pointSize > 0,
               let design = face.designMetrics else { return nil }
         let units = Double(design.unitsPerEM)
         let convert: (Int) -> Double
@@ -158,9 +236,12 @@ final class FontResource: Hashable, @unchecked Sendable {
                 return nil
             }
         }
-        // Cap height retains its independent backend input.
         var result = face.resolvedMetrics.scaled(by: scaleFactor)
         let size = Double(pointSize) / units
+        // Cap height bypasses the format-specific conversion of ascent/descent/leading.
+        if let capHeight = design.capHeight {
+            result.capHeight = CGFloat(Double(capHeight) * size)
+        }
         let rawAscent = convert(design.ascender)
         let rawDescent = abs(convert(design.descender))
         let policy = applyingStylePolicy ? stylePolicy : nil
@@ -204,27 +285,47 @@ final class FontResource: Hashable, @unchecked Sendable {
     }
 
     static func == (lhs: FontResource, rhs: FontResource) -> Bool {
-        lhs.selectedWeight == rhs.selectedWeight &&
+        guard lhs.selectedWeight == rhs.selectedWeight &&
             lhs.language == rhs.language &&
-            lhs.languageAwareLineHeightRatio == rhs.languageAwareLineHeightRatio &&
+            lhs.metricRatio == rhs.metricRatio &&
             lhs.stylePolicy == rhs.stylePolicy &&
             lhs.preferredLanguageGroup == rhs.preferredLanguageGroup &&
             lhs.metricLanguageGroup == rhs.metricLanguageGroup &&
-            lhs.textStyle == rhs.textStyle &&
-            lhs.shapingFeatures == rhs.shapingFeatures &&
-            lhs.provider.isEqual(to: rhs.provider)
+            lhs.textStyle == rhs.textStyle else { return false }
+        switch (lhs.registeredConstruction, rhs.registeredConstruction) {
+        case let (a?, b?):
+            return lhs.pointSize == rhs.pointSize && lhs.renderingMode == rhs.renderingMode && a.isEqual(to: b)
+        case (nil, nil):
+            return lhs.shapingFeatures == rhs.shapingFeatures && lhs.provider.isEqual(to: rhs.provider)
+        default:
+            return false
+        }
+    }
+
+    private var metricRatio: Double? {
+        registeredConstruction == nil || stylePolicy != nil ? languageAwareLineHeightRatio : nil
     }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(selectedWeight)
-        hasher.combine(language)
-        hasher.combine(languageAwareLineHeightRatio)
+        hasher.combine(metricRatio)
         hasher.combine(stylePolicy)
         hasher.combine(preferredLanguageGroup)
         hasher.combine(metricLanguageGroup)
         hasher.combine(textStyle)
-        hasher.combine(shapingFeatures)
-        provider.hash(into: &hasher)
+        if let registeredConstruction {
+            hasher.combine(true)
+            hasher.combine(pointSize)
+            hasher.combine(renderingMode)
+            hasher.combine(SelectedFont.constructionFlags(language: language))
+            registeredConstruction.hash(into: &hasher,
+                extraAttributeCount: (language == nil ? 0 : 1) + (registeredConstruction.features.isEmpty ? 0 : 1))
+        } else {
+            hasher.combine(false)
+            hasher.combine(language)
+            hasher.combine(shapingFeatures)
+            provider.hash(into: &hasher)
+        }
     }
 }
 

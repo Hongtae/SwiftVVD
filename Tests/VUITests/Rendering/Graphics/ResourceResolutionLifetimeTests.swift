@@ -4,6 +4,191 @@ import VVD
 @testable import VUI
 
 final class ResourceResolutionLifetimeTests: XCTestCase {
+    // ASSERTIONS fontGraphicsSizeCopy27Observed
+    func testSuppliedTextureSizeCopyReleasesOriginalFaceAndRetainsItsDevice() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let path = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path
+        let resolution = EnvironmentValues().fontResolutionContext
+        for memory in [false, true] {
+            weak var original: TextureFont?
+            weak var copied: TextureFont?
+            weak var source: VVD.Font.Source?
+            weak var device: GraphicsDeviceContext?
+            var retained: FontResource?
+            func populate() throws {
+                let graphics = GraphicsDeviceContext(device: LifetimeTestDevice())
+                device = graphics
+                let backend = try XCTUnwrap(memory
+                    ? TextureFont(deviceContext: graphics, data: Data(contentsOf: URL(fileURLWithPath: path)))
+                    : TextureFont(deviceContext: graphics, path: path))
+                original = backend
+                source = backend.source
+                backend.setPointSize(23.375, dpi: (96, 144))
+                XCTAssertTrue(backend.setVariationCoordinates([0x77676874: 700, 0x77647468: 90]))
+                backend.boldStrength = 0.75
+                backend.outlineThickness = 0.5
+                backend.isBitmapPreferred = true
+                backend.isKerningEnabled = false
+                backend.isColorEnabled = false
+                let input = VUI.Font(backend).monospacedDigit()
+                let resource = FontResource(descriptor: input.resolveDescriptor(in: resolution), in: resolution)
+                retained = try XCTUnwrap(resource.fontWithSize(31.375))
+                let face = try XCTUnwrap(retained?.provider.makeTypeface(LifetimeTestAppContext(graphics), dpi: 216) as? TextureTypeface)
+                copied = face.textureFont
+                XCTAssertFalse(face.textureFont === backend)
+                XCTAssertTrue(face.textureFont.deviceContext === graphics)
+                XCTAssertEqual(face.textureFont.pointSize, 31.375)
+                XCTAssertEqual(face.textureFont.dpi.x, 96)
+                XCTAssertEqual(face.textureFont.dpi.y, 144)
+                XCTAssertEqual(face.textureFont.variationCoordinates, backend.variationCoordinates)
+                XCTAssertEqual(face.textureFont.boldStrength, 0.75)
+                XCTAssertEqual(face.textureFont.outlineThickness, 0.5)
+                XCTAssertTrue(face.textureFont.isBitmapPreferred)
+                XCTAssertFalse(face.textureFont.isKerningEnabled)
+                XCTAssertFalse(face.textureFont.isColorEnabled)
+                XCTAssertEqual(face.selectedFont?.variation, [0x77676874: 700, 0x77647468: 90])
+                XCTAssertNil(face.selectedFont?.variationExtras)
+                XCTAssertEqual(retained?.shapingFeatures, resource.shapingFeatures)
+                let restored = try XCTUnwrap(retained?.fontWithSize(23.375))
+                XCTAssertEqual(restored, resource)
+                XCTAssertEqual(restored.hashValue, resource.hashValue)
+                XCTAssertEqual(backend.pointSize, 23.375)
+                XCTAssertNotNil(face.glyphMetrics(for: "A"))
+            }
+            try populate()
+            XCTAssertNil(original)
+            XCTAssertNotNil(copied)
+            XCTAssertNotNil(source)
+            XCTAssertNotNil(device)
+            XCTAssertNotNil(retained?.fontWithSize(15.375))
+            retained = nil
+            XCTAssertNil(copied)
+            XCTAssertNil(source)
+            XCTAssertNil(device)
+        }
+    }
+
+    // ASSERTIONS fontGraphicsSizeCopy27Observed fontStructureInputs27Observed fontPlatformInputs27Observed
+    func testSuppliedTextureCacheIdentityKeepsRasterConfigurationSeparateFromSelection() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let path = root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"
+        ).path
+        let graphics = GraphicsDeviceContext(device: LifetimeTestDevice())
+        let backend = try XCTUnwrap(TextureFont(deviceContext: graphics, path: path))
+        backend.setPointSize(23.375, dpi: (96, 144))
+        XCTAssertTrue(backend.setVariationCoordinates([0x7767_6874: 700, 0x7764_7468: 90]))
+
+        func copy(_ update: (TextureFont) -> Void = { _ in }) throws -> TextureFont {
+            let value = try XCTUnwrap(backend.copy() as? TextureFont)
+            update(value)
+            return value
+        }
+        func selected(_ font: VUI.Font) throws -> SelectedFont {
+            let provider = try XCTUnwrap(font.typefaceProvider as? FixedFontProvider)
+            return try XCTUnwrap(provider.face.selectedFont)
+        }
+
+        let original = VUI.Font(try copy())
+        let equivalent = VUI.Font(try copy())
+        let resolution = EnvironmentValues().fontResolutionContext
+        XCTAssertEqual(original, equivalent)
+        XCTAssertEqual(original.hashValue, equivalent.hashValue)
+        XCTAssertEqual(original.platformFont(in: resolution), equivalent.platformFont(in: resolution))
+
+        let controls: [(String, VUI.Font)] = [
+            ("bold", VUI.Font(try copy { $0.boldStrength = 0.75 })),
+            ("outline", VUI.Font(try copy { $0.outlineThickness = 0.5 })),
+            ("dpi", VUI.Font(try copy { $0.dpi = (72, 72) })),
+            ("bitmap", VUI.Font(try copy { $0.isBitmapPreferred = true })),
+            ("kerning", VUI.Font(try copy { $0.isKerningEnabled = false })),
+            ("color", VUI.Font(try copy { $0.isColorEnabled = false }))
+        ]
+        let originalSelection = try selected(original)
+        for (label, value) in controls {
+            XCTAssertTrue(originalSelection.isEqual(to: try selected(value)), label)
+            XCTAssertNotEqual(original, value, label)
+            XCTAssertNotEqual(original.platformFont(in: resolution), value.platformFont(in: resolution), label)
+        }
+    }
+
+    // ASSERTIONS fontGraphicsSource27Observed fontVariationSelection27Observed
+    func testSuppliedTextureFontRetainsVariationAndDeviceWithoutDescriptorExtras() throws {
+        let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+        let app = LifetimeTestAppContext(context)
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let path = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path
+        let resolution = EnvironmentValues().fontResolutionContext
+        let weight: UInt32 = 0x7767_6874, width: UInt32 = 0x7764_7468
+        let controls: [([UInt32: CGFloat], [UInt32: CGFloat])] = [
+            ([:], [:]),
+            ([weight: 700], [weight: 700]),
+            ([weight: 700, width: 90], [weight: 700, width: 90]),
+            ([weight: 530.0014], [weight: 530.0013])
+        ]
+        for (request, comparison) in controls {
+            let backend = try XCTUnwrap(TextureFont(deviceContext: context, path: path))
+            XCTAssertTrue(backend.setVariationCoordinates(request))
+            backend.setPointSize(23.375, dpi: (144, 144))
+            let coordinates = backend.variationCoordinates
+            let input = VUI.Font(backend)
+            let resource = input.resolve(in: resolution).resource
+            let wrapped = VUI.Font(provider: FontBox(VUI.Font.PlatformFontProvider(font: resource)))
+            for font in [input, wrapped, input.monospacedDigit(), wrapped.monospacedDigit()] {
+                let face = try XCTUnwrap(font.resolve(in: resolution).resource.provider.makeTypeface(app, dpi: 216) as? TextureTypeface)
+                let selected = try XCTUnwrap(face.selectedFont)
+                XCTAssertEqual(selected.variation, comparison)
+                XCTAssertNil(selected.variationExtras)
+                XCTAssertEqual(selected.pointSize, 23.375)
+                guard case let .supplied(owner) = selected.descriptor.source else {
+                    return XCTFail("A supplied texture font lost its resource identity")
+                }
+                XCTAssertTrue(owner === backend.source)
+                XCTAssertTrue(face.textureFont === backend)
+                XCTAssertTrue(face.textureFont.deviceContext === context)
+            }
+            XCTAssertEqual(backend.variationCoordinates, coordinates)
+            XCTAssertEqual(backend.dpi.x, 144)
+            XCTAssertEqual(backend.dpi.y, 144)
+        }
+    }
+
+    // ASSERTIONS fontGraphicsConstruction27Observed
+    func testSuppliedTextureFontPreservesPointSizeAndRetainedDevice() throws {
+        let context = GraphicsDeviceContext(device: LifetimeTestDevice())
+        let app = LifetimeTestAppContext(context)
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let path = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path
+        let resolution = EnvironmentValues().fontResolutionContext
+        for dpi: UInt32 in [72, 144] {
+            for size: CGFloat in [23, 23.375] {
+                let backend = try XCTUnwrap(TextureFont(deviceContext: context, path: path))
+                backend.setPointSize(size, dpi: (dpi, dpi))
+                let height = backend.height
+                XCTAssertNotEqual(height, size)
+                let input = VUI.Font(backend)
+                let resource = input.resolve(in: resolution).resource
+                let wrapped = VUI.Font(provider: FontBox(VUI.Font.PlatformFontProvider(font: resource)))
+                for font in [input, wrapped, input.monospacedDigit(), wrapped.monospacedDigit()] {
+                    XCTAssertEqual(font.resolve(in: resolution).pointSize, size)
+                    let face = try XCTUnwrap(font.resolve(in: resolution).resource.provider.makeTypeface(app, dpi: 216) as? TextureTypeface)
+                    XCTAssertTrue(face.textureFont === backend)
+                    XCTAssertTrue(face.textureFont.deviceContext === context)
+                    XCTAssertEqual(face.lineHeight, height)
+                    XCTAssertEqual(face.selectedFont?.pointSize, size)
+                    XCTAssertEqual(face.textureFont.dpi.x, dpi)
+                    XCTAssertEqual(face.textureFont.dpi.y, dpi)
+                }
+                XCTAssertEqual(backend.pointSize, size)
+                XCTAssertEqual(backend.height, height)
+            }
+        }
+    }
+
     // ASSERTIONS textResolvedFontsIdentityAndMetricsObserved
     func testRetainedFontCollectionsReleaseFixedDeviceResourcesOnTerminationOrLastValue() throws {
         for ownerType: ResolvedStyledText.Type in [ResolvedStyledText.StringDrawing.self, ResolvedStyledText.TextLayoutManager.self] {
@@ -22,7 +207,7 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
                     artwork = font
                     deviceContext = context
                     let face = TextureTypeface(textureFont: font)
-                    let resource = FontResource(descriptor: FontDescriptor(source: .typeface(FixedFontProvider(face)), pointSize: 23),
+                    let resource = FontResource(descriptor: FontDescriptor(source: .typeface(FixedFontProvider(face, pointSize: 23)), pointSize: 23),
                         in: EnvironmentValues().fontResolutionContext)
                     resourceReference = resource
                     var attributes = _ResolvedTextRunAttributes()

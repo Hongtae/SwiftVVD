@@ -169,6 +169,7 @@ struct BundledFontProvider: TypefaceProvider {
     let variations: [BundledFontVariation]
     let appliesSyntheticWeight: Bool
     let resolvedVariation: FontVariationSelection.Resolved?
+    let opticalConstruction: FontOpticalConstruction?
 
     init(
         resource: BundledFontResource,
@@ -178,7 +179,8 @@ struct BundledFontProvider: TypefaceProvider {
         variations: [BundledFontVariation] = [],
         appliesSyntheticWeight: Bool = true,
         instanceIndex: Int? = nil,
-        resolvedVariation: FontVariationSelection.Resolved? = nil
+        resolvedVariation: FontVariationSelection.Resolved? = nil,
+        opticalConstruction: FontOpticalConstruction? = nil
     ) {
         self.resource = resource
         self.instanceIndex = instanceIndex
@@ -188,6 +190,7 @@ struct BundledFontProvider: TypefaceProvider {
         self.variations = variations
         self.appliesSyntheticWeight = appliesSyntheticWeight
         self.resolvedVariation = resolvedVariation
+        self.opticalConstruction = opticalConstruction
     }
 
     init?(
@@ -266,8 +269,23 @@ struct BundledFontProvider: TypefaceProvider {
             variations: variations,
             appliesSyntheticWeight: appliesSyntheticWeight,
             instanceIndex: instanceIndex,
-            resolvedVariation: resolvedVariation
+            resolvedVariation: resolvedVariation,
+            opticalConstruction: opticalConstruction
         )
+    }
+
+    func withSize(_ size: CGFloat, variationExtras: [UInt32: CGFloat]? = nil) -> Self {
+        let copiedVariation: FontVariationSelection.Resolved?
+        if let resolvedVariation, let variationExtras {
+            copiedVariation = .init(coordinates: resolvedVariation.coordinates,
+                                   comparison: resolvedVariation.comparison, extras: variationExtras)
+        } else {
+            copiedVariation = resolvedVariation
+        }
+        return Self(resource: resource, size: size, weight: weight, renderingMode: renderingMode,
+             variations: variations, appliesSyntheticWeight: appliesSyntheticWeight,
+             instanceIndex: instanceIndex, resolvedVariation: copiedVariation,
+             opticalConstruction: opticalConstruction?.withSize(size))
     }
 
     func isEqual(to: any TypefaceProvider) -> Bool {
@@ -279,6 +297,7 @@ struct BundledFontProvider: TypefaceProvider {
             renderingMode == other.renderingMode &&
             variations == other.variations &&
             resolvedVariation == other.resolvedVariation &&
+            opticalConstruction == other.opticalConstruction &&
             appliesSyntheticWeight == other.appliesSyntheticWeight
     }
 
@@ -290,6 +309,7 @@ struct BundledFontProvider: TypefaceProvider {
         hasher.combine(renderingMode)
         hasher.combine(variations)
         hasher.combine(resolvedVariation)
+        hasher.combine(opticalConstruction)
         hasher.combine(appliesSyntheticWeight)
     }
 
@@ -316,7 +336,7 @@ struct BundledFontProvider: TypefaceProvider {
               let metadata = VVD.Font.metadata(data: data, faceIndex: resource.faceIndex) else { return nil }
         let requested = Dictionary(uniqueKeysWithValues: variations.map { ($0.tag, $0.value) })
         guard requested.values.allSatisfy(\.isFinite) else { return nil }
-        let resolved = resolvedVariation ?? FontVariationSelection(metadata: metadata, instanceIndex: instanceIndex)
+        let resolved = opticalConstruction?.resolved ?? resolvedVariation ?? FontVariationSelection(metadata: metadata, instanceIndex: instanceIndex)
             .resolved(requested: requested)
         guard resolved.coordinates.count == metadata.variationAxes.count,
               resolved.coordinates.allSatisfy(\.isFinite) else { return nil }
@@ -331,6 +351,11 @@ struct BundledFontProvider: TypefaceProvider {
             comparisonCoordinates: resolved.comparison,
             syntheticWeight: logicalEmbolden)
         selectedFont.variationExtras = resolved.extras
+        if let opticalConstruction {
+            selectedFont.opticalConstruction = opticalConstruction
+            selectedFont.descriptor.postScriptName = opticalConstruction.postScriptName
+            selectedFont.descriptor.derivesOpticalSize = opticalConstruction.derivesOpticalSize
+        }
         func applyVariations(to font: VVD.Font) -> Bool {
             metadata.variationAxes.isEmpty || font.setVariationCoordinates(selection.rasterCoordinates)
         }
@@ -636,26 +661,131 @@ struct ExternalFontProvider: TypefaceProvider {
 }
 
 struct FixedFontProvider: TypefaceProvider {
-    let face: any Typeface
-    var pointSize: CGFloat { face.lineHeight }
+    /// Supplied faces keep renderer state outside selected-font comparison.
+    /// Cache admission still needs the immutable snapshot taken by the public Font bridge.
+    private struct ResourceConfiguration: Hashable {
+        enum Rendering: Hashable {
+            case texture(boldStrength: CGFloat, outlineThickness: CGFloat)
+            case vector(embolden: CGFloat, outlineThickness: CGFloat)
+        }
 
-    init(_ face: any Typeface) {
+        let dpiX: UInt32
+        let dpiY: UInt32
+        let isBitmapPreferred: Bool
+        let isKerningEnabled: Bool
+        let isColorEnabled: Bool
+        let rendering: Rendering
+
+        init?(_ face: any Typeface) {
+            let font: VVD.Font
+            switch face {
+            case let face as TextureTypeface:
+                font = face.textureFont
+                rendering = .texture(
+                    boldStrength: face.textureFont.boldStrength,
+                    outlineThickness: face.textureFont.outlineThickness
+                )
+            case let face as VectorTypeface:
+                font = face.font
+                rendering = .vector(
+                    embolden: face.embolden,
+                    outlineThickness: face.outlineThickness
+                )
+            default:
+                return nil
+            }
+            let dpi = font.dpi
+            self.dpiX = dpi.x
+            self.dpiY = dpi.y
+            self.isBitmapPreferred = font.isBitmapPreferred
+            self.isKerningEnabled = font.isKerningEnabled
+            self.isColorEnabled = font.isColorEnabled
+        }
+    }
+
+    let face: any Typeface
+    let pointSize: CGFloat
+    private let source: VVD.Font.Source?
+    private let resourceConfiguration: ResourceConfiguration?
+    let selection: FontResourceResolver.Selection?
+
+    init(_ face: any Typeface, pointSize: CGFloat, metadata: VVD.Font.FaceMetadata? = nil) {
         self.face = face
+        self.pointSize = pointSize
+        self.source = (face as? any VVDFontBackedTypeface)?.font.source
+        self.resourceConfiguration = ResourceConfiguration(face)
+        if let metadata, let font = (face as? any VVDFontBackedTypeface)?.font,
+           let selected = face.selectedFont {
+            let coordinates = font.variationCoordinates
+            self.selection = .init(variation: FontVariationSelection(metadata: metadata,
+                coordinates: metadata.variationAxes.map { coordinates[$0.tag] ?? $0.defaultValue }),
+                comparison: selected.variation)
+        } else {
+            self.selection = nil
+        }
     }
 
     var identifier: String {
         face.identifier
     }
 
+    var supportsSizeCopy: Bool {
+        face is VectorTypeface || face is TextureTypeface
+    }
+
     func isEqual(to: any TypefaceProvider) -> Bool {
         if let other = to as? Self {
+            guard pointSize == other.pointSize else { return false }
+            if let source, let otherSource = other.source,
+               let selected = face.selectedFont, let otherSelected = other.face.selectedFont {
+                return source === otherSource && type(of: face) == type(of: other.face) &&
+                    resourceConfiguration == other.resourceConfiguration &&
+                    selected.isEqual(to: otherSelected)
+            }
             return self.face.isEqual(to: other.face)
         }
         return false
     }
 
     func hash(into hasher: inout Hasher) {
-        face.hashIdentity(into: &hasher)
+        if let source, face.selectedFont != nil {
+            hasher.combine(ObjectIdentifier(source))
+            hasher.combine(ObjectIdentifier(type(of: face)))
+            hasher.combine(resourceConfiguration)
+        } else {
+            face.hashIdentity(into: &hasher)
+        }
+        hasher.combine(pointSize)
+    }
+
+    func withSize(_ size: CGFloat) -> Self? {
+        let copy: (any Typeface)?
+        switch face {
+        case let face as VectorTypeface: copy = face.withSize(size)
+        case let face as TextureTypeface: copy = face.withSize(size)
+        default: return nil
+        }
+        guard let copy else { return nil }
+        return Self(copy, pointSize: size, metadata: selection?.variation.metadata)
+    }
+
+    func copying(pointSize: CGFloat, comparison: [UInt32: CGFloat]) -> Self? {
+        guard let selection, let current = face.selectedFont else { return nil }
+        // Missing comparison axes preserve the graphics input. The parser's
+        // copy tolerance is also independent of comparison-coordinate rounding.
+        let coordinates = selection.variation.applying(comparison).rasterCoordinates
+        let selected = current.copying(pointSize: pointSize, comparison: comparison)
+        let copy: (any Typeface)?
+        switch face {
+        case let face as VectorTypeface:
+            copy = face.withSize(pointSize, selectedFont: selected, coordinates: coordinates)
+        case let face as TextureTypeface:
+            copy = face.withSize(pointSize, selectedFont: selected, coordinates: coordinates)
+        default:
+            return nil
+        }
+        guard let copy else { return nil }
+        return Self(copy, pointSize: pointSize, metadata: selection.variation.metadata)
     }
 
     func makeTypeface(

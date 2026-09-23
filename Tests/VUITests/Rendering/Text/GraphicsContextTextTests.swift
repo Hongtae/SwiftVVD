@@ -4,6 +4,81 @@ import VVD
 @testable import VUI
 
 final class GraphicsContextTextTests: XCTestCase {
+    // ASSERTIONS fontGraphicsSizeCopy27Observed textStringDrawingScaleOverrideReconstructionObserved
+    func testSuppliedFontCopiesReachTextMeasurementDrawingAndRecording() throws {
+        try withContext { context in
+            let device = try XCTUnwrap(appContext?.graphicsDeviceContext)
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            let path = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf").path
+            func font(size: CGFloat, dpi: UInt32, bitmap: Bool) throws -> (VUI.Font, VVD.Font) {
+                let backend: VVD.Font
+                if bitmap { backend = try XCTUnwrap(TextureFont(deviceContext: device, path: path)) }
+                else { backend = try XCTUnwrap(VVD.Font(path: path)) }
+                backend.setPointSize(size, dpi: (dpi, dpi))
+                XCTAssertTrue(backend.setVariationCoordinates([0x77676874: 700, 0x77647468: 90]))
+                let font = (backend as? TextureFont).map { VUI.Font($0) } ?? VUI.Font(vector: backend)
+                return (font.monospacedDigit(), backend)
+            }
+            func pixels(_ text: GraphicsContext.ResolvedText, replay: Bool) throws -> [UInt8] {
+                let extent = CGSize(width: 320, height: 80)
+                let commands = try XCTUnwrap(device.renderQueue()?.makeCommandBuffer())
+                let drawing = try XCTUnwrap(GraphicsContext(sceneResources: SceneResources(), environment: context.environment,
+                    viewport: CGRect(origin: .zero, size: extent), contentOffset: .zero,
+                    contentScaleFactor: 1, resolution: extent, commandBuffer: commands))
+                drawing.clear(with: .clear)
+                if replay {
+                    let recording = drawing.recordingContext(size: extent)
+                    recording.draw(text, in: CGRect(origin: .zero, size: extent))
+                    try XCTUnwrap(recording.recording).draw(in: drawing)
+                } else {
+                    drawing.draw(text, in: CGRect(origin: .zero, size: extent))
+                }
+                let completed = expectation(description: "Supplied font copy readback")
+                commands.addCompletedHandler { _ in completed.fulfill() }
+                XCTAssertTrue(commands.commit())
+                wait(for: [completed], timeout: 15)
+                let buffer = try XCTUnwrap(device.makeCPUAccessible(texture: drawing.backdrop))
+                return Array(UnsafeRawBufferPointer(start: try XCTUnwrap(buffer.contents()), count: 320 * 80 * 4))
+            }
+            for bitmap in [false, true] {
+                for dpi: UInt32 in [72, 144] {
+                    let (input, backend) = try font(size: 23.375, dpi: dpi, bitmap: bitmap)
+                    let original = context.resolve(Text(verbatim: "AVfi12").font(input))
+                    let owner = try XCTUnwrap(original.resolved as? ResolvedStyledText.StringDrawing)
+                    let source = try XCTUnwrap(owner.resolvedText)
+                    for factor: CGFloat in [0.5, 0.63] {
+                        let size = (23.375 * factor * 4).rounded() / 4
+                        let (referenceFont, _) = try font(size: size, dpi: dpi, bitmap: bitmap)
+                        let reference = context.resolve(Text(verbatim: "AVfi12").font(referenceFont))
+                        owner.scaleFactorOverride = factor
+                        let scaled = source.scalingFonts(by: factor)
+                        let manager = ResolvedStyledText.TextLayoutManager(storage: scaled.attributedStorage, resolvedText: scaled)
+                        let referenceSource = try XCTUnwrap(reference.resolved.resolvedText)
+                        let referenceManager = ResolvedStyledText.TextLayoutManager(storage: referenceSource.attributedStorage,
+                                                                                  resolvedText: referenceSource)
+                        let pairs = [(original, reference),
+                            (GraphicsContext.ResolvedText(resolved: manager, shared: original.shared),
+                             GraphicsContext.ResolvedText(resolved: referenceManager, shared: reference.shared))]
+                        for (actual, expected) in pairs {
+                            let request = CGSize(width: 320, height: 80)
+                            let label = "bitmap=\(bitmap) dpi=\(dpi) factor=\(factor) owner=\(type(of: actual.resolved))"
+                            XCTAssertEqual(actual.measure(in: request), expected.measure(in: request), label)
+                            XCTAssertEqual(actual.firstBaseline(in: request), expected.firstBaseline(in: request), label)
+                            let direct = try pixels(actual, replay: false)
+                            XCTAssertTrue(stride(from: 3, to: direct.count, by: 4).contains { direct[$0] > 0 }, label)
+                            XCTAssertTrue(direct == (try pixels(actual, replay: true)), "recording " + label)
+                            XCTAssertTrue(direct == (try pixels(expected, replay: false)), "fresh selected size " + label)
+                        }
+                        XCTAssertEqual(backend.pointSize, 23.375)
+                        XCTAssertEqual(backend.dpi.x, dpi)
+                        XCTAssertEqual(backend.variationCoordinates, [0x77676874: 700, 0x77647468: 90])
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textParagraphDirectionalAlignmentAggregationObserved
     func testCanvasPreservesLogicalAndExplicitPhysicalAlignment() throws {
         try withContext { original in

@@ -4,6 +4,72 @@ import VVD
 @testable import VUI
 
 final class TextMetricsTests: XCTestCase {
+    // ASSERTIONS fontGraphicsFitting27Observed
+    func testSuppliedFontAutomaticFittingRetainsEachMetricOwner() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let ordinaryValues: [[CGFloat]] = [
+            [80,48,19,43], [79,15,12,12], [30,28,11,25], [80,56,22,50],
+            [80,48,19,43], [79,15,12,12], [30,28,11,25], [79.5,56,22,50],
+            [80,52,21,47], [80,19,15,15], [26,33,11,29], [80,65,22,57],
+            [80,56,22,50], [78,19,15,15], [30,33,11,29], [78,65,22,57]]
+        let managerValues: [[CGFloat]] = [
+            [79.5,46,18,41], [80,15,12,12], [30,28,11,25], [80,56,22,50],
+            [79.5,48,19,43], [80,15,12,12], [30,28,11,25], [79.5,56,22,50],
+            [80,54,21,48], [80,19,15,15], [26,33,11,29], [80,65,22,57],
+            [80,56,22,50], [78,19,15,15], [30,33,11,29], [78,65,22,57]]
+        let ordinaryScales: [CGFloat] = [0.859375,0.546875,0.5,1, 0.875,0.5546875,0.5,1, 0.71875,0.5,0.5,1, 0.75,0.5,0.5,1]
+        let managerScales: [CGFloat] = [0.8515625,0.546875,0.5,1, 0.875,0.5625,0.5,1, 0.71875,0.5,0.5,1, 0.7421875,0.5,0.5,1]
+        for memory in [false, true] {
+            for contentScale: CGFloat in [1, 2] {
+                for index in ordinaryValues.indices {
+                    let group = index / 4, proposal = index % 4
+                    let weight: CGFloat = group == 1 ? 700 : group == 3 ? 530.0013885498047 : 400
+                    let width: CGFloat = group == 1 || group == 3 ? 90 : 100
+                    let secondSize: CGFloat = group < 2 ? 23.375 : 31.375
+                    var backends: [CGFloat: VVD.Font] = [:]
+                    func font(_ size: CGFloat) throws -> VUI.Font {
+                        if let backend = backends[size] { return VUI.Font(vector: backend) }
+                        let backend = try XCTUnwrap(memory ? VVD.Font(data: Data(contentsOf: file)) : VVD.Font(path: file.path))
+                        backend.setPointSize(size, dpi: (UInt32(72 * contentScale), UInt32(72 * contentScale)))
+                        XCTAssertTrue(backend.setVariationCoordinates([0x77676874: weight, 0x77647468: width]))
+                        backends[size] = backend
+                        return VUI.Font(vector: backend)
+                    }
+                    let text = try Text(verbatim: "AAA ").font(font(23.375)).foregroundColor(.red)
+                        + Text(verbatim: "BBB BBB").font(font(secondSize)).foregroundColor(.blue)
+                    try withOwner(text, configure: {
+                        $0.minimumScaleFactor = proposal == 3 ? 1 : 0.5
+                        $0.lineLimit = proposal == 1 ? 1 : 2
+                        $0.displayScale = proposal == 1 ? 1 : 2
+                        $0._contentScaleFactor = contentScale
+                    }) { ordinary in
+                        let manager = ResolvedStyledText.TextLayoutManager(layoutProperties: ordinary.layoutProperties,
+                            layoutMargins: ordinary.layoutMargins, resolvedText: ordinary.resolvedText)
+                        for (custom, owner): (Bool, ResolvedStyledText) in [(false, ordinary), (true, manager)] {
+                            let request = CGSize(width: proposal == 2 ? 30 : 80, height: proposal == 1 ? 24 : 120)
+                            let metrics = owner.metrics(in: request, layoutMargins: nil)
+                            let label = "memory=\(memory) contentScale=\(contentScale) custom=\(custom) case=\(index + 1)"
+                            let expected = custom ? managerValues[index] : ordinaryValues[index]
+                            XCTAssertEqual(metrics.scale, custom ? managerScales[index] : ordinaryScales[index], label)
+                            XCTAssertEqual([metrics.size.width, metrics.size.height, metrics.firstBaseline, metrics.lastBaseline], expected, label)
+                            XCTAssertEqual(owner.metrics(in: request, layoutMargins: nil), metrics, label)
+                            XCTAssertEqual(metrics.numberOfLines, proposal == 1 ? 1 : 2, label)
+                            let source = try XCTUnwrap(owner.resolvedText)
+                            for (fontSize, backend) in backends {
+                                XCTAssertEqual(backend.pointSize, fontSize, label)
+                                XCTAssertEqual(backend.dpi.y, UInt32(72 * contentScale), label)
+                                XCTAssertEqual(backend.variationCoordinates, [0x77676874: weight, 0x77647468: width], label)
+                            }
+                            XCTAssertEqual(source.runs.count, 2, label)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ASSERTIONS textNegativeMultilineFitting27Observed textNegativeMultilineDrawing27Observed
     func testNegativeMultilineFittingRetainsParagraphMeasurementAndDrawingOwners() throws {
         var root = URL(fileURLWithPath: #filePath)

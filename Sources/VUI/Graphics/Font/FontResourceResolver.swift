@@ -42,10 +42,48 @@ struct FontResourceResolver: Sendable {
         }
     }
 
+    /// Selection inputs independent of whether a face belongs to a catalog.
+    struct Selection {
+        let variation: FontVariationSelection
+        let comparisonCoordinates: [UInt32: CGFloat]
+        let traits: Traits
+
+        var opticalSize: CGFloat? {
+            guard let index = variation.metadata.variationAxes.firstIndex(where: { $0.tag == 0x6f70_737a }) else { return nil }
+            return variation.coordinates[index]
+        }
+
+        init(variation: FontVariationSelection, comparison: [UInt32: CGFloat], traits: Traits? = nil) {
+            self.variation = variation
+            self.comparisonCoordinates = comparison
+            if let traits {
+                self.traits = traits
+            } else {
+                let metadata = variation.metadata
+                let weightDefault: CGFloat = metadata.variationAxes.first(where: { $0.tag == 0x7767_6874 })?.defaultValue
+                    ?? CGFloat(metadata.sfntStyle.weightClass ?? 400)
+                let weight = FontWeightScale.logicalWeight(forClass:
+                    (comparison[0x7767_6874] ?? weightDefault).rounded())
+                let width = comparison[0x7764_7468].map { FontResourceResolver.logicalWidth(forPercent: $0) }
+                    ?? CGFloat(Float(Int(metadata.sfntStyle.widthClass ?? 5) - 5) * 0.1)
+                let slant = FontResourceResolver.sourceSlant(style: metadata.styleName,
+                                                            angle: metadata.sfntStyle.italicAngle ?? 0)
+                var symbolic: UInt32 = (metadata.sfntStyle.selection ?? 0) & 1 != 0 ||
+                    (metadata.sfntStyle.macStyle ?? 0) & 2 != 0 ? 1 : 0
+                if weight >= CGFloat(Float(0.3)) { symbolic |= 2 }
+                if width < 0 { symbolic |= 64 }
+                if width > 0 { symbolic |= 32 }
+                if metadata.sfntStyle.fixedPitch != nil && metadata.sfntStyle.fixedPitch != 0 { symbolic |= 1024 }
+                self.traits = Traits(symbolic: symbolic, weight: weight, width: width, slant: slant)
+            }
+        }
+    }
+
     struct Candidate: Sendable {
         let face: FontResourceCatalog.Face
         let instanceIndex: Int?
         let coordinates: [CGFloat]
+        let comparisonCoordinates: [UInt32: CGFloat]
         let traits: Traits
 
         var variations: [BundledFontVariation] {
@@ -58,6 +96,10 @@ struct FontResourceResolver: Sendable {
             FontVariationSelection(metadata: face.metadata, coordinates: coordinates)
         }
 
+        var selection: Selection {
+            Selection(variation: variationSelection, comparison: comparisonCoordinates, traits: traits)
+        }
+
         func applying(variation: [UInt32: CGFloat]) -> Self {
             let original = variationSelection
             let merged = original.merging(variation)
@@ -66,7 +108,7 @@ struct FontResourceResolver: Sendable {
         }
 
         func selecting(_ selection: FontVariationSelection, comparison: [UInt32: CGFloat]) -> Self {
-            let before = variationSelection.comparisonCoordinates(requested: [:])
+            let before = comparisonCoordinates
             let after = comparison
             var traits = traits
             for axis in face.metadata.variationAxes where before[axis.tag] != after[axis.tag] {
@@ -86,13 +128,7 @@ struct FontResourceResolver: Sendable {
             if traits.width < 0 { traits.symbolic |= 64 }
             if traits.width > 0 { traits.symbolic |= 32 }
             return Self(face: face, instanceIndex: instanceIndex,
-                        coordinates: selection.coordinates, traits: traits)
-        }
-
-        fileprivate func nondefaultVariation(_ tag: UInt32) -> CGFloat? {
-            guard let index = face.metadata.variationAxes.firstIndex(where: { $0.tag == tag }),
-                  coordinates[index] != face.metadata.variationAxes[index].defaultValue else { return nil }
-            return coordinates[index]
+                        coordinates: selection.coordinates, comparisonCoordinates: comparison, traits: traits)
         }
 
         fileprivate var opticalSize: CGFloat? {
@@ -235,19 +271,26 @@ struct FontResourceResolver: Sendable {
     }
 
     static func selectSymbolicVariant(_ candidates: [Candidate], from source: Candidate, weight: CGFloat) -> Candidate? {
+        selectSymbolicVariant(candidates, from: source.selection, weight: weight)
+    }
+
+    static func selectSymbolicVariant(_ candidates: [Candidate], from source: Selection, weight: CGFloat) -> Candidate? {
         let weight = CGFloat(Float(weight))
         let tolerance: CGFloat = 0.001
         let sourceOptical = source.opticalSize
-        let gradeAxis = source.face.metadata.variationAxes.first {
+        let gradeAxis = source.variation.metadata.variationAxes.first {
             $0.tag == 0x4752_4144 && $0.maximumValue > $0.minimumValue
         }
         func normalizedGrade(_ candidate: Candidate) -> CGFloat {
             guard let axis = gradeAxis else { return 0 }
             // An absent coordinate uses the source axis default, even for a different face.
-            let value = candidate.nondefaultVariation(axis.tag) ?? axis.defaultValue
+            let value = candidate.comparisonCoordinates[axis.tag] ?? axis.defaultValue
             return (value - axis.minimumValue) / (axis.maximumValue - axis.minimumValue)
         }
-        let sourceGrade = normalizedGrade(source)
+        let sourceGrade = gradeAxis.map { axis in
+            ((source.comparisonCoordinates[axis.tag] ?? axis.defaultValue) - axis.minimumValue)
+                / (axis.maximumValue - axis.minimumValue)
+        } ?? 0
         func opticalDistance(_ candidate: Candidate) -> CGFloat {
             abs((candidate.opticalSize ?? 0) - (sourceOptical ?? 0))
         }
@@ -276,10 +319,14 @@ struct FontResourceResolver: Sendable {
     }
 
     static func symbolicWeightVariation(from source: Candidate, weight: CGFloat) -> [UInt32: CGFloat]? {
+        symbolicWeightVariation(from: source.selection, weight: weight)
+    }
+
+    static func symbolicWeightVariation(from source: Selection, weight: CGFloat) -> [UInt32: CGFloat]? {
         let tag: UInt32 = 0x7767_6874
-        guard let axis = source.face.metadata.variationAxes.first(where: { $0.tag == tag }) else { return nil }
+        guard let axis = source.variation.metadata.variationAxes.first(where: { $0.tag == tag }) else { return nil }
         let target = FontWeightScale.weightClass(for: CGFloat(Float(weight)))
-        var variation = source.variationSelection.comparisonCoordinates(requested: [:])
+        var variation = source.comparisonCoordinates
         // An implicit default is absent from the comparison dictionary and still
         // constructs a copy. An explicit nearby coordinate stops the fallback.
         if let current = variation[tag], abs(current - target) < 0.001 { return nil }
@@ -311,7 +358,7 @@ struct FontResourceResolver: Sendable {
     ) -> Candidate {
         let metadata = face.metadata
         let coordinates = instance?.coordinates ?? metadata.variationAxes.map(\.defaultValue)
-        var weight = FontWeightScale.logicalWeight(forClass: CGFloat(metadata.sfntStyle.weightClass ?? 400))
+        var weight = FontWeightScale.metadataWeight(forClass: CGFloat(metadata.sfntStyle.weightClass ?? 400))
         var width = CGFloat(Float(Int(metadata.sfntStyle.widthClass ?? 5) - 5) * 0.1)
         let italic = (metadata.sfntStyle.selection ?? 0) & 1 != 0 ||
             (metadata.sfntStyle.macStyle ?? 0) & 2 != 0
@@ -323,7 +370,7 @@ struct FontResourceResolver: Sendable {
             where instance?.index != metadata.defaultVariationInstanceIndex {
             switch axis.tag {
             case 0x7767_6874:
-                weight = FontWeightScale.logicalWeight(forClass: coordinate.rounded())
+                weight = FontWeightScale.metadataWeight(forClass: coordinate.rounded())
             case 0x7764_7468:
                 width = logicalWidth(forPercent: coordinate)
             default:
@@ -336,6 +383,8 @@ struct FontResourceResolver: Sendable {
         if width > 0 { symbolic |= 32 }
         if metadata.sfntStyle.fixedPitch != 0 && metadata.sfntStyle.fixedPitch != nil { symbolic |= 1024 }
         return Candidate(face: face, instanceIndex: instance?.index, coordinates: coordinates,
+                         comparisonCoordinates: FontVariationSelection(metadata: metadata, coordinates: coordinates)
+                            .comparisonCoordinates(requested: [:]),
                          traits: Traits(symbolic: symbolic, weight: weight, width: width, slant: slant))
     }
 

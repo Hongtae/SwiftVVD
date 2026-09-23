@@ -2,6 +2,7 @@ import Dispatch
 import Foundation
 import Synchronization
 import XCTest
+import func VVD.makeGraphicsDeviceContext
 @testable import VUI
 
 private enum ObservedFontDefinition: FontDefinition {
@@ -367,6 +368,7 @@ final class FontProviderResolutionTests: XCTestCase {
     }
 
     // ASSERTIONS fontSymbolicCandidateScoring27Observed
+    // ASSERTIONS fontMetadataWeightPrecision27Observed
     func testSymbolicSelectionAcceptsTheFirstWeightWithinTolerance() throws {
         let (bundle, _) = try scoringFixtureBundle("near")
         var environment = EnvironmentValues()
@@ -377,7 +379,71 @@ final class FontProviderResolutionTests: XCTestCase {
             return XCTFail("A supported italic copy must select a family candidate.")
         }
         XCTAssertEqual(candidate.postScriptName, "P440bo-Italic")
+        XCTAssertEqual(candidate.traits.weight, 0.0800000011920929)
         XCTAssertEqual(descriptor.pointSize, 23)
+    }
+
+    // ASSERTIONS fontMetadataWeightPrecision27Observed
+    func testRegisteredMetadataWeightRetainsDoublePrecisionThroughFontResolution() throws {
+        let controls: [(UInt16, CGFloat)] = [
+            (0, -0.8999999761581421), (1, -0.6000000238418579), (4, 0), (10, 1),
+            (11, -0.8669999814033509), (99, -0.6030000233650208),
+            (100, -0.6000000238418579), (199, -0.4020000061392784),
+            (200, -0.4000000059604645), (299, -0.23170000419020653),
+            (300, -0.23000000417232513), (399, -0.0023000000417232533), (400, 0),
+            (401, 0.0020000000298023225), (440, 0.0800000011920929),
+            (450, 0.10000000149011612), (499, 0.1980000029504299),
+            (500, 0.20000000298023224), (530, 0.23000000566244125),
+            (599, 0.299000011831522), (600, 0.30000001192092896),
+            (699, 0.39900000602006913), (700, 0.4000000059604645),
+            (780, 0.5600000202655793), (899, 0.7980000120401383),
+            (900, 0.800000011920929), (999, 0.9980000001192093), (1000, 1)
+        ]
+        for (weightClass, expected) in controls {
+            let (bundle, _) = try metadataWeightFixtureBundle(weightClass: weightClass, kind: "static")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            let font = Font.custom("Roboto-Regular", fixedSize: 23)
+            let descriptor = font.resolveDescriptor(in: environment.fontResolutionContext)
+            let provider = try XCTUnwrap(descriptor.typefaceProvider(in: environment) as? BundledFontProvider)
+            XCTAssertEqual(descriptor.resolvedWeight, expected, "class \(weightClass)")
+            XCTAssertEqual(provider.weight.value, expected, "class \(weightClass)")
+            XCTAssertEqual(font.resolveTraits(in: environment.fontResolutionContext).weight, expected,
+                           "class \(weightClass)")
+            XCTAssertEqual(provider.resource.url.lastPathComponent, "Font.ttf")
+            XCTAssertEqual(descriptor.pointSize, 23)
+        }
+    }
+
+    // ASSERTIONS fontMetadataWeightPrecision27Observed
+    func testRegisteredVariationWeightKeepsItsProducerThroughSelectionAndCopies() throws {
+        let tag: UInt32 = 0x7767_6874
+        for kind in ["default", "instance"] {
+            for (weightClass, registered, active, changed): (UInt16, CGFloat, CGFloat, CGFloat) in [
+                (440, 0.0800000011920929, 0.08000000566244125, 0.0820000022649765),
+                (699, 0.39900000602006913, 0.39900001883506775, 0.4000000059604645)
+            ] {
+                let (bundle, _) = try metadataWeightFixtureBundle(weightClass: weightClass, kind: kind)
+                var environment = EnvironmentValues()
+                environment.resourceBundle = bundle
+                let catalog = try XCTUnwrap(BundledFontCatalog.catalog(in: bundle))
+                let name = kind == "instance" ? "Roboto-Thin" : "Roboto-Regular"
+                let candidate = try XCTUnwrap(catalog.resources.resolver.named(name))
+                let descriptor = Font.custom(name, fixedSize: 23)
+                    .resolveDescriptor(in: environment.fontResolutionContext)
+                XCTAssertEqual(candidate.traits.weight, registered)
+                XCTAssertEqual(descriptor.resolvedWeight, registered)
+                XCTAssertEqual(candidate.applying(variation: [:]).traits.weight, registered)
+                XCTAssertEqual(candidate.applying(variation: [tag: CGFloat(weightClass)]).traits.weight, registered)
+                let changedCandidate = candidate.applying(variation: [tag: CGFloat(weightClass + 1)])
+                XCTAssertEqual(changedCandidate.traits.weight, changed)
+                XCTAssertEqual(changedCandidate.variations.first { $0.tag == tag }?.value, CGFloat(weightClass + 1))
+                XCTAssertEqual(FontWeightScale.logicalWeight(forClass: CGFloat(weightClass)), active)
+                let resource = FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
+                XCTAssertEqual(try XCTUnwrap(resource.fontWithSize(31.375)).selectedWeight, registered)
+                XCTAssertEqual(descriptor.adding(features: [TypefaceShapingFeature(tag: 0x746e_756d)]).resolvedWeight, registered)
+            }
+        }
     }
 
     // ASSERTIONS fontSymbolicCandidateScoring27Observed
@@ -425,6 +491,700 @@ final class FontProviderResolutionTests: XCTestCase {
             }
             XCTAssertEqual(candidate.postScriptName, expected)
             XCTAssertEqual(candidate.variations.first { $0.tag == 0x4752_4144 }?.value, grade)
+        }
+    }
+
+    // ASSERTIONS fontGradeRetention27Observed
+    func testRegisteredGradeDefaultsSurviveResourceAndModifierCopies() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let appContext = StyleTestAppContext()
+        let grade: UInt32 = 0x4752_4144
+        for name in ["Roboto-Regular", "Roboto-CandidateRegular"] {
+            let descriptor = FontDescriptor(source: .named(name, bundle), pointSize: 23,
+                                            variation: [grade: 100])
+            let original = FontResource(descriptor: descriptor, in: context)
+            for resource in [original, try XCTUnwrap(original.fontWithSize(31.375))] {
+                let face = try XCTUnwrap(resource.provider.makeTypeface(appContext, dpi: 72))
+                XCTAssertEqual(face.selectedFont?.variation, [:])
+                XCTAssertEqual(face.selectedFont?.variationExtras, [grade: 100])
+                XCTAssertEqual(resource.descriptor().variation, [grade: 100])
+                let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+                for font in [wrapped.weight(.heavy), wrapped.weight(.heavy).italic(),
+                             wrapped.monospacedDigit().weight(.heavy)] {
+                    let resolved = font.resolve(in: context)
+                    let selected = try XCTUnwrap(resolved.resource.provider.makeTypeface(appContext, dpi: 72)?.selectedFont)
+                    XCTAssertEqual(selected.variation, [0x7767_6874: 800])
+                    XCTAssertEqual(selected.variationExtras, [grade: 100])
+                    XCTAssertEqual(selected.pointSize, resource.pointSize)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontGradeRetention27Observed
+    func testGeneratedGradeSeparatesNameRequestsFromResourceCopies() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let appContext = StyleTestAppContext()
+        let grade: UInt32 = 0x4752_4144
+        let custom = Font.custom("Roboto-Regular_wght_GRAD550000", fixedSize: 23)
+        let original = custom.resolve(in: context).resource
+        let originalFace = try XCTUnwrap(original.provider.makeTypeface(appContext, dpi: 72)?.selectedFont)
+        XCTAssertEqual(originalFace.variation, [grade: 85])
+        XCTAssertNil(originalFace.variationExtras)
+        let namedItalic = try XCTUnwrap(custom.italic().resolve(in: context).resource.provider
+            .makeTypeface(appContext, dpi: 72)?.selectedFont)
+        XCTAssertEqual(namedItalic.variation, [grade: 75])
+        XCTAssertNil(namedItalic.variationExtras)
+        let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+        let suppliedItalic = try XCTUnwrap(supplied.italic().resolve(in: context).resource.provider
+            .makeTypeface(appContext, dpi: 72)?.selectedFont)
+        XCTAssertEqual(suppliedItalic.variation, [grade: 85])
+        XCTAssertEqual(suppliedItalic.variationExtras, [grade: 85])
+        let resized = try XCTUnwrap(original.fontWithSize(31.375))
+        let resizedFace = try XCTUnwrap(resized.provider.makeTypeface(appContext, dpi: 72)?.selectedFont)
+        XCTAssertEqual(resizedFace.variation, [grade: 85])
+        XCTAssertEqual(resizedFace.variationExtras, [grade: 85])
+        XCTAssertEqual(resizedFace.pointSize, 31.375)
+        XCTAssertNil(original.provider.makeTypeface(appContext, dpi: 72)?.selectedFont?.variationExtras)
+    }
+
+    // ASSERTIONS fontGradeRetention27Observed fontSymbolicCandidateScoring27Observed
+    func testSymbolicGradeScoringUsesConvertedCoordinates() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-sparse")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let grade: UInt32 = 0x4752_4144
+        for (value, suffix) in [(CGFloat(70), "460000"), (75, "4B0000"), (85, "550000")] {
+            let descriptor = FontDescriptor(source: .named("Roboto-Regular", bundle), pointSize: 23,
+                                            variation: [grade: value])
+            let resource = FontResource(descriptor: descriptor, in: context)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+            let copied = supplied.weight(.heavy).italic().resolve(in: context).resource
+            let face = try XCTUnwrap(copied.provider.makeTypeface(StyleTestAppContext(), dpi: 72)?.selectedFont)
+            XCTAssertEqual(face.descriptor.postScriptName, "Roboto-Italic_wght_GRAD" + suffix)
+            XCTAssertEqual(face.variation, [grade: max(75, value)])
+            XCTAssertEqual(face.variationExtras, [grade: value])
+        }
+    }
+
+    // ASSERTIONS fontGradeRetention27Observed
+    func testRegisteredGradeRequestsRemainSeparateFromSelectedCoordinates() throws {
+        let appContext = StyleTestAppContext()
+        let grade: UInt32 = 0x4752_4144, weight: UInt32 = 0x7767_6874
+        for value: CGFloat in [70, 75, 85, 90, 99.99999, 100, 110] {
+            // Each construction starts with an independent resource identity.
+            // Equivalent requests otherwise reuse the first cached originals.
+            let (bundle, _) = try scoringFixtureBundle("grade")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            environment.defaultFontRenderingMode = .vector()
+            let context = environment.fontResolutionContext
+            let descriptor = FontDescriptor(source: .named("Roboto-Regular", bundle), pointSize: 23,
+                                            variation: [grade: value])
+            let original = FontResource(descriptor: descriptor, in: context)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+            let expectedGrade: CGFloat? = value >= 100 ? nil : max(75, (value * 10000).rounded(.towardZero) / 10000)
+            for (font, expectedWeight) in [(supplied, CGFloat(400)), (supplied.italic(), 400),
+                                           (supplied.weight(.heavy), 800),
+                                           (supplied.weight(.heavy).italic(), 800),
+                                           (supplied.monospacedDigit(), 400)] {
+                let resolved = font.resolve(in: context).resource
+                let selected = try XCTUnwrap(resolved.provider.makeTypeface(appContext, dpi: 72)?.selectedFont)
+                XCTAssertEqual(selected.variation[grade], expectedGrade)
+                XCTAssertEqual(selected.variation[weight] ?? 400, expectedWeight)
+                XCTAssertEqual(selected.variationExtras, [grade: value])
+            }
+        }
+        for request: [UInt32: CGFloat] in [[:], [weight: 400], [grade: 85, weight: 400], [grade: 85, weight: 530]] {
+            let (bundle, _) = try scoringFixtureBundle("grade")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            environment.defaultFontRenderingMode = .vector()
+            let context = environment.fontResolutionContext
+            let descriptor = FontDescriptor(source: .named("Roboto-Regular", bundle), pointSize: 23,
+                                            variation: request)
+            let resource = FontResource(descriptor: descriptor, in: context)
+            XCTAssertEqual(resource.descriptor().variation, request)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+            for font in [supplied, supplied.italic(), supplied.weight(.heavy), supplied.monospacedDigit()] {
+                let selected = try XCTUnwrap(font.resolve(in: context).resource.provider
+                    .makeTypeface(appContext, dpi: 72)?.selectedFont)
+                XCTAssertEqual(selected.variationExtras, request)
+                if let requested = request[weight] { XCTAssertEqual(selected.variation[weight] ?? 400, requested) }
+                if let requested = request[grade] { XCTAssertEqual(selected.variation[grade], requested) }
+            }
+        }
+    }
+
+    // ASSERTIONS fontGradeRetention27Observed fontSymbolicVariationRetention27Observed
+    func testGradeFallbackCopiesTheComparisonDictionaryBeforeReentry() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let grade: UInt32 = 0x4752_4144
+        for (value, expected, name) in [
+            (CGFloat(70), CGFloat(75), "Roboto-Regular_wght_GRAD460000"),
+            (99.99999, 99.9999, "Roboto-Regular")
+        ] {
+            let descriptor = FontDescriptor(source: .named("Roboto-Regular", bundle), pointSize: 23,
+                                            variation: [grade: value])
+            let resource = FontResource(descriptor: descriptor, in: context)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+            let copied = supplied.italic().resolve(in: context).resource
+            let selected = try XCTUnwrap(copied.provider.makeTypeface(StyleTestAppContext(), dpi: 72)?.selectedFont)
+            XCTAssertEqual(selected.descriptor.postScriptName, name)
+            XCTAssertEqual(selected.variation, [grade: expected])
+            XCTAssertEqual(selected.variationExtras, [grade: expected])
+            XCTAssertEqual(selected.pointSize, 23)
+            XCTAssertEqual(resource.descriptor().variation, [grade: value])
+        }
+    }
+
+    // ASSERTIONS fontRegisteredCopyHistory27Observed
+    func testRegisteredVariationCopySelectsSizeFromItsRetainedConstruction() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let appContext = StyleTestAppContext()
+        let grade: UInt32 = 0x4752_4144
+        for (request, size): (CGFloat, CGFloat) in [(75, 12), (85, 12), (90, 12), (70, 23), (100, 23), (99.99999, 23)] {
+            let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, variation: [grade: request]), in: context)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+            let copied = supplied.italic().platformFont(in: context)
+            XCTAssertEqual(copied.pointSize, size, "request \(request)")
+            let face = try XCTUnwrap(copied.provider.makeTypeface(appContext, dpi: 72))
+            XCTAssertEqual(face.selectedFont?.pointSize, size)
+            XCTAssertEqual(try XCTUnwrap(face as? any VVDFontBackedTypeface).font.pointSize, size)
+            XCTAssertEqual(original.pointSize, 23)
+            let twice = supplied.italic().italic().platformFont(in: context)
+            XCTAssertEqual(twice.pointSize, request == 99.99999 ? 12 : size)
+        }
+        let generated = Font.custom("Roboto-Regular_wght_GRAD550000", fixedSize: 23).platformFont(in: context)
+        let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: generated)))
+        XCTAssertEqual(supplied.italic().platformFont(in: context).pointSize, 23)
+        XCTAssertEqual(supplied.weight(.regular).italic().platformFont(in: context).pointSize, 12)
+        XCTAssertEqual(supplied.leading(.tight).italic().platformFont(in: context).pointSize, 12)
+        XCTAssertEqual(supplied.italic().leading(.tight).platformFont(in: context).pointSize, 23)
+    }
+
+    // ASSERTIONS fontRegisteredCopyHistory27Observed
+    func testRegisteredSymbolicCopyDropsOnlyTheUnmergedOriginalAttributes() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        let context = environment.fontResolutionContext
+        let digits = TypefaceShapingFeature(tag: 0x746e_756d)
+        for request: CGFloat in [85, 70, 99.99999, 100] {
+            let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, shapingFeatures: [digits], language: "en", variation: [0x4752_4144: request]), in: context)
+            let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+            let italic = supplied.italic().platformFont(in: context)
+            XCTAssertEqual(italic.shapingFeatures, request == 85 ? [] : [digits])
+            XCTAssertEqual(italic.language, request == 85 ? nil : "en")
+            XCTAssertEqual(italic.pointSize, request == 85 ? 12 : 23)
+            let after = supplied.italic().monospacedDigit().platformFont(in: context)
+            XCTAssertFalse(after.shapingFeatures.isEmpty)
+            let before = supplied.monospacedDigit().italic().platformFont(in: context)
+            XCTAssertEqual(before.shapingFeatures.isEmpty, request == 85)
+            XCTAssertEqual(original.shapingFeatures, [digits])
+            XCTAssertEqual(original.language, "en")
+        }
+    }
+
+    // ASSERTIONS fontRegisteredCopyHistory27Observed
+    func testRegisteredAttributeCopyHistoryIsSeparateFromFeatureCopies() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        let context = environment.fontResolutionContext
+        let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 23, variation: [0x4752_4144: 85]), in: context)
+        let descriptor = original.descriptor()
+        let features = descriptor.adding(features: [TypefaceShapingFeature(tag: 0x746e_756d)])
+        XCTAssertEqual(features.symbolicTrait(1, active: true).pointSize, 12)
+        let cleared = descriptor.clearFeatures().symbolicTrait(1, active: true)
+        XCTAssertEqual(cleared.pointSize, 23)
+        XCTAssertEqual(cleared.symbolicTrait(1, active: true).pointSize, 23)
+        XCTAssertTrue(cleared.shapingFeatures.isEmpty)
+        let language = descriptor.withTypesetting(language: "en").symbolicTrait(1, active: true)
+        XCTAssertEqual(language.pointSize, 23)
+        XCTAssertNil(language.language)
+        let supplied = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+        var redacted = context
+        redacted.shouldRedactContent = true
+        XCTAssertEqual(supplied.italic().platformFont(in: redacted).pointSize, 23)
+        let near = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 23, variation: [0x4752_4144: 99.99999]), in: context)
+        let pending = near.descriptor().symbolicTrait(1, active: true)
+        XCTAssertEqual(pending.clearFeatures().symbolicTrait(1, active: true).pointSize, 12)
+        let realized = FontResource(descriptor: near.descriptor().symbolicTrait(1, active: true), in: context)
+        XCTAssertEqual(realized.descriptor().clearFeatures().symbolicTrait(1, active: true).pointSize, 23)
+    }
+
+    // ASSERTIONS fontRegisteredCopyHistory27Observed
+    func testRegisteredCopyOptionsSurviveResourceSizingAndLazySelection() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let source = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 23, variation: [0x4752_4144: 85]), in: context)
+        let copied = FontResource(descriptor: source.descriptor().clearFeatures(), in: context)
+        for (resource, expectedSize) in [(source, CGFloat(12)), (copied, 31.375)] {
+            let resized = try XCTUnwrap(resource.fontWithSize(31.375))
+            let selected = resized.descriptor().symbolicTrait(1, active: true)
+            XCTAssertEqual(selected.pointSize, expectedSize)
+            let face = try XCTUnwrap(selected.typefaceProvider(in: environment)
+                .makeTypeface(StyleTestAppContext(), dpi: 72)?.selectedFont)
+            XCTAssertEqual(face.pointSize, expectedSize)
+            XCTAssertEqual(face.variation, [0x4752_4144: 85])
+            XCTAssertEqual(source.pointSize, 23)
+        }
+        let descriptor = source.descriptor()
+        XCTAssertTrue(descriptor.withTypesetting() === descriptor)
+        let ratio = descriptor.withTypesetting(lineHeightRatio: 1.2).symbolicTrait(1, active: true)
+        XCTAssertEqual(ratio.pointSize, 23)
+        XCTAssertEqual(ratio.languageAwareLineHeightRatio, 1.2)
+    }
+
+    // ASSERTIONS fontRegisteredCacheEquality27Observed
+    func testRegisteredFontCacheReusesNearVariationInBothRequestOrders() throws {
+        for reverse in [false, true] {
+            let (bundle, _) = try scoringFixtureBundle("grade-upright")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            let context = environment.fontResolutionContext
+            let first = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, variation: [0x4752_4144: 99.99999]), in: context)
+            let second = FontResource(descriptor: first.descriptor().symbolicTrait(1, active: true), in: context)
+            let fonts = (reverse ? [second, first] : [first, second]).map {
+                Font(provider: FontBox(Font.PlatformFontProvider(font: $0)))
+            }
+            XCTAssertEqual(fonts[0], fonts[1])
+            XCTAssertEqual(fonts[0].hashValue, fonts[1].hashValue)
+            XCTAssertFalse(first.provider.isEqual(to: second.provider))
+            let selected = fonts.map { $0.italic().platformFont(in: context) }
+            XCTAssertTrue(selected[0] === selected[1])
+            XCTAssertEqual(selected.map(\.pointSize), reverse ? [12, 12] : [23, 23])
+            XCTAssertEqual(first.pointSize, 23)
+            if !reverse {
+                let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: selected[0])))
+                XCTAssertTrue(wrapped.italic().platformFont(in: context) === selected[0])
+            }
+        }
+    }
+
+    // ASSERTIONS fontRegisteredCacheEquality27Observed
+    func testRegisteredFontIdentityPreservesSelectedVariationAndDescriptorName() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        let context = environment.fontResolutionContext
+        func resource(_ value: CGFloat) -> FontResource {
+            FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, variation: [0x4752_4144: value]), in: context)
+        }
+        for (first, second, equal, hashEqual): (CGFloat, CGFloat, Bool, Bool) in [
+            (99.99999, 99.9999, true, true), (85, 85.00000001, true, true),
+            (85, 85.0002, false, false), (70, 71, false, false), (70, 75, false, false),
+            (100, 110, true, true), (100, 99.99999, false, true)
+        ] {
+            let a = resource(first), b = resource(second)
+            XCTAssertEqual(a == b, equal, "\(first), \(second)")
+            XCTAssertEqual(a.hashValue == b.hashValue, hashEqual, "\(first), \(second)")
+        }
+        for value: CGFloat in [75, 85, 99.99999, 100] {
+            let original = resource(value)
+            let copied = FontResource(descriptor: original.descriptor().clearFeatures(), in: context)
+            XCTAssertEqual(original, copied)
+            XCTAssertEqual(original.hashValue, copied.hashValue)
+            let ratio = FontResource(descriptor: original.descriptor().withTypesetting(lineHeightRatio: 1.2), in: context)
+            XCTAssertEqual(original == ratio, value != 75)
+            XCTAssertEqual(original.hashValue, ratio.hashValue)
+        }
+    }
+
+    // ASSERTIONS fontRegisteredCacheEquality27Observed
+    func testRegisteredFontCacheRetainsOriginalExtrasHashPartitions() throws {
+        for reverse in [false, true] {
+            let (bundle, _) = try scoringFixtureBundle("grade-upright")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            let context = environment.fontResolutionContext
+            for (variation, name): ([UInt32: CGFloat], String) in [
+                ([0x4752_4144: 100], "Roboto-Regular"), ([:], "Roboto-Regular"),
+                ([0x4752_4144: 85], "Roboto-Regular_wght_GRAD550000")
+            ] {
+                let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                    pointSize: 23, variation: variation), in: context)
+                let named = FontResource(descriptor: FontDescriptor(source: .named(name, bundle), pointSize: 23), in: context)
+                let fonts = (reverse ? [named, original] : [original, named]).map {
+                    Font(provider: FontBox(Font.PlatformFontProvider(font: $0)))
+                }
+                // Lookup preserves extras presence independently of value comparison.
+                XCTAssertEqual(fonts[0], fonts[1])
+                XCTAssertNotEqual(fonts[0].hashValue, fonts[1].hashValue)
+                let selected = fonts.map { $0.italic().platformFont(in: context) }
+                XCTAssertFalse(selected[0] === selected[1])
+                let expected: [CGFloat] = variation[0x4752_4144] == 85 ? [12, 23] : [23, 23]
+                XCTAssertEqual(selected.map(\.pointSize), reverse ? expected.reversed() : expected)
+            }
+        }
+    }
+
+    // ASSERTIONS fontRegisteredCacheEquality27Observed
+    func testRegisteredFontCacheKeepsAttributeHistoryOutsideValueComparison() throws {
+        for value: CGFloat in [75, 85] {
+            for ratio in [false, true] {
+                for reverse in [false, true] {
+                    let (bundle, _) = try scoringFixtureBundle("grade-upright")
+                    var environment = EnvironmentValues()
+                    environment.resourceBundle = bundle
+                    let context = environment.fontResolutionContext
+                    let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                        pointSize: 23, variation: [0x4752_4144: value]), in: context)
+                    let descriptor = ratio ? original.descriptor().withTypesetting(lineHeightRatio: 1.2)
+                        : original.descriptor().clearFeatures()
+                    let copied = FontResource(descriptor: descriptor, in: context)
+                    let resources = reverse ? [copied, original] : [original, copied]
+                    let results = resources.map {
+                        Font(provider: FontBox(Font.PlatformFontProvider(font: $0))).italic().platformFont(in: context)
+                    }
+                    let shares = value != 75 || !ratio
+                    XCTAssertEqual(results[0] === results[1], shares)
+                    let sizes: [CGFloat] = shares ? (reverse ? [23, 23] : [12, 12])
+                        : (reverse ? [23, 12] : [12, 23])
+                    XCTAssertEqual(results.map(\.pointSize), sizes)
+                    XCTAssertEqual(original.pointSize, 23)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontRegisteredExtrasCache27Observed
+    func testRegisteredFontFeaturesCompareSelectedSettingsBeforeCacheLookup() throws {
+        func f(_ tag: String, _ value: UInt32) -> TypefaceShapingFeature {
+            TypefaceShapingFeature(tag: tag, value: value)!
+        }
+        let pairs: [([TypefaceShapingFeature], [TypefaceShapingFeature], Bool)] = [
+            ([], [f("liga", 1)], true), ([], [f("ss01", 0)], true),
+            ([f("tnum", 1)], [f("tnum", 2)], true),
+            ([f("dnom", 1)], [f("dnom", 2)], false),
+            ([f("tnum", 1), f("ss01", 1)], [f("ss01", 1), f("tnum", 1)], true),
+            ([f("ss01", 1)], [f("ss01", 1), f("ss01", 0), f("ss01", 1)], true),
+            ([], [f("liga", 0), f("liga", 1)], true),
+            ([f("tnum", 1)], [f("tnum", 1), f("pnum", 0)], true)
+        ]
+        for (first, second, equal) in pairs {
+            let (bundle, _) = try scoringFixtureBundle("grade-upright")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            let context = environment.fontResolutionContext
+            let fonts = [first, second].map {
+                Font(provider: FontBox(Font.PlatformFontProvider(font: FontResource(
+                    descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                        pointSize: 23, shapingFeatures: $0), in: context))))
+            }
+            XCTAssertEqual(fonts[0] == fonts[1], equal, "\(first), \(second)")
+            XCTAssertEqual(fonts[0].hashValue, fonts[1].hashValue)
+            let results = fonts.map { $0.italic().platformFont(in: context) }
+            XCTAssertEqual(results[0] === results[1], equal)
+        }
+    }
+
+    // ASSERTIONS fontRegisteredExtrasCache27Observed
+    func testRegisteredFontPublishesAndCopiesItsSelectedFeatureRequests() throws {
+        let (bundle, _) = try scoringFixtureBundle("grade-upright")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let app = StyleTestAppContext()
+        func selectedRequests(_ resource: FontResource) throws -> [TypefaceShapingFeature] {
+            let base = try XCTUnwrap(resource.provider.makeTypeface(app, dpi: 72))
+            let face = ShapingFeatureTypeface(base, features: resource.shapingFeatures)
+            return try XCTUnwrap(face.selectedFont).features.map {
+                TypefaceShapingFeature(tag: $0.tag, value: $0.value)
+            }
+        }
+        let digits = TypefaceShapingFeature(tag: "tnum", value: 1)!
+        let alternate = TypefaceShapingFeature(tag: "ss01", value: 1)!
+        let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 23, shapingFeatures: [digits, alternate]), in: context)
+        XCTAssertEqual(try selectedRequests(original), [alternate, digits])
+        XCTAssertEqual(original.descriptor().shapingFeatures, [alternate, digits])
+        let font = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+        let italic = font.italic().platformFont(in: context)
+        XCTAssertEqual(try selectedRequests(italic), [digits, alternate])
+        XCTAssertEqual(italic.descriptor().shapingFeatures, [digits, alternate])
+        for size: CGFloat in [0, 31.375] {
+            let copy = try XCTUnwrap(original.fontWithSize(size))
+            XCTAssertFalse(copy === original)
+            XCTAssertEqual(copy.pointSize, size == 0 ? 23 : size)
+            XCTAssertEqual(try selectedRequests(copy), [digits, alternate])
+            XCTAssertEqual(copy.descriptor().shapingFeatures, [digits, alternate])
+        }
+        XCTAssertTrue(original.fontWithSize(23) === original)
+        XCTAssertEqual(try selectedRequests(original), [alternate, digits])
+        let defaultFeature = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 23, shapingFeatures: [TypefaceShapingFeature(tag: "liga", value: 1)!]), in: context)
+        XCTAssertTrue(try selectedRequests(defaultFeature).isEmpty)
+        XCTAssertTrue(defaultFeature.descriptor().shapingFeatures.isEmpty)
+    }
+
+    // ASSERTIONS fontRegisteredExtrasCache27Observed
+    func testRegisteredFeatureAliasesReuseNearVariationWithoutErasingLanguage() throws {
+        for reverse in [false, true] {
+            let (bundle, _) = try scoringFixtureBundle("grade-upright")
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            let context = environment.fontResolutionContext
+            let originals = [(CGFloat(99.99999), UInt32(1)), (99.9999, 2)].map { value, feature in
+                FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                    pointSize: 23, shapingFeatures: [TypefaceShapingFeature(tag: "tnum", value: feature)!],
+                    variation: [0x4752_4144: value]), in: context)
+            }
+            let results = (reverse ? originals.reversed() : originals).map {
+                Font(provider: FontBox(Font.PlatformFontProvider(font: $0))).italic().platformFont(in: context)
+            }
+            XCTAssertTrue(results[0] === results[1])
+            XCTAssertEqual(results.map(\.pointSize), reverse ? [12, 12] : [23, 23])
+            for (first, second, equal, hashEqual): (String?, String?, Bool, Bool) in [
+                ("en", "en", true, true), ("en", "en-US", false, true),
+                ("", nil, false, false), ("zh", "zh-CN", false, true)
+            ] {
+                let languages = [first, second].map {
+                    FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                        pointSize: 23, language: $0), in: context)
+                }
+                XCTAssertEqual(languages[0] == languages[1], equal)
+                XCTAssertEqual(languages[0].hashValue == languages[1].hashValue, hashEqual)
+            }
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testRegisteredOpticalSizeFollowsPointSizeAfterSymbolicSelection() throws {
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = StyleTestAppContext()
+        let optical: UInt32 = 0x6f70_737a
+        for size: CGFloat in [0.5, 23, 23.375, 99.99999, 100, 300] {
+            for italic in [false, true] {
+                let font = Font.custom("Roboto-Regular", fixedSize: size)
+                let descriptor = (italic ? font.italic() : font).resolveDescriptor(in: environment.fontResolutionContext)
+                let resource = FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
+                let candidate = try XCTUnwrap(descriptor.resolvedConstruction.candidate)
+                XCTAssertEqual(candidate.variations.first { $0.tag == optical }?.value, 100)
+                let expectedName = italic ? "P450bo-Italic" : "Roboto-Regular"
+                let value = min(max((size * 10000).rounded(.towardZero) / 10000, 1), 200)
+                for dpi: UInt32 in [72, 216] {
+                    let face = try XCTUnwrap(resource.provider.makeTypeface(context, dpi: dpi) as? VectorTypeface)
+                    let selected = try XCTUnwrap(face.selectedFont)
+                    XCTAssertEqual(selected.descriptor.postScriptName, expectedName)
+                    XCTAssertEqual(selected.variation, value == 100 ? [:] : [optical: value])
+                    XCTAssertNil(selected.variationExtras)
+                    XCTAssertEqual(selected.pointSize, size)
+                    let physical = size == 99.99999 ? 100 : min(max(size, 1), 200)
+                    XCTAssertEqual(face.font.variationCoordinates[optical], physical)
+                    XCTAssertEqual(face.outlineSource.font.variationCoordinates[optical], physical)
+                }
+                let resized = try XCTUnwrap(resource.fontWithSize(31.375))
+                let copied = try XCTUnwrap(resized.provider.makeTypeface(context, dpi: 144)?.selectedFont)
+                XCTAssertEqual(copied.variation, [optical: 31.375])
+                XCTAssertEqual(copied.descriptor.postScriptName, expectedName)
+                XCTAssertNil(copied.variationExtras)
+            }
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testExplicitOpticalDefaultsRemainRequestsThroughSizeAndFeatureCopies() throws {
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let context = StyleTestAppContext()
+        let optical: UInt32 = 0x6f70_737a
+        for value: CGFloat in [25, 100, 300, 0, 23.00000001] {
+            let resource = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, variation: [optical: value]), in: environment.fontResolutionContext)
+            let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+            let feature = wrapped.monospacedDigit().platformFont(in: environment.fontResolutionContext)
+            for copy in [resource, feature, try XCTUnwrap(resource.fontWithSize(31.375))] {
+                let selected = try XCTUnwrap(copy.provider.makeTypeface(context, dpi: 144)?.selectedFont)
+                let bounded = min(max((value * 10000).rounded(.towardZero) / 10000, 1), 200)
+                XCTAssertEqual(selected.variation, value == 100 ? [:] : [optical: bounded])
+                XCTAssertEqual(selected.variationExtras, [optical: value])
+                XCTAssertEqual(copy.descriptor().variation, [optical: value])
+            }
+        }
+        let automatic = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 100), in: environment.fontResolutionContext)
+        let explicit = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+            pointSize: 100, variation: [optical: 100]), in: environment.fontResolutionContext)
+        let a = try XCTUnwrap(automatic.provider.makeTypeface(context, dpi: 72)?.selectedFont)
+        let b = try XCTUnwrap(explicit.provider.makeTypeface(context, dpi: 72)?.selectedFont)
+        XCTAssertEqual(a.variation, b.variation)
+        XCTAssertEqual(a.descriptor.postScriptName, b.descriptor.postScriptName)
+        XCTAssertFalse(a.isEqual(to: b))
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testRegisteredOpticalEligibilityUsesTablesAndTheWholeNamedInstanceSet() throws {
+        let optical: UInt32 = 0x6f70_737a
+        for (family, names, automatic) in [
+            ("Optica", ["Regular", "Thin", "CondensedRegular"], false),
+            ("SameOp", ["Regular", "Thin"], true),
+            ("NoStat", ["Regular"], false)
+        ] {
+            let (bundle, _) = try opticalFixtureBundle(family)
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            environment.defaultFontRenderingMode = .vector()
+            for name in names {
+                let resource = Font.custom(family + "-" + name, fixedSize: 23)
+                    .platformFont(in: environment.fontResolutionContext)
+                for copy in [resource, try XCTUnwrap(resource.fontWithSize(31.375))] {
+                    let selected = try XCTUnwrap(copy.provider.makeTypeface(StyleTestAppContext(), dpi: 72)?.selectedFont)
+                    var expected: [UInt32: CGFloat] = automatic ? [optical: copy.pointSize] : [:]
+                    if name == "Thin" { expected[0x7767_6874] = 100 }
+                    if name == "CondensedRegular" { expected[optical] = 75 }
+                    XCTAssertEqual(selected.variation, expected, family + "-" + name)
+                    XCTAssertEqual(selected.descriptor.postScriptName, family + "-" + name)
+                }
+            }
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testGeneratedOpticalNamesAndSuppliedCopiesKeepAutomaticConstruction() throws {
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let context = StyleTestAppContext()
+        let optical: UInt32 = 0x6f70_737a
+        let resource = Font.custom("Roboto-Regular_wght_opsz460000", fixedSize: 23)
+            .platformFont(in: environment.fontResolutionContext)
+        let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+        let feature = wrapped.monospacedDigit().platformFont(in: environment.fontResolutionContext)
+        for original in [resource, feature] {
+            for copy in [original, try XCTUnwrap(original.fontWithSize(31.375))] {
+                let face = try XCTUnwrap(copy.provider.makeTypeface(context, dpi: 216) as? VectorTypeface)
+                let selected = try XCTUnwrap(face.selectedFont)
+                let suffix = copy.pointSize == 23 ? "170000" : "1F6000"
+                XCTAssertEqual(selected.descriptor.postScriptName, "Roboto-Regular_wght_opsz" + suffix)
+                XCTAssertEqual(selected.variation, [optical: copy.pointSize])
+                XCTAssertNil(selected.variationExtras)
+                let supplied = FixedFontProvider(face, pointSize: copy.pointSize)
+                let resized = try XCTUnwrap(supplied.withSize(31.375)?.face as? VectorTypeface)
+                XCTAssertEqual(resized.selectedFont?.variation, [optical: 31.375])
+                XCTAssertEqual(resized.font.variationCoordinates[optical], 31.375)
+                XCTAssertEqual(resized.outlineSource.font.variationCoordinates[optical], 31.375)
+                XCTAssertEqual(face.font.variationCoordinates[optical], copy.pointSize)
+            }
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testGeneratedOpticalDefaultSeparatesRetainedSizeAndReconstructedFeatureCopies() throws {
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        var environment = EnvironmentValues()
+        environment.resourceBundle = bundle
+        environment.defaultFontRenderingMode = .vector()
+        let optical: UInt32 = 0x6f70_737a
+        let context = StyleTestAppContext()
+        let original = Font.custom("Roboto-Regular_wght_opsz460000", fixedSize: 100)
+            .platformFont(in: environment.fontResolutionContext)
+        let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+        let feature = wrapped.monospacedDigit().platformFont(in: environment.fontResolutionContext)
+        for (resource, comparison) in [(original, [optical: CGFloat(100)]), (feature, [:])] {
+            let selected = try XCTUnwrap(resource.provider.makeTypeface(context, dpi: 72)?.selectedFont)
+            XCTAssertEqual(selected.variation, comparison)
+            XCTAssertEqual(selected.descriptor.postScriptName, "Roboto-Regular")
+            XCTAssertTrue(selected.descriptor.derivesOpticalSize)
+            XCTAssertNil(selected.variationExtras)
+            let resized = try XCTUnwrap(resource.fontWithSize(31.375))
+            let copied = try XCTUnwrap(resized.provider.makeTypeface(context, dpi: 72)?.selectedFont)
+            XCTAssertEqual(copied.variation, [optical: 31.375])
+            XCTAssertEqual(copied.descriptor.postScriptName,
+                           resource === original ? "Roboto-Regular_wght_opsz1F6000" : "Roboto-Regular")
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testOpticalConstructionPreservesIndependentRawWeightExtras() throws {
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let weight: UInt32 = 0x7767_6874
+        let optical: UInt32 = 0x6f70_737a
+        for value: CGFloat in [100, 700, 1000] {
+            let original = FontResource(descriptor: FontDescriptor(source: .named("Roboto-Regular", bundle),
+                pointSize: 23, variation: [weight: value]), in: environment.fontResolutionContext)
+            let wrapped = Font(provider: FontBox(Font.PlatformFontProvider(font: original)))
+            let feature = wrapped.monospacedDigit().platformFont(in: environment.fontResolutionContext)
+            for resource in [original, feature, try XCTUnwrap(original.fontWithSize(31.375))] {
+                let selected = try XCTUnwrap(resource.provider.makeTypeface(StyleTestAppContext(), dpi: 144)?.selectedFont)
+                XCTAssertEqual(selected.variation, [weight: min(value, 900), optical: resource.pointSize])
+                XCTAssertEqual(selected.variationExtras, [weight: value])
+                XCTAssertEqual(resource.descriptor().variation, [weight: value])
+                let weightSuffix = String(Int(min(value, 900) * 65536), radix: 16, uppercase: true)
+                let opticalSuffix = resource.pointSize == 23 ? "170000" : "1F6000"
+                XCTAssertEqual(selected.descriptor.postScriptName, "Roboto-Regular_wght" + weightSuffix + "_opsz" + opticalSuffix)
+            }
+        }
+    }
+
+    // ASSERTIONS fontOpticalRealization27Observed
+    func testOpticalCopiesUpdateBitmapVectorAndIndependentLayoutFaces() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let (bundle, _) = try scoringFixtureBundle("optical-close")
+        let context = StyleTestAppContext(graphicsDeviceContext: device)
+        let optical: UInt32 = 0x6f70_737a
+        for rendering: Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            var environment = EnvironmentValues()
+            environment.resourceBundle = bundle
+            environment.defaultFontRenderingMode = rendering
+            let resource = Font.custom("Roboto-Regular", fixedSize: 23)
+                .platformFont(in: environment.fontResolutionContext)
+            for dpi: UInt32 in [72, 216] {
+                let face = try XCTUnwrap(resource.provider.makeTypeface(context, dpi: dpi))
+                let provider = FixedFontProvider(face, pointSize: 23)
+                let copy = try XCTUnwrap(provider.withSize(31.375)?.face)
+                for (value, size) in [(face, CGFloat(23)), (copy, 31.375)] {
+                    let backed = try XCTUnwrap(value as? any VVDFontBackedTypeface)
+                    let layout = (value as? VectorTypeface)?.outlineSource.font ?? (value as? TextureTypeface)?.outlineSource.font
+                    XCTAssertEqual(backed.font.variationCoordinates[optical], size)
+                    XCTAssertEqual(backed.font.pointSize, size)
+                    XCTAssertEqual(layout?.variationCoordinates[optical], size)
+                    XCTAssertEqual(layout?.pointSize, size)
+                    XCTAssertEqual(value.selectedFont?.variation, [optical: size])
+                    XCTAssertEqual(value.selectedFont?.descriptor.postScriptName, "Roboto-Regular")
+                }
+                let originalFont = try XCTUnwrap(face as? any VVDFontBackedTypeface).font
+                let copiedFont = try XCTUnwrap(copy as? any VVDFontBackedTypeface).font
+                XCTAssertFalse(originalFont === copiedFont)
+                XCTAssertTrue(originalFont.source === copiedFont.source)
+            }
         }
     }
 
@@ -938,7 +1698,9 @@ final class FontProviderResolutionTests: XCTestCase {
         let regular = directory.appendingPathComponent("Roboto-VariableFont_wdth,wght.ttf")
         let italic = directory.appendingPathComponent("Roboto-Italic-VariableFont_wdth,wght.ttf")
         let specs: [(URL, String, Int, Int)]
-        if fixture == "grade" {
+        if fixture == "grade-upright" {
+            specs = [(regular, "Font.ttf", 400, 100)]
+        } else if fixture.hasPrefix("grade") {
             specs = [(regular, "Font.ttf", 400, 100), (italic, "Roboto-Italic.ttf", 400, 100)]
         } else {
             let last = fixture == "optical-far" ? 460 : 450
@@ -962,12 +1724,27 @@ final class FontProviderResolutionTests: XCTestCase {
                 let tag = String(bytes: data[record..<record + 4], encoding: .ascii)
                 let offset = uint32(record + 8)
                 if tag == "OS/2" { write16(weight, at: offset + 4) }
-                else if tag == "STAT" && fixture == "grade" { data[record + 3] = 0x5f }
+                else if tag == "STAT" && fixture.hasPrefix("grade") { data[record + 3] = 0x5f }
                 else if tag == "fvar" {
                     let axes = offset + uint16(offset + 4)
                     if fixture == "near" { data[record + 3] = 0x5f }
-                    else if fixture == "grade" {
+                    else if fixture.hasPrefix("grade") {
                         data.replaceSubrange(axes + 20..<axes + 24, with: "GRAD".utf8)
+                        if fixture == "grade-sparse" {
+                            let start = axes + uint16(offset + 8) * uint16(offset + 10)
+                            let count = uint16(offset + 12), size = uint16(offset + 14)
+                            let instances = (0..<count).compactMap { index -> Data? in
+                                let position = start + index * size
+                                let weight = uint32(position + 4), grade = uint32(position + 8)
+                                guard (weight == 400 * 65536 && grade == 100 * 65536) ||
+                                    (source == italic && weight == 100 * 65536 && grade == 75 * 65536) else { return nil }
+                                return data.subdata(in: position..<position + size)
+                            }
+                            XCTAssertEqual(instances.count, source == italic ? 2 : 1)
+                            write16(instances.count, at: offset + 12)
+                            data.replaceSubrange(start..<start + instances.count * size,
+                                                 with: instances.reduce(into: Data()) { $0.append($1) })
+                        }
                     } else {
                         write16(0, at: offset + 12)
                         write32(weight * 65536, at: axes + 8)
@@ -978,9 +1755,9 @@ final class FontProviderResolutionTests: XCTestCase {
                     }
                 }
             }
-            let oldName = fixture == "grade" ? "Condensed" : "Roboto-Italic"
-            let newName = fixture == "grade" ? "Candidate" : String(name.dropLast(4))
-            if fixture == "grade" || source == italic {
+            let oldName = fixture.hasPrefix("grade") ? "Condensed" : "Roboto-Italic"
+            let newName = fixture.hasPrefix("grade") ? "Candidate" : String(name.dropLast(4))
+            if fixture.hasPrefix("grade") || source == italic {
                 let old = try XCTUnwrap(oldName.data(using: .utf16BigEndian))
                 let new = try XCTUnwrap(newName.data(using: .utf16BigEndian))
                 XCTAssertEqual(old.count, new.count)
@@ -1001,6 +1778,48 @@ final class FontProviderResolutionTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: config).write(to: configURL)
         let catalog = try XCTUnwrap(BundledFontCatalog.catalog(in: bundle))
         XCTAssertEqual(catalog.resources.resourceDirectory, fonts)
+        return (bundle, fonts)
+    }
+
+    private func opticalFixtureBundle(_ family: String) throws -> (Bundle, URL) {
+        let (bundle, fonts) = try fixtureBundle(weightClass: family == "NoStat" ? 440 : 400)
+        let path = fonts.appendingPathComponent("Font.ttf")
+        var data = try Data(contentsOf: path)
+        func uint16(_ offset: Int) -> Int { Int(data[offset]) << 8 | Int(data[offset + 1]) }
+        func uint32(_ offset: Int) -> Int { uint16(offset) << 16 | uint16(offset + 2) }
+        func write32(_ value: Int, at offset: Int) {
+            for index in 0..<4 { data[offset + index] = UInt8((value >> ((3 - index) * 8)) & 255) }
+        }
+        for index in 0..<uint16(4) {
+            let record = 12 + index * 16
+            let tag = String(bytes: data[record..<record + 4], encoding: .ascii)
+            let offset = uint32(record + 8)
+            if tag == "STAT", family == "NoStat" { data[record + 3] = 0x5f }
+            if tag == "fvar" {
+                let axes = offset + uint16(offset + 4)
+                data.replaceSubrange(axes + 20..<axes + 24, with: "opsz".utf8)
+                write32(65536, at: axes + 24)
+                write32(100 * 65536, at: axes + 28)
+                write32(200 * 65536, at: axes + 32)
+                if family == "NoStat" {
+                    data[offset + 12] = 0
+                    data[offset + 13] = 0
+                    write32(440 * 65536, at: axes + 8)
+                } else if family == "SameOp" {
+                    let start = axes + uint16(offset + 8) * uint16(offset + 10)
+                    let size = uint16(offset + 14)
+                    for instance in 0..<uint16(offset + 12) {
+                        write32(100 * 65536, at: start + instance * size + 8)
+                    }
+                }
+            }
+        }
+        let old = try XCTUnwrap("Roboto".data(using: .utf16BigEndian))
+        let new = try XCTUnwrap(family.data(using: .utf16BigEndian))
+        XCTAssertEqual(old.count, new.count)
+        while let range = data.range(of: old) { data.replaceSubrange(range, with: new) }
+        // These axis derivatives exercise metadata and construction, not visual design.
+        try data.write(to: path)
         return (bundle, fonts)
     }
 
@@ -1062,6 +1881,44 @@ final class FontProviderResolutionTests: XCTestCase {
                 for index in 0..<4 { data[maximum + index] = UInt8(truncatingIfNeeded: value >> (24 - index * 8)) }
             }
         }
+        try data.write(to: url)
+        return (bundle, fonts)
+    }
+
+    private func metadataWeightFixtureBundle(weightClass: UInt16, kind: String) throws -> (Bundle, URL) {
+        let (bundle, fonts) = try fixtureBundle(weightClass: kind == "instance" ? 400 : weightClass)
+        let url = fonts.appendingPathComponent("Font.ttf")
+        var data = try Data(contentsOf: url)
+        func u16(_ offset: Int) -> Int { Int(data[offset]) << 8 | Int(data[offset + 1]) }
+        func u32(_ offset: Int) -> Int { u16(offset) << 16 | u16(offset + 2) }
+        func put16(_ offset: Int, _ value: Int) {
+            data[offset] = UInt8(truncatingIfNeeded: value >> 8)
+            data[offset + 1] = UInt8(truncatingIfNeeded: value)
+        }
+        func put32(_ offset: Int, _ value: Int) {
+            put16(offset, value >> 16); put16(offset + 2, value)
+        }
+        let record = try XCTUnwrap((0..<u16(4)).map { 12 + $0 * 16 }.first {
+            String(bytes: data[$0..<$0 + 4], encoding: .ascii) == "fvar"
+        })
+        if kind == "static" {
+            data[record + 3] = 0x5f
+        } else {
+            let offset = u32(record + 8)
+            let axes = offset + u16(offset + 4)
+            let instances = axes + u16(offset + 8) * u16(offset + 10)
+            let size = u16(offset + 14)
+            if kind == "default" {
+                put32(axes + 8, Int(weightClass) * 65536)
+                put16(offset + 12, 0)
+            } else {
+                let regular = Data(data[(instances + 3 * size)..<(instances + 4 * size)])
+                data.replaceSubrange((instances + size)..<(instances + 2 * size), with: regular)
+                put16(offset + 12, 2)
+                put32(instances + 4, Int(weightClass) * 65536)
+            }
+        }
+        // Descriptor-only derivatives retain the existing source and fixture lifetime.
         try data.write(to: url)
         return (bundle, fonts)
     }
