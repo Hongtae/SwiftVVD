@@ -228,26 +228,22 @@ public struct Font: Hashable, Sendable {
         applyEnvironmentModifiers: Bool = true
     ) -> TypefaceCascade {
         let font = !applyEnvironmentModifiers ||
-            (provider is FontBox<PlatformFontProvider> && environment.fontModifiers.isEmpty)
+            (provider is FontBox<PlatformFontProvider> && environment.fontModifiers.isEmpty &&
+                !environment.shouldRedactContent)
             ? self : resolved(in: environment)
         var shapingFeatures = font.typefaceFeatures
-        if applyEnvironmentModifiers && environment.fontModifiers.usesMonospacedDigits {
+        if applyEnvironmentModifiers && !environment.shouldRedactContent &&
+            environment.fontModifiers.usesMonospacedDigits {
             shapingFeatures.append(
                 contentsOf: MonospacedDigitModifier.shapingFeatures
             )
         }
-        var uniqueShapingFeatures: [TypefaceShapingFeature] = []
-        for feature in shapingFeatures where
-            !uniqueShapingFeatures.contains(feature) {
-            uniqueShapingFeatures.append(feature)
-        }
-
         let system = font.typefaceProvider as? SystemFontProvider
         let external = font.typefaceProvider as? ExternalFontProvider
         let catalog = BundledFontCatalog.shared
         let locale = environment.locale
         let design = system?.design ?? external?.design ?? .default
-        let families = catalog.configuration.fonts(
+        let families = catalog.configuration.fallbacks(
             for: locale,
             design: design
         )
@@ -259,11 +255,15 @@ public struct Font: Hashable, Sendable {
         let primary = font.typeface(forContext: context, dpi: dpi)
 
         var ordinaryFaces: [Typeface] = []
+        var defaultFallbackIndices = IndexSet()
+        var primaryIndex: Int?
         if system == nil, let primary {
+            primaryIndex = ordinaryFaces.count
             ordinaryFaces.append(primary)
         }
 
-        for family in families {
+        for candidate in families {
+            let family = candidate.font
             let face: Typeface?
             if family == catalog.configuration.systemFont(for: design),
                let system {
@@ -289,6 +289,10 @@ public struct Font: Hashable, Sendable {
             else {
                 continue
             }
+            if system != nil, family == catalog.configuration.systemFont(for: design) {
+                primaryIndex = ordinaryFaces.count
+            }
+            if candidate.isDefault { defaultFallbackIndices.insert(ordinaryFaces.count) }
             ordinaryFaces.append(face)
         }
 
@@ -305,6 +309,7 @@ public struct Font: Hashable, Sendable {
                 context: context, dpi: dpi, isItalic: false,
                 deferLoading: true, isEmojiFallback: true
             ) {
+                defaultFallbackIndices.insert(ordinaryFaces.count)
                 ordinaryFaces.append(face)
             }
         }
@@ -324,7 +329,16 @@ public struct Font: Hashable, Sendable {
         return TypefaceCascade(
             ordinaryFaces: ordinaryFaces,
             missingGlyphFace: missingGlyphFace,
-            shapingFeatures: uniqueShapingFeatures
+            primaryIndex: primaryIndex,
+            isSystemFont: system != nil,
+            fontLanguage: (font.provider as? FontBox<PlatformFontProvider>)?.base.font.language,
+            // Repeated requests retain their position. An earlier identical
+            // value can be overridden between that occurrence and the last one.
+            shapingFeatures: shapingFeatures,
+            // System requests retain common settings before a concrete fallback
+            // normalizes them. File and supplied faces own only their settings.
+            fallbackFeatures: system == nil ? [] : VVD.FontFeatures.cascadeRequests(shapingFeatures),
+            defaultFallbackIndices: defaultFallbackIndices
         )
     }
 

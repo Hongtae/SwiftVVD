@@ -188,7 +188,9 @@ final class EmojiFontTests: XCTestCase {
                     XCTAssertFalse(first.face.hasColorGlyphs)
                 } else {
                     XCTAssertTrue(first.face.isEmojiFallback, text)
-                    XCTAssertEqual(first.face.identifier,
+                    let selected = try XCTUnwrap(first.face as? ShapingFeatureTypeface)
+                    XCTAssertTrue(selected.isSystemFont)
+                    XCTAssertEqual(selected.base.identifier,
                                    preset == "color" ? "deferred:NotoColorEmoji:0" : "deferred:NotoEmoji:0")
                     XCTAssertTrue(glyphs.allSatisfy { $0.sourceRange == 0..<text.unicodeScalars.count })
                 }

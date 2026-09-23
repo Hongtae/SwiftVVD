@@ -21,6 +21,8 @@ final class FontResource: Hashable, @unchecked Sendable {
     private let preferredLanguageGroup: Int
     private let metricLanguageGroup: Int
     private let source: FontDescriptor.Source
+    private let variation: [UInt32: CGFloat]?
+    private let selection: FontDescriptor.Resolution?
     private let renderingMode: Font.DefaultRenderingMode
 
     init(descriptor: FontDescriptor, in context: Font.Context) {
@@ -37,7 +39,17 @@ final class FontResource: Hashable, @unchecked Sendable {
         self.preferredLanguageGroup = data?.preferredGroup(for: Locale.preferredLanguages) ?? 0
         self.metricLanguageGroup = descriptor.language.map { data?.preferredGroup(for: [$0]) ?? 0 }
             ?? preferredLanguageGroup
-        self.source = descriptor.source
+        let selection = descriptor.resolvedConstruction
+        if let catalog = selection.catalog, let candidate = selection.candidate {
+            self.source = .selected(catalog, candidate, nil)
+            self.variation = (selection.provider as? BundledFontProvider)?.resolvedVariation?.extras
+                ?? candidate.variationSelection.descriptorVariation
+            self.selection = selection
+        } else {
+            self.source = descriptor.source
+            self.variation = descriptor.variation
+            self.selection = nil
+        }
         self.renderingMode = descriptor.renderingMode ?? context.defaultFontRenderingMode
         if case let .system(_, _, _, _, style) = descriptor.source {
             self.textStyle = style
@@ -50,14 +62,25 @@ final class FontResource: Hashable, @unchecked Sendable {
     func descriptor() -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: shapingFeatures,
                        renderingMode: renderingMode, language: language,
-                       languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
+                       languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy, variation: variation,
+                       resolution: selection)
     }
 
-    /// Creates an independent font request while retaining the original traits.
+    /// Copies the selected construction at another point size.
     func fontWithSize(_ requestedSize: CGFloat) -> FontResource? {
         let size = requestedSize == 0 ? pointSize : requestedSize
         guard size.isFinite, size > 0 else { return nil }
         if size == pointSize { return self }
+        var resizedSelection = selection
+        if let selection, let value = selection.provider as? BundledFontProvider {
+            let provider = BundledFontProvider(resource: value.resource, size: size, weight: value.weight,
+                renderingMode: value.renderingMode, variations: value.variations,
+                appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex,
+                resolvedVariation: value.resolvedVariation)
+            resizedSelection = FontDescriptor.Resolution(provider: provider, weight: selection.weight,
+                catalog: selection.catalog, candidate: selection.candidate,
+                usesVariationBase: selection.usesVariationBase)
+        }
         let resizedSource: FontDescriptor.Source
         if case let .typeface(provider) = source {
             let resized: any TypefaceProvider
@@ -68,7 +91,8 @@ final class FontResource: Hashable, @unchecked Sendable {
             case let value as BundledFontProvider:
                 resized = BundledFontProvider(resource: value.resource, size: size, weight: value.weight,
                     renderingMode: value.renderingMode, variations: value.variations,
-                    appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex)
+                    appliesSyntheticWeight: value.appliesSyntheticWeight, instanceIndex: value.instanceIndex,
+                    resolvedVariation: value.resolvedVariation)
             case let value as ExternalFontProvider:
                 resized = ExternalFontProvider(source: value.source, size: size, weight: value.weight,
                     design: value.design, faceIndex: value.faceIndex, renderingMode: value.renderingMode)
@@ -82,7 +106,8 @@ final class FontResource: Hashable, @unchecked Sendable {
         }
         let descriptor = FontDescriptor(source: resizedSource, pointSize: size,
             shapingFeatures: shapingFeatures, renderingMode: renderingMode, language: language,
-            languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy)
+            languageAwareLineHeightRatio: languageAwareLineHeightRatio, stylePolicy: stylePolicy, variation: variation,
+            resolution: resizedSelection)
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = renderingMode
         return FontResource(descriptor: descriptor, in: environment.fontResolutionContext)
@@ -238,7 +263,8 @@ extension Font {
         var tag: ProviderTag { .typeface }
 
         func resolveDescriptor(in context: Context) -> FontDescriptor {
-            font.descriptor()
+            let descriptor = font.descriptor()
+            return context.shouldRedactContent ? descriptor.clearFeatures() : descriptor
         }
 
         func serialize(to encoder: any Encoder) throws {

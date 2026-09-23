@@ -39,6 +39,137 @@ final class TextParagraphAdmissionTests: XCTestCase {
             referenceDate: Date(timeIntervalSince1970: 0)))
     }
 
+    private func publishedGlyphs(_ line: ResolvedTextSource.LineGlyphs) -> [ResolvedTextSource.Glyph] {
+        line.glyphs.enumerated().compactMap { index, glyph in
+            glyph.glyphIndex != 65535 || index == 0 ? glyph : nil
+        }
+    }
+
+    private func forEachPublishedGlyph(in lines: [ResolvedTextSource.LineGlyphs],
+        callback: (ResolvedTextSource.Glyph, CGPoint) -> Void) {
+        for line in lines {
+            var index = 0
+            ResolvedTextSource.forEachGlyph(in: [line]) { glyph, point in
+                if glyph.glyphIndex != 65535 || index == 0 { callback(glyph, point) }
+                index += 1
+            }
+        }
+    }
+
+    // ASSERTIONS textAttributedCharacterOwner27Observed fontResourceIdentity27Observed
+    func testCanonicalCandidateUsesBaseFontAcrossOriginalFontRuns() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let url = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let regular = VUI.Font.file(url, size: 23)
+        let large = VUI.Font.file(url, size: 46)
+        let cases: [(String, Int, [UInt32])] = [
+            ("e\u{301}", 1, [703, 65535]),
+            ("e\u{301}\u{323}", 2, [1107, 65535, 65535]),
+            ("e\u{323}\u{301}", 2, [1107, 65535, 65535]),
+            ("e\u{301}\u{323}", 1, [1107, 65535, 169]),
+        ]
+        for scale: CGFloat in [1, 2] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            environment._contentScaleFactor = scale
+            for (string, changed, expected) in cases {
+                var text = Text(verbatim: "")
+                for (index, scalar) in string.unicodeScalars.enumerated() {
+                    text = text + Text(verbatim: String(scalar)).font(index == changed ? large : regular)
+                }
+                let source = try XCTUnwrap(text._resolve(context:
+                    GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                    referenceDate: Date(timeIntervalSince1970: 0)))
+                let raw = try XCTUnwrap(source.makeGlyphLayout(maxWidth: 500, maximumHeight: 500).lines.first)
+                let label = "\(Array(string.unicodeScalars)) changed=\(changed) scale=\(scale)"
+                XCTAssertEqual(raw.glyphs.map(\.glyphIndex), expected, label)
+                XCTAssertEqual(raw.glyphs.map(\.characterIndex), Array(expected.indices), label)
+                XCTAssertEqual(raw.ascender / scale, 43, accuracy: 1e-8, label)
+                XCTAssertEqual(raw.descender / scale, -11, accuracy: 1e-8, label)
+                for glyph in raw.glyphs where glyph.glyphIndex == 65535 {
+                    XCTAssertEqual(glyph.advance, .zero, label)
+                    XCTAssertEqual(glyph.positionOffset, .zero, label)
+                }
+                let layout = source.makeLayout(in: .init(width: 250, height: 250), layoutDirection: .leftToRight)
+                XCTAssertEqual(Set(layout.glyphAtoms().flatMap { Array($0.sourceRange) }),
+                               Set(expected.indices), label)
+            }
+        }
+    }
+
+    // ASSERTIONS fontFeatureNormalization27Observed textAttributedCharacterOwner27Observed
+    func testCanonicalTailComparesSelectedFeaturesInsteadOfRawRequests() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let url = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let provider = VUI.Font.file(url, size: 23).platformFont(in: environment.fontResolutionContext).provider
+        for (tag, a, b, equal): (String, UInt32, UInt32, Bool) in [
+            ("tnum", 1, 2, true), ("ss01", 1, 2, true), ("smcp", 1, 2, true),
+            ("numr", 1, 2, false), ("dnom", 1, 2, false), ("tnum", 1, 0, false),
+        ] {
+            let base = VUI.Font(typefaceProvider: provider, features: [TypefaceShapingFeature(tag: tag, value: a)!])
+            let tail = VUI.Font(typefaceProvider: provider, features: [TypefaceShapingFeature(tag: tag, value: b)!])
+            let text = Text(verbatim: "e\u{301}").font(base) + Text(verbatim: "\u{323}").font(tail)
+            let source = try XCTUnwrap(text._resolve(context:
+                GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                referenceDate: Date(timeIntervalSince1970: 0)))
+            let raw = try XCTUnwrap(source.makeGlyphLayout(maxWidth: 500, maximumHeight: 500).lines.first)
+            XCTAssertEqual(raw.glyphs.map(\.glyphIndex), [1107, 65535, equal ? 169 : 65535], tag)
+            XCTAssertEqual(raw.glyphs.map(\.characterIndex), [0, 1, 2], tag)
+        }
+    }
+
+    // ASSERTIONS fontLanguageConstruction27Observed fontStructureInputs27Observed textAttributedCharacterOwner27Observed
+    func testCanonicalTailKeepsOriginalLanguageOnReorderedPrimary() throws {
+        for locale in ["en", "ko"] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            environment.locale = Locale(identifier: locale)
+            func font(_ language: String?) -> VUI.Font {
+                let context = environment.fontResolutionContext
+                let descriptor = VUI.Font.system(size: 23).resolveDescriptor(in: context)
+                    .withTypesetting(language: language)
+                let resource = FontResource(descriptor: descriptor, in: context)
+                return VUI.Font(provider: FontBox(VUI.Font.PlatformFontProvider(font: resource)))
+            }
+            for language in [nil, "", "en", "en-US"] as [String?] {
+                let text = Text(verbatim: "e\u{301}").font(font(nil)) +
+                    Text(verbatim: "\u{323}").font(font(language))
+                let source = try XCTUnwrap(text._resolve(context:
+                    GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                    referenceDate: Date(timeIntervalSince1970: 0)))
+                let raw = try XCTUnwrap(source.makeGlyphLayout(maxWidth: 500, maximumHeight: 500).lines.first)
+                XCTAssertEqual(raw.glyphs.map(\.glyphIndex), [1107, 65535, language == nil ? 169 : 65535],
+                               "\(locale): \(language ?? "absent")")
+                XCTAssertEqual(raw.glyphs.map(\.characterIndex), [0, 1, 2])
+            }
+        }
+    }
+
+    // ASSERTIONS fontResourceIdentity27Observed textAttributedCharacterOwner27Observed
+    func testCanonicalTailPreservesMemoryResourceOwner() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let url = root.appendingPathComponent("Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf")
+        let bytes = try Data(contentsOf: url)
+        let first = VUI.Font.data(bytes, size: 23)
+        let independent = VUI.Font.data(bytes, size: 23)
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        for (tail, equal) in [(first, true), (independent, false)] {
+            let text = Text(verbatim: "e\u{301}").font(first) + Text(verbatim: "\u{323}").font(tail)
+            let source = try XCTUnwrap(text._resolve(context:
+                GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                referenceDate: Date(timeIntervalSince1970: 0)))
+            let raw = try XCTUnwrap(source.makeGlyphLayout(maxWidth: 500, maximumHeight: 500).lines.first)
+            XCTAssertEqual(raw.glyphs.map(\.glyphIndex), [1107, 65535, equal ? 169 : 65535])
+            XCTAssertEqual(raw.glyphs.map(\.characterIndex), [0, 1, 2])
+        }
+    }
+
     // ASSERTIONS textAttributedShapingContext27Observed
     func testPaintIntervalsPreserveShapingContextAndOriginalPublicRuns() throws {
         let cases: [(String, [UInt32], [[Int]], [CGFloat], [(CGFloat, CGFloat)])] = [
@@ -78,9 +209,9 @@ final class TextParagraphAdmissionTests: XCTestCase {
                 for (slice, width) in zip(slices, widths) { XCTAssertEqual(slice.typographicBounds.width, width, accuracy: 1e-8, string) }
                 let shaped = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
                 let raw = try XCTUnwrap(shaped.first)
-                XCTAssertEqual(raw.glyphs.map(\.glyphIndex), glyphs, string)
+                XCTAssertEqual(publishedGlyphs(raw).map(\.glyphIndex), glyphs, string)
                 var drawn: [CGPoint] = []
-                ResolvedTextSource.forEachGlyph(in: shaped) { _, position in drawn.append(position) }
+                forEachPublishedGlyph(in: shaped) { _, position in drawn.append(position) }
                 XCTAssertEqual(drawn.count, positions.count, string)
                 for (position, expected) in zip(drawn, positions) {
                     XCTAssertEqual((position.x - raw.originX) / scale, expected.0, accuracy: 1e-8, string)
@@ -148,12 +279,54 @@ final class TextParagraphAdmissionTests: XCTestCase {
                         XCTAssertEqual(slice.characterIndices.map { first.distance(to: $0) }, [expected[index]], label)
                     }
                 }
+                let raw = try XCTUnwrap(source.makeGlyphLayout(maxWidth: Int(200 * scale),
+                    maximumHeight: 100 * scale).lines.first)
+                XCTAssertEqual(raw.glyphs.map(\.characterIndex), Array(scalars.indices), label)
+                for glyph in raw.glyphs where glyph.glyphIndex == 65535 {
+                    XCTAssertEqual(glyph.advance, .zero, label)
+                    XCTAssertEqual(glyph.positionOffset, .zero, label)
+                }
                 // Public glyph projection must not remove source slots from
                 // the independent hit-testing and selection representation.
                 let atoms = layout.glyphAtoms()
                 XCTAssertEqual(Set(atoms.flatMap { Array($0.sourceRange) }), Set(scalars.indices), label)
                 XCTAssertEqual(atoms.map(\.sourceRange), source.glyphAtoms(in:
                     CGSize(width: 200, height: 100)).map(\.sourceRange), label)
+            }
+        }
+    }
+
+    // ASSERTIONS textAttributedShapingContext27Observed textLinePublication27Observed
+    func testDeletedRawSlotsDoNotAcquireTrackingOrKernAdvance() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let font = VUI.Font.file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"), size: 23, weight: .regular)
+        for scale: CGFloat in [1, 2] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            environment._contentScaleFactor = scale
+            for tracking in [false, true] {
+                for amount: CGFloat in [0, 2] {
+                    let hidden = Text(verbatim: "\u{34f}").font(font)
+                    let middle = tracking ? hidden.tracking(amount) : hidden.kerning(amount)
+                    let text = hidden + middle + Text(verbatim: "a").font(font)
+                    let source = try XCTUnwrap(text._resolve(context:
+                        GraphTextResolutionContext(environment: environment, sceneResources: scene),
+                        referenceDate: Date(timeIntervalSince1970: 0)))
+                    let line = try XCTUnwrap(source.makeGlyphLayout(maxWidth: Int(200 * scale),
+                        maximumHeight: 100 * scale).lines.first)
+                    XCTAssertEqual(line.glyphs.map(\.glyphIndex), [65535, 65535, 69])
+                    XCTAssertEqual(line.glyphs.map(\.characterIndex), [0, 1, 2])
+                    XCTAssertEqual(line.glyphs[0].advance, .zero)
+                    XCTAssertEqual(line.glyphs[1].advance, .zero)
+                    XCTAssertEqual(line.width / scale, 12.5107421875, accuracy: 1e-8)
+                    let layout = source.makeLayout(in: .init(width: 200, height: 100), layoutDirection: .leftToRight)
+                    let published = try XCTUnwrap(layout.first)
+                    let first = try XCTUnwrap(published.first?.characterIndices.first)
+                    XCTAssertEqual(published.map { $0.characterIndices.map { first.distance(to: $0) } }, [[0], [2]])
+                    XCTAssertEqual(published.typographicBounds.width, 12.5107421875, accuracy: 1e-8)
+                }
             }
         }
     }
@@ -246,9 +419,9 @@ final class TextParagraphAdmissionTests: XCTestCase {
                 }
                 let lines = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
                 let line = try XCTUnwrap(lines.first)
-                XCTAssertEqual(line.glyphs.map(\.glyphIndex), glyphs, text)
+                XCTAssertEqual(publishedGlyphs(line).map(\.glyphIndex), glyphs, text)
                 var positions: [CGPoint] = []
-                ResolvedTextSource.forEachGlyph(in: lines) { _, position in positions.append(position) }
+                forEachPublishedGlyph(in: lines) { _, position in positions.append(position) }
                 XCTAssertEqual(positions.count, expected.count, text)
                 for (position, value) in zip(positions, expected) {
                     XCTAssertEqual((position.x - line.originX) / scale, value.0, accuracy: 1e-8, text)
@@ -290,9 +463,9 @@ final class TextParagraphAdmissionTests: XCTestCase {
                 }
                 let lines = source.makeGlyphLayout(maxWidth: Int(200 * scale), maximumHeight: 100 * scale).lines
                 let line = try XCTUnwrap(lines.first)
-                XCTAssertEqual(line.glyphs.map(\.glyphIndex), glyphs, text)
+                XCTAssertEqual(publishedGlyphs(line).map(\.glyphIndex), glyphs, text)
                 var positions: [CGPoint] = []
-                ResolvedTextSource.forEachGlyph(in: lines) { _, position in positions.append(position) }
+                forEachPublishedGlyph(in: lines) { _, position in positions.append(position) }
                 XCTAssertEqual(positions.count, expected.count, text)
                 for (position, value) in zip(positions, expected) {
                     XCTAssertEqual((position.x - line.originX) / scale, value.0, accuracy: 1e-8, text)

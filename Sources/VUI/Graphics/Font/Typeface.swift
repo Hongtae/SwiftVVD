@@ -52,9 +52,13 @@ protocol Typeface {
         direction: TypefaceShapingDirection?,
         language: String?,
         features: [TypefaceShapingFeature],
-        optionalLigatureBoundaries: [Int]
+        optionalLigatureBoundaries: [Int],
+        retainsDeletedGlyphs: Bool,
+        characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText?
 
+    var selectedFont: SelectedFont? { get }
+    var featureCatalog: VVD.FontFeatures? { get }
     var lineHeight: CGFloat { get }
     var ascender: CGFloat { get }
     var descender: CGFloat { get }
@@ -73,6 +77,8 @@ protocol Typeface {
 }
 
 extension Typeface {
+    var selectedFont: SelectedFont? { nil }
+    var featureCatalog: VVD.FontFeatures? { nil }
     var isEmojiFallback: Bool { false }
     var hasColorGlyphs: Bool { false }
     func glyph(at index: UInt32) -> TypefaceGlyph? { nil }
@@ -84,7 +90,9 @@ extension Typeface {
         direction: TypefaceShapingDirection?,
         language: String?,
         features: [TypefaceShapingFeature],
-        optionalLigatureBoundaries: [Int]
+        optionalLigatureBoundaries: [Int],
+        retainsDeletedGlyphs: Bool,
+        characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         nil
     }
@@ -93,6 +101,20 @@ extension Typeface {
                features: [TypefaceShapingFeature]) -> TypefaceShapedText? {
         shape(text, direction: direction, language: language, features: features,
               optionalLigatureBoundaries: [])
+    }
+
+    func shape(_ text: String, direction: TypefaceShapingDirection?, language: String?,
+               features: [TypefaceShapingFeature], optionalLigatureBoundaries: [Int]) -> TypefaceShapedText? {
+        shape(text, direction: direction, language: language, features: features,
+              optionalLigatureBoundaries: optionalLigatureBoundaries, retainsDeletedGlyphs: false, characterInput: nil)
+    }
+
+    func shape(_ text: String, direction: TypefaceShapingDirection?, language: String?,
+               features: [TypefaceShapingFeature], optionalLigatureBoundaries: [Int],
+               retainsDeletedGlyphs: Bool) -> TypefaceShapedText? {
+        shape(text, direction: direction, language: language, features: features,
+              optionalLigatureBoundaries: optionalLigatureBoundaries,
+              retainsDeletedGlyphs: retainsDeletedGlyphs, characterInput: nil)
     }
 
     func glyphMetrics(for c: UnicodeScalar) -> TypefaceGlyphMetrics? {
@@ -202,6 +224,7 @@ private protocol VVDFontBackedTypeface: Typeface {
 }
 
 extension VVDFontBackedTypeface {
+    var featureCatalog: VVD.FontFeatures? { outlineSource.font.featureCatalog }
     private var outlineTransform: CGAffineTransform? {
         let (font, scale) = outlineSource
         guard let metrics = font.designMetrics else { return nil }
@@ -357,14 +380,18 @@ private struct ScaleInvariantTypefaceMetrics {
         direction: TypefaceShapingDirection?,
         language: String?,
         features: [TypefaceShapingFeature],
-        optionalLigatureBoundaries: [Int]
+        optionalLigatureBoundaries: [Int],
+        retainsDeletedGlyphs: Bool,
+        characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         guard let shaped = font.shape(
             text,
             direction: direction,
             language: language,
             features: features,
-            optionalLigatureBoundaries: optionalLigatureBoundaries
+            optionalLigatureBoundaries: optionalLigatureBoundaries,
+            retainsDeletedGlyphs: retainsDeletedGlyphs,
+            characterInput: characterInput
         ) else {
             return nil
         }
@@ -375,7 +402,7 @@ private struct ScaleInvariantTypefaceMetrics {
                     sourceIndex: glyph.sourceIndex,
                     sourceRange: glyph.sourceRange,
                     advance: CGSize(
-                        width: (glyph.advance.width + embolden) * renderScale,
+                        width: (glyph.advance.width + (glyph.index == 65535 ? 0 : embolden)) * renderScale,
                         height: glyph.advance.height * renderScale
                     ),
                     offset: glyph.offset * renderScale
@@ -394,6 +421,7 @@ private struct ScaleInvariantTypefaceMetrics {
 }
 
 struct TextureTypeface: VVDFontBackedTypeface {
+    let selectedFont: SelectedFont?
     let textureFont: VVD.TextureFont
     private let layoutMetrics: ScaleInvariantTypefaceMetrics?
     let decorationMetrics: TypefaceDecorationMetrics?
@@ -403,7 +431,8 @@ struct TextureTypeface: VVDFontBackedTypeface {
         textureFont: VVD.TextureFont,
         layoutFont: VVD.Font? = nil,
         renderScale: CGFloat = 1,
-        logicalEmbolden: CGFloat = 0
+        logicalEmbolden: CGFloat = 0,
+        selectedFont: SelectedFont? = nil
     ) {
         let metricsFont = layoutFont ?? (textureFont.isScalable ? nil : textureFont)
         let layoutMetrics = metricsFont.map {
@@ -414,6 +443,8 @@ struct TextureTypeface: VVDFontBackedTypeface {
             )
         }
         self.textureFont = textureFont
+        self.selectedFont = selectedFont ?? SelectedFont(supplied: layoutFont ?? textureFont,
+                                                         syntheticWeight: logicalEmbolden)
         self.layoutMetrics = layoutMetrics
         self.decorationMetrics = layoutMetrics?.decorationMetrics ??
             typefaceDecorationMetrics(for: textureFont)
@@ -521,7 +552,9 @@ struct TextureTypeface: VVDFontBackedTypeface {
         direction: TypefaceShapingDirection?,
         language: String?,
         features: [TypefaceShapingFeature],
-        optionalLigatureBoundaries: [Int]
+        optionalLigatureBoundaries: [Int],
+        retainsDeletedGlyphs: Bool,
+        characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         if let layoutMetrics {
             return layoutMetrics.shape(
@@ -529,7 +562,9 @@ struct TextureTypeface: VVDFontBackedTypeface {
                 direction: direction,
                 language: language,
                 features: features,
-                optionalLigatureBoundaries: optionalLigatureBoundaries
+                optionalLigatureBoundaries: optionalLigatureBoundaries,
+                retainsDeletedGlyphs: retainsDeletedGlyphs,
+                characterInput: characterInput
             )
         }
         guard let shaped = font.shape(
@@ -537,7 +572,9 @@ struct TextureTypeface: VVDFontBackedTypeface {
             direction: direction,
             language: language,
             features: features,
-            optionalLigatureBoundaries: optionalLigatureBoundaries
+            optionalLigatureBoundaries: optionalLigatureBoundaries,
+            retainsDeletedGlyphs: retainsDeletedGlyphs,
+            characterInput: characterInput
         ) else {
             return nil
         }
@@ -548,7 +585,7 @@ struct TextureTypeface: VVDFontBackedTypeface {
                     sourceIndex: glyph.sourceIndex,
                     sourceRange: glyph.sourceRange,
                     advance: CGSize(
-                        width: glyph.advance.width + textureFont.boldStrength,
+                        width: glyph.advance.width + (glyph.index == 65535 ? 0 : textureFont.boldStrength),
                         height: glyph.advance.height
                     ),
                     offset: glyph.offset
@@ -606,10 +643,14 @@ final class DeferredGlyphTypeface: Typeface {
         metrics.kernAdvance(left: left, right: right)
     }
     func shape(_ text: String, direction: TypefaceShapingDirection?, language: String?,
-               features: [TypefaceShapingFeature], optionalLigatureBoundaries: [Int]) -> TypefaceShapedText? {
+               features: [TypefaceShapingFeature], optionalLigatureBoundaries: [Int],
+               retainsDeletedGlyphs: Bool, characterInput: VVD.CharacterComposer.Input?) -> TypefaceShapedText? {
         metrics.shape(text, direction: direction, language: language, features: features,
-                      optionalLigatureBoundaries: optionalLigatureBoundaries)
+                      optionalLigatureBoundaries: optionalLigatureBoundaries,
+                      retainsDeletedGlyphs: retainsDeletedGlyphs, characterInput: characterInput)
     }
+    var selectedFont: SelectedFont? { metrics.selectedFont }
+    var featureCatalog: VVD.FontFeatures? { metrics.featureCatalog }
     var lineHeight: CGFloat { metrics.lineHeight }
     var ascender: CGFloat { metrics.ascender }
     var descender: CGFloat { metrics.descender }
@@ -628,6 +669,7 @@ final class DeferredGlyphTypeface: Typeface {
 }
 
 final class VectorTypeface: VVDFontBackedTypeface {
+    let selectedFont: SelectedFont?
     let font: VVD.Font
     let embolden: CGFloat
     let outlineThickness: CGFloat
@@ -655,7 +697,8 @@ final class VectorTypeface: VVDFontBackedTypeface {
          outlineThickness: CGFloat = 0,
          layoutFont: VVD.Font? = nil,
          renderScale: CGFloat = 1,
-         logicalEmbolden: CGFloat? = nil) {
+         logicalEmbolden: CGFloat? = nil,
+         selectedFont: SelectedFont? = nil) {
         let layoutMetrics = layoutFont.map {
             ScaleInvariantTypefaceMetrics(
                 font: $0,
@@ -665,6 +708,8 @@ final class VectorTypeface: VVDFontBackedTypeface {
         }
         self.font = font
         self.embolden = embolden
+        self.selectedFont = selectedFont ?? SelectedFont(supplied: layoutFont ?? font,
+                                                         syntheticWeight: logicalEmbolden ?? embolden)
         self.outlineThickness = outlineThickness
         self.layoutMetrics = layoutMetrics
         self.decorationMetrics = layoutMetrics?.decorationMetrics ??
@@ -755,7 +800,9 @@ final class VectorTypeface: VVDFontBackedTypeface {
         direction: TypefaceShapingDirection?,
         language: String?,
         features: [TypefaceShapingFeature],
-        optionalLigatureBoundaries: [Int]
+        optionalLigatureBoundaries: [Int],
+        retainsDeletedGlyphs: Bool,
+        characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         if let layoutMetrics {
             return layoutMetrics.shape(
@@ -763,7 +810,9 @@ final class VectorTypeface: VVDFontBackedTypeface {
                 direction: direction,
                 language: language,
                 features: features,
-                optionalLigatureBoundaries: optionalLigatureBoundaries
+                optionalLigatureBoundaries: optionalLigatureBoundaries,
+                retainsDeletedGlyphs: retainsDeletedGlyphs,
+                characterInput: characterInput
             )
         }
         guard let shaped = font.shape(
@@ -771,7 +820,9 @@ final class VectorTypeface: VVDFontBackedTypeface {
             direction: direction,
             language: language,
             features: features,
-            optionalLigatureBoundaries: optionalLigatureBoundaries
+            optionalLigatureBoundaries: optionalLigatureBoundaries,
+            retainsDeletedGlyphs: retainsDeletedGlyphs,
+            characterInput: characterInput
         ) else {
             return nil
         }
@@ -782,7 +833,7 @@ final class VectorTypeface: VVDFontBackedTypeface {
                     sourceIndex: glyph.sourceIndex,
                     sourceRange: glyph.sourceRange,
                     advance: CGSize(
-                        width: glyph.advance.width + embolden,
+                        width: glyph.advance.width + (glyph.index == 65535 ? 0 : embolden),
                         height: glyph.advance.height
                     ),
                     offset: glyph.offset

@@ -893,51 +893,15 @@ struct ResolvedTextSource {
     }
 
     struct TextGlyphs {
-        private struct SourceSpan {
+        struct SourceSpan {
             var range: Range<Int>
             var face: Typeface
             var makesGlyphs: Bool
         }
 
-        let glyphs: [Glyph]
-        let width: CGFloat
-        var height: CGFloat { ascender - descender }
-        let ascender: CGFloat
-        let descender: CGFloat
-        let lastFace: Typeface?
-        let lastCharacter: UnicodeScalar
-        var fontLineMetrics: FontLineMetrics? = nil
-        static func from(unicodeScalars: String.UnicodeScalarView,
-                         with faces: [Typeface],
-                         drawMissingGlyphs: Bool,
-                         prevFace: Typeface?,
-                         prevChar: UnicodeScalar,
-                         fontResource: FontResource? = nil,
-                         scaleFactor: CGFloat = 1,
-                         optionalLigatureBoundaries: [Int] = []) -> Self {
-            assert(faces.isEmpty == false)
+        static func sourceSpans(unicodeScalars: String.UnicodeScalarView, faces: [Typeface],
+                                drawMissingGlyphs: Bool) -> [SourceSpan] {
             let scalars = Array(unicodeScalars)
-            var glyphs: [Glyph] = []
-            var ascender: CGFloat = .zero
-            var descender: CGFloat = .zero
-            var width: CGFloat = .zero
-            var face1 = prevFace
-            var char1 = prevChar
-            let primaryMetrics = fontResource?.resolvedMetrics(for: faces[0], scaleFactor: scaleFactor)
-            let fontLineMetrics = primaryMetrics.map {
-                FontLineMetrics(metrics: $0, pointSize: fontResource!.pointSize,
-                                isTextStyle: fontResource!.stylePolicy != nil, scale: scaleFactor)
-            }
-            // Ordinary line inputs round in points before applying the render scale.
-            // Natural font leading remains a separate run metric.
-            let lineBoxAscender = primaryMetrics.map { floor($0.ascender + 0.5) * scaleFactor }
-                ?? faces[0].ascender
-            let lineBoxDescender = primaryMetrics.map { metrics in
-                let ascent = floor(metrics.ascender + 0.5)
-                let height = ascent + floor(-metrics.descender + 0.5)
-                return (ascent - (height > 0 ? height : 0.0001)) * scaleFactor
-            } ?? faces[0].descender
-
             var spans: [SourceSpan] = []
             func appendSpan(
                 _ range: Range<Int>,
@@ -1031,6 +995,52 @@ struct ResolvedTextSource {
                 }
             }
 
+            return spans
+        }
+
+        let glyphs: [Glyph]
+        let width: CGFloat
+        var height: CGFloat { ascender - descender }
+        let ascender: CGFloat
+        let descender: CGFloat
+        let lastFace: Typeface?
+        let lastCharacter: UnicodeScalar
+        var fontLineMetrics: FontLineMetrics? = nil
+        static func from(unicodeScalars: String.UnicodeScalarView,
+                         with faces: [Typeface],
+                         drawMissingGlyphs: Bool,
+                         prevFace: Typeface?,
+                         prevChar: UnicodeScalar,
+                         fontResource: FontResource? = nil,
+                         scaleFactor: CGFloat = 1,
+                         optionalLigatureBoundaries: [Int] = [],
+                         characterInput: VVD.CharacterComposer.Input? = nil) -> Self {
+            assert(faces.isEmpty == false)
+            let scalars = Array(unicodeScalars)
+            var glyphs: [Glyph] = []
+            var ascender: CGFloat = .zero
+            var descender: CGFloat = .zero
+            var width: CGFloat = .zero
+            var face1 = prevFace
+            var char1 = prevChar
+            let primaryMetrics = fontResource?.resolvedMetrics(for: faces[0], scaleFactor: scaleFactor)
+            let fontLineMetrics = primaryMetrics.map {
+                FontLineMetrics(metrics: $0, pointSize: fontResource!.pointSize,
+                                isTextStyle: fontResource!.stylePolicy != nil, scale: scaleFactor)
+            }
+            // Ordinary line inputs round in points before applying the render scale.
+            // Natural font leading remains a separate run metric.
+            let lineBoxAscender = primaryMetrics.map { floor($0.ascender + 0.5) * scaleFactor }
+                ?? faces[0].ascender
+            let lineBoxDescender = primaryMetrics.map { metrics in
+                let ascent = floor(metrics.ascender + 0.5)
+                let height = ascent + floor(-metrics.descender + 0.5)
+                return (ascent - (height > 0 ? height : 0.0001)) * scaleFactor
+            } ?? faces[0].descender
+
+            let spans = sourceSpans(unicodeScalars: unicodeScalars, faces: faces,
+                                    drawMissingGlyphs: drawMissingGlyphs)
+
             func append(_ glyph: Glyph) {
                 glyphs.append(glyph)
                 ascender = max(ascender, glyph.lineBoxAscender)
@@ -1091,7 +1101,9 @@ struct ResolvedTextSource {
                         optionalLigatureBoundaries: optionalLigatureBoundaries.compactMap {
                             $0 > span.range.lowerBound && $0 < span.range.upperBound
                                 ? $0 - span.range.lowerBound : nil
-                        }
+                        },
+                        retainsDeletedGlyphs: true,
+                        characterInput: characterInput?.sliced(to: span.range)
                       ),
                       shaped.direction == .leftToRight,
                       !shaped.glyphs.isEmpty else {
@@ -2566,6 +2578,57 @@ struct ResolvedTextSource {
                 return nil
             }
         }
+        struct CharacterInput {
+            let prepared: VVD.CharacterComposer.Input
+            let range: Range<Int>
+        }
+        var characterInputs: [Int: CharacterInput] = [:]
+        var characterRun = 0
+        while characterRun < runs.count {
+            guard let first = textInput(runs[characterRun]), !first.faces.isEmpty,
+                  first.style?.customAttachment == nil else {
+                characterRun += 1
+                continue
+            }
+            var inputs: [(index: Int, input: TextInput, range: Range<Int>)] = []
+            var text = ""
+            var count = 0
+            while characterRun < runs.count, let input = textInput(runs[characterRun]),
+                  !input.faces.isEmpty, input.style?.customAttachment == nil {
+                let end = count + input.text.unicodeScalars.count
+                inputs.append((characterRun, input, count..<end))
+                text += input.text
+                count = end
+                characterRun += 1
+            }
+            guard VVD.CharacterComposer.accepts(text) else { continue }
+            var fonts: [Typeface] = []
+            for (_, input, _) in inputs {
+                for span in TextGlyphs.sourceSpans(unicodeScalars: input.text.unicodeScalars,
+                                                   faces: input.faces, drawMissingGlyphs: drawMissingGlyphs) {
+                    fonts.append(contentsOf: repeatElement(span.face, count: span.range.count))
+                }
+            }
+            assert(fonts.count == count)
+            let prepared = VVD.CharacterComposer.prepare(text,
+                isLastResort: { fonts[$0].selectedFont?.descriptor.postScriptName == "LastResort" },
+                hasGlyph: { index, scalar in fonts[index].hasGlyph(for: UnicodeScalar(scalar)!) },
+                fontsEqual: { a, b in
+                    if a == b { return true }
+                    if let lhs = fonts[a].selectedFont, let rhs = fonts[b].selectedFont {
+                        return lhs.isEqual(to: rhs)
+                    }
+                    // Supplied typefaces without a logical font expose only
+                    // their own identity contract.
+                    return fonts[a].isEqual(to: fonts[b])
+                })
+            if let prepared {
+                for (index, _, range) in inputs {
+                    characterInputs[index] = CharacterInput(prepared: prepared, range: range)
+                }
+            }
+        }
+
         func sharesPaintContext(_ first: TextInput, _ next: TextInput) -> Bool {
             guard !first.faces.isEmpty, !next.text.isEmpty,
                   first.faces.count == next.faces.count,
@@ -2586,6 +2649,7 @@ struct ResolvedTextSource {
         var inputIndex = 0
         while inputIndex < runs.count {
             let s = runs[inputIndex]
+            let characterInput = characterInputs[inputIndex]
             inputIndex += 1
             var textRun = textInput(s)
             var paintRuns: [(range: Range<Int>, style: _ResolvedTextRunAttributes)] = []
@@ -2610,6 +2674,9 @@ struct ResolvedTextSource {
             if let (faces, text, attributes, style) = textRun {
                 if faces.isEmpty || text.isEmpty { continue }
                 let scalars = Array(text.unicodeScalars)
+                let prepared = characterInput.map {
+                    $0.prepared.sliced(to: $0.range.lowerBound..<($0.range.lowerBound + scalars.count))
+                }
                 let resolvedStyle = style ?? _ResolvedTextRunAttributes()
                 let spacing = (resolvedStyle.tracking ?? resolvedStyle.kern ?? 0) * scaleFactor
                 let baselineOffset = (resolvedStyle.baselineOffset ?? 0) * scaleFactor
@@ -2727,7 +2794,7 @@ struct ResolvedTextSource {
                         optionalLigatureBoundaries: paintRuns.dropFirst().compactMap {
                             $0.range.lowerBound > start && $0.range.lowerBound < index
                                 ? $0.range.lowerBound - start : nil
-                        })
+                        }, characterInput: prepared?.sliced(to: start..<index))
                     face1 = textGlyphs.lastFace
                     char1 = textGlyphs.lastCharacter
                     lastBreak = nil
@@ -2738,7 +2805,13 @@ struct ResolvedTextSource {
                         if paintRuns.count > 1 {
                             glyph.sourceRunIndex = inputSourceStart + paint.range.lowerBound
                         }
-                        if let range = glyph.sourceRange {
+                        if let characterInput, let range = characterInput.prepared.composedRanges.first(where: {
+                            $0.contains(characterInput.range.lowerBound + start + glyph.characterIndex)
+                        }) {
+                            let origin = inputSourceStart - characterInput.range.lowerBound
+                            glyph.sourceRange = (origin + range.lowerBound)..<(origin + range.upperBound)
+                            glyph.characterIndex += runStartIndex
+                        } else if let range = glyph.sourceRange {
                             glyph.sourceRange = (runStartIndex + range.lowerBound)..<(runStartIndex + range.upperBound)
                             glyph.characterIndex += runStartIndex
                         } else {
@@ -2748,7 +2821,7 @@ struct ResolvedTextSource {
                         glyph.style = paint.style
                         glyph.baselineOffset = baselineOffset
                         glyph.foregroundColor = paint.style.foregroundColor
-                        if spacing != 0 {
+                        if spacing != 0, glyph.glyphIndex != 65535 {
                             glyph.advance.width += spacing
                             // Spacing can collapse an advance without removing its glyph.
                             if glyph.advance.width < 0 { glyph.advance.width = 0 }

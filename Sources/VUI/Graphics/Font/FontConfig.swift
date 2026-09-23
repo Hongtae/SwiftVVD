@@ -217,7 +217,12 @@ struct FontFallbackConfiguration: Sendable {
     let fontDescriptors: [BundledFontID: BundledFontDescriptor]
     let defaultLocale: String
     let systemFonts: [Font.Design: BundledFontID]
-    let designLocales: [Font.Design: [String: [BundledFontID]]]
+    struct Fallback: Sendable {
+        let font: BundledFontID
+        let isDefault: Bool
+    }
+
+    let designLocales: [Font.Design: [String: [Fallback]]]
     let missingGlyphFont: BundledFontID
     let defaultEmojiPreset: String?
     let emojiPresets: [String: [BundledFontID]]
@@ -395,7 +400,7 @@ struct FontFallbackConfiguration: Sendable {
             throw FontFallbackConfigurationError.invalidDefaultLocale(source.defaultLocale)
         }
         var systemFonts: [Font.Design: BundledFontID] = [:]
-        var designLocales: [Font.Design: [String: [BundledFontID]]] = [:]
+        var designLocales: [Font.Design: [String: [Fallback]]] = [:]
         for (identifier, designSource) in source.designs.profiles {
             guard let design = Self.design(for: identifier) else {
                 throw FontFallbackConfigurationError.invalidDesign(identifier)
@@ -411,7 +416,7 @@ struct FontFallbackConfiguration: Sendable {
             var uniqueFallbackFonts = Set(designFonts)
             let fallbackFonts = designFonts + sharedFonts.filter { uniqueFallbackFonts.insert($0).inserted }
 
-            var locales: [String: [BundledFontID]] = [:]
+            var locales: [String: [Fallback]] = [:]
             for (localeIdentifier, fonts) in designSource.locales ?? [:] {
                 let canonical = Self.canonicalIdentifier(localeIdentifier)
                 guard !canonical.isEmpty,
@@ -443,7 +448,9 @@ struct FontFallbackConfiguration: Sendable {
                     )
                 }
                 // Resolve shared fallbacks once while retaining locale-specific priority.
-                let cascade = fontIDs + fallbackFonts.filter { unique.insert($0).inserted }
+                let cascade = fontIDs.map { Fallback(font: $0, isDefault: false) } +
+                    fallbackFonts.filter { unique.insert($0).inserted }
+                        .map { Fallback(font: $0, isDefault: true) }
                 guard locales.updateValue(
                     cascade,
                     forKey: canonical
@@ -457,7 +464,7 @@ struct FontFallbackConfiguration: Sendable {
                 guard !fallbackFonts.isEmpty else {
                     throw FontFallbackConfigurationError.invalidDefaultLocale(source.defaultLocale)
                 }
-                locales[defaultLocale] = fallbackFonts
+                locales[defaultLocale] = fallbackFonts.map { Fallback(font: $0, isDefault: true) }
             }
             systemFonts[design] = systemFont
             designLocales[design] = locales
@@ -523,6 +530,10 @@ struct FontFallbackConfiguration: Sendable {
         for locale: Locale,
         design: Font.Design = .default
     ) -> [BundledFontID] {
+        fallbacks(for: locale, design: design).map(\.font)
+    }
+
+    func fallbacks(for locale: Locale, design: Font.Design = .default) -> [Fallback] {
         let locales = designLocales[design] ?? designLocales[.default]!
         for candidate in Self.candidateIdentifiers(for: locale) {
             if let fonts = locales[candidate] {

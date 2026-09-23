@@ -8,7 +8,7 @@
 import Foundation
 import VVD
 
-/// Immutable candidates and name indexes for one catalog's resource snapshots.
+/// Immutable catalog candidates and indexes with thread-owned name-request history.
 struct FontResourceResolver: Sendable {
     struct Traits: Sendable {
         var symbolic: UInt32
@@ -54,6 +54,52 @@ struct FontResourceResolver: Sendable {
             }
         }
 
+        var variationSelection: FontVariationSelection {
+            FontVariationSelection(metadata: face.metadata, coordinates: coordinates)
+        }
+
+        func applying(variation: [UInt32: CGFloat]) -> Self {
+            let original = variationSelection
+            let merged = original.merging(variation)
+            guard let extras = merged.extras else { return self }
+            return selecting(merged.selection, comparison: merged.selection.comparisonCoordinates(requested: extras))
+        }
+
+        func selecting(_ selection: FontVariationSelection, comparison: [UInt32: CGFloat]) -> Self {
+            let before = variationSelection.comparisonCoordinates(requested: [:])
+            let after = comparison
+            var traits = traits
+            for axis in face.metadata.variationAxes where before[axis.tag] != after[axis.tag] {
+                switch axis.tag {
+                case 0x7767_6874:
+                    let weight = after[axis.tag] ?? CGFloat(face.metadata.sfntStyle.weightClass ?? 400)
+                    traits.weight = FontWeightScale.logicalWeight(forClass: weight.rounded())
+                case 0x7764_7468:
+                    traits.width = after[axis.tag].map { FontResourceResolver.logicalWidth(forPercent: $0) }
+                        ?? CGFloat(Float(Int(face.metadata.sfntStyle.widthClass ?? 5) - 5) * 0.1)
+                default:
+                    break
+                }
+            }
+            traits.symbolic &= ~UInt32(2 | 32 | 64)
+            if traits.weight >= CGFloat(Float(0.3)) { traits.symbolic |= 2 }
+            if traits.width < 0 { traits.symbolic |= 64 }
+            if traits.width > 0 { traits.symbolic |= 32 }
+            return Self(face: face, instanceIndex: instanceIndex,
+                        coordinates: selection.coordinates, traits: traits)
+        }
+
+        fileprivate func nondefaultVariation(_ tag: UInt32) -> CGFloat? {
+            guard let index = face.metadata.variationAxes.firstIndex(where: { $0.tag == tag }),
+                  coordinates[index] != face.metadata.variationAxes[index].defaultValue else { return nil }
+            return coordinates[index]
+        }
+
+        fileprivate var opticalSize: CGFloat? {
+            guard let index = face.metadata.variationAxes.firstIndex(where: { $0.tag == 0x6f70_737a }) else { return nil }
+            return coordinates[index]
+        }
+
         var family: String { face.metadata.familyName ?? "" }
 
         var instance: VVD.Font.VariationInstance? {
@@ -77,6 +123,7 @@ struct FontResourceResolver: Sendable {
     private let postScriptNames: [String: [Int]]
     private let fullNames: [String: [Int]]
     private let familyNames: [String: [Int]]
+    private let nameRequestScope = FontNameRequestCache.Scope()
 
     init(faces: [FontResourceCatalog.Face]) {
         var candidates: [Candidate] = []
@@ -140,9 +187,32 @@ struct FontResourceResolver: Sendable {
     }
 
     func named(_ name: String) -> Candidate? {
+        let cache = FontNameRequestCache.current(in: nameRequestScope)
+        if let candidate = cache.candidate(for: name) { return candidate }
         let key = name.lowercased()
         let indices = postScriptNames[key] ?? fullNames[key] ?? familyNames[key]
-        return indices?.first.map { candidates[$0] }
+        if let index = indices?.first {
+            let candidate = candidates[index]
+            cache.insert(candidate, for: name)
+            return candidate
+        }
+        guard name.rangeOfCharacter(from: .whitespaces) == nil,
+              let separator = name.firstIndex(of: "_"),
+              postScriptNames[String(name[..<separator]).lowercased()] != nil,
+              let base = named(String(name[..<separator])) else { return nil }
+        guard let selection = base.variationSelection.parsing(suffix: name[separator...]) else { return nil }
+        let candidate = base.selecting(selection, comparison: selection.comparisonCoordinates(requested: [:]))
+        cache.insert(candidate, for: name)
+        return candidate
+    }
+
+    /// Family-constrained copies match registered names; generated-name parsing
+    /// belongs to the independent name-only lookup.
+    func named(_ name: String, inFamily family: String) -> Candidate? {
+        let key = name.lowercased()
+        let indices = postScriptNames[key] ?? fullNames[key] ?? familyNames[key] ?? []
+        let familyIndices = familyNames[family.lowercased(), default: []]
+        return indices.first(where: { familyIndices.contains($0) }).map { candidates[$0] }
     }
 
     func family(_ name: String) -> [Candidate] {
@@ -162,6 +232,61 @@ struct FontResourceResolver: Sendable {
             }
         }
         return best
+    }
+
+    static func selectSymbolicVariant(_ candidates: [Candidate], from source: Candidate, weight: CGFloat) -> Candidate? {
+        let weight = CGFloat(Float(weight))
+        let tolerance: CGFloat = 0.001
+        let sourceOptical = source.opticalSize
+        let gradeAxis = source.face.metadata.variationAxes.first {
+            $0.tag == 0x4752_4144 && $0.maximumValue > $0.minimumValue
+        }
+        func normalizedGrade(_ candidate: Candidate) -> CGFloat {
+            guard let axis = gradeAxis else { return 0 }
+            // An absent coordinate uses the source axis default, even for a different face.
+            let value = candidate.nondefaultVariation(axis.tag) ?? axis.defaultValue
+            return (value - axis.minimumValue) / (axis.maximumValue - axis.minimumValue)
+        }
+        let sourceGrade = normalizedGrade(source)
+        func opticalDistance(_ candidate: Candidate) -> CGFloat {
+            abs((candidate.opticalSize ?? 0) - (sourceOptical ?? 0))
+        }
+        var best: Candidate?
+        var bestScore = CGFloat.infinity
+        for candidate in candidates {
+            let delta = candidate.traits.weight - weight
+            var score = delta * delta
+            if gradeAxis != nil {
+                let grade = sourceGrade - normalizedGrade(candidate)
+                score += grade * grade
+            }
+            if !(score < bestScore) {
+                guard let best, abs(score - bestScore) < tolerance,
+                      opticalDistance(candidate) < opticalDistance(best) else { continue }
+            }
+            // A sufficiently close candidate terminates the ordered search. An optical
+            // source also requires a sufficiently close optical coordinate before exit.
+            if abs(score) < tolerance && (sourceOptical == nil || opticalDistance(candidate) < tolerance) {
+                return candidate
+            }
+            best = candidate
+            bestScore = score
+        }
+        return best
+    }
+
+    static func symbolicWeightVariation(from source: Candidate, weight: CGFloat) -> [UInt32: CGFloat]? {
+        let tag: UInt32 = 0x7767_6874
+        guard let axis = source.face.metadata.variationAxes.first(where: { $0.tag == tag }) else { return nil }
+        let target = FontWeightScale.weightClass(for: CGFloat(Float(weight)))
+        var variation = source.variationSelection.comparisonCoordinates(requested: [:])
+        // An implicit default is absent from the comparison dictionary and still
+        // constructs a copy. An explicit nearby coordinate stops the fallback.
+        if let current = variation[tag], abs(current - target) < 0.001 { return nil }
+        guard target >= axis.minimumValue, target <= axis.maximumValue else { return nil }
+        variation[tag] = target
+        if target == axis.defaultValue { variation.removeValue(forKey: tag) }
+        return variation
     }
 
     private static func name(_ id: UInt16, in metadata: VVD.Font.FaceMetadata) -> String? {

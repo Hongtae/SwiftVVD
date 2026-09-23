@@ -23,6 +23,58 @@ private struct CountingFontProvider: FontProvider {
 }
 
 final class FontResourceCacheTests: XCTestCase {
+    // ASSERTIONS fontPlatformRedaction27Observed
+    func testPlatformFeaturesAreClearedOnAnIndependentRedactedDescriptor() throws {
+        for mode: Font.DefaultRenderingMode in [.bitmap(), .vector()] {
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = mode
+            let context = environment.fontResolutionContext
+            var redacted = context
+            redacted.shouldRedactContent = true
+            for base in [Font.system(.body).leading(.tight), .custom("Roboto-Regular", fixedSize: 23)] {
+                let descriptor = base.monospacedDigit().resolveDescriptor(in: context)
+                    .withTypesetting(language: "zh-Hant", lineHeightRatio: 1.2)
+                let resource = FontResource(descriptor: descriptor, in: context)
+                let font = Font(provider: FontBox(Font.PlatformFontProvider(font: resource)))
+                let normal = font.resolveDescriptor(in: context)
+                let cleared = font.resolveDescriptor(in: redacted)
+                XCTAssertFalse(normal === cleared)
+                XCTAssertFalse(normal.shapingFeatures.isEmpty)
+                XCTAssertTrue(cleared.shapingFeatures.isEmpty)
+                XCTAssertEqual(cleared.pointSize, normal.pointSize)
+                XCTAssertEqual(cleared.resolvedWeight, normal.resolvedWeight)
+                XCTAssertEqual(cleared.language, "zh-Hant")
+                XCTAssertEqual(cleared.languageAwareLineHeightRatio, 1.2)
+                XCTAssertEqual(cleared.stylePolicy, normal.stylePolicy)
+                XCTAssertEqual(cleared.renderingMode, mode)
+                XCTAssertEqual(resource.shapingFeatures, normal.shapingFeatures)
+                XCTAssertEqual(font.resolveDescriptor(in: context).shapingFeatures, normal.shapingFeatures)
+                XCTAssertTrue(font.resolve(in: redacted).resource.shapingFeatures.isEmpty)
+                XCTAssertEqual(font.resolve(in: context).resource.shapingFeatures, normal.shapingFeatures)
+            }
+        }
+    }
+
+    // ASSERTIONS fontPlatformRedaction27Observed
+    func testMonospacedDigitRequestsRespectRedactionInProviderAndContextModifiers() {
+        let normal = EnvironmentValues().fontResolutionContext
+        var redacted = normal
+        redacted.shouldRedactContent = true
+        for base in [Font.system(size: 23), .custom("Roboto-Regular", fixedSize: 23)] {
+            let decorated = base.monospacedDigit()
+            XCTAssertFalse(decorated.resolve(in: normal).resource.shapingFeatures.isEmpty)
+            XCTAssertTrue(decorated.resolve(in: redacted).resource.shapingFeatures.isEmpty)
+            for font in [base, decorated, decorated.resolved(in: EnvironmentValues())] {
+                var context = redacted
+                context.fontModifiers = [.monospacedDigit]
+                let resource = font.resolve(in: context).resource
+                XCTAssertTrue(resource.shapingFeatures.isEmpty)
+                XCTAssertEqual(resource.pointSize, 23)
+                XCTAssertEqual(resource, base.resolve(in: normal).resource)
+            }
+        }
+    }
+
     // ASSERTIONS textFontResizeResourceCopyObserved
     func testResizingResolvedFontsPreservesTheirRequestAndOriginalSize() throws {
         var environment = EnvironmentValues()
@@ -157,6 +209,25 @@ final class FontResourceCacheTests: XCTestCase {
             }
             XCTAssertNotEqual(resolved, font.resolved(in: vector))
         }
+    }
+
+    // ASSERTIONS fontNamedSymbolicCopies27Observed
+    func testResolvedNamedSymbolicCopiesRetainSizeAndFeatureRequests() throws {
+        let environment = EnvironmentValues()
+        let base = Font.custom("Roboto-Regular", fixedSize: 23).monospacedDigit()
+        let wrapped = base.resolved(in: environment)
+        let original = wrapped.platformFont(in: environment.fontResolutionContext)
+        for (first, second) in [(base.italic(), wrapped.italic()), (base.bold(), wrapped.bold())] {
+            let direct = first.platformFont(in: environment.fontResolutionContext)
+            let copied = second.platformFont(in: environment.fontResolutionContext)
+            XCTAssertEqual(copied, direct)
+            XCTAssertEqual(copied.pointSize, 23)
+            XCTAssertEqual(copied.shapingFeatures, original.shapingFeatures)
+            XCTAssertFalse(copied.shapingFeatures.isEmpty)
+            XCTAssertFalse(copied === original)
+        }
+        XCTAssertEqual(original.pointSize, 23)
+        XCTAssertEqual(original.selectedWeight, 0)
     }
 
     // ASSERTIONS fontResolvedLazyCacheBoundaryObserved

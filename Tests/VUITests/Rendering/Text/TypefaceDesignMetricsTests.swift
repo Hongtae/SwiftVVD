@@ -4,6 +4,35 @@ import VVD
 @testable import VUI
 
 struct TypefaceDesignMetricsTests {
+    // ASSERTIONS textLinePublication27Observed textAttributedCharacterOwner27Observed
+    @Test
+    func testRawSlotsUseLogicalFaceAndStayZeroThroughWrappers() throws {
+        let logical = try makeFont(), raster = try makeFont()
+        logical.setPointSize(23, dpi: (72, 72))
+        raster.setPointSize(47, dpi: (144, 144))
+        let base = VectorTypeface(font: raster, embolden: 4, layoutFont: logical,
+                                  renderScale: 2, logicalEmbolden: 2)
+        var artworkLoads = 0
+        let deferred = DeferredGlyphTypeface(metrics: base) { artworkLoads += 1; return nil }
+        let faces: [Typeface] = [base, deferred, TerminalFallbackTypeface(deferred),
+            ShapingFeatureTypeface(deferred, features: VUI.Font.MonospacedDigitModifier.shapingFeatures)]
+        for face in faces {
+            let raw = try #require(face.shape("e\u{301}\u{323}", direction: nil, language: nil,
+                features: [], optionalLigatureBoundaries: [], retainsDeletedGlyphs: true))
+            let projected = try #require(face.shape("e\u{301}\u{323}", direction: nil,
+                                                   language: nil, features: []))
+            #expect(raw.glyphs.map(\.index) == [1107, 65535, 169])
+            #expect(raw.glyphs.map(\.sourceIndex) == [0, 1, 2])
+            #expect(raw.glyphs[1].advance == .zero)
+            #expect(raw.glyphs[1].offset == .zero)
+            #expect(projected.glyphs.map(\.index) == [1107, 169])
+            #expect(raw.glyphs[0].advance == projected.glyphs[0].advance)
+            #expect(raw.glyphs[2].offset == projected.glyphs[1].offset)
+        }
+        #expect(artworkLoads == 0)
+        #expect(logical.pointSize == 23 && raster.pointSize == 47)
+    }
+
     // ASSERTIONS textDecorationOutlineProducer27Observed
     @Test
     func testOutlineCoordinatesUseLogicalFaceThroughDeferredAndFallbackOwners() throws {

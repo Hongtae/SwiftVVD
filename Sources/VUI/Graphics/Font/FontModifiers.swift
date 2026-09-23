@@ -200,7 +200,10 @@ extension Font {
     struct MonospacedDigitModifier: StaticFontModifier {
         static var tag: StaticModifierTag { .monospacedDigit }
         static let shapingFeatures = [TypefaceShapingFeature(tag: 0x746e_756d)]
-        static func modify(descriptor: inout FontDescriptor, in context: Context) { descriptor = descriptor.adding(features: shapingFeatures) }
+        static func modify(descriptor: inout FontDescriptor, in context: Context) {
+            guard !context.shouldRedactContent else { return }
+            descriptor = descriptor.adding(features: shapingFeatures)
+        }
     }
 
     struct UndoModifier<Modifier: UndoableStaticFontModifier>: StaticFontModifier {

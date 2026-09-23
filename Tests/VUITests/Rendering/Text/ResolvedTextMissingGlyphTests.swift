@@ -5,6 +5,186 @@ import VVD
 @testable import VUI
 
 final class ResolvedTextMissingGlyphTests: XCTestCase {
+    // ASSERTIONS fontPlatformRedaction27Observed
+    @MainActor
+    func testRedactedCascadeDoesNotRestoreResolvedOrEnvironmentFeatures() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        let context = environment.fontResolutionContext
+        let descriptor = VUI.Font.custom("Roboto-Regular", fixedSize: 23).resolveDescriptor(in: context)
+            .adding(features: [TypefaceShapingFeature(tag: "liga", value: 0)!])
+        let font = VUI.Font(provider: FontBox(VUI.Font.PlatformFontProvider(
+            font: FontResource(descriptor: descriptor, in: context))))
+        var redacted = environment
+        redacted.shouldRedactContent = true
+        for environmentDigits in [false, true] {
+            redacted.fontModifiers = environmentDigits ? [.monospacedDigit] : []
+            for applyModifiers in [false, true] {
+                let cascade = font.typefaceCascade(in: redacted, forContext: SceneResources(),
+                    contentScaleFactor: 1, applyEnvironmentModifiers: applyModifiers)
+                let face = cascade.runFaces[try XCTUnwrap(cascade.primaryIndex)]
+                let selected = try XCTUnwrap(face.selectedFont)
+                XCTAssertEqual(selected.features.isEmpty, applyModifiers)
+                let shaped = try XCTUnwrap(face.shape("ffi", direction: nil, language: nil, features: []))
+                XCTAssertEqual(shaped.glyphs.map(\.index), applyModifiers ? [473] : [74, 74, 77])
+            }
+        }
+        XCTAssertFalse(font.typefaceFeatures.isEmpty)
+    }
+
+    // Selected-font construction can wrap a resource without replacing it.
+    private func resourceFace(_ face: Typeface?) -> Typeface? {
+        (face as? ShapingFeatureTypeface)?.base ?? face
+    }
+
+    // ASSERTIONS fontCascadeRequestFlags27Observed fontFallbackInputs27Observed
+    @MainActor
+    func testConfiguredFallbackFlagsKeepCandidateSourceAndPrimaryExtras() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+        for locale in ["en", "ko"] {
+            var environment = EnvironmentValues()
+            environment.locale = Locale(identifier: locale)
+            environment.defaultFontRenderingMode = .vector()
+            for original in [[], [TypefaceShapingFeature(tag: "liga", value: 1)!]] {
+                let font = VUI.Font(typefaceProvider: SystemFontProvider(size: 23,
+                    weight: .regular, design: .default, renderingMode: .vector()), features: original)
+                let cascade = font.typefaceCascade(in: environment, forContext: SceneResources(),
+                    contentScaleFactor: 1)
+                let primary = try XCTUnwrap(cascade.primaryIndex)
+                XCTAssertEqual(primary, locale == "en" ? 0 : 1)
+                let faces = cascade.runFaces
+                XCTAssertEqual(faces[primary].selectedFont?.flags, 192)
+                if locale == "ko" { XCTAssertEqual(faces[0].selectedFont?.flags, 192) }
+                let fallback = try XCTUnwrap(cascade.ordinaryFaces.firstIndex {
+                    $0.identifier.hasPrefix("deferred:NotoSansKR:")
+                })
+                let expected: UInt32 = original.isEmpty ? 200 : 192
+                XCTAssertEqual(faces[fallback].selectedFont?.flags, expected, locale)
+                XCTAssertEqual(faces.last?.selectedFont?.flags, expected, locale)
+            }
+        }
+    }
+
+    // ASSERTIONS fontVariationExtras27Observed fontCascadeRequestFlags27Observed
+    @MainActor
+    func testConfiguredFallbackUsesRawVariationPresenceIncludingEmptyComparison() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+        let url = try XCTUnwrap(defaultFontURL)
+        let metadata = try XCTUnwrap(VVD.Font.metadata(path: url.path))
+        let w: UInt32 = 0x7767_6874, h: UInt32 = 0x7764_7468, unknown: UInt32 = 0x4142_4344
+        for (baseWeight, request, extra): (CGFloat, [UInt32: CGFloat], Bool) in [
+            (400, [:], false), (400, [w: 400.0001], false), (400, [w: 400.001], true),
+            (400, [h: 200], false), (400, [unknown: 400], true),
+            (100, [:], false), (100, [w: 400], true), (100, [unknown: 400], false)
+        ] {
+            let instance = try XCTUnwrap(metadata.variationInstances.first { $0.coordinates == [baseWeight, 100] })
+            let provider = BundledFontProvider(resource: .init(url: url), size: 23, weight: .regular,
+                renderingMode: .vector(), variations: request.map { .init(tag: $0.key, value: $0.value) },
+                appliesSyntheticWeight: false, instanceIndex: instance.index)
+            var environment = EnvironmentValues()
+            environment.defaultFontRenderingMode = .vector()
+            let cascade = VUI.Font(typefaceProvider: provider).typefaceCascade(in: environment,
+                forContext: SceneResources(), contentScaleFactor: 1)
+            let faces = cascade.runFaces
+            XCTAssertEqual(faces[0].selectedFont?.hasExtras, extra)
+            let index = try XCTUnwrap(cascade.ordinaryFaces.firstIndex {
+                $0.identifier.hasPrefix("deferred:NotoSansKR:")
+            })
+            let selected = try XCTUnwrap(faces[index].selectedFont)
+            XCTAssertEqual(selected.flags, extra ? 192 : 200, "\(baseWeight), \(request)")
+            if !extra { XCTAssertNil(selected.variationExtras) }
+        }
+    }
+
+    // ASSERTIONS fontFallbackInputs27Observed fontDescriptorSelection27Observed
+    @MainActor
+    func testFontCascadeKeepsFileFeaturesAndPropagatesCommonSystemRequests() throws {
+        let previousAppContext = appContext
+        let testContext = MissingGlyphTestAppContext()
+        appContext = testContext
+        defer { appContext = previousAppContext }
+        let requests = ["ss01", "fwid"].map { TypefaceShapingFeature(tag: $0, value: 1)! }
+        for locale in ["en", "ko"] {
+            var environment = EnvironmentValues()
+            environment.locale = Locale(identifier: locale)
+            environment.defaultFontRenderingMode = .vector()
+            let font = VUI.Font(typefaceProvider: SystemFontProvider(size: 23,
+                weight: .regular, design: .default, renderingMode: .vector()), features: requests)
+            let cascade = font.typefaceCascade(in: environment, forContext: SceneResources(),
+                contentScaleFactor: 1)
+            let primary = try XCTUnwrap(cascade.primaryIndex)
+            XCTAssertEqual(primary, locale == "en" ? 0 : 1)
+            let faces = cascade.runFaces
+            let original = try XCTUnwrap(faces[primary].selectedFont)
+            XCTAssertEqual(original.features.map(\.type), [35])
+            XCTAssertTrue(original.descriptor.isSystemFont)
+            XCTAssertEqual(original.originalFeatures, [requests[1]])
+            let fallbackIndex = try XCTUnwrap(cascade.ordinaryFaces.firstIndex {
+                $0.identifier.hasPrefix("deferred:NotoSansKR:")
+            })
+            let fallback = faces[fallbackIndex]
+            let selected = try XCTUnwrap(fallback.selectedFont)
+            XCTAssertTrue(selected.descriptor.isSystemFont)
+            XCTAssertTrue(selected.originalFeatures.isEmpty)
+            XCTAssertEqual(selected.features.map(\.type), [22])
+            XCTAssertEqual(selected.features.map(\.selector), [1])
+            XCTAssertEqual(fallback.shape("123", direction: nil, language: nil, features: [])?
+                .glyphs.map(\.index), [21668, 21669, 21670])
+        }
+
+        let backend = try XCTUnwrap(VVD.Font(data: Data(contentsOf: XCTUnwrap(defaultFontURL))))
+        backend.setPointSize(23, dpi: (72, 72))
+        let face = VectorTypeface(font: backend)
+        let font = VUI.Font(typefaceProvider: FixedFontProvider(face), features: requests)
+        var environment = EnvironmentValues()
+        environment.locale = Locale(identifier: "ko")
+        environment.defaultFontRenderingMode = .vector()
+        let cascade = font.typefaceCascade(in: environment, forContext: SceneResources(),
+            contentScaleFactor: 1)
+        XCTAssertEqual(cascade.primaryIndex, 0)
+        XCTAssertTrue(cascade.fallbackFeatures.isEmpty)
+        let fallbackIndex = try XCTUnwrap(cascade.ordinaryFaces.firstIndex {
+            $0.identifier.hasPrefix("deferred:NotoSansKR:")
+        })
+        let fallback = cascade.runFaces[fallbackIndex]
+        XCTAssertTrue(try XCTUnwrap(fallback.selectedFont).features.isEmpty)
+        XCTAssertEqual(fallback.shape("123", direction: nil, language: nil, features: [])?
+            .glyphs.map(\.index), [22523, 22524, 22525])
+    }
+
+    // ASSERTIONS fontFeatureNormalization27Observed
+    @MainActor
+    func testFontCascadePreservesFinalRepeatedFeatureRequest() throws {
+        let previousAppContext = appContext
+        appContext = MissingGlyphTestAppContext()
+        defer { appContext = previousAppContext }
+        let backend = try XCTUnwrap(VVD.Font(data: Data(contentsOf: XCTUnwrap(defaultFontURL))))
+        backend.setPointSize(23, dpi: (72, 72))
+        let face = VectorTypeface(font: backend)
+        var environment = EnvironmentValues()
+        environment.defaultFontRenderingMode = .vector()
+        for values: [UInt32] in [[0, 1, 0], [1, 0, 1], [0, 1, 0, 1], [1, 0, 1, 0]] {
+            let requests = values.map { TypefaceShapingFeature(tag: 0x6c69_6761, value: $0) }
+            let font = VUI.Font(typefaceProvider: FixedFontProvider(face), features: requests)
+            let cascade = font.typefaceCascade(in: environment, forContext: SceneResources(),
+                contentScaleFactor: 1)
+            let selected = try XCTUnwrap(cascade.runFaces.first)
+            let shaped = try XCTUnwrap(selected.shape("ffi", direction: .leftToRight,
+                language: nil, features: []))
+            let expected = try XCTUnwrap(backend.shape("ffi", features: [requests.last!]))
+            XCTAssertEqual(shaped.glyphs.map(\.index), expected.glyphs.map(\.index))
+            XCTAssertEqual(shaped.glyphs.map(\.sourceRange), expected.glyphs.map(\.sourceRange))
+            XCTAssertEqual(shaped.glyphs.count, values.last == 0 ? 3 : 1)
+        }
+    }
+
     func testBackendFontTypesAreSendable() {
         func requireSendable<T: Sendable>(_: T.Type) {}
 
@@ -717,6 +897,14 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             .map(\.rawValue), ["NotoSansCJK", "Roboto", "NotoSans"])
         XCTAssertEqual(configuration.fonts(for: Locale(identifier: "ar_EG"), design: .monospaced)
             .map(\.rawValue), ["RobotoMono", "NotoSansMonoCJK", "NotoSans", "Roboto"])
+        XCTAssertEqual(configuration.fallbacks(for: Locale(identifier: "ko_KR")).map(\.isDefault),
+                       [false, false, true])
+        XCTAssertEqual(configuration.fallbacks(for: Locale(identifier: "ko_KP")).map(\.isDefault),
+                       [false, false, true, true])
+        XCTAssertEqual(configuration.fallbacks(for: Locale(identifier: "ar_EG")).map(\.isDefault),
+                       [true, true, true])
+        XCTAssertEqual(configuration.fallbacks(for: Locale(identifier: "ar_EG"), design: .monospaced)
+            .map(\.isDefault), [false, false, true, true])
     }
 
     func testSharedFallbackRejectsUndefinedDuplicateAndTerminalFonts() throws {
@@ -1387,12 +1575,12 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             )
             let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
             XCTAssertEqual(glyphs.map(\.scalar), Array(text.unicodeScalars))
-            XCTAssertEqual((glyphs.first?.face as? VectorTypeface)?.font.familyName,
+            XCTAssertEqual((resourceFace(glyphs.first?.face) as? VectorTypeface)?.font.familyName,
                            design == .monospaced ? "Roboto Mono" : "Roboto")
             for (glyph, sample) in zip(glyphs.dropFirst(), samples) {
                 let family = design == .monospaced && sample.1 == "NotoSansKR"
                     ? "NotoSansMonoCJK" : sample.1
-                XCTAssertEqual(glyph.face.identifier, "deferred:\(family):0", locale)
+                XCTAssertEqual(resourceFace(glyph.face)?.identifier, "deferred:\(family):0", locale)
                 XCTAssertGreaterThan(glyph.advance.width, 0, sample.0)
                 if design == .monospaced && sample.1 == "NotoSansArabic" {
                     XCTAssertNotEqual(glyph.advance.width, glyphs[0].advance.width)
@@ -1448,9 +1636,9 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
             korean,
             han,
         ])
-        XCTAssertTrue(glyphs[0].face.isEqual(to: cascade.ordinaryFaces[0]))
-        XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[0]))
-        XCTAssertTrue(glyphs[2].face.isEqual(to: hanFallback))
+        XCTAssertTrue(resourceFace(glyphs[0].face)?.isEqual(to: cascade.ordinaryFaces[0]) == true)
+        XCTAssertTrue(resourceFace(glyphs[1].face)?.isEqual(to: cascade.ordinaryFaces[0]) == true)
+        XCTAssertTrue(resourceFace(glyphs[2].face)?.isEqual(to: hanFallback) == true)
         XCTAssertGreaterThan(resolved.measure().width, 0)
     }
 
@@ -1700,9 +1888,9 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 )
         )
         let localFalse = try XCTUnwrap(
-            localFalseText
+            resourceFace(localFalseText
                 .makeGlyphs()
-                .first?.glyphs.first?.face as? VectorTypeface
+                .first?.glyphs.first?.face) as? VectorTypeface
         )
         XCTAssertEqual(localFalse.font.familyName, "Roboto")
 
@@ -1721,9 +1909,9 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
                 )
         )
         let localTrue = try XCTUnwrap(
-            localTrueText
+            resourceFace(localTrueText
                 .makeGlyphs()
-                .first?.glyphs.first?.face as? VectorTypeface
+                .first?.glyphs.first?.face) as? VectorTypeface
         )
         XCTAssertEqual(localTrue.font.familyName, "Roboto Mono")
     }
@@ -1787,8 +1975,8 @@ final class ResolvedTextMissingGlyphTests: XCTestCase {
         )
         let glyphs = try XCTUnwrap(resolved.makeGlyphs().first?.glyphs)
         XCTAssertEqual(glyphs.map(\.scalar), [latin, korean, latin])
-        XCTAssertTrue(glyphs[0].face.isEqual(to: cascade.ordinaryFaces[0]))
-        XCTAssertTrue(glyphs[1].face.isEqual(to: cascade.ordinaryFaces[2]))
+        XCTAssertTrue(resourceFace(glyphs[0].face)?.isEqual(to: cascade.ordinaryFaces[0]) == true)
+        XCTAssertTrue(resourceFace(glyphs[1].face)?.isEqual(to: cascade.ordinaryFaces[2]) == true)
         XCTAssertEqual(glyphs[0].advance.width, glyphs[2].advance.width)
         XCTAssertNotEqual(glyphs[1].advance.width, glyphs[0].advance.width)
 

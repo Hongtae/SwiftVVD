@@ -168,6 +168,7 @@ struct BundledFontProvider: TypefaceProvider {
     let renderingMode: Font.RenderingMode
     let variations: [BundledFontVariation]
     let appliesSyntheticWeight: Bool
+    let resolvedVariation: FontVariationSelection.Resolved?
 
     init(
         resource: BundledFontResource,
@@ -176,7 +177,8 @@ struct BundledFontProvider: TypefaceProvider {
         renderingMode: Font.RenderingMode,
         variations: [BundledFontVariation] = [],
         appliesSyntheticWeight: Bool = true,
-        instanceIndex: Int? = nil
+        instanceIndex: Int? = nil,
+        resolvedVariation: FontVariationSelection.Resolved? = nil
     ) {
         self.resource = resource
         self.instanceIndex = instanceIndex
@@ -185,6 +187,7 @@ struct BundledFontProvider: TypefaceProvider {
         self.renderingMode = renderingMode
         self.variations = variations
         self.appliesSyntheticWeight = appliesSyntheticWeight
+        self.resolvedVariation = resolvedVariation
     }
 
     init?(
@@ -262,7 +265,8 @@ struct BundledFontProvider: TypefaceProvider {
             renderingMode: renderingMode,
             variations: variations,
             appliesSyntheticWeight: appliesSyntheticWeight,
-            instanceIndex: instanceIndex
+            instanceIndex: instanceIndex,
+            resolvedVariation: resolvedVariation
         )
     }
 
@@ -274,6 +278,7 @@ struct BundledFontProvider: TypefaceProvider {
             weight == other.weight &&
             renderingMode == other.renderingMode &&
             variations == other.variations &&
+            resolvedVariation == other.resolvedVariation &&
             appliesSyntheticWeight == other.appliesSyntheticWeight
     }
 
@@ -284,6 +289,7 @@ struct BundledFontProvider: TypefaceProvider {
         hasher.combine(weight)
         hasher.combine(renderingMode)
         hasher.combine(variations)
+        hasher.combine(resolvedVariation)
         hasher.combine(appliesSyntheticWeight)
     }
 
@@ -306,11 +312,28 @@ struct BundledFontProvider: TypefaceProvider {
                 Log.error("Error on loading data: \(error)")
             }
         }
-        guard let data else { return nil }
+        guard let data,
+              let metadata = VVD.Font.metadata(data: data, faceIndex: resource.faceIndex) else { return nil }
+        let requested = Dictionary(uniqueKeysWithValues: variations.map { ($0.tag, $0.value) })
+        guard requested.values.allSatisfy(\.isFinite) else { return nil }
+        let resolved = resolvedVariation ?? FontVariationSelection(metadata: metadata, instanceIndex: instanceIndex)
+            .resolved(requested: requested)
+        guard resolved.coordinates.count == metadata.variationAxes.count,
+              resolved.coordinates.allSatisfy(\.isFinite) else { return nil }
+        let selection = FontVariationSelection(metadata: metadata, coordinates: resolved.coordinates)
 
         let logicalEmbolden = appliesSyntheticWeight
             ? SystemFontProvider.embolden(for: weight)
             : 0
+        var selectedFont = SelectedFont(
+            source: .file(resource.url, faceIndex: resource.faceIndex, namedInstance: instanceIndex),
+            pointSize: size, variation: selection,
+            comparisonCoordinates: resolved.comparison,
+            syntheticWeight: logicalEmbolden)
+        selectedFont.variationExtras = resolved.extras
+        func applyVariations(to font: VVD.Font) -> Bool {
+            metadata.variationAxes.isEmpty || font.setVariationCoordinates(selection.rasterCoordinates)
+        }
         guard let layoutFont = VVD.Font(
             data: data,
             faceIndex: resource.faceIndex
@@ -329,7 +352,8 @@ struct BundledFontProvider: TypefaceProvider {
             }
             let metrics = VectorTypeface(
                 font: layoutFont, layoutFont: layoutFont,
-                renderScale: contentScaleFactor, logicalEmbolden: logicalEmbolden
+                renderScale: contentScaleFactor, logicalEmbolden: logicalEmbolden,
+                selectedFont: selectedFont
             )
             let device = context.graphicsDeviceContext
             return DeferredGlyphTypeface(metrics: metrics) {
@@ -344,7 +368,7 @@ struct BundledFontProvider: TypefaceProvider {
                 font.setPointSize(size, dpi: (dpi, dpi))
                 return TextureTypeface(textureFont: font, layoutFont: layoutFont,
                                        renderScale: contentScaleFactor,
-                                       logicalEmbolden: logicalEmbolden)
+                                       logicalEmbolden: logicalEmbolden, selectedFont: selectedFont)
             }
         }
         switch renderingMode {
@@ -370,7 +394,8 @@ struct BundledFontProvider: TypefaceProvider {
                 textureFont: font,
                 layoutFont: layoutFont,
                 renderScale: contentScaleFactor,
-                logicalEmbolden: logicalEmbolden
+                logicalEmbolden: logicalEmbolden,
+                selectedFont: selectedFont
             )
         case let .vector(options):
             guard let font = VVD.Font(
@@ -386,18 +411,10 @@ struct BundledFontProvider: TypefaceProvider {
                     options.outlineThickness * contentScaleFactor,
                 layoutFont: layoutFont,
                 renderScale: contentScaleFactor,
-                logicalEmbolden: logicalEmbolden
+                logicalEmbolden: logicalEmbolden,
+                selectedFont: selectedFont
             )
         }
-    }
-
-    private func applyVariations(to font: VVD.Font) -> Bool {
-        guard !variations.isEmpty else { return true }
-        return font.setVariationCoordinates(
-            Dictionary(uniqueKeysWithValues: variations.map {
-                ($0.tag, $0.value)
-            })
-        )
     }
 }
 
@@ -534,19 +551,40 @@ struct ExternalFontProvider: TypefaceProvider {
     ) -> Typeface? {
         precondition(dpi > 0, "The font DPI must be positive.")
         let contentScaleFactor = CGFloat(dpi) / CGFloat(defaultDPI)
+        let metadata: VVD.Font.FaceMetadata?
+        let selectedSource: SelectedFont.Source
+        switch source {
+        case let .file(url):
+            metadata = VVD.Font.metadata(path: url.path, faceIndex: faceIndex)
+            selectedSource = .file(url, faceIndex: faceIndex, namedInstance: nil)
+        case let .data(data):
+            metadata = VVD.Font.metadata(data: data.storage, faceIndex: faceIndex)
+            selectedSource = .data(data, faceIndex: faceIndex)
+        }
+        guard let metadata else { return nil }
+        let weightAxis = metadata.variationAxes.first { $0.tag == Self.weightVariationTag }
+        let requested = weightAxis.map { axis in
+            [axis.tag: min(max(weight.weightClass, axis.minimumValue), axis.maximumValue)]
+        } ?? [:]
+        guard requested.values.allSatisfy(\.isFinite) else { return nil }
+        let merged = FontVariationSelection(metadata: metadata).merging(requested)
+        let selection = merged.selection
+        func applyRequestedWeight(to font: VVD.Font) -> Bool {
+            metadata.variationAxes.isEmpty || font.setVariationCoordinates(selection.rasterCoordinates)
+        }
         guard let layoutFont = source.makeFont(faceIndex: faceIndex),
-              applyRequestedWeight(to: layoutFont) else {
-            return nil
-        }
-        let usesVariableWeight = layoutFont.variationAxes.contains {
-            $0.tag == Self.weightVariationTag
-        }
+              applyRequestedWeight(to: layoutFont) else { return nil }
+        let usesVariableWeight = weightAxis != nil
         let requestedWeight = weight.value.isFinite
             ? weight
             : .regular
         let logicalEmbolden = usesVariableWeight
             ? 0
             : SystemFontProvider.embolden(for: requestedWeight)
+        var selectedFont = SelectedFont(source: selectedSource, pointSize: size, variation: selection,
+            comparisonCoordinates: selection.comparisonCoordinates(requested: merged.extras ?? [:]),
+            syntheticWeight: logicalEmbolden)
+        selectedFont.variationExtras = merged.extras
         layoutFont.setPointSize(
             size,
             dpi: (UInt32(defaultDPI), UInt32(defaultDPI))
@@ -574,7 +612,8 @@ struct ExternalFontProvider: TypefaceProvider {
                 textureFont: font,
                 layoutFont: layoutFont,
                 renderScale: contentScaleFactor,
-                logicalEmbolden: logicalEmbolden
+                logicalEmbolden: logicalEmbolden,
+                selectedFont: selectedFont
             )
         case let .vector(options):
             guard let font = source.makeFont(faceIndex: faceIndex),
@@ -589,25 +628,10 @@ struct ExternalFontProvider: TypefaceProvider {
                     options.outlineThickness * contentScaleFactor,
                 layoutFont: layoutFont,
                 renderScale: contentScaleFactor,
-                logicalEmbolden: logicalEmbolden
+                logicalEmbolden: logicalEmbolden,
+                selectedFont: selectedFont
             )
         }
-    }
-
-    private func applyRequestedWeight(to font: VVD.Font) -> Bool {
-        guard let axis = font.variationAxes.first(where: {
-            $0.tag == Self.weightVariationTag
-        }) else {
-            return true
-        }
-        let requested = weight.weightClass
-        let value = min(
-            max(requested, axis.minimumValue),
-            axis.maximumValue
-        )
-        return font.setVariationCoordinates([
-            Self.weightVariationTag: value
-        ])
     }
 }
 
