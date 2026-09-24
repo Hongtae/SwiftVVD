@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(CoreText)
+import CoreText
+#endif
 
 /// Carries the paragraph's automatic or balanced typesetting request.
 struct ParagraphTypesetting: Equatable {
@@ -42,11 +45,20 @@ private enum ParagraphTypesettingKey: EnvironmentKey { static var defaultValue: 
 private enum AvoidsOrphansKey: EnvironmentKey { static var defaultValue: Bool { true } }
 private enum TextWritingDirectionKey: EnvironmentKey { static var defaultValue: Text.WritingDirectionStrategy { .default } }
 private enum AllowsTighteningKey: EnvironmentKey { static var defaultValue: Bool { false } }
-private enum TextLineHeightKey: EnvironmentKey { static var defaultValue: TextLineHeight? { nil } }
+private enum TextCaseKey: EnvironmentKey {
+    static var defaultValue: Text.Case? { nil }
+}
+private enum TextLineHeightKey: EnvironmentKey {
+    static var defaultValue: AttributedString.LineHeight? { nil }
+}
 extension EnvironmentValues {
-    var allowsTightening: Bool {
+    public var allowsTightening: Bool {
         get { self[AllowsTighteningKey.self] }
         set { self[AllowsTighteningKey.self] = newValue }
+    }
+    public var textCase: Text.Case? {
+        get { self[TextCaseKey.self] }
+        set { self[TextCaseKey.self] = newValue }
     }
     var paragraphTypesetting: ParagraphTypesetting {
         get { self[ParagraphTypesettingKey.self] }
@@ -64,13 +76,31 @@ extension EnvironmentValues {
         get { self[Text.AlignmentStrategy.EnvironmentKey.self] }
         set { self[Text.AlignmentStrategy.EnvironmentKey.self] = newValue }
     }
-    var lineHeight: TextLineHeight? {
+    public var lineHeight: AttributedString.LineHeight? {
         get { self[TextLineHeightKey.self] }
         set { self[TextLineHeightKey.self] = newValue }
     }
 }
 
 extension View {
+    @inlinable nonisolated public func allowsTightening(
+        _ flag: Bool
+    ) -> some View {
+        environment(\.allowsTightening, flag)
+    }
+
+    @inlinable nonisolated public func textCase(
+        _ textCase: Text.Case?
+    ) -> some View {
+        environment(\.textCase, textCase)
+    }
+
+    nonisolated public func lineHeight(
+        _ lineHeight: AttributedString.LineHeight?
+    ) -> some View {
+        environment(\.lineHeight, lineHeight)
+    }
+
     nonisolated public func multilineTextAlignment(
         strategy: Text.AlignmentStrategy
     ) -> some View {
@@ -94,7 +124,7 @@ struct ParagraphStyleResolutionContext {
     var textWritingDirection: Text.WritingDirectionStrategy
     var layoutDirection: LayoutDirection
     var allowsTightening: Bool
-    var lineHeight: TextLineHeight?
+    var lineHeight: AttributedString.LineHeight?
     var truncationMode: Text.TruncationMode
     var lineSpacing: CGFloat
     var lineHeightMultiple: CGFloat
@@ -162,7 +192,7 @@ final class TextParagraphStyle: Codable, Equatable {
     var tabStops: [CGFloat] = defaultTabStops
     var defaultTabInterval: CGFloat = 0
     var allowsTightening = false
-    var baselineInterval: TextLineHeight = .variable
+    var baselineInterval: AttributedString.LineHeight = .variable
     var compositionLanguage: Int = 0
 
     static func == (lhs: TextParagraphStyle, rhs: TextParagraphStyle) -> Bool { lhs === rhs }
@@ -174,7 +204,7 @@ func makeParagraphStyle(
     fallbackAlignment: Text.AlignmentStrategy.Storage,
     writingDirection: AttributedString.WritingDirection?,
     fallbackWritingDirection: Text.WritingDirectionStrategy.Storage,
-    lineHeight: TextLineHeight?
+    lineHeight: AttributedString.LineHeight?
 ) -> TextParagraphStyle {
     let result = TextParagraphStyle()
     let vertical = context.writingMode == .verticalRightToLeft
@@ -231,7 +261,8 @@ func makeParagraphStyle(
 
 extension Text.ResolvedProperties {
     mutating func style(environment: EnvironmentValues, alignment: TextParagraphAlignment?,
-                        writingDirection: AttributedString.WritingDirection?, lineHeight: TextLineHeight?) -> TextParagraphStyle {
+                        writingDirection: AttributedString.WritingDirection?,
+                        lineHeight: AttributedString.LineHeight?) -> TextParagraphStyle {
         // Aggregate every run, including runs that reuse the paragraph's cached style.
         if let height = lineHeight ?? environment.lineHeight {
             lineHeightMetrics.update(height)
@@ -243,7 +274,8 @@ extension Text.ResolvedProperties {
 
 extension Text.ResolvedProperties.Paragraph {
     mutating func style(environment: EnvironmentValues, alignment: TextParagraphAlignment?,
-                        writingDirection: AttributedString.WritingDirection?, lineHeight: TextLineHeight?) -> TextParagraphStyle {
+                        writingDirection: AttributedString.WritingDirection?,
+                        lineHeight: AttributedString.LineHeight?) -> TextParagraphStyle {
         if let cachedStyle { return cachedStyle }
         let result = makeParagraphStyle(context: ParagraphStyleResolutionContext(environment),
             alignment: alignment, fallbackAlignment: .layoutBased,

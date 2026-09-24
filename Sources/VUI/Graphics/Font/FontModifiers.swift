@@ -160,6 +160,18 @@ extension Font {
         func modify(traits: inout ResolvedTraits) { traits.width = width }
     }
 
+    struct DesignModifier: FontModifier {
+        var design: Design
+        var tag: DynamicModifierTag { .design }
+        var codingProxy: String { design.codingProxy }
+        static func unwrap(codingProxy: String) -> Self {
+            Self(design: Design.unwrap(codingProxy: codingProxy))
+        }
+        func modify(descriptor: inout FontDescriptor, in context: Context) {
+            descriptor = descriptor.design(design)
+        }
+    }
+
     struct PointSizeModifier: FontModifier {
         var pointSize: CGFloat
         var tag: DynamicModifierTag { .setPointSize }

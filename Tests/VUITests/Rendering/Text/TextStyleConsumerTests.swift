@@ -1,4 +1,5 @@
 import Foundation
+import CoreText
 import Testing
 import VVD
 @testable import VUI
@@ -1503,7 +1504,7 @@ final class TextStyleConsumerTests {
         #expect(!metrics.isCustomized)
         metrics.update(.variable)
         #expect(!metrics.isCustomized)
-        for height: TextLineHeight in [.exact(points: 40), .exact(points: 20), .exact(points: 50),
+        for height: AttributedString.LineHeight in [.exact(points: 40), .exact(points: 20), .exact(points: 50),
                                       .multiple(factor: 2), .multiple(factor: 1), .multiple(factor: 3),
                                       .leading(increase: -5), .leading(increase: -2), .leading(increase: -7), .variable] {
             metrics.update(height)
@@ -1512,7 +1513,7 @@ final class TextStyleConsumerTests {
         #expect(metrics.exact == 20)
         #expect(metrics.leading == -7)
         #expect(metrics.isCustomized)
-        for (height, factor): (TextLineHeight, CGFloat) in [(.normal, 1.2), (.tight, 1), (.loose, 1.5)] {
+        for (height, factor): (AttributedString.LineHeight, CGFloat) in [(.normal, 1.2), (.tight, 1), (.loose, 1.5)] {
             var named = Text.ResolvedProperties.LineHeightMetrics()
             named.update(height)
             #expect(named.multiple == factor)
@@ -1555,7 +1556,7 @@ final class TextStyleConsumerTests {
         original.lineHeight = .exact(points: 40)
         var changed = original
         changed.lineHeight = .exact(points: 20)
-        for height: TextLineHeight? in [nil, .variable, .exact(points: 30)] {
+        for height: AttributedString.LineHeight? in [nil, .variable, .exact(points: 30)] {
             var properties = Text.ResolvedProperties()
             _ = properties.paragraph.style(environment: original, alignment: nil,
                 writingDirection: nil, lineHeight: .exact(points: 50))
@@ -1571,7 +1572,7 @@ final class TextStyleConsumerTests {
     // ASSERTIONS textLineHeight27ParagraphInputObserved
     @Test func attributedLineHeightIsNormalizedBeforeTextResolution() throws {
         #expect(TextLineHeightAttribute.runBoundaries == .paragraph)
-        let cases: [([TextLineHeight?], TextLineHeight?, CGFloat?, CGFloat?)] = [
+        let cases: [([AttributedString.LineHeight?], AttributedString.LineHeight?, CGFloat?, CGFloat?)] = [
             ([nil], .exact(points: 40), 40, nil),
             ([.exact(points: 20)], .exact(points: 40), 20, nil),
             ([.variable], .exact(points: 40), nil, nil),
@@ -1601,7 +1602,7 @@ final class TextStyleConsumerTests {
     // ASSERTIONS textResolvedLineHeight27CacheAggregationObserved
     @Test func attributedParagraphsRetainTheirHeightsAndAggregateAcrossFontScaling() throws {
         var rich = AttributedString()
-        let heights: [TextLineHeight] = [.exact(points: 40), .exact(points: 20), .multiple(factor: 2), .leading(increase: 7)]
+        let heights: [AttributedString.LineHeight] = [.exact(points: 40), .exact(points: 20), .multiple(factor: 2), .leading(increase: 7)]
         for (index, height) in heights.enumerated() {
             var run = AttributedString(index == heights.count - 1 ? "AA" : "AA\n")
             run[TextLineHeightAttribute.self] = height

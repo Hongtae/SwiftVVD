@@ -7,6 +7,9 @@
 
 import Foundation
 import Synchronization
+#if canImport(CoreText)
+import CoreText
+#endif
 
 extension NSAttributedString.Key {
     static let resolvedTextAttachment = NSAttributedString.Key(
@@ -348,16 +351,16 @@ extension Text {
                 multiple != nil || exact != nil || leading != nil
             }
 
-            mutating func update(_ height: TextLineHeight) {
-                switch height {
+            mutating func update(_ height: AttributedString.LineHeight) {
+                switch height.textLineHeightInterval {
                 case .variable:
                     break
                 case let .multiple(factor):
-                    multiple = min(CGFloat(factor), multiple ?? CGFloat(factor))
+                    multiple = min(factor, multiple ?? factor)
                 case let .exact(points):
-                    exact = min(CGFloat(points), exact ?? CGFloat(points))
+                    exact = min(points, exact ?? points)
                 case let .leading(increase):
-                    leading = min(CGFloat(increase), leading ?? CGFloat(increase))
+                    leading = min(increase, leading ?? increase)
                 }
             }
         }

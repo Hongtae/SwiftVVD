@@ -13,6 +13,18 @@ extension View {
         return environment(\.font, font)
     }
 
+    public func fontDesign(_ design: Font.Design?) -> some View {
+        transformEnvironment(\.fontModifiers) { modifiers in
+            if let design {
+                modifiers.append(.dynamic(Font.DesignModifier(design: design)))
+            } else {
+                modifiers.removeAll {
+                    $0 is AnyDynamicFontModifier<Font.DesignModifier>
+                }
+            }
+        }
+    }
+
     public func monospacedDigit() -> some View {
         transformEnvironment(\.fontModifiers) { modifiers in
             modifiers.appendAsNearest(.monospacedDigit)

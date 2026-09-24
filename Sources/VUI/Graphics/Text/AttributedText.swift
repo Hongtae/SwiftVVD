@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(CoreText)
+import CoreText
+#endif
 
 extension AttributeScopes {
     public var core: CoreAttributes.Type { CoreAttributes.self }
@@ -392,7 +395,7 @@ extension Dictionary where Key == NSAttributedString.Key, Value == Any {
         if let value = self[.init(TextParagraphWritingDirectionAttribute.name)] as? AttributedString.WritingDirection {
             style.writingDirection = value; removeValue(forKey: .init(TextParagraphWritingDirectionAttribute.name))
         }
-        if let value = self[.init(TextLineHeightAttribute.name)] as? TextLineHeight {
+        if let value = self[.init(TextLineHeightAttribute.name)] as? AttributedString.LineHeight {
             style.lineHeight = value; removeValue(forKey: .init(TextLineHeightAttribute.name))
         }
         if let intent = self[.init("NSInlinePresentationIntent")] as? InlinePresentationIntent {
@@ -431,7 +434,7 @@ enum TextParagraphWritingDirectionAttribute: AttributedStringKey {
     static let name = "VUI.ParagraphWritingDirection"
 }
 enum TextLineHeightAttribute: AttributedStringKey {
-    typealias Value = TextLineHeight
+    typealias Value = AttributedString.LineHeight
     static let name = "VUI.LineHeight"
     static let runBoundaries: AttributedString.AttributeRunBoundaries? = .paragraph
 }

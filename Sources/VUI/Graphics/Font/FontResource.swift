@@ -70,6 +70,7 @@ final class FontResource: Hashable, @unchecked Sendable {
     private let variation: [UInt32: CGFloat]?
     private let selection: FontDescriptor.Resolution?
     private let preservesSizeOnSymbolicCopy: Bool
+    private let designAttribute: Font.Design?
     private let renderingMode: Font.DefaultRenderingMode
     private let registeredConstruction: RegisteredConstruction?
 
@@ -86,6 +87,7 @@ final class FontResource: Hashable, @unchecked Sendable {
         self.legibilityWeight = descriptor.legibilityWeight
         self.stylePolicy = descriptor.stylePolicy
         self.preservesSizeOnSymbolicCopy = descriptor.preservesSizeOnSymbolicCopy
+        self.designAttribute = descriptor.designAttribute
         let data = descriptor.stylePolicy == nil ? nil : BundledFontCatalog.shared.outsetData
         self.preferredLanguageGroup = data?.preferredGroup(for: Locale.preferredLanguages) ?? 0
         self.metricLanguageGroup = descriptor.language.map { data?.preferredGroup(for: [$0]) ?? 0 }
@@ -128,7 +130,8 @@ final class FontResource: Hashable, @unchecked Sendable {
                        renderingMode: renderingMode,
                        legibilityWeight: legibilityWeight, language: language,
                        stylePolicy: stylePolicy, variation: variation,
-                       resolution: selection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
+                       resolution: selection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy,
+                       designAttribute: designAttribute)
     }
 
     private var descriptorFeatures: [TypefaceShapingFeature] {
@@ -184,7 +187,8 @@ final class FontResource: Hashable, @unchecked Sendable {
             shapingFeatures: descriptorFeatures, renderingMode: renderingMode,
             legibilityWeight: legibilityWeight, language: language,
             stylePolicy: stylePolicy, variation: variation,
-            resolution: resizedSelection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
+            resolution: resizedSelection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy,
+            designAttribute: designAttribute)
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = renderingMode
         return FontResource(descriptor: descriptor, in: environment.fontResolutionContext)

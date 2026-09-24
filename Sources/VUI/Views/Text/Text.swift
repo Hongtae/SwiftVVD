@@ -202,6 +202,60 @@ class AnyTextStorage: CustomDebugStringConvertible {
     }
 }
 
+private protocol EnvironmentConfigurableFormatter {
+    func configure(in environment: EnvironmentValues)
+}
+
+extension DateFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        locale = environment.locale
+        calendar = environment.calendar
+        timeZone = environment.timeZone
+    }
+}
+
+extension ISO8601DateFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        timeZone = environment.timeZone
+    }
+}
+
+#if canImport(Darwin)
+extension DateComponentsFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        calendar = environment.calendar
+    }
+}
+#endif
+
+extension DateIntervalFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        locale = environment.locale
+        calendar = environment.calendar
+        timeZone = environment.timeZone
+    }
+}
+
+extension NumberFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        locale = environment.locale
+    }
+}
+
+#if canImport(Darwin)
+extension MeasurementFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        locale = environment.locale
+    }
+}
+#endif
+
+extension MassFormatter: EnvironmentConfigurableFormatter {
+    fileprivate func configure(in environment: EnvironmentValues) {
+        numberFormatter.locale = environment.locale
+    }
+}
+
 class AnyTextModifier {
     func modify(style: inout Text.Style, environment: EnvironmentValues) {
         preconditionFailure("Abstract text modifier")
@@ -345,6 +399,60 @@ private final class FormatStyleStorage: AnyTextStorage {
         // General format-style storage is classified structurally. Formatting
         // and inspection of the produced value happen later during resolution.
         false
+    }
+}
+
+private final class FormatterTextStorage: AnyTextStorage {
+    let object: NSObject
+    let formatter: Formatter
+
+    init(object: NSObject, formatter: Formatter) {
+        self.object = object
+        self.formatter = formatter
+    }
+
+    override func resolve(
+        style: Text.Style,
+        properties: inout Text.ResolvedProperties,
+        text: inout String,
+        options: Text.ResolveOptions,
+        context: any TextResolutionContext
+    ) -> ResolvedTextSource? {
+        guard let string = formattedString(in: context.environment) else {
+            return .init(
+                runs: [],
+                scaleFactor: context.contentScaleFactor,
+                displayScale: context.displayScale
+            )
+        }
+        return style.resolve(
+            string,
+            context: context,
+            properties: &properties,
+            text: &text,
+            options: options
+        )
+    }
+
+    override func resolveText(in environment: EnvironmentValues) -> String {
+        formattedString(in: environment) ?? ""
+    }
+
+    override func isEqual(to other: AnyTextStorage) -> Bool {
+        guard let other = other as? FormatterTextStorage else { return false }
+        return object.isEqual(other.object)
+            && formatter.isEqual(other.formatter)
+    }
+
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        false
+    }
+
+    private func formattedString(in environment: EnvironmentValues) -> String? {
+        (formatter as? EnvironmentConfigurableFormatter)?.configure(
+            in: environment
+        )
+        return formatter.string(for: object)
     }
 }
 
@@ -1216,9 +1324,9 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
 
     var storage: Storage
 
-    public enum Case: Hashable {
-        case lowercase
+    public enum Case: Hashable, Sendable {
         case uppercase
+        case lowercase
     }
 
     public struct LineStyle: Hashable, Sendable {
@@ -1432,6 +1540,25 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
 
     public init(_ image: Image) {
         self.storage = .anyTextStorage(AttachmentTextStorage(image))
+        self.modifiers = []
+    }
+
+    public init<Subject>(_ subject: Subject, formatter: Formatter)
+    where Subject: ReferenceConvertible {
+        self.storage = .anyTextStorage(
+            FormatterTextStorage(
+                object: subject as! Subject.ReferenceType,
+                formatter: formatter
+            )
+        )
+        self.modifiers = []
+    }
+
+    public init<Subject>(_ subject: Subject, formatter: Formatter)
+    where Subject: NSObject {
+        self.storage = .anyTextStorage(
+            FormatterTextStorage(object: subject, formatter: formatter)
+        )
         self.modifiers = []
     }
 
@@ -1750,6 +1877,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         hasher.combine(environment.hyphenationFactor)
         hasher.combine(environment.hyphenationDisabled)
         hasher.combine(environment.allowsTightening)
+        let textCase = environment.textCase
+        hasher.combine(textCase)
+        if textCase != nil {
+            hasher.combine(environment.locale)
+        }
         hasher.combine(environment.bodyHeadOutdent)
         hasher.combine(environment.shouldRedactContent)
         for modifier in modifiers {
@@ -1948,6 +2080,31 @@ final class TextWidthModifier: AnyTextModifier {
     }
 }
 
+final class TextDesignModifier: AnyTextModifier {
+    let design: Font.Design?
+
+    init(design: Font.Design?) {
+        self.design = design
+    }
+
+    override func modify(style: inout Text.Style, environment: EnvironmentValues) {
+        if let design {
+            style.addFontModifier(.dynamic(Font.DesignModifier(design: design)))
+        } else {
+            style.removeFontModifier(Font.DesignModifier.self)
+        }
+    }
+
+    override func isEqual(to other: AnyTextModifier) -> Bool {
+        (other as? TextDesignModifier)?.design == design
+    }
+
+    override func hashResolution(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(TextDesignModifier.self))
+        hasher.combine(design)
+    }
+}
+
 final class MonospacedTextModifier: AnyTextModifier {
     override func modify(style: inout Text.Style, environment: EnvironmentValues) {
         if isActive { style.addFontModifier(.static(Font.MonospacedModifier.self)) }
@@ -2120,6 +2277,10 @@ extension Text {
 
     public func fontWeight(_ weight: Font.Weight?) -> Text {
         modified(with: .weight(weight))
+    }
+
+    public func fontDesign(_ design: Font.Design?) -> Text {
+        modified(with: .anyTextModifier(TextDesignModifier(design: design)))
     }
 
     public func fontWidth(_ width: Font.Width?) -> Text {

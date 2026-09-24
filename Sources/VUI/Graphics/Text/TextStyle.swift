@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(CoreText)
+import CoreText
+#endif
 
 extension Text {
     /// Style values copied through nested text before producing font and run attributes.
@@ -110,7 +113,7 @@ extension Text {
         var adaptiveImageGlyph: TextAdaptiveImageGlyph?
         var alignment: TextParagraphAlignment?
         var writingDirection: AttributedString.WritingDirection?
-        var lineHeight: TextLineHeight?
+        var lineHeight: AttributedString.LineHeight?
         var clearedFontModifiers: Set<ObjectIdentifier> = []
 
         mutating func addFontModifier(_ modifier: AnyFontModifier) { fontModifiers.append(modifier) }
@@ -202,6 +205,7 @@ extension Text {
 
         func resolveRun(_ string: String, context: any TextResolutionContext,
                         properties: inout ResolvedProperties, text: inout String, options: ResolveOptions = .includeTransitions) -> ResolvedTextSource.Run? {
+            let string = string.caseConvertedIfNeeded(context.environment)
             let attributes = nsAttributes(in: context.environment, properties: &properties,
                 options: options, includeDefaultAttributes: context.includeDefaultAttributes)
             guard !string.isEmpty else { return nil }
@@ -231,6 +235,19 @@ extension Text {
             // original environment and its dependency tracker while creating glyph resources.
             return font.typefaceCascade(in: context.environment, forContext: context.sceneResources,
                 contentScaleFactor: context.contentScaleFactor, applyEnvironmentModifiers: false).runFaces
+        }
+    }
+}
+
+extension String {
+    func caseConvertedIfNeeded(_ environment: EnvironmentValues) -> String {
+        guard let textCase = environment.textCase else { return self }
+        let locale = environment.locale
+        switch textCase {
+        case .uppercase:
+            return uppercased(with: locale)
+        case .lowercase:
+            return lowercased(with: locale)
         }
     }
 }

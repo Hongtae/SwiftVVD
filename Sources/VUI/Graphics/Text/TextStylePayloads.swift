@@ -191,16 +191,6 @@ final class TextEncapsulationResource: NSObject {
 
 /// Physical paragraph alignment, independent of leading/trailing resolution.
 enum TextParagraphAlignment: Hashable, Codable { case left, right, center }
-/// A line-height request retained separately from measured glyph metrics.
-enum TextLineHeight: Hashable, Codable {
-    case variable
-    case multiple(factor: Double)
-    case leading(increase: Double)
-    case exact(points: Double)
-    static let normal = Self.multiple(factor: 1.2)
-    static let tight = Self.multiple(factor: 1)
-    static let loose = Self.multiple(factor: 1.5)
-}
 
 /// Writes a language request into Text.Style before font resolution.
 final class LanguageTextModifier: AnyTextModifier {
