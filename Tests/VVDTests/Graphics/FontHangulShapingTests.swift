@@ -3,6 +3,20 @@ import XCTest
 import VVD
 
 final class FontHangulShapingTests: XCTestCase {
+    // ASSERTIONS textCombiningRunSlices27Observed
+    func testSameFontGlyphsRetainTheirScriptRunRanges() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let file = root.appendingPathComponent("Sources/VUI/Resources/Fonts/NotoSansKR/NotoSansKR-VariableFont_wght.ttf")
+        let font = try XCTUnwrap(Font(data: Data(contentsOf: file)))
+        XCTAssertTrue(font.setVariationCoordinates([0x7767_6874: 100]))
+        font.setPointSize(23, dpi: (72, 72))
+        let shaped = try XCTUnwrap(font.shape("A가\u{301} 나"))
+        XCTAssertEqual(shaped.glyphs.map(\.sourceIndex), [0, 1, 2, 3, 4])
+        XCTAssertEqual(shaped.glyphs.map(\.scriptRunRange),
+                       [0..<1, 1..<5, 1..<5, 1..<5, 1..<5])
+    }
+
     func testExplicitFeatureRangeRemainsRelativeToTheCompleteSource() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }

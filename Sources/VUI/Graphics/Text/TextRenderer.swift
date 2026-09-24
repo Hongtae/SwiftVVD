@@ -667,9 +667,7 @@ extension ResolvedTextSource {
             let glyph = glyphs[index]
             if let last = ranges.indices.last {
                 let first = glyphs[ranges[last].lowerBound]
-                if first.sourceRunIndex == glyph.sourceRunIndex &&
-                    first.attributes == glyph.attributes && first.style == glyph.style &&
-                    !first.isTruncationToken && !glyph.isTruncationToken && first.face.isEqual(to: glyph.face) {
+                if Self.samePublicationRun(first, glyph) {
                     ranges[last] = ranges[last].lowerBound..<(index + 1)
                     continue
                 }
@@ -720,10 +718,15 @@ extension ResolvedTextSource {
             // its font still contributes to the already resolved line metrics.
             for range in Self.drawingRunRanges(in: line.glyphs) {
                 var indices: [Int]?
-                if range.contains(where: { line.glyphs[$0].glyphIndex == 65535 && $0 != 0 }) {
-                    indices = range.filter { line.glyphs[$0].glyphIndex != 65535 || $0 == 0 }
+                if range.contains(where: { line.glyphs[$0].glyphIndex == 65535 }) {
+                    let published = range.filter {
+                        line.glyphs[$0].glyphIndex != 65535 ||
+                            line.publishedDeletedGlyphIndex == $0
+                    }
+                    if published.count != range.count { indices = published }
                 }
-                if indices?.isEmpty != true {
+                if indices?.isEmpty != true ||
+                    (line.retainsEmptyLeadingPublicationRun && range.contains(0)) {
                     let input = line.glyphs[range.lowerBound]
                     runs.append(_TextLayoutRunStorage(glyphRange: range, glyphIndices: indices,
                         attributes: input.attributes, style: input.style))

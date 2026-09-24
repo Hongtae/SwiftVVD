@@ -216,6 +216,7 @@ package enum GlyphComposer {
                 index: glyph.index,
                 sourceIndex: glyph.sourceIndex,
                 sourceRange: glyph.sourceRange,
+                scriptRunRange: glyph.scriptRunRange,
                 advance: prepared[index].advance,
                 offset: prepared[index].offset,
                 hasResolvedMarkPosition: prepared[index].hasResolvedMarkPosition

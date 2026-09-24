@@ -684,6 +684,8 @@ public class Font: @unchecked Sendable {
         public let sourceIndex: Int
         /// Unicode-scalar range represented by this glyph's source cluster.
         public let sourceRange: Range<Int>
+        /// Source interval shaped as one script run.
+        package let scriptRunRange: Range<Int>
         public let advance: CGSize
         public let offset: CGPoint
         /// Internal table attachment or geometric placement has resolved this mark.
@@ -693,6 +695,7 @@ public class Font: @unchecked Sendable {
             index: UInt32,
             sourceIndex: Int,
             sourceRange: Range<Int>,
+            scriptRunRange: Range<Int>,
             advance: CGSize,
             offset: CGPoint,
             hasResolvedMarkPosition: Bool = false
@@ -700,6 +703,7 @@ public class Font: @unchecked Sendable {
             self.index = index
             self.sourceIndex = sourceIndex
             self.sourceRange = sourceRange
+            self.scriptRunRange = scriptRunRange
             self.advance = advance
             self.offset = offset
             self.hasResolvedMarkPosition = hasResolvedMarkPosition
@@ -1455,6 +1459,7 @@ public class Font: @unchecked Sendable {
                         index: info.codepoint,
                         sourceIndex: clusterStart,
                         sourceRange: graphemeRanges[clusterStart].lowerBound..<graphemeRanges[clusterEnd - 1].upperBound,
+                        scriptRunRange: run.range,
                         advance: CGSize(
                             width: (CGFloat(position.x_advance) / positionUnits) * positionScale.width,
                             height: (CGFloat(position.y_advance) / positionUnits) * positionScale.height
@@ -1494,6 +1499,7 @@ public class Font: @unchecked Sendable {
                             guard run.range.contains(source) else { return nil }
                             glyphs.append(ShapedGlyph(index: infos[index].codepoint,
                                 sourceIndex: source, sourceRange: graphemeRanges[source],
+                                scriptRunRange: run.range,
                                 advance: CGSize(
                                     width: (CGFloat(positions[index].x_advance) / positionUnits) * positionScale.width,
                                     height: (CGFloat(positions[index].y_advance) / positionUnits) * positionScale.height),
@@ -1525,6 +1531,7 @@ public class Font: @unchecked Sendable {
                         }) ?? glyphs.endIndex
                         glyphs.insert(ShapedGlyph(index: 65535,
                             sourceIndex: lower, sourceRange: graphemeRanges[lower],
+                            scriptRunRange: run.range,
                             advance: .zero, offset: .zero), at: insertion)
                     }
                 }

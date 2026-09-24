@@ -35,6 +35,9 @@ final class TerminalFallbackTypeface: Typeface {
     }
 
     func glyphBounds(at index: UInt32) -> CGRect? { base.glyphBounds(at: index) }
+    func allowsMarkComposition(at index: UInt32) -> Bool {
+        base.allowsMarkComposition(at: index)
+    }
     func glyphOutline(at index: UInt32) -> Path? { base.glyphOutline(at: index) }
 
     func kernAdvance(
@@ -54,7 +57,10 @@ final class TerminalFallbackTypeface: Typeface {
         language: String?,
         features: [TypefaceShapingFeature],
         optionalLigatureBoundaries: [Int],
+        positioningRunBoundaries: [Int],
+        sourceRunBoundaries: [Int],
         retainsDeletedGlyphs: Bool,
+        allowsLeadingMarkBase: Bool,
         characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         base.shape(
@@ -63,7 +69,10 @@ final class TerminalFallbackTypeface: Typeface {
             language: language,
             features: features,
             optionalLigatureBoundaries: optionalLigatureBoundaries,
+            positioningRunBoundaries: positioningRunBoundaries,
+            sourceRunBoundaries: sourceRunBoundaries,
             retainsDeletedGlyphs: retainsDeletedGlyphs,
+            allowsLeadingMarkBase: allowsLeadingMarkBase,
             characterInput: characterInput
         )
     }
@@ -77,6 +86,9 @@ final class TerminalFallbackTypeface: Typeface {
         base.decorationMetrics
     }
     var resolvedMetrics: ResolvedFontMetrics { base.resolvedMetrics }
+    var glyphCompositionMetrics: VVD.GlyphComposer.Metrics? {
+        base.glyphCompositionMetrics
+    }
     var designMetrics: TypefaceDesignMetrics? { base.designMetrics }
     var outsetAttributes: FontOutsetAttributes? { base.outsetAttributes }
     var identifier: String { "terminal:\(base.identifier)" }
@@ -157,6 +169,9 @@ final class ShapingFeatureTypeface: Typeface {
     }
 
     func glyphBounds(at index: UInt32) -> CGRect? { base.glyphBounds(at: index) }
+    func allowsMarkComposition(at index: UInt32) -> Bool {
+        base.allowsMarkComposition(at: index)
+    }
     func glyphOutline(at index: UInt32) -> Path? { base.glyphOutline(at: index) }
 
     func kernAdvance(
@@ -176,7 +191,10 @@ final class ShapingFeatureTypeface: Typeface {
         language: String?,
         features requestedFeatures: [TypefaceShapingFeature],
         optionalLigatureBoundaries: [Int],
+        positioningRunBoundaries: [Int],
+        sourceRunBoundaries: [Int],
         retainsDeletedGlyphs: Bool,
+        allowsLeadingMarkBase: Bool,
         characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         let selectedFeatures: [TypefaceShapingFeature]
@@ -193,7 +211,10 @@ final class ShapingFeatureTypeface: Typeface {
             language: language,
             features: selectedFeatures + requestedFeatures,
             optionalLigatureBoundaries: optionalLigatureBoundaries,
+            positioningRunBoundaries: positioningRunBoundaries,
+            sourceRunBoundaries: sourceRunBoundaries,
             retainsDeletedGlyphs: retainsDeletedGlyphs,
+            allowsLeadingMarkBase: allowsLeadingMarkBase,
             characterInput: characterInput
         )
     }
@@ -232,6 +253,9 @@ final class ShapingFeatureTypeface: Typeface {
         base.decorationMetrics
     }
     var resolvedMetrics: ResolvedFontMetrics { base.resolvedMetrics }
+    var glyphCompositionMetrics: VVD.GlyphComposer.Metrics? {
+        base.glyphCompositionMetrics
+    }
     var designMetrics: TypefaceDesignMetrics? { base.designMetrics }
     var outsetAttributes: FontOutsetAttributes? { base.outsetAttributes }
     var identifier: String {
@@ -326,6 +350,9 @@ final class DeferredTypeface: Typeface {
     }
 
     func glyphBounds(at index: UInt32) -> CGRect? { resolved.glyphBounds(at: index) }
+    func allowsMarkComposition(at index: UInt32) -> Bool {
+        resolved.allowsMarkComposition(at: index)
+    }
     func glyphOutline(at index: UInt32) -> Path? { resolved.glyphOutline(at: index) }
 
     func kernAdvance(
@@ -345,7 +372,10 @@ final class DeferredTypeface: Typeface {
         language: String?,
         features: [TypefaceShapingFeature],
         optionalLigatureBoundaries: [Int],
+        positioningRunBoundaries: [Int],
+        sourceRunBoundaries: [Int],
         retainsDeletedGlyphs: Bool,
+        allowsLeadingMarkBase: Bool,
         characterInput: VVD.CharacterComposer.Input?
     ) -> TypefaceShapedText? {
         resolved.shape(
@@ -354,7 +384,10 @@ final class DeferredTypeface: Typeface {
             language: language,
             features: features,
             optionalLigatureBoundaries: optionalLigatureBoundaries,
+            positioningRunBoundaries: positioningRunBoundaries,
+            sourceRunBoundaries: sourceRunBoundaries,
             retainsDeletedGlyphs: retainsDeletedGlyphs,
+            allowsLeadingMarkBase: allowsLeadingMarkBase,
             characterInput: characterInput
         )
     }
@@ -368,6 +401,9 @@ final class DeferredTypeface: Typeface {
         resolved.decorationMetrics
     }
     var resolvedMetrics: ResolvedFontMetrics { resolved.resolvedMetrics }
+    var glyphCompositionMetrics: VVD.GlyphComposer.Metrics? {
+        resolved.glyphCompositionMetrics
+    }
     var designMetrics: TypefaceDesignMetrics? { resolved.designMetrics }
     var outsetAttributes: FontOutsetAttributes? { resolved.outsetAttributes }
 

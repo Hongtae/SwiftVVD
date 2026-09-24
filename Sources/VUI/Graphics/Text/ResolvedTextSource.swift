@@ -576,6 +576,7 @@ struct ResolvedTextSource {
         var content: Content = .missing
         var advance: CGSize = .zero     // distance to next glyph
         var positionOffset: CGPoint = .zero
+        var hasResolvedMarkPosition: Bool = false
         // The selected face owns glyph/run metrics and artwork.
         var ascender: CGFloat = .zero
         var descender: CGFloat = .zero
@@ -593,6 +594,8 @@ struct ResolvedTextSource {
         // Original attributed intervals remain distinct when shaping removes
         // an intervening run's glyphs.
         var sourceRunIndex: Int?
+        // A selected face can still produce distinct script shaping runs.
+        var scriptRunRange: Range<Int>?
         var isTruncationToken: Bool = false
 
         init(scalar: UnicodeScalar, face: Typeface) {
@@ -634,6 +637,14 @@ struct ResolvedTextSource {
             lhs.face.isEqual(to: rhs.face)
     }
 
+    static func samePublicationRun(_ lhs: Glyph, _ rhs: Glyph) -> Bool {
+        lhs.sourceRunIndex == rhs.sourceRunIndex &&
+            lhs.scriptRunRange == rhs.scriptRunRange &&
+            lhs.attributes == rhs.attributes && lhs.style == rhs.style &&
+            !lhs.isTruncationToken && !rhs.isTruncationToken &&
+            lhs.face.isEqual(to: rhs.face)
+    }
+
     static func clusterRanges(in glyphs: [Glyph]) -> [Range<Int>] {
         guard !glyphs.isEmpty else { return [] }
         var ranges: [Range<Int>] = []
@@ -666,6 +677,11 @@ struct ResolvedTextSource {
         // Preserve the source attributes when the visible glyphs are truncated.
         var sourceStart: Glyph? = nil
         var kind: Kind = .content
+        // Public glyph projection normally designates the first deleted glyph
+        // as a zero-width placeholder. A copied line can detach that designation
+        // while retaining the original empty run.
+        var publishedDeletedGlyphIndex: Int? = 0
+        var retainsEmptyLeadingPublicationRun: Bool = false
         var isSimpleParagraph: Bool = false
         var isTruncated: Bool = false
         var forcedClusterBreak: Bool = false
@@ -1015,6 +1031,8 @@ struct ResolvedTextSource {
                          fontResource: FontResource? = nil,
                          scaleFactor: CGFloat = 1,
                          optionalLigatureBoundaries: [Int] = [],
+                         positioningRunBoundaries: [Int] = [],
+                         sourceRunBoundaries: [Int] = [],
                          characterInput: VVD.CharacterComposer.Input? = nil) -> Self {
             assert(faces.isEmpty == false)
             let scalars = Array(unicodeScalars)
@@ -1103,7 +1121,16 @@ struct ResolvedTextSource {
                             $0 > span.range.lowerBound && $0 < span.range.upperBound
                                 ? $0 - span.range.lowerBound : nil
                         },
+                        positioningRunBoundaries: positioningRunBoundaries.compactMap {
+                            $0 > span.range.lowerBound && $0 < span.range.upperBound
+                                ? $0 - span.range.lowerBound : nil
+                        },
+                        sourceRunBoundaries: sourceRunBoundaries.compactMap {
+                            $0 > span.range.lowerBound && $0 < span.range.upperBound
+                                ? $0 - span.range.lowerBound : nil
+                        },
                         retainsDeletedGlyphs: true,
+                        allowsLeadingMarkBase: face1 == nil && span.range.lowerBound == 0,
                         characterInput: characterInput?.sliced(to: span.range)
                       ),
                       shaped.direction == .leftToRight,
@@ -1138,9 +1165,15 @@ struct ResolvedTextSource {
                     var glyph = Glyph(scalar: scalar, face: span.face)
                     glyph.glyphIndex = shapedGlyph.index
                     glyph.sourceRange = sourceRange
+                    glyph.scriptRunRange = (
+                        span.range.lowerBound + shapedGlyph.scriptRunRange.lowerBound
+                    )..<(
+                        span.range.lowerBound + shapedGlyph.scriptRunRange.upperBound
+                    )
                     glyph.characterIndex = sourceIndex
                     glyph.advance = shapedGlyph.advance
                     glyph.positionOffset = shapedGlyph.offset
+                    glyph.hasResolvedMarkPosition = shapedGlyph.hasResolvedMarkPosition
                     glyph.lineBoxAscender = lineBoxAscender
                     glyph.lineBoxDescender = lineBoxDescender
                     glyph.fontLineMetrics = fontLineMetrics
@@ -1787,6 +1820,22 @@ struct ResolvedTextSource {
             line.width = getGlyphsWidth(line.glyphs)
         }
 
+        func leadingDeletedRunEnd(in glyphs: [Glyph]) -> Int? {
+            guard let first = glyphs.first,
+                  first.glyphIndex == 65535,
+                  first.advance == .zero,
+                  first.positionOffset == .zero else { return nil }
+            let end = glyphs.prefix {
+                Self.samePublicationRun(first, $0) &&
+                    $0.glyphIndex == 65535 &&
+                    $0.advance == .zero &&
+                    $0.positionOffset == .zero
+            }.count
+            guard end > 0, end < glyphs.count,
+                  !Self.samePublicationRun(first, glyphs[end]) else { return nil }
+            return end
+        }
+
         // Keep each phase's temporary line values in its own call frame.
         func wrapLines() -> [LineGlyphs] {
             // A single-line paragraph is measured before truncation. Document
@@ -1819,7 +1868,18 @@ struct ResolvedTextSource {
                     first.width = min(first.width, CGFloat(maxWidth))
                     wrappedLines.append(first)
 
-                    line.glyphs = split.second
+                    var continuation = split.second
+                    if first.glyphs.last.map({ CharacterSet.whitespaces.contains($0.scalar) }) == true,
+                       let deletedEnd = leadingDeletedRunEnd(in: continuation) {
+                        var deleted = line
+                        deleted.glyphs = Array(continuation[..<deletedEnd])
+                        deleted.trailingBoundary = nil
+                        deleted.isParagraphEnd = false
+                        updateMetrics(&deleted)
+                        wrappedLines.append(deleted)
+                        continuation.removeFirst(deletedEnd)
+                    }
+                    line.glyphs = continuation
                     updateMetrics(&line)
                 }
                 // Trailing whitespace stays in the glyph range even when it
@@ -2307,6 +2367,34 @@ struct ResolvedTextSource {
                 return nil
             }
 
+            func copiedInsertedTokenCandidate() -> [Glyph]? {
+                let admitted = visibleLines[lastVisibleIndex].glyphs
+                guard needsTruncation,
+                      hasParagraphOverflow,
+                      !admitted.isEmpty,
+                      paragraphGlyphs.count > admitted.count,
+                      admitted.allSatisfy({
+                          $0.glyphIndex == 65535 &&
+                              $0.advance == .zero &&
+                              $0.positionOffset == .zero
+                      }),
+                      let admittedFirst = admitted.first,
+                      let following = paragraphGlyphs.dropFirst(admitted.count).first,
+                      !Self.samePublicationRun(admittedFirst, following),
+                      let source = paragraphGlyphs.last,
+                      let tokenIndex = paragraphGlyphs.compactMap({
+                          $0.sourceRange?.upperBound
+                      }).max(),
+                      let ellipsis = makeEllipsis(
+                        inheriting: source,
+                        characterIndex: tokenIndex,
+                        after: source
+                      ),
+                      getGlyphsWidth([ellipsis]) > truncationWidth +
+                        truncationTolerance else { return nil }
+                return paragraphGlyphs + [ellipsis]
+            }
+
             func headTruncation(_ glyphs: [Glyph]) -> (glyphs: [Glyph], range: Range<Int>?)? {
                 let clusters = Self.clusterRanges(in: glyphs).map {
                     Array(glyphs[$0])
@@ -2412,6 +2500,8 @@ struct ResolvedTextSource {
             let explicitBoundary = hasExplicitLineOverflow
                 ? visibleLines[lastVisibleIndex].trailingBoundary
                 : nil
+            let copiedTokenCandidate = truncationMode == .tail
+                ? copiedInsertedTokenCandidate() : nil
             let truncated: (glyphs: [Glyph], range: Range<Int>?)?
             if explicitBoundary != nil, truncationMode != .tail {
                 return result()
@@ -2438,6 +2528,16 @@ struct ResolvedTextSource {
             // including an empty continuation that shares the same rectangle.
             let admittedOriginY = visibleLines[lastVisibleIndex].originY
             guard let truncated else {
+                if let copiedTokenCandidate {
+                    visibleLines[lastVisibleIndex].glyphs = copiedTokenCandidate
+                    visibleLines[lastVisibleIndex].trailingBoundary = nil
+                    visibleLines[lastVisibleIndex].isTruncated = hasParagraphOverflow
+                    visibleLines[lastVisibleIndex].publishedDeletedGlyphIndex = nil
+                    visibleLines[lastVisibleIndex].retainsEmptyLeadingPublicationRun = true
+                    visibleLines[lastVisibleIndex].width = getGlyphsWidth(copiedTokenCandidate)
+                    visibleLines[lastVisibleIndex].fragmentWidth = truncationWidth
+                    return result()
+                }
                 if hasParagraphOverflow {
                     visibleLines[lastVisibleIndex].glyphs = paragraphGlyphs
                     updateMetrics(&visibleLines[lastVisibleIndex])
@@ -2527,6 +2627,102 @@ struct ResolvedTextSource {
         return nil
     }
 
+    /// Resolves unattached marks only when one source group spans distinct
+    /// selected faces. Each glyph keeps its own outline geometry and vertical
+    /// composition metrics.
+    private static func composeCrossFontMarks(in glyphs: inout [Glyph]) {
+        guard glyphs.count > 1,
+              glyphs.contains(where: {
+                  VVD.GlyphComposer.isMark($0.scalar.value)
+              }),
+              let firstVisible = glyphs.first(where: {
+                  $0.glyphIndex != nil && $0.glyphIndex != 0 && $0.glyphIndex != 65535
+              }),
+              glyphs.contains(where: {
+                  $0.glyphIndex != nil && $0.glyphIndex != 0 && $0.glyphIndex != 65535 &&
+                      !firstVisible.face.isEqual(to: $0.face)
+              }) else { return }
+        let ordered = glyphs.indices.sorted {
+            let first = glyphs[$0].characterIndex
+            let second = glyphs[$1].characterIndex
+            return first == second ? $0 < $1 : first < second
+        }
+        var groups: [[Int]] = []
+        for index in ordered {
+            if groups.isEmpty || !VVD.GlyphComposer.isMark(glyphs[index].scalar.value) {
+                groups.append([index])
+            } else {
+                groups[groups.count - 1].append(index)
+            }
+        }
+
+        func normalizedStyle(_ glyph: Glyph) -> _ResolvedTextRunAttributes {
+            var style = glyph.style
+            style.font = nil
+            style.fontResource = nil
+            style.foregroundColor = nil
+            return style
+        }
+
+        var eligible = Set<Int>()
+        for group in groups where group.count > 1 {
+            let baseIndex = group[0]
+            let base = glyphs[baseIndex]
+            guard base.glyphIndex != nil,
+                  base.glyphIndex != 0,
+                  base.glyphIndex != 65535,
+                  base.style.kern == nil,
+                  base.style.tracking == nil,
+                  base.style.baselineOffset == nil,
+                  base.style.language == nil else { continue }
+            let style = normalizedStyle(base)
+            guard group.dropFirst().allSatisfy({ index in
+                let glyph = glyphs[index]
+                return glyph.style.kern == nil &&
+                    glyph.style.tracking == nil &&
+                    glyph.style.baselineOffset == nil &&
+                    glyph.style.language == nil &&
+                    glyph.attributes == base.attributes &&
+                    normalizedStyle(glyph) == style
+            }) else { continue }
+            guard group.dropFirst().contains(where: { index in
+                let glyph = glyphs[index]
+                guard glyph.glyphIndex != nil,
+                      glyph.glyphIndex != 0,
+                      glyph.glyphIndex != 65535 else { return false }
+                return !base.face.isEqual(to: glyph.face)
+            }) else { continue }
+            eligible.formUnion(group.dropFirst())
+        }
+        guard !eligible.isEmpty else { return }
+
+        var prepared = glyphs.indices.map { index in
+            let glyph = glyphs[index]
+            let glyphIndex = glyph.glyphIndex
+            let isPresent = glyphIndex != nil && glyphIndex != 0 && glyphIndex != 65535
+            return VVD.GlyphComposer.Glyph(
+                scalar: glyph.scalar.value,
+                sourceIndex: glyph.characterIndex,
+                bounds: glyphIndex.flatMap { isPresent ? glyph.face.glyphBounds(at: $0) : nil },
+                isPresent: isPresent,
+                allowsMarkComposition: eligible.contains(index) &&
+                    glyphIndex.map { glyph.face.allowsMarkComposition(at: $0) } == true,
+                hasResolvedMarkPosition: glyph.hasResolvedMarkPosition,
+                metrics: glyph.face.glyphCompositionMetrics,
+                advance: glyph.advance,
+                offset: glyph.positionOffset
+            )
+        }
+        let sourceUpperBound = glyphs.compactMap(\.sourceRange?.upperBound).max() ??
+            ((glyphs.map(\.characterIndex).max() ?? -1) + 1)
+        VVD.GlyphComposer.compose(&prepared, sourceUpperBound: sourceUpperBound)
+        for index in glyphs.indices {
+            glyphs[index].advance = prepared[index].advance
+            glyphs[index].positionOffset = prepared[index].offset
+            glyphs[index].hasResolvedMarkPosition = prepared[index].hasResolvedMarkPosition
+        }
+    }
+
     private static func _makeGlyphs(
         runs: [Run],
         scaleFactor: CGFloat,
@@ -2548,6 +2744,10 @@ struct ResolvedTextSource {
         var previousWasCR = false
 
         func addLine(_ boundary: Glyph?, isParagraphEnd: Bool) {
+            composeCrossFontMarks(in: &glyphs)
+            offset.x = glyphs.reduce(CGFloat.zero) {
+                $0 + $1.advance.width + $1.kerning.x
+            }
             let tabOverflow = applyTabStops(to: &glyphs, scaleFactor: scaleFactor, tolerance: 0.0002)
             if glyphs.contains(where: { $0.scalar == "\t" }) {
                 offset.x = glyphs.reduce(CGFloat.zero) { $0 + $1.advance.width + $1.kerning.x }
@@ -2637,14 +2837,18 @@ struct ResolvedTextSource {
                   first.attributes == next.attributes else { return false }
             var firstStyle = first.style ?? _ResolvedTextRunAttributes()
             var nextStyle = next.style ?? _ResolvedTextRunAttributes()
-            // This adapter handles paint intervals within one unchanged
-            // shaping request. Independent positioning and attachment inputs
+            // Paint and spacing intervals can share character preparation and
+            // substitution context. Other positioning and attachment inputs
             // retain their existing owners.
-            guard firstStyle.kern == nil, firstStyle.tracking == nil,
-                  firstStyle.baselineOffset == nil, firstStyle.language == nil,
-                  firstStyle.customAttachment == nil else { return false }
+            guard firstStyle.baselineOffset == nil, nextStyle.baselineOffset == nil,
+                  firstStyle.language == nil, nextStyle.language == nil,
+                  firstStyle.customAttachment == nil, nextStyle.customAttachment == nil else { return false }
             firstStyle.foregroundColor = nil
+            firstStyle.kern = nil
+            firstStyle.tracking = nil
             nextStyle.foregroundColor = nil
+            nextStyle.kern = nil
+            nextStyle.tracking = nil
             return firstStyle == nextStyle
         }
         var inputIndex = 0
@@ -2679,8 +2883,6 @@ struct ResolvedTextSource {
                     $0.prepared.sliced(to: $0.range.lowerBound..<($0.range.lowerBound + scalars.count))
                 }
                 let resolvedStyle = style ?? _ResolvedTextRunAttributes()
-                let spacing = (resolvedStyle.tracking ?? resolvedStyle.kern ?? 0) * scaleFactor
-                let baselineOffset = (resolvedStyle.baselineOffset ?? 0) * scaleFactor
                 let fontInput = TextGlyphs.from(unicodeScalars: "".unicodeScalars,
                     with: faces, drawMissingGlyphs: false, prevFace: nil, prevChar: UnicodeScalar(0),
                     fontResource: style?.fontResource, scaleFactor: scaleFactor)
@@ -2705,7 +2907,7 @@ struct ResolvedTextSource {
                     glyph.fontLineMetrics = fontInput.fontLineMetrics
                     glyph.attributes = attributes
                     glyph.style = paint.style
-                    glyph.baselineOffset = baselineOffset
+                    glyph.baselineOffset = (paint.style.baselineOffset ?? 0) * scaleFactor
                     glyph.foregroundColor = paint.style.foregroundColor
                     if paintRuns.count > 1 { glyph.sourceRunIndex = inputSourceStart + paint.range.lowerBound }
                     glyph.characterIndex = characterIndex
@@ -2789,13 +2991,23 @@ struct ResolvedTextSource {
                     }
                     if paragraphInput == nil { paragraphInput = attributeGlyph(scalars[start]) }
                     let span = String(String.UnicodeScalarView(scalars[start..<index]))
+                    let sourceRunBoundaries = paintRuns.dropFirst().compactMap {
+                        $0.range.lowerBound > start && $0.range.lowerBound < index
+                            ? $0.range.lowerBound - start : nil
+                    }
+                    let positioningRunBoundaries = Set(paintRuns.flatMap { paint -> [Int] in
+                        guard paint.style.kern == 0 else { return [] }
+                        return [paint.range.lowerBound, paint.range.upperBound].compactMap {
+                            $0 > start && $0 < index ? $0 - start : nil
+                        }
+                    }).sorted()
                     let textGlyphs = TextGlyphs.from(unicodeScalars: span.unicodeScalars,
                         with: faces, drawMissingGlyphs: drawMissingGlyphs, prevFace: face1,
                         prevChar: char1, fontResource: style?.fontResource, scaleFactor: scaleFactor,
-                        optionalLigatureBoundaries: paintRuns.dropFirst().compactMap {
-                            $0.range.lowerBound > start && $0.range.lowerBound < index
-                                ? $0.range.lowerBound - start : nil
-                        }, characterInput: prepared?.sliced(to: start..<index))
+                        optionalLigatureBoundaries: sourceRunBoundaries,
+                        positioningRunBoundaries: positioningRunBoundaries,
+                        sourceRunBoundaries: sourceRunBoundaries,
+                        characterInput: prepared?.sliced(to: start..<index))
                     face1 = textGlyphs.lastFace
                     char1 = textGlyphs.lastCharacter
                     lastBreak = nil
@@ -2818,10 +3030,15 @@ struct ResolvedTextSource {
                         } else {
                             glyph.characterIndex = runStartIndex
                         }
+                        if let range = glyph.scriptRunRange {
+                            glyph.scriptRunRange =
+                                (runStartIndex + range.lowerBound)..<(runStartIndex + range.upperBound)
+                        }
                         glyph.attributes = attributes
                         glyph.style = paint.style
-                        glyph.baselineOffset = baselineOffset
+                        glyph.baselineOffset = (paint.style.baselineOffset ?? 0) * scaleFactor
                         glyph.foregroundColor = paint.style.foregroundColor
+                        let spacing = (paint.style.tracking ?? paint.style.kern ?? 0) * scaleFactor
                         if spacing != 0, glyph.glyphIndex != 65535 {
                             glyph.advance.width += spacing
                             // Spacing can collapse an advance without removing its glyph.

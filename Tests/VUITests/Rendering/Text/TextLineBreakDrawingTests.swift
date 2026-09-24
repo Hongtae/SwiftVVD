@@ -72,6 +72,102 @@ final class TextLineBreakDrawingTests: XCTestCase {
         try verifyDrawing(cases, emptyCases: [4], emptyClippedCases: [0, 2, 3, 4, 5, 6, 7])
     }
 
+    // ASSERTIONS textLinePublication27Observed
+    func testMountedRawSlotReflowAndCopiedTokenPreserveRunPublication() throws {
+        guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
+        let previous = appContext
+        appContext = StyleTestAppContext(graphicsDeviceContext: device)
+        defer { appContext = previous }
+
+        let regular = testFont(cjk: false)
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let large = VUI.Font.file(root.appendingPathComponent(
+            "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"
+        ), size: 46, weight: .regular)
+        func part(_ value: String, font: VUI.Font, color: VUI.Color = .blue) -> Text {
+            Text(verbatim: value).font(font).foregroundColor(color)
+        }
+        let cases: [(Text, [[[Int]]], [CGFloat], [CGFloat])] = [
+            (
+                part("x ", font: regular) + part("\u{34f}", font: regular, color: .red) +
+                    part("a", font: regular),
+                [[[0, 1]], [[2]], [[3]]],
+                [15, 0, 12.5107421875],
+                [15, 81, 21, 75]
+            ),
+            (
+                part("x ", font: regular) + part("\u{34f}", font: large) +
+                    part("a", font: regular),
+                [[[0, 1]], [[], [3], [4]]],
+                [15, 15],
+                [15, 81, 21, 70]
+            ),
+        ]
+
+        for (backend, rendering) in [("bitmap", VUI.Font.DefaultRenderingMode.bitmap()),
+                                     ("vector", VUI.Font.DefaultRenderingMode.vector())] {
+            for scale: CGFloat in [1, 2] {
+                var environment = EnvironmentValues()
+                environment.defaultFontRenderingMode = rendering
+                environment.displayScale = 2
+                environment._contentScaleFactor = scale
+                for (index, input) in cases.enumerated() {
+                    let (text, expectedRuns, expectedWidths, expectedMeasure) = input
+                    for clips in [false, true] {
+                        var images: [String: [UInt8]] = [:]
+                        for mode in ["ordinary", "default", "measured", "slices"] {
+                            let capture = LineBreakDrawingCapture()
+                            capture.drawsSlices = mode == "slices"
+                            let child = mode == "ordinary" ? AnyView(text) : mode == "measured"
+                                ? AnyView(text.textRenderer(LineBreakDrawingMeasuredRenderer(capture: capture)))
+                                : AnyView(text.textRenderer(LineBreakDrawingDefaultRenderer(capture: capture)))
+                            let measured = LineBreakDrawingMeasure(
+                                proposal: .init(width: 15, height: 100), capture: capture
+                            ) { child }.padding(.top, 24).padding(.leading, 24)
+                            let value = measured.frame(width: 320, height: 160, alignment: .topLeading)
+                            let rendererHost = TestViewRendererHost()
+                            let host = ViewGraph(rootViewType: AnyView.self, content: AnyView(value),
+                                rendererHost: rendererHost, initialEnvironment: environment)
+                            rendererHost.storage = host
+                            host.setSize(CGSize(width: 320, height: 160))
+                            host.updateOutputs(at: .zero)
+                            let list = try host.data.withCurrent { try XCTUnwrap(host.displayList()) }
+                            let label = "\(backend) scale=\(scale) case=\(index) clips=\(clips) \(mode)"
+                            let clip = clips ? CGRect(x: 0, y: 0, width: 43, height: 48) : nil
+                            let direct = try render(list, device: device,
+                                resources: rendererHost.sceneResources, environment: environment,
+                                replay: false, clip: clip)
+                            let replay = try render(list, device: device,
+                                resources: rendererHost.sceneResources, environment: environment,
+                                replay: true, clip: clip)
+                            XCTAssertEqual(direct, replay, "replay " + label)
+                            images[mode] = direct
+                            XCTAssertFalse(capture.measures.isEmpty, label)
+                            for measure in capture.measures {
+                                XCTAssertEqual(measure, expectedMeasure, label)
+                            }
+                            if mode != "ordinary" {
+                                XCTAssertFalse(capture.runs.isEmpty, label)
+                                XCTAssertFalse(capture.widths.isEmpty, label)
+                                for runs in capture.runs { XCTAssertEqual(runs, expectedRuns, label) }
+                                for widths in capture.widths {
+                                    XCTAssertEqual(widths.count, expectedWidths.count, label)
+                                    for (actual, expected) in zip(widths, expectedWidths) {
+                                        XCTAssertEqual(actual, expected, accuracy: 0.000_001, label)
+                                    }
+                                }
+                            }
+                        }
+                        let custom = [images["default"]!, images["measured"]!, images["slices"]!]
+                        XCTAssertTrue(custom.dropFirst().allSatisfy { $0 == custom[0] },
+                                      "custom owners \(backend) scale=\(scale) case=\(index) clips=\(clips)")
+                    }
+                }
+            }
+        }
+    }
+
     private func verifyDrawing(_ cases: [Text], emptyCases: Set<Int> = [],
                                emptyClippedCases: Set<Int> = []) throws {
         guard let device = makeGraphicsDeviceContext() else { throw XCTSkip("Graphics device unavailable") }
@@ -293,9 +389,16 @@ private final class LineBreakDrawingCapture: @unchecked Sendable {
     var drawsSlices = false
     var measures: [[CGFloat]] = []
     var widths: [[CGFloat]] = []
+    var runs: [[[[Int]]]] = []
     var slices: [[[CGFloat]]] = []
     func draw(_ layout: Text.Layout, in context: inout GraphicsContext) {
         widths.append(layout.map { $0.typographicBounds.width })
+        let start = layout.first?.first?.characterIndices.first
+        runs.append(layout.map { line in
+            line.map { run in
+                run.characterIndices.map { start?.distance(to: $0) ?? 0 }
+            }
+        })
         slices.append(layout.map { line in
             line.flatMap { run in run.flatMap { [$0.typographicBounds.rect.minX, $0.typographicBounds.width] } }
         })
