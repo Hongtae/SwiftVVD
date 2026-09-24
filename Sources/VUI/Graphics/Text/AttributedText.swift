@@ -202,9 +202,11 @@ struct _ResolvedTextRunAttributes: Equatable {
         if let underlineStyle {
             result[.coreUnderlineStyle] = underlineStyle
         }
-        if let kern { result[.coreKern] = kern }
-        if let tracking { result[.coreTracking] = tracking }
-        if let baselineOffset {
+        if let kern, kern != 0 { result[.coreKern] = kern }
+        if let tracking, tracking != 0 {
+            result[.coreTracking] = tracking
+        }
+        if let baselineOffset, baselineOffset != 0 {
             result[.coreBaselineOffset] = baselineOffset
         }
         if let language { result[NSAttributedString.Key("NSLanguage")] = language }

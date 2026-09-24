@@ -35,6 +35,22 @@ extension EnvironmentValues {
     var currentForegroundStyle: AnyShapeStyle? {
         foregroundStyleLevels?.primary ?? defaultForegroundStyle
     }
+
+    @usableFromInline
+    var foregroundColor: Color? {
+        get {
+            guard let box = foregroundStyleLevels?.primary.storage.box
+                    as? AnyColorBox else {
+                return nil
+            }
+            return Color(box)
+        }
+        set {
+            foregroundStyleLevels = newValue.map {
+                _ForegroundStyleLevels(primary: AnyShapeStyle($0))
+            }
+        }
+    }
 }
 
 public struct _ForegroundStyleModifier<Style> where Style: ShapeStyle {
@@ -139,6 +155,12 @@ extension _ForegroundStyleModifier3: ViewInputsModifier, PrimitiveViewModifier {
 }
 
 extension View {
+    @inlinable nonisolated public func foregroundColor(
+        _ color: Color?
+    ) -> some View {
+        return environment(\.foregroundColor, color)
+    }
+
     @inlinable public func foregroundStyle<S>(_ style: S) -> some View where S: ShapeStyle {
         modifier(_ForegroundStyleModifier(style: style))
     }

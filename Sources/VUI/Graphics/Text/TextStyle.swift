@@ -10,6 +10,53 @@ import Foundation
 import CoreText
 #endif
 
+struct DefaultKerningKey: EnvironmentKey {
+    static var defaultValue: CGFloat { 0 }
+}
+
+struct DefaultTrackingKey: EnvironmentKey {
+    static var defaultValue: CGFloat { 0 }
+}
+
+struct DefaultBaselineOffsetKey: EnvironmentKey {
+    static var defaultValue: CGFloat { 0 }
+}
+
+struct UnderlineStyleKey: EnvironmentKey {
+    static var defaultValue: Text.LineStyle? { nil }
+}
+
+struct StrikethroughStyleKey: EnvironmentKey {
+    static var defaultValue: Text.LineStyle? { nil }
+}
+
+extension EnvironmentValues {
+    var defaultKerning: CGFloat {
+        get { self[DefaultKerningKey.self] }
+        set { self[DefaultKerningKey.self] = newValue }
+    }
+
+    var defaultTracking: CGFloat {
+        get { self[DefaultTrackingKey.self] }
+        set { self[DefaultTrackingKey.self] = newValue }
+    }
+
+    var defaultBaselineOffset: CGFloat {
+        get { self[DefaultBaselineOffsetKey.self] }
+        set { self[DefaultBaselineOffsetKey.self] = newValue }
+    }
+
+    var underlineStyle: Text.LineStyle? {
+        get { self[UnderlineStyleKey.self] }
+        set { self[UnderlineStyleKey.self] = newValue }
+    }
+
+    var strikethroughStyle: Text.LineStyle? {
+        get { self[StrikethroughStyleKey.self] }
+        set { self[StrikethroughStyleKey.self] = newValue }
+    }
+}
+
 extension Text {
     /// Style values copied through nested text before producing font and run attributes.
     /// Paragraph state is accumulated separately in ResolvedProperties.
@@ -177,11 +224,26 @@ extension Text {
                 properties.addColor(resolved)
             }
             attributes.backgroundColor = backgroundColor
-            attributes.baselineOffset = baselineOffset
-            attributes.kern = kerning
-            attributes.tracking = tracking
-            attributes.underlineStyle = underline.resolve(fallback: nil)
-            attributes.strikethroughStyle = strikethrough.resolve(fallback: nil)
+            attributes.baselineOffset = baselineOffset ?? environment.defaultBaselineOffset
+            if let kerning {
+                attributes.kern = kerning
+            } else {
+                let inheritedKerning = environment.defaultKerning
+                attributes.kern = inheritedKerning == 0 ? nil : inheritedKerning
+            }
+            if let tracking {
+                attributes.tracking = tracking
+            } else {
+                let inheritedTracking = environment.defaultTracking
+                attributes.tracking = inheritedTracking == 0
+                    ? nil : inheritedTracking
+            }
+            attributes.underlineStyle = underline.resolve(
+                fallback: environment.underlineStyle
+            )
+            attributes.strikethroughStyle = strikethrough.resolve(
+                fallback: environment.strikethroughStyle
+            )
             attributes.glyphInfo = glyphInfo
             attributes.encapsulation = encapsulation?.resolve(in: environment)
             attributes.adaptiveImageProvider = adaptiveImageGlyph.map(TextAdaptiveImageProvider.init)

@@ -150,6 +150,81 @@ final class TextForegroundStyleTests: XCTestCase {
         }
     }
 
+    func testMountedViewForegroundColorKeepsSourceOrderAndRunOverrides() throws {
+        // ASSERTIONS viewForegroundColorPublic27Observed
+        try withDevice { device in
+            func rendered<V: View>(_ view: V) throws -> [UInt8] {
+                let host = ForegroundTextHost(view)
+                return try pixels(
+                    host.list(),
+                    device: device,
+                    resources: host.rendererHost.sceneResources
+                )
+            }
+
+            let base = Text(verbatim: "AB").font(.system(size: 48))
+            let red = try rendered(AnyView(base).foregroundStyle(.red))
+            let blue = try rendered(AnyView(base).foregroundStyle(.blue))
+            XCTAssertEqual(
+                try rendered(
+                    AnyView(base)
+                        .foregroundColor(.red)
+                        .foregroundStyle(.blue)
+                ),
+                red
+            )
+            XCTAssertEqual(
+                try rendered(
+                    AnyView(base)
+                        .foregroundStyle(.blue)
+                        .foregroundColor(.red)
+                ),
+                blue
+            )
+            XCTAssertEqual(
+                try rendered(
+                    AnyView(base)
+                        .foregroundColor(.red)
+                        .foregroundColor(.blue)
+                ),
+                red
+            )
+            XCTAssertEqual(
+                try rendered(
+                    AnyView(base.foregroundColor(nil))
+                        .foregroundColor(.red)
+                ),
+                red
+            )
+
+            let mixed = (
+                Text(verbatim: "A").foregroundColor(.green)
+                    + Text(verbatim: "B")
+            ).font(.system(size: 48))
+            let explicitMixed = (
+                Text(verbatim: "A").foregroundColor(.green)
+                    + Text(verbatim: "B").foregroundColor(.red)
+            ).font(.system(size: 48))
+            XCTAssertEqual(
+                try rendered(AnyView(mixed).foregroundColor(.red)),
+                try rendered(explicitMixed)
+            )
+
+            var first = AttributedString("A")
+            first.foregroundColor = VUI.Color.green
+            var second = AttributedString("B")
+            second.foregroundColor = VUI.Color.red
+            let attributed = Text(first + AttributedString("B"))
+                .font(.system(size: 48))
+            let explicitAttributed = Text(first + second)
+                .font(.system(size: 48))
+            XCTAssertEqual(
+                try rendered(AnyView(attributed).foregroundColor(.red)),
+                try rendered(explicitAttributed)
+            )
+        }
+    }
+
     func testAlphaOnlyReplayIgnoresRecordedRGBAndPreservesCoverage() throws {
         try withDevice { device in
             let host = ForegroundTextHost(Text("fixture"))

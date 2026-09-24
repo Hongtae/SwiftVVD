@@ -1257,6 +1257,10 @@ extension ResolvedStyledText {
                     layoutProperties: layoutProperties, sourceLines: sources)
             }
             var metrics = measurement.metrics
+            if let lowerLineLimit = layoutProperties.lowerLineLimit,
+               let reservedHeight = resolvedText.limitedFontHeight(by: lowerLineLimit) {
+                metrics.size.height = max(metrics.size.height, reservedHeight)
+            }
             let clippedWidth = fitted == nil ? min(metrics.size.width, normalizedWidth) : metrics.size.width
             let width = clippedWidth == CGFloat.leastNonzeroMagnitude ? 0 : clippedWidth
             let height = metrics.size.height == .leastNonzeroMagnitude ? 0 : metrics.size.height
@@ -1940,6 +1944,10 @@ extension ResolvedStyledText {
             let width = available.width > 0 ? available.width : CGFloat.leastNonzeroMagnitude
             let layout = glyphLayout(resolvedText, in: available, scale: scale)
             var raw = resolvedText.layoutMetrics(lineGlyphs: layout.lines)
+            if let lowerLineLimit = layoutProperties.lowerLineLimit,
+               let reservedHeight = resolvedText.limitedFontHeight(by: lowerLineLimit) {
+                raw.size.height = max(raw.size.height, reservedHeight)
+            }
             raw.size.width = layout.lines.reduce(CGFloat.zero) {
                 max($0, $1.fragmentWidth ?? $1.width)
             } / resolvedText.scaleFactor

@@ -390,6 +390,38 @@ struct ResolvedTextSource {
         return result
     }
 
+    func limitedFontHeight(by lineCount: Int) -> CGFloat? {
+        guard lineCount >= 1 else { return 0 }
+        for run in runs {
+            let faces: [Typeface]
+            let resource: FontResource?
+            switch run {
+            case let .text(runFaces, text),
+                 let .attributedText(runFaces, text, _):
+                guard !text.isEmpty else { continue }
+                faces = runFaces
+                resource = nil
+            case let .styledText(runFaces, text, _, style):
+                guard !text.isEmpty else { continue }
+                faces = runFaces
+                resource = style.fontResource
+            case let .attachment(runFaces, _),
+                 let .attributedAttachment(runFaces, _, _):
+                faces = runFaces
+                resource = nil
+            case let .styledAttachment(runFaces, _, _, style):
+                faces = runFaces
+                resource = style.fontResource
+            }
+            guard let face = faces.first else { continue }
+            let metrics = metrics(for: face, resource: resource)
+            let count = CGFloat(lineCount)
+            return (metrics.ascender - metrics.descender) * count
+                + metrics.leading * (count - 1)
+        }
+        return nil
+    }
+
     func metrics(for font: FontResource) -> ResolvedFontMetrics? {
         guard let face = face(for: font) else { return nil }
         return metrics(for: face, resource: font)

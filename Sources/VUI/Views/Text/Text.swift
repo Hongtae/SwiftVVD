@@ -2322,11 +2322,8 @@ extension Text {
     }
 
     public func italic(_ isActive: Bool) -> Text {
-        if isActive {
-            return italic()
-        }
         return modified(with: .anyTextModifier(ItalicTextModifier(
-            isActive: false
+            isActive: isActive
         )))
     }
 
@@ -2428,6 +2425,44 @@ extension Text {
 
     public func baselineOffset(_ baselineOffset: CGFloat) -> Text {
         modified(with: .baseline(baselineOffset))
+    }
+}
+
+extension View {
+    nonisolated public func underline(
+        _ isActive: Bool = true,
+        pattern: Text.LineStyle.Pattern = .solid,
+        color: Color? = nil
+    ) -> some View {
+        environment(
+            \.underlineStyle,
+            isActive ? Text.LineStyle(pattern: pattern, color: color) : nil
+        )
+    }
+
+    nonisolated public func strikethrough(
+        _ isActive: Bool = true,
+        pattern: Text.LineStyle.Pattern = .solid,
+        color: Color? = nil
+    ) -> some View {
+        environment(
+            \.strikethroughStyle,
+            isActive ? Text.LineStyle(pattern: pattern, color: color) : nil
+        )
+    }
+
+    nonisolated public func kerning(_ kerning: CGFloat) -> some View {
+        environment(\.defaultKerning, kerning)
+    }
+
+    nonisolated public func tracking(_ tracking: CGFloat) -> some View {
+        environment(\.defaultTracking, tracking)
+    }
+
+    nonisolated public func baselineOffset(
+        _ baselineOffset: CGFloat
+    ) -> some View {
+        environment(\.defaultBaselineOffset, baselineOffset)
     }
 }
 

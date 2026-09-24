@@ -13,6 +13,44 @@ extension View {
         return environment(\.font, font)
     }
 
+    nonisolated public func bold(_ isActive: Bool = true) -> some View {
+        transformEnvironment(\.fontModifiers) { modifiers in
+            if isActive {
+                modifiers.append(.static(Font.BoldModifier.self))
+            } else {
+                modifiers.removeAll {
+                    $0 is AnyStaticFontModifier<Font.BoldModifier>
+                }
+            }
+        }
+    }
+
+    nonisolated public func italic(_ isActive: Bool = true) -> some View {
+        transformEnvironment(\.fontModifiers) { modifiers in
+            if isActive {
+                modifiers.append(.static(Font.ItalicModifier.self))
+            } else {
+                modifiers.removeAll {
+                    $0 is AnyStaticFontModifier<Font.ItalicModifier>
+                }
+            }
+        }
+    }
+
+    nonisolated public func fontWeight(_ weight: Font.Weight?) -> some View {
+        transformEnvironment(\.fontModifiers) { modifiers in
+            if let weight {
+                modifiers.append(
+                    .dynamic(Font.WeightModifier(weight: weight))
+                )
+            } else {
+                modifiers.removeAll {
+                    $0 is AnyDynamicFontModifier<Font.WeightModifier>
+                }
+            }
+        }
+    }
+
     public func fontDesign(_ design: Font.Design?) -> some View {
         transformEnvironment(\.fontModifiers) { modifiers in
             if let design {

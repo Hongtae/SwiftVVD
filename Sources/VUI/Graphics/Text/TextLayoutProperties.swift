@@ -298,9 +298,62 @@ extension EnvironmentValues {
     }
 }
 
+struct LineLimitModifier: ViewModifier, EnvironmentModifier {
+    typealias Body = Never
+
+    var lowerLimit: Int?
+    var upperLimit: Int?
+
+    static func makeEnvironment(
+        modifier: Attribute<Self>,
+        environment: inout EnvironmentValues
+    ) {
+        let modifier = modifier.value
+        environment.lineLimit = modifier.upperLimit
+        environment.lowerLineLimit = modifier.lowerLimit
+    }
+}
+
 extension View {
-    @inlinable public func lineLimit(_ number: Int?) -> some View {
+    @inlinable nonisolated public func lineLimit(_ number: Int?) -> some View {
         environment(\.lineLimit, number)
+    }
+
+    nonisolated public func lineLimit(
+        _ limit: PartialRangeFrom<Int>
+    ) -> some View {
+        modifier(LineLimitModifier(
+            lowerLimit: limit.lowerBound,
+            upperLimit: nil
+        ))
+    }
+
+    nonisolated public func lineLimit(
+        _ limit: PartialRangeThrough<Int>
+    ) -> some View {
+        modifier(LineLimitModifier(
+            lowerLimit: nil,
+            upperLimit: limit.upperBound
+        ))
+    }
+
+    nonisolated public func lineLimit(
+        _ limit: ClosedRange<Int>
+    ) -> some View {
+        modifier(LineLimitModifier(
+            lowerLimit: limit.lowerBound,
+            upperLimit: limit.upperBound
+        ))
+    }
+
+    nonisolated public func lineLimit(
+        _ limit: Int,
+        reservesSpace: Bool
+    ) -> some View {
+        modifier(LineLimitModifier(
+            lowerLimit: reservesSpace ? limit : nil,
+            upperLimit: limit
+        ))
     }
 
     @inlinable public func truncationMode(_ mode: Text.TruncationMode) -> some View {
