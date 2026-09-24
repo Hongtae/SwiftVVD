@@ -18,24 +18,24 @@ struct ParagraphTypesetting: Equatable {
 extension Text {
     /// Selects whether logical alignment follows layout or writing direction.
     /// An unset strategy defers to the paragraph producer's fallback.
-    struct AlignmentStrategy: Hashable {
+    public struct AlignmentStrategy: Hashable, Sendable {
         enum Storage: Hashable, Codable { case layoutBased, writingDirectionBased }
         var storage: Storage?
-        static let `default` = Self(storage: nil)
-        static let layoutBased = Self(storage: .layoutBased)
-        static let writingDirectionBased = Self(storage: .writingDirectionBased)
+        public static let `default` = Self(storage: nil)
+        public static let layoutBased = Self(storage: .layoutBased)
+        public static let writingDirectionBased = Self(storage: .writingDirectionBased)
         enum EnvironmentKey: VUI.EnvironmentKey {
             static var defaultValue: AlignmentStrategy { .default }
         }
     }
     /// Requests layout-derived or content-derived paragraph direction.
     /// An unset strategy defers to the paragraph producer's fallback.
-    struct WritingDirectionStrategy: Hashable {
+    public struct WritingDirectionStrategy: Hashable, Sendable {
         enum Storage: Hashable, Codable { case layoutBased, contentBased }
         var storage: Storage?
-        static let `default` = Self(storage: nil)
-        static let layoutBased = Self(storage: .layoutBased)
-        static let contentBased = Self(storage: .contentBased)
+        public static let `default` = Self(storage: nil)
+        public static let layoutBased = Self(storage: .layoutBased)
+        public static let contentBased = Self(storage: .contentBased)
     }
 }
 private enum ParagraphTypesettingKey: EnvironmentKey { static var defaultValue: ParagraphTypesetting { .automatic } }
@@ -67,6 +67,20 @@ extension EnvironmentValues {
     var lineHeight: TextLineHeight? {
         get { self[TextLineHeightKey.self] }
         set { self[TextLineHeightKey.self] = newValue }
+    }
+}
+
+extension View {
+    nonisolated public func multilineTextAlignment(
+        strategy: Text.AlignmentStrategy
+    ) -> some View {
+        environment(\.textAlignmentStrategy, strategy)
+    }
+
+    nonisolated public func writingDirection(
+        strategy: Text.WritingDirectionStrategy
+    ) -> some View {
+        environment(\.textWritingDirection, strategy)
     }
 }
 

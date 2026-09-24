@@ -39,6 +39,87 @@ final class TextStyleConsumerTests {
         resolved.runs.compactMap { if case let .styledText(_, _, _, attributes) = $0 { attributes } else { nil } }
     }
 
+    // ASSERTIONS fontTextPublicTypesettingModifiers27Observed
+    // ASSERTIONS textTypesettingAttributeProducerObserved textLanguageModifierResetsRatioObserved
+    // ASSERTIONS textScaleAttributeOwnerObserved textParagraphAlignmentWritingStrategiesObserved
+    @Test func publicTypesettingModifiersPreserveTheirSeparateOwnersAndDisabledInheritance() throws {
+        let japanese = TypesettingLanguage.explicit(Locale.Language(identifier: "ja"))
+        let english = TypesettingLanguage.explicit(Locale.Language(identifier: "en"))
+
+        let languageEnabled = try #require(
+            EmptyView().typesettingLanguage(japanese)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyTransformModifier<TypesettingConfiguration>>
+        )
+        var enabledConfiguration = TypesettingConfiguration(
+            language: english,
+            languageAwareLineHeightRatio: .legacy
+        )
+        languageEnabled.modifier.transform(&enabledConfiguration)
+        #expect(enabledConfiguration.language == japanese)
+        #expect(enabledConfiguration.languageAwareLineHeightRatio == .automatic)
+
+        let languageDisabled = try #require(
+            EmptyView().typesettingLanguage(japanese, isEnabled: false)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyTransformModifier<TypesettingConfiguration>>
+        )
+        var disabledConfiguration = TypesettingConfiguration(
+            language: english,
+            languageAwareLineHeightRatio: .legacy
+        )
+        languageDisabled.modifier.transform(&disabledConfiguration)
+        #expect(disabledConfiguration.language == english)
+        #expect(disabledConfiguration.languageAwareLineHeightRatio == .legacy)
+
+        let scaleEnabled = try #require(
+            EmptyView().textScale(.default)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyTransformModifier<Text.Scale?>>
+        )
+        var enabledScale: Text.Scale? = .secondary
+        scaleEnabled.modifier.transform(&enabledScale)
+        #expect(enabledScale == .default)
+
+        let scaleDisabled = try #require(
+            EmptyView().textScale(.default, isEnabled: false)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyTransformModifier<Text.Scale?>>
+        )
+        var disabledScale: Text.Scale? = .secondary
+        scaleDisabled.modifier.transform(&disabledScale)
+        #expect(disabledScale == .secondary)
+        #expect(EnvironmentValues().textScale == nil)
+
+        let alignment = try #require(
+            EmptyView().multilineTextAlignment(strategy: .writingDirectionBased)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyWritingModifier<Text.AlignmentStrategy>>
+        )
+        #expect(alignment.modifier.value == .writingDirectionBased)
+        let direction = try #require(
+            EmptyView().writingDirection(strategy: .contentBased)
+                as? ModifiedContent<EmptyView, _EnvironmentKeyWritingModifier<Text.WritingDirectionStrategy>>
+        )
+        #expect(direction.modifier.value == .contentBased)
+
+        let languageText = Text(verbatim: "Hg").typesettingLanguage(japanese)
+        #expect(style(languageText).typesettingConfiguration.language == japanese)
+        let disabledLanguageText = Text(verbatim: "Hg").typesettingLanguage(
+            japanese,
+            isEnabled: false
+        )
+        #expect(disabledLanguageText.modifiers.isEmpty)
+
+        let disabledScaleText = Text(verbatim: "Hg").textScale(
+            .secondary,
+            isEnabled: false
+        )
+        #expect(disabledScaleText.modifiers.count == 1)
+        guard case let .anyTextModifier(modifier)? = disabledScaleText.modifiers.first else {
+            Issue.record("Expected a text-scale modifier")
+            return
+        }
+        #expect(modifier is TextScaleModifier)
+        #expect(style(disabledScaleText).scale == nil)
+        #expect(style(Text(verbatim: "Hg").textScale(.secondary)).scale == .secondary)
+    }
+
     private func fontURL(_ name: String) -> URL {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

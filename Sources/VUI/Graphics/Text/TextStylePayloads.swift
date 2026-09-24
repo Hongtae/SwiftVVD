@@ -11,10 +11,15 @@ import Foundation
 struct TypesettingConfiguration: Hashable {
     var language: TypesettingLanguage = .automatic
     var languageAwareLineHeightRatio: TypesettingLanguageAwareLineHeightRatio = .automatic
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(language.storage)
+        hasher.combine(languageAwareLineHeightRatio)
+    }
 }
 
 /// Specifies the language source while retaining its font-resolution flags.
-struct TypesettingLanguage: Hashable {
+public struct TypesettingLanguage: Equatable, Sendable {
     struct Flags: OptionSet, Hashable {
         var rawValue: UInt8
     }
@@ -29,9 +34,9 @@ struct TypesettingLanguage: Hashable {
         case automatic
     }
     var storage: Storage
-    static let automatic = Self(storage: .automatic)
+    public static let automatic = Self(storage: .automatic)
     static let contentAware = Self(storage: .contentAware)
-    static func explicit(_ language: Locale.Language) -> Self {
+    public static func explicit(_ language: Locale.Language) -> Self {
         Self(storage: .explicit(language, Flags(rawValue: 1)))
     }
     func resolve() -> Resolved {
@@ -106,11 +111,11 @@ struct AccessibilityTextAttributes: Equatable {
 
 extension Text {
     /// A relative text-size request retained separately from the base font.
-    struct Scale: Hashable {
+    public struct Scale: Hashable, Sendable {
         enum Storage: Hashable { case `default`, secondary }
         var storage: Storage
-        static let `default` = Self(storage: .default)
-        static let secondary = Self(storage: .secondary)
+        public static let `default` = Self(storage: .default)
+        public static let secondary = Self(storage: .secondary)
     }
     /// Marks a superscript request carried by resolved run attributes.
     struct Superscript: Hashable {}
@@ -225,6 +230,57 @@ final class TextScaleModifier: AnyTextModifier {
         return scale == other.scale && isEnabled == other.isEnabled
     }
 }
+
+extension Text {
+    public func typesettingLanguage(
+        _ language: Locale.Language,
+        isEnabled: Bool = true
+    ) -> Text {
+        typesettingLanguage(.explicit(language), isEnabled: isEnabled)
+    }
+
+    public func typesettingLanguage(
+        _ language: TypesettingLanguage,
+        isEnabled: Bool = true
+    ) -> Text {
+        guard isEnabled else { return self }
+        return modified(with: .anyTextModifier(LanguageTextModifier(language)))
+    }
+
+    public func textScale(_ scale: Scale, isEnabled: Bool = true) -> Text {
+        modified(with: .anyTextModifier(TextScaleModifier(scale, isEnabled: isEnabled)))
+    }
+}
+
+extension View {
+    nonisolated public func typesettingLanguage(
+        _ language: Locale.Language,
+        isEnabled: Bool = true
+    ) -> some View {
+        typesettingLanguage(.explicit(language), isEnabled: isEnabled)
+    }
+
+    nonisolated public func typesettingLanguage(
+        _ language: TypesettingLanguage,
+        isEnabled: Bool = true
+    ) -> some View {
+        transformEnvironment(\.typesettingConfiguration) { configuration in
+            guard isEnabled else { return }
+            configuration.language = language
+            configuration.languageAwareLineHeightRatio = .automatic
+        }
+    }
+
+    nonisolated public func textScale(
+        _ scale: Text.Scale,
+        isEnabled: Bool = true
+    ) -> some View {
+        transformEnvironment(\.textScale) { value in
+            guard isEnabled else { return }
+            value = scale
+        }
+    }
+}
 /// Merges specified speech settings while retaining other inherited values.
 final class SpeechModifier: AnyTextModifier {
     let value: AccessibilitySpeechAttributes
@@ -265,13 +321,13 @@ final class TextTransitionModifier: AnyTextModifier {
 private enum TypesettingConfigurationKey: EnvironmentKey {
     static var defaultValue: TypesettingConfiguration { .init() }
 }
-private enum TextScaleKey: EnvironmentKey { static var defaultValue: Text.Scale { .default } }
+private enum TextScaleKey: EnvironmentKey { static var defaultValue: Text.Scale? { nil } }
 extension EnvironmentValues {
     var typesettingConfiguration: TypesettingConfiguration {
         get { self[TypesettingConfigurationKey.self] }
         set { self[TypesettingConfigurationKey.self] = newValue }
     }
-    var textScale: Text.Scale {
+    var textScale: Text.Scale? {
         get { self[TextScaleKey.self] }
         set { self[TextScaleKey.self] = newValue }
     }
