@@ -2349,6 +2349,9 @@ extension Text: View {
         if inputs.preferences.keys.contains(Text.LayoutKey.self) {
             textFeatures.insert(.produceTextLayout)
         }
+        if inputs.base[TextAllowsSelection.self] {
+            textFeatures.insert(.produceTextLayout)
+        }
         if inputs[PreferTextLayoutManagerInput.self] {
             textFeatures.insert(.useTextLayoutManager)
         }
@@ -2566,6 +2569,15 @@ extension Text: View {
             styles: styles,
             interpolatorGroup: interpolatorGroup
         )
+        if inputs.base[TextAllowsSelection.self] {
+            PlatformSelectableTextChildView.attach(
+                unresolvedText: view._attribute,
+                resolvedText: displayedStyledTextAttr,
+                renderer: textRendererAttr,
+                inputs: leafInputs,
+                outputs: &outputs
+            )
+        }
         outputs._layoutComputer = OptionalAttribute(lcAttr)
 
         // 5. Propagate ResourceList and DisplayList upwards via the Preference channel!

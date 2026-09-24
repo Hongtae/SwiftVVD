@@ -2,6 +2,14 @@ import Foundation
 import XCTest
 import VUI
 
+private struct PublicTextRendererProbe: TextRenderer {
+    func draw(layout: Text.Layout, in ctx: inout GraphicsContext) {}
+}
+
+private struct PublicCustomTextSelectability: TextSelectability {
+    static let allowsSelection = true
+}
+
 final class FontTextPublicSurfaceTests: XCTestCase {
     // ASSERTIONS fontTextPublicSurface27Observed
     // ASSERTIONS textTypesettingAttributeProducerObserved textScaleAttributeOwnerObserved
@@ -41,5 +49,30 @@ final class FontTextPublicSurfaceTests: XCTestCase {
         _ = EmptyView().textScale(.secondary, isEnabled: false)
         _ = EmptyView().multilineTextAlignment(strategy: .writingDirectionBased)
         _ = EmptyView().writingDirection(strategy: .contentBased)
+    }
+
+    // ASSERTIONS textSelectableRenderer27Observed
+    func testExternalConsumerCanRetainRendererAcrossTextSelectionOrders() {
+        XCTAssertTrue(EnabledTextSelectability.allowsSelection)
+        XCTAssertFalse(DisabledTextSelectability.allowsSelection)
+        XCTAssertTrue(PublicCustomTextSelectability.allowsSelection)
+        XCTAssertEqual(MemoryLayout<EnabledTextSelectability>.size, 0)
+        XCTAssertEqual(MemoryLayout<DisabledTextSelectability>.size, 0)
+
+        let renderer = PublicTextRendererProbe()
+        _ = Text(verbatim: "enabled")
+            .textRenderer(renderer)
+            .textSelection(.enabled)
+        _ = Text(verbatim: "enabled")
+            .textSelection(.enabled)
+            .textRenderer(renderer)
+        _ = Text(verbatim: "disabled")
+            .textRenderer(renderer)
+            .textSelection(.disabled)
+        _ = Text(verbatim: "disabled")
+            .textSelection(.disabled)
+            .textRenderer(renderer)
+        _ = Text(verbatim: "custom")
+            .textSelection(PublicCustomTextSelectability())
     }
 }

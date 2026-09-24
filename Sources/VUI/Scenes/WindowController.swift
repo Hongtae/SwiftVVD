@@ -444,6 +444,8 @@ class WindowController: WindowDelegate,
     // responder for its complete overlay presentation tree.
     private weak var textInputFocusController: WindowController?
     private weak var textInputFocusedResponder: ResponderNode?
+    private weak var textSelectionFocusController: WindowController?
+    private weak var textSelectionFocusedResponder: ResponderNode?
     private var platformTextInputEnabled = false
     private var platformTextInputGeneration: UInt64 = 0
     private let textInputCursorRequestGeneration = Mutex<UInt64>(0)
@@ -686,6 +688,11 @@ class WindowController: WindowDelegate,
         guard owner.textInputFocusController === self else { return nil }
         return owner.textInputFocusedResponder
     }
+    private var focusedTextSelectionResponder: ResponderNode? {
+        let owner = textInputFocusOwner
+        guard owner.textSelectionFocusController === self else { return nil }
+        return owner.textSelectionFocusedResponder
+    }
     // Commands remain owned by the static root while their target follows the
     // active modal or presentation child.
     var commandFocusedResponder: ResponderNode? {
@@ -714,7 +721,7 @@ class WindowController: WindowDelegate,
                 return responder
             }
         }
-        return focusedResponder
+        return focusedResponder ?? focusedTextSelectionResponder
     }
     var nextGestureUpdateTime: Time {
         viewGraph.nextUpdate.gestures.time
@@ -2116,6 +2123,13 @@ class WindowController: WindowDelegate,
                !responder.containsTextInputPoint(event.location) {
                 self.resignTextInputFocus()
             }
+            if event.type == .buttonDown,
+               event.buttonID == 0,
+               let responder = self.focusedTextSelectionResponder
+                    as? any TextSelectionCommandResponder,
+               !responder.containsTextSelectionPoint(event.location) {
+                self.resignTextSelectionFocus()
+            }
             guard let rootResponder = self.responderNode
                 as? MultiViewResponder else {
                 return false
@@ -3006,6 +3020,9 @@ class WindowController: WindowDelegate,
             return
         }
         let owner = textInputFocusOwner
+        if let selectionController = owner.textSelectionFocusController {
+            selectionController.resignTextSelectionFocus()
+        }
         if owner.textInputFocusController === self,
            owner.textInputFocusedResponder === responder {
             return
@@ -3038,6 +3055,45 @@ class WindowController: WindowDelegate,
         owner.textInputFocusController = nil
         setFocusedItem(nil)
         owner.setPlatformTextInputEnabled(false)
+    }
+
+    func focusTextSelectionResponder(_ responder: ResponderNode) {
+        guard let selectionResponder = responder as?
+                any TextSelectionCommandResponder else {
+            return
+        }
+        let owner = textInputFocusOwner
+        if let textInputController = owner.textInputFocusController {
+            textInputController.resignTextInputFocus()
+        }
+        if owner.textSelectionFocusController === self,
+           owner.textSelectionFocusedResponder === responder {
+            return
+        }
+
+        (owner.textSelectionFocusedResponder as?
+            any TextSelectionCommandResponder)?
+            .textSelectionFocusDidChange(false)
+        owner.textSelectionFocusController = self
+        owner.textSelectionFocusedResponder = responder
+        selectionResponder.textSelectionFocusDidChange(true)
+    }
+
+    func resignTextSelectionFocus(_ responder: ResponderNode? = nil) {
+        let owner = textInputFocusOwner
+        if let responder {
+            guard owner.textSelectionFocusedResponder === responder else {
+                return
+            }
+        } else {
+            guard owner.textSelectionFocusController === self else { return }
+        }
+
+        (owner.textSelectionFocusedResponder as?
+            any TextSelectionCommandResponder)?
+            .textSelectionFocusDidChange(false)
+        owner.textSelectionFocusedResponder = nil
+        owner.textSelectionFocusController = nil
     }
 
     func updateFocus(

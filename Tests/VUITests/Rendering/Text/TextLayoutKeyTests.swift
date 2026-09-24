@@ -71,6 +71,83 @@ final class TextLayoutKeyTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textSelectableRenderer27Observed
+    func testSelectionAndRendererReachTheSameTextLayoutOwnerInEitherOrder() throws {
+        let previous = appContext
+        appContext = StyleTestAppContext()
+        defer { appContext = previous }
+
+        let text = Text(verbatim: "selectable")
+            .font(.file(fontURL, size: 23))
+        let renderer = LayoutKeyRenderer()
+        let cases: [(String, AnyView, Bool, Bool)] = [
+            ("enabled", AnyView(text.textSelection(.enabled)), true, false),
+            ("disabled", AnyView(text.textSelection(.disabled)), false, false),
+            (
+                "renderer-then-enabled",
+                AnyView(text.textRenderer(renderer).textSelection(.enabled)),
+                true,
+                true
+            ),
+            (
+                "enabled-then-renderer",
+                AnyView(text.textSelection(.enabled).textRenderer(renderer)),
+                true,
+                true
+            ),
+            (
+                "renderer-then-disabled",
+                AnyView(text.textRenderer(renderer).textSelection(.disabled)),
+                false,
+                true
+            ),
+            (
+                "disabled-then-renderer",
+                AnyView(text.textSelection(.disabled).textRenderer(renderer)),
+                false,
+                true
+            ),
+        ]
+
+        for (name, value, selectable, customRenderer) in cases {
+            let rendererHost = TestViewRendererHost()
+            let host = ViewGraph(
+                rootViewType: EmptyView.self,
+                content: EmptyView(),
+                rendererHost: rendererHost,
+                requestedOutputs: []
+            )
+            rendererHost.storage = host
+            try host.data.withCurrent {
+                let graph = host.data.graph
+                let outputs = AnyView._makeView(
+                    view: _GraphValue(_attribute: graph.makeInput(value: value)),
+                    inputs: makeInputs(graph)
+                )
+                let computer = try XCTUnwrap(outputs._layoutComputer.attribute, name).value
+                let engine = try XCTUnwrap(
+                    computer.box as? LayoutEngineBox<StyledTextLayoutEngine>,
+                    name
+                ).engine
+                XCTAssertEqual(
+                    engine.text is ResolvedStyledText.TextLayoutManager,
+                    selectable || customRenderer,
+                    name
+                )
+                XCTAssertEqual(
+                    engine.text.features.contains(.produceTextLayout),
+                    selectable || customRenderer,
+                    name
+                )
+                XCTAssertEqual(
+                    engine.text.features.contains(.customRenderer),
+                    customRenderer,
+                    name
+                )
+            }
+        }
+    }
+
     func testPreferredManagerFollowsGroupChildrenWithoutChangingSiblingInputs() throws {
         // ASSERTIONS textPreferredManagerInput27Observed
         let previous = appContext

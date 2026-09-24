@@ -120,6 +120,88 @@ final class TextRendererTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textSelectableRenderer27Observed
+    func testTextSelectionRetainsRendererInputInBothOrdersAndDisabledControls() {
+        let graph = _AGGraph()
+
+        _AGGraph.withCurrent(graph) {
+            let renderer = _TextRendererViewModifier(renderer: TextRendererProbe())
+            let rendererValue = _GraphValue(
+                _attribute: graph.makeInput(value: renderer)
+            )
+            let enabled = TextSelectabilityModifier<EnabledTextSelectability>()
+            let enabledValue = _GraphValue(
+                _attribute: graph.makeInput(value: enabled)
+            )
+            let disabled = TextSelectabilityModifier<DisabledTextSelectability>()
+            let disabledValue = _GraphValue(
+                _attribute: graph.makeInput(value: disabled)
+            )
+
+            var rendererThenEnabled = makeViewInputs(graph: graph)
+            type(of: renderer)._makeViewInputs(
+                modifier: rendererValue,
+                inputs: &rendererThenEnabled
+            )
+            let savedRenderer = rendererThenEnabled[TextRendererInput.self]
+            type(of: enabled)._makeInputs(
+                modifier: enabledValue,
+                inputs: &rendererThenEnabled.base
+            )
+            XCTAssertTrue(rendererThenEnabled.base[TextAllowsSelection.self])
+            XCTAssertTrue(
+                TextRendererInput.valuesEqual(
+                    savedRenderer,
+                    rendererThenEnabled[TextRendererInput.self]
+                )
+            )
+            XCTAssertNotNil(rendererThenEnabled[TextRendererInput.self].value)
+
+            var enabledThenRenderer = makeViewInputs(graph: graph)
+            type(of: enabled)._makeInputs(
+                modifier: enabledValue,
+                inputs: &enabledThenRenderer.base
+            )
+            type(of: renderer)._makeViewInputs(
+                modifier: rendererValue,
+                inputs: &enabledThenRenderer
+            )
+            XCTAssertTrue(enabledThenRenderer.base[TextAllowsSelection.self])
+            XCTAssertNotNil(enabledThenRenderer[TextRendererInput.self].value)
+
+            var rendererThenDisabled = makeViewInputs(graph: graph)
+            type(of: renderer)._makeViewInputs(
+                modifier: rendererValue,
+                inputs: &rendererThenDisabled
+            )
+            let disabledRenderer = rendererThenDisabled[TextRendererInput.self]
+            type(of: disabled)._makeInputs(
+                modifier: disabledValue,
+                inputs: &rendererThenDisabled.base
+            )
+            XCTAssertFalse(rendererThenDisabled.base[TextAllowsSelection.self])
+            XCTAssertTrue(
+                TextRendererInput.valuesEqual(
+                    disabledRenderer,
+                    rendererThenDisabled[TextRendererInput.self]
+                )
+            )
+            XCTAssertNotNil(rendererThenDisabled[TextRendererInput.self].value)
+
+            var disabledThenRenderer = makeViewInputs(graph: graph)
+            type(of: disabled)._makeInputs(
+                modifier: disabledValue,
+                inputs: &disabledThenRenderer.base
+            )
+            type(of: renderer)._makeViewInputs(
+                modifier: rendererValue,
+                inputs: &disabledThenRenderer
+            )
+            XCTAssertFalse(disabledThenRenderer.base[TextAllowsSelection.self])
+            XCTAssertNotNil(disabledThenRenderer[TextRendererInput.self].value)
+        }
+    }
+
     // ASSERTIONS textRendererWeakInputObserved
     func testRendererInputExpiresWithItsSubgraphAndPreservesGenerationIdentity() throws {
         let graph = _AGGraph()
