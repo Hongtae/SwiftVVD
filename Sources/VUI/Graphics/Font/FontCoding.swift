@@ -18,7 +18,8 @@ extension Font: CodableByProxy {
     }
 
     enum DynamicModifierTag: String, Codable {
-        case weight, width, leading, _stylisticAlternative, language, lineHeightRatio
+        case weight, width, _stylisticAlternative, leading, _featureSettings, language,
+             lineHeightRatio, scalePointSize, setPointSize
     }
 
     enum UndoableStaticModifierTag: Codable, Hashable {
@@ -49,8 +50,11 @@ extension Font: CodableByProxy {
             case .modifier(.width): FontBox<ModifierProvider<WidthModifier>>.self
             case .modifier(.leading): FontBox<ModifierProvider<LeadingModifier>>.self
             case .modifier(._stylisticAlternative): FontBox<ModifierProvider<StylisticAlternativeModifier>>.self
+            case .modifier(._featureSettings): FontBox<ModifierProvider<FeatureSettingModifier>>.self
             case .modifier(.language): FontBox<ModifierProvider<LanguageFontModifier>>.self
             case .modifier(.lineHeightRatio): FontBox<ModifierProvider<LanguageAwareLineHeightRatioFontModifier>>.self
+            case .modifier(.scalePointSize): FontBox<ModifierProvider<ScalePointSizeModifier>>.self
+            case .modifier(.setPointSize): FontBox<ModifierProvider<PointSizeModifier>>.self
             case .staticModifier(.do(.bold)): FontBox<StaticModifierProvider<BoldModifier>>.self
             case .staticModifier(.do(.italic)): FontBox<StaticModifierProvider<ItalicModifier>>.self
             case .staticModifier(.do(.monospaced)): FontBox<StaticModifierProvider<MonospacedModifier>>.self
@@ -91,6 +95,14 @@ extension Font: CodableByProxy {
         @ProxyCodable var font: Font
         @ProxyCodable var modifier: Modifier
         var base: ModifierProvider<Modifier> { ModifierProvider(base: font, modifier: modifier) }
+    }
+
+    struct FeatureSettingDefinition: CodableProxy {
+        var type: Int
+        var selector: Int
+        var base: FeatureSettingModifier {
+            FeatureSettingModifier(type: type, selector: selector)
+        }
     }
 }
 

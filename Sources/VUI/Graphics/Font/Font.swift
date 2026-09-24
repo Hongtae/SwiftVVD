@@ -73,7 +73,7 @@ extension EnvironmentValues {
     }
 
     var effectiveFont: Font {
-        font ?? defaultFont ?? .system(size: Font.pointSize(for: .body))
+        font ?? defaultFont ?? .body
     }
 
     var fontModifiers: [AnyFontModifier] {
@@ -542,6 +542,20 @@ extension Font {
         }
     }
 
+    static func boldWeight(for style: TextStyle) -> Weight {
+        switch style {
+        case .largeTitle, .title, .title2:
+            return .bold
+        case .title3, .subheadline, .body, .callout, .footnote,
+             .caption2:
+            return .semibold
+        case .headline:
+            return .heavy
+        case .caption:
+            return .medium
+        }
+    }
+
     public static func system(_ style: Font.TextStyle, design: Font.Design? = nil, weight: Font.Weight? = nil) -> Font {
         Font(provider: FontBox(TextStyleProvider(style: style, design: design, weight: weight)))
     }
@@ -661,6 +675,61 @@ extension Font {
 }
 
 extension Font {
+    public static var `default`: Font {
+        Font(provider: FontBox(DefaultProvider()))
+    }
+
+    public func pointSize(_ size: CGFloat) -> Font {
+        Font(provider: FontBox(ModifierProvider(
+            base: self,
+            modifier: PointSizeModifier(pointSize: size)
+        )))
+    }
+
+    public func scaled(by factor: CGFloat) -> Font {
+        Font(provider: FontBox(ModifierProvider(
+            base: self,
+            modifier: ScalePointSizeModifier(scaleFactor: factor)
+        )))
+    }
+
+    public func smallCaps() -> Font {
+        lowercaseSmallCaps().uppercaseSmallCaps()
+    }
+
+    public func smallCaps(_ isActive: Bool) -> Font {
+        if isActive { return smallCaps() }
+        return lowercaseSmallCaps(false).uppercaseSmallCaps(false)
+    }
+
+    public func lowercaseSmallCaps() -> Font {
+        lowercaseSmallCaps(true)
+    }
+
+    public func lowercaseSmallCaps(_ isActive: Bool) -> Font {
+        Font(provider: FontBox(ModifierProvider(
+            base: self,
+            modifier: FeatureSettingModifier(
+                type: 37,
+                selector: isActive ? 1 : 0
+            )
+        )))
+    }
+
+    public func uppercaseSmallCaps() -> Font {
+        uppercaseSmallCaps(true)
+    }
+
+    public func uppercaseSmallCaps(_ isActive: Bool) -> Font {
+        Font(provider: FontBox(ModifierProvider(
+            base: self,
+            modifier: FeatureSettingModifier(
+                type: 38,
+                selector: isActive ? 1 : 0
+            )
+        )))
+    }
+
     public func weight(_ weight: Weight) -> Font {
         Font(provider: FontBox(ModifierProvider(base: self, modifier: WeightModifier(weight: weight))))
     }

@@ -387,6 +387,8 @@ public class Font: @unchecked Sendable {
     public struct FaceMetadata: Hashable, Sendable {
         public let faceIndex: Int
         public let numFaces: Int
+        /// The face either declares fixed pitch or stores one shared horizontal advance.
+        public let isFixedWidth: Bool
         public let familyName: String?
         public let styleName: String?
         public let postScriptName: String?
@@ -513,6 +515,10 @@ public class Font: @unchecked Sendable {
         // Instance selection can change names and metrics, so copy the base first.
         let faceIndex = Int(face.pointee.face_index)
         let numFaces = Int(face.pointee.num_faces)
+        let horizontalHeader = FT_Get_Sfnt_Table(face, FT_SFNT_HHEA)?
+            .assumingMemoryBound(to: TT_HoriHeader.self).pointee
+        let isFixedWidth = FT_IS_FIXED_WIDTH(face) ||
+            horizontalHeader?.number_Of_HMetrics == 1
         let familyName = face.pointee.family_name.map { String(cString: $0) }
         let styleName = face.pointee.style_name.map { String(cString: $0) }
         let postScriptName = FT_Get_Postscript_Name(face).map { String(cString: $0) }
@@ -624,6 +630,7 @@ public class Font: @unchecked Sendable {
         return FaceMetadata(
             faceIndex: faceIndex,
             numFaces: numFaces,
+            isFixedWidth: isFixedWidth,
             familyName: familyName,
             styleName: styleName,
             postScriptName: postScriptName,

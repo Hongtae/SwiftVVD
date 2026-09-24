@@ -101,13 +101,94 @@ enum ContentSizeCategory: Hashable {
     }
 }
 
-enum DynamicTypeSize: Hashable {
-    case xSmall, small, medium, large, xLarge, xxLarge, xxxLarge
-    case accessibility1, accessibility2, accessibility3, accessibility4, accessibility5
+public enum DynamicTypeSize: Hashable, Comparable, CaseIterable, Sendable {
+    case xSmall
+    case small
+    case medium
+    case large
+    case xLarge
+    case xxLarge
+    case xxxLarge
+    case accessibility1
+    case accessibility2
+    case accessibility3
+    case accessibility4
+    case accessibility5
+
+    public var isAccessibilitySize: Bool {
+        self >= .accessibility1
+    }
+
+    public static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.order < rhs.order
+    }
+
+    private var order: Int {
+        switch self {
+        case .xSmall: 0
+        case .small: 1
+        case .medium: 2
+        case .large: 3
+        case .xLarge: 4
+        case .xxLarge: 5
+        case .xxxLarge: 6
+        case .accessibility1: 7
+        case .accessibility2: 8
+        case .accessibility3: 9
+        case .accessibility4: 10
+        case .accessibility5: 11
+        }
+    }
 }
 
-enum LegibilityWeight: Hashable {
-    case regular, bold
+public enum LegibilityWeight: Hashable, Sendable {
+    case regular
+    case bold
+}
+
+private struct DynamicTypeSizeCollection: Collection {
+    var startIndex: DynamicTypeSize {
+        .xSmall
+    }
+
+    var endIndex: DynamicTypeSize {
+        .accessibility5
+    }
+
+    subscript(position: DynamicTypeSize) -> DynamicTypeSize {
+        position
+    }
+
+    func index(after index: DynamicTypeSize) -> DynamicTypeSize {
+        let cases = DynamicTypeSize.allCases
+        let position = cases.firstIndex(of: index)!
+        return cases[Swift.min(position + 1, cases.count - 1)]
+    }
+}
+
+private extension DynamicTypeSize {
+    func clamped<R>(
+        to range: R
+    ) -> DynamicTypeSize where R: RangeExpression,
+        R.Bound == DynamicTypeSize
+    {
+        let relativeRange = range.relative(to: DynamicTypeSizeCollection())
+        var maximum = relativeRange.upperBound
+        if !range.contains(maximum) {
+            let cases = DynamicTypeSize.allCases
+            let position = cases.firstIndex(of: maximum)!
+            maximum = cases[Swift.max(position - 1, 0)]
+        }
+
+        var result = self
+        if result < relativeRange.lowerBound {
+            result = relativeRange.lowerBound
+        }
+        if maximum < result {
+            result = maximum
+        }
+        return result
+    }
 }
 
 enum WatchDisplayVariant: Hashable {
@@ -153,12 +234,12 @@ private enum FontContextKey: DerivedEnvironmentKey {
 extension EnvironmentValues {
     public var fontResolutionContext: Font.Context { self[FontContextKey.self] }
 
-    var dynamicTypeSize: DynamicTypeSize {
+    public var dynamicTypeSize: DynamicTypeSize {
         get { self[DynamicTypeSizeKey.self] }
         set { self[DynamicTypeSizeKey.self] = newValue }
     }
 
-    var legibilityWeight: LegibilityWeight? {
+    public var legibilityWeight: LegibilityWeight? {
         get { self[LegibilityWeightKey.self] }
         set { self[LegibilityWeightKey.self] = newValue }
     }
@@ -176,5 +257,23 @@ extension EnvironmentValues {
     var watchDisplayVariant: WatchDisplayVariant {
         get { self[WatchDisplayVariantKey.self] }
         set { self[WatchDisplayVariantKey.self] = newValue }
+    }
+}
+
+extension View {
+    nonisolated public func dynamicTypeSize(
+        _ size: DynamicTypeSize
+    ) -> some View {
+        environment(\.dynamicTypeSize, size)
+    }
+
+    nonisolated public func dynamicTypeSize<T>(
+        _ range: T
+    ) -> some View where T: RangeExpression,
+        T.Bound == DynamicTypeSize
+    {
+        transformEnvironment(\.dynamicTypeSize) {
+            $0 = $0.clamped(to: range)
+        }
     }
 }

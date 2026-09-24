@@ -73,7 +73,7 @@ struct FontResourceResolver: Sendable {
                 if weight >= CGFloat(Float(0.3)) { symbolic |= 2 }
                 if width < 0 { symbolic |= 64 }
                 if width > 0 { symbolic |= 32 }
-                if metadata.sfntStyle.fixedPitch != nil && metadata.sfntStyle.fixedPitch != 0 { symbolic |= 1024 }
+                if metadata.isFixedWidth { symbolic |= 1024 }
                 self.traits = Traits(symbolic: symbolic, weight: weight, width: width, slant: slant)
             }
         }
@@ -381,7 +381,7 @@ struct FontResourceResolver: Sendable {
         if weight >= CGFloat(Float(0.3)) { symbolic |= 2 }
         if width < 0 { symbolic |= 64 }
         if width > 0 { symbolic |= 32 }
-        if metadata.sfntStyle.fixedPitch != 0 && metadata.sfntStyle.fixedPitch != nil { symbolic |= 1024 }
+        if metadata.isFixedWidth { symbolic |= 1024 }
         return Candidate(face: face, instanceIndex: instance?.index, coordinates: coordinates,
                          comparisonCoordinates: FontVariationSelection(metadata: metadata, coordinates: coordinates)
                             .comparisonCoordinates(requested: [:]),

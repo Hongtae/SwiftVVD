@@ -54,6 +54,7 @@ final class FontResource: Hashable, @unchecked Sendable {
 
     let provider: any TypefaceProvider
     let pointSize: CGFloat
+    let realizedTraits: FontDescriptor.RealizedTraits
     /// Selected logical weight, independent of the shared physical glyph resource.
     let selectedWeight: CGFloat?
     /// Physical-face requests; descriptor copies carry the selected settings.
@@ -62,6 +63,7 @@ final class FontResource: Hashable, @unchecked Sendable {
     let stylePolicy: FontStylePolicy?
     let language: String?
     let languageAwareLineHeightRatio: Double?
+    private let legibilityWeight: LegibilityWeight?
     private let preferredLanguageGroup: Int
     private let metricLanguageGroup: Int
     private let source: FontDescriptor.Source
@@ -75,11 +77,13 @@ final class FontResource: Hashable, @unchecked Sendable {
         var environment = EnvironmentValues()
         environment.defaultFontRenderingMode = context.defaultFontRenderingMode
         self.provider = descriptor.typefaceProvider(in: environment)
-        self.pointSize = descriptor.pointSize
+        self.pointSize = descriptor.realizedPointSize
+        self.realizedTraits = descriptor.realizedTraits
         self.selectedWeight = descriptor.selectedWeight
         self.shapingFeatures = descriptor.shapingFeatures
         self.language = descriptor.language
         self.languageAwareLineHeightRatio = descriptor.languageAwareLineHeightRatio
+        self.legibilityWeight = descriptor.legibilityWeight
         self.stylePolicy = descriptor.stylePolicy
         self.preservesSizeOnSymbolicCopy = descriptor.preservesSizeOnSymbolicCopy
         let data = descriptor.stylePolicy == nil ? nil : BundledFontCatalog.shared.outsetData
@@ -121,7 +125,8 @@ final class FontResource: Hashable, @unchecked Sendable {
     // The metric ratio belongs to this resolved font and is not a copied attribute.
     func descriptor() -> FontDescriptor {
         FontDescriptor(source: source, pointSize: pointSize, shapingFeatures: descriptorFeatures,
-                       renderingMode: renderingMode, language: language,
+                       renderingMode: renderingMode,
+                       legibilityWeight: legibilityWeight, language: language,
                        stylePolicy: stylePolicy, variation: variation,
                        resolution: selection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
     }
@@ -158,6 +163,7 @@ final class FontResource: Hashable, @unchecked Sendable {
             switch provider {
             case let value as SystemFontProvider:
                 resized = SystemFontProvider(size: size, weight: value.weight, design: value.design,
+                    legibilityWeight: value.legibilityWeight,
                     renderingMode: value.renderingMode, isItalic: value.isItalic, width: value.width)
             case let value as BundledFontProvider:
                 resized = value.withSize(size)
@@ -175,7 +181,8 @@ final class FontResource: Hashable, @unchecked Sendable {
             resizedSource = source
         }
         let descriptor = FontDescriptor(source: resizedSource, pointSize: size,
-            shapingFeatures: descriptorFeatures, renderingMode: renderingMode, language: language,
+            shapingFeatures: descriptorFeatures, renderingMode: renderingMode,
+            legibilityWeight: legibilityWeight, language: language,
             stylePolicy: stylePolicy, variation: variation,
             resolution: resizedSelection, preservesSizeOnSymbolicCopy: preservesSizeOnSymbolicCopy)
         var environment = EnvironmentValues()
@@ -286,6 +293,7 @@ final class FontResource: Hashable, @unchecked Sendable {
 
     static func == (lhs: FontResource, rhs: FontResource) -> Bool {
         guard lhs.selectedWeight == rhs.selectedWeight &&
+            lhs.legibilityWeight == rhs.legibilityWeight &&
             lhs.language == rhs.language &&
             lhs.metricRatio == rhs.metricRatio &&
             lhs.stylePolicy == rhs.stylePolicy &&
@@ -308,6 +316,7 @@ final class FontResource: Hashable, @unchecked Sendable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(selectedWeight)
+        hasher.combine(legibilityWeight)
         hasher.combine(metricRatio)
         hasher.combine(stylePolicy)
         hasher.combine(preferredLanguageGroup)

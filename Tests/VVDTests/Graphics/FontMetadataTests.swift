@@ -5,6 +5,7 @@ import VVD
 
 final class FontMetadataTests: XCTestCase {
     private static let roboto = "Roboto/Roboto-VariableFont_wdth,wght.ttf"
+    private static let robotoMono = "RobotoMono/RobotoMono-VariableFont_wght.ttf"
     private static let nanum = "NanumSquareNeo/NanumSquareNeo-Variable.ttf"
     private static let weightTag: UInt32 = 0x7767_6874
     private static let widthTag: UInt32 = 0x7764_7468
@@ -82,6 +83,16 @@ final class FontMetadataTests: XCTestCase {
         XCTAssertEqual(value.variationInstances[10].coordinates, [200, 75])
         XCTAssertEqual(value.sfntStyle.weightClass, 400)
         XCTAssertEqual(value.sfntStyle.widthClass, 5)
+    }
+
+    // ASSERTIONS fontResolvedTraits27Observed
+    func testFixedWidthMetadataUsesTheSharedHorizontalAdvance() throws {
+        let proportional = try XCTUnwrap(Font.metadata(path: Self.resource(Self.roboto).path))
+        let monospaced = try XCTUnwrap(Font.metadata(path: Self.resource(Self.robotoMono).path))
+
+        XCTAssertFalse(proportional.isFixedWidth)
+        XCTAssertTrue(monospaced.isFixedWidth)
+        XCTAssertEqual(monospaced.sfntStyle.fixedPitch, 0)
     }
 
     func testGeneratedInstanceNamesAndNonRegularDefaultRemainDistinct() throws {

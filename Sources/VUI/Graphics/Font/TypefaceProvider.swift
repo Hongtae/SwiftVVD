@@ -74,6 +74,7 @@ struct SystemFontProvider: TypefaceProvider {
     let size: CGFloat
     let weight: Font.Weight
     let design: Font.Design
+    let legibilityWeight: LegibilityWeight?
     let renderingMode: Font.RenderingMode
     let isItalic: Bool
     let width: Font.Width?
@@ -81,12 +82,14 @@ struct SystemFontProvider: TypefaceProvider {
     init(size: CGFloat,
          weight: Font.Weight,
          design: Font.Design,
+         legibilityWeight: LegibilityWeight? = nil,
          renderingMode: Font.RenderingMode = .automatic,
          isItalic: Bool = false,
          width: Font.Width? = nil) {
         self.size = size
         self.weight = weight
         self.design = design
+        self.legibilityWeight = legibilityWeight
         self.renderingMode = renderingMode
         self.isItalic = isItalic
         self.width = width
@@ -113,6 +116,7 @@ struct SystemFontProvider: TypefaceProvider {
         return Self(size: size,
                     weight: weight,
                     design: design,
+                    legibilityWeight: legibilityWeight,
                     renderingMode: renderingMode,
                     isItalic: isItalic,
                     width: width)
@@ -123,6 +127,7 @@ struct SystemFontProvider: TypefaceProvider {
             return self.size == other.size &&
                    self.weight == other.weight &&
                    self.design == other.design &&
+                   self.legibilityWeight == other.legibilityWeight &&
                    self.renderingMode == other.renderingMode &&
                    self.isItalic == other.isItalic &&
                    self.width == other.width
@@ -134,6 +139,7 @@ struct SystemFontProvider: TypefaceProvider {
         hasher.combine(size)
         hasher.combine(weight)
         hasher.combine(design)
+        hasher.combine(legibilityWeight)
         hasher.combine(renderingMode)
         hasher.combine(isItalic)
         hasher.combine(width)
@@ -145,17 +151,44 @@ struct SystemFontProvider: TypefaceProvider {
     ) -> Typeface? {
         let catalog = BundledFontCatalog.shared
         let configuration = catalog.configuration
+        let selectionWeight = legibilitySelectionWeight
         guard let provider = BundledFontProvider(
             family: configuration.systemFont(for: design),
             locale: Locale(identifier: configuration.defaultLocale),
             size: size,
-            weight: weight,
+            weight: selectionWeight,
             renderingMode: renderingMode,
             isItalic: isItalic,
             catalog: catalog,
             width: width
         ) else { return nil }
         return provider.makeTypeface(context, dpi: dpi)
+    }
+
+    private var legibilitySelectionWeight: Font.Weight {
+        guard legibilityWeight == .bold else { return weight }
+        switch design {
+        case .rounded, .monospaced:
+            return weight
+        case .default:
+            if weight == .ultraLight { return .thin }
+            if weight == .thin { return .light }
+            if weight == .light { return .regular }
+            if weight == .regular { return .semibold }
+            if weight == .medium { return .bold }
+            if weight == .semibold { return .heavy }
+            if weight == .bold || weight == .heavy { return .black }
+            return weight
+        case .serif:
+            if weight == .ultraLight || weight == .thin ||
+                weight == .light || weight == .regular {
+                return .semibold
+            }
+            if weight == .medium { return .bold }
+            if weight == .semibold { return .heavy }
+            if weight == .bold || weight == .heavy { return .black }
+            return weight
+        }
     }
 }
 

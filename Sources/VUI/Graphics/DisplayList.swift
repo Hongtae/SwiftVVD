@@ -4304,6 +4304,14 @@ extension EnvironmentValues {
         set { self[DisplayScaleEnvironmentKey.self] = newValue }
         get { self[DisplayScaleEnvironmentKey.self] }
     }
+
+    public var pixelLength: CGFloat {
+        if let defaultPixelLength {
+            return defaultPixelLength
+        }
+        let scale = displayScale
+        return scale == 0 ? 1 : 1 / scale
+    }
 }
 
 private struct ResourceBundleKey: EnvironmentKey {

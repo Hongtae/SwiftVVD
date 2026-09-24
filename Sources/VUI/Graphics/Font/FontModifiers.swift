@@ -160,6 +160,33 @@ extension Font {
         func modify(traits: inout ResolvedTraits) { traits.width = width }
     }
 
+    struct PointSizeModifier: FontModifier {
+        var pointSize: CGFloat
+        var tag: DynamicModifierTag { .setPointSize }
+        var codingProxy: CGFloat { pointSize }
+        static func unwrap(codingProxy: CGFloat) -> Self {
+            Self(pointSize: codingProxy)
+        }
+        func modify(descriptor: inout FontDescriptor, in context: Context) {
+            descriptor = descriptor.withPointSize(pointSize)
+        }
+    }
+
+    struct ScalePointSizeModifier: FontModifier {
+        var scaleFactor: CGFloat
+        var tag: DynamicModifierTag { .scalePointSize }
+        var codingProxy: CGFloat { scaleFactor }
+        static func unwrap(codingProxy: CGFloat) -> Self {
+            Self(scaleFactor: codingProxy)
+        }
+        func modify(descriptor: inout FontDescriptor, in context: Context) {
+            guard scaleFactor != 1 else { return }
+            let pointSize = (descriptor.traitsPointSize * scaleFactor * 4)
+                .rounded(.toNearestOrAwayFromZero) * 0.25
+            descriptor = descriptor.withPointSize(pointSize)
+        }
+    }
+
     struct StylisticAlternativeModifier: FontModifier {
         var alternative: _StylisticAlternative
         var tag: DynamicModifierTag { ._stylisticAlternative }
@@ -174,6 +201,32 @@ extension Font {
             // Encode the selected set as the four-byte ss01...ss20 tag.
             let tag: UInt32 = 0x7373_3030 + (value / 10) * 256 + value % 10
             descriptor = descriptor.adding(features: [TypefaceShapingFeature(tag: tag)])
+        }
+    }
+
+    struct FeatureSettingModifier: FontModifier {
+        var type: Int
+        var selector: Int
+        var tag: DynamicModifierTag { ._featureSettings }
+        var codingProxy: FeatureSettingDefinition {
+            FeatureSettingDefinition(type: type, selector: selector)
+        }
+        static func unwrap(codingProxy: FeatureSettingDefinition) -> Self {
+            codingProxy.base
+        }
+
+        func modify(descriptor: inout FontDescriptor, in context: Context) {
+            guard !context.shouldRedactContent else { return }
+            let tag: UInt32
+            switch type {
+            case 37: tag = 0x736d_6370 // smcp
+            case 38: tag = 0x6332_7363 // c2sc
+            default: return
+            }
+            guard selector == 0 || selector == 1 else { return }
+            descriptor = descriptor.adding(features: [
+                TypefaceShapingFeature(tag: tag, value: UInt32(selector))
+            ])
         }
     }
 
