@@ -9,6 +9,13 @@ import Foundation
 
 /// Content type identifiers shared by clipboard backends.
 public enum ClipboardContentType {
+    /// Rich Text Format data.
+    public static let rtf = "public.rtf"
+
+    /// Byte-order-marked UTF-16 plain text.
+    public static let utf16ExternalPlainText =
+        "public.utf16-external-plain-text"
+
     /// UTF-8 encoded plain text.
     public static let utf8PlainText = "public.utf8-plain-text"
 }

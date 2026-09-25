@@ -1,6 +1,9 @@
 import XCTest
 @testable import VUI
 @testable import VVD
+#if canImport(AppKit)
+import AppKit
+#endif
 
 final class TextSelectionInteractionTests: XCTestCase {
     // ASSERTIONS textSelectionInteraction27Observed
@@ -184,6 +187,292 @@ final class TextSelectionInteractionTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS textSelectionRichCopy27Observed
+    @MainActor
+    func testRichSelectableTextCopyPublishesCanonicalRepresentations() throws {
+        let source = "Alpha Bravo"
+        let clipboard = StaticTextSelectionClipboard()
+        let previousAppContext = appContext
+        appContext = StaticTextSelectionAppContext(clipboard: clipboard)
+        defer { appContext = previousAppContext }
+
+        for fixture in RichTextSelectionFixture.Case.allCases {
+            clipboard.representations = [:]
+            let capture = StaticTextSelectionCapture()
+            let controller = WindowController(
+                content: RichTextSelectionFixture(
+                    fixture: fixture,
+                    capture: capture
+                ),
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(RichTextSelectionFixture.self)
+                )
+            )
+            var tick: UInt64 = 0
+            var redraw = false
+
+            func renderFrame() {
+                controller.updateView(
+                    tick: tick,
+                    delta: 0,
+                    date: controller.date,
+                    contentSize: CGSize(width: 640, height: 140),
+                    redraw: &redraw
+                ) { _, _ in }
+                tick += 1
+                Update.dispatchActions()
+            }
+
+            renderFrame()
+            renderFrame()
+
+            let bounds = capture.snapshot().layoutBounds
+            XCTAssertFalse(bounds.isEmpty, fixture.rawValue)
+            let start = CGPoint(x: 20 + bounds.minX + 0.1, y: 70)
+            let end = CGPoint(x: 20 + bounds.maxX + 1, y: 70)
+            XCTAssertTrue(controller.handleMouseEvent(event: VVD.MouseEvent(
+                type: .buttonDown,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: start,
+                timestamp: 0
+            )), fixture.rawValue)
+            XCTAssertTrue(controller.handleMouseEvent(event: VVD.MouseEvent(
+                type: .move,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: end,
+                timestamp: 0.01
+            )), fixture.rawValue)
+            XCTAssertTrue(controller.handleMouseEvent(event: VVD.MouseEvent(
+                type: .buttonUp,
+                device: .genericMouse,
+                deviceID: 0,
+                buttonID: 0,
+                location: end,
+                timestamp: 0.02
+            )), fixture.rawValue)
+            Update.dispatchActions()
+
+            XCTAssertTrue(
+                controller.canPerformTextEditingCommand(.copy),
+                fixture.rawValue
+            )
+            controller.performTextEditingCommand(.copy)
+            Update.dispatchActions()
+
+            XCTAssertEqual(
+                clipboard.representations.keys.sorted(),
+                [
+                    "public.rtf",
+                    "public.utf16-external-plain-text",
+                    "public.utf8-plain-text",
+                ],
+                fixture.rawValue
+            )
+            XCTAssertEqual(
+                clipboard.representations["public.utf8-plain-text"],
+                Data(source.utf8),
+                fixture.rawValue
+            )
+            XCTAssertEqual(
+                clipboard.representations[
+                    "public.utf16-external-plain-text"
+                ],
+                utf16ExternalData(source),
+                fixture.rawValue
+            )
+
+            let rtfData = try XCTUnwrap(
+                clipboard.representations["public.rtf"],
+                fixture.rawValue
+            )
+            let rtf = try XCTUnwrap(
+                String(data: rtfData, encoding: .ascii),
+                fixture.rawValue
+            )
+            XCTAssertTrue(rtf.hasPrefix("{\\rtf1"), fixture.rawValue)
+            XCTAssertTrue(rtf.contains("Alpha"), fixture.rawValue)
+            XCTAssertTrue(rtf.contains(" Bravo"), fixture.rawValue)
+            if fixture.isRich {
+                XCTAssertTrue(
+                    rtfContainsControlWord("b", in: rtf),
+                    fixture.rawValue
+                )
+                XCTAssertTrue(
+                    rtfContainsControlWord("i", in: rtf),
+                    fixture.rawValue
+                )
+                XCTAssertTrue(
+                    rtfContainsControlWord("cf", in: rtf),
+                    fixture.rawValue
+                )
+            }
+            if fixture == .attributedRich {
+                XCTAssertTrue(
+                    rtfContainsControlWord("ul", in: rtf),
+                    fixture.rawValue
+                )
+            }
+#if canImport(AppKit)
+            let decoded = try NSAttributedString(
+                data: rtfData,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+            )
+            XCTAssertEqual(decoded.string, source, fixture.rawValue)
+            let firstAttributes = decoded.attributes(
+                at: 0,
+                effectiveRange: nil
+            )
+            let secondAttributes = decoded.attributes(
+                at: 5,
+                effectiveRange: nil
+            )
+            let firstFont = try XCTUnwrap(
+                firstAttributes[.font] as? NSFont,
+                fixture.rawValue
+            )
+            let secondFont = try XCTUnwrap(
+                secondAttributes[.font] as? NSFont,
+                fixture.rawValue
+            )
+            XCTAssertEqual(firstFont.pointSize, 32, fixture.rawValue)
+            XCTAssertEqual(secondFont.pointSize, 32, fixture.rawValue)
+            XCTAssertEqual(
+                firstFont.fontDescriptor.symbolicTraits.contains(.bold),
+                fixture.isRich,
+                fixture.rawValue
+            )
+            XCTAssertEqual(
+                secondFont.fontDescriptor.symbolicTraits.contains(.italic),
+                fixture.isRich,
+                fixture.rawValue
+            )
+            if fixture.isRich {
+                assertColor(
+                    firstAttributes[.foregroundColor] as? NSColor,
+                    red: 1,
+                    green: 56.0 / 255.0,
+                    blue: 60.0 / 255.0,
+                    alpha: 1,
+                    fixture.rawValue
+                )
+                assertColor(
+                    secondAttributes[.foregroundColor] as? NSColor,
+                    red: 0,
+                    green: 136.0 / 255.0,
+                    blue: 1,
+                    alpha: 1,
+                    fixture.rawValue
+                )
+            } else {
+                assertColor(
+                    firstAttributes[.foregroundColor] as? NSColor,
+                    red: 0,
+                    green: 0,
+                    blue: 0,
+                    alpha: 216.0 / 255.0,
+                    fixture.rawValue
+                )
+            }
+            XCTAssertEqual(
+                (firstAttributes[.underlineStyle] as? NSNumber)?.intValue,
+                fixture == .attributedRich ? 1 : nil,
+                fixture.rawValue
+            )
+#endif
+        }
+    }
+
+#if canImport(AppKit)
+    private func assertColor(
+        _ color: NSColor?,
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat,
+        alpha: CGFloat,
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let resolved = color?.usingColorSpace(.sRGB) else {
+            XCTFail(message, file: file, line: line)
+            return
+        }
+        XCTAssertEqual(
+            resolved.redComponent,
+            red,
+            accuracy: 0.000_01,
+            message,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            resolved.greenComponent,
+            green,
+            accuracy: 0.000_01,
+            message,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            resolved.blueComponent,
+            blue,
+            accuracy: 0.000_01,
+            message,
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(
+            resolved.alphaComponent,
+            alpha,
+            accuracy: 0.000_01,
+            message,
+            file: file,
+            line: line
+        )
+    }
+#endif
+
+    private func utf16ExternalData(_ value: String) -> Data {
+        var result = Data([0xff, 0xfe])
+        for codeUnit in value.utf16 {
+            result.append(UInt8(truncatingIfNeeded: codeUnit))
+            result.append(UInt8(truncatingIfNeeded: codeUnit >> 8))
+        }
+        return result
+    }
+
+    private func rtfContainsControlWord(
+        _ word: String,
+        in value: String
+    ) -> Bool {
+        let characters = Array(value)
+        let expected = Array(word)
+        guard !expected.isEmpty, characters.count > expected.count else {
+            return false
+        }
+        for index in characters.indices where characters[index] == "\\" {
+            let start = characters.index(after: index)
+            guard characters.distance(from: start, to: characters.endIndex)
+                    >= expected.count else {
+                continue
+            }
+            let end = characters.index(start, offsetBy: expected.count)
+            guard Array(characters[start..<end]) == expected else {
+                continue
+            }
+            if end == characters.endIndex || !characters[end].isLetter {
+                return true
+            }
+        }
+        return false
+    }
+
     private struct ShapeFillRecord: Equatable {
         var frame: CGRect
         var color: VUI.Color
@@ -204,6 +493,63 @@ final class TextSelectionInteractionTests: XCTestCase {
             result.append(contentsOf: shapeFillRecords(in: effect.contents))
         }
         return result
+    }
+}
+
+private struct RichTextSelectionFixture: View {
+    enum Case: String, CaseIterable {
+        case plain
+        case interpolatedRich
+        case attributedPlain
+        case attributedRich
+
+        var isRich: Bool {
+            self == .interpolatedRich || self == .attributedRich
+        }
+    }
+
+    var fixture: Case
+    var capture: StaticTextSelectionCapture
+
+    var body: some View {
+        text
+            .font(.system(size: 32))
+            .textRenderer(StaticTextSelectionRenderer(capture: capture))
+            .textSelection(.enabled)
+            .environment(\.defaultFontRenderingMode, .vector())
+            .frame(width: 600, height: 100, alignment: .leading)
+            .padding(20)
+    }
+
+    private var text: Text {
+        switch fixture {
+        case .plain:
+            return Text(verbatim: "Alpha Bravo")
+        case .interpolatedRich:
+            let first = Text(verbatim: "Alpha")
+                .bold()
+                .foregroundColor(.red)
+            let second = Text(verbatim: " Bravo")
+                .italic()
+                .foregroundColor(.blue)
+            return Text("\(first)\(second)")
+        case .attributedPlain:
+            return Text(AttributedString("Alpha Bravo"))
+        case .attributedRich:
+            return Text(Self.richAttributedString)
+        }
+    }
+
+    private static var richAttributedString: AttributedString {
+        var first = AttributedString("Alpha")
+        first.font = VUI.Font.system(size: 32).bold()
+        first.foregroundColor = VUI.Color.red
+        first.underlineStyle = VUI.Text.LineStyle.single
+        var second = AttributedString(" Bravo")
+        second.font = VUI.Font.system(size: 32).italic()
+        second.foregroundColor = VUI.Color.blue
+        first.append(second)
+        return first
     }
 }
 

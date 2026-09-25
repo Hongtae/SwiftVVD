@@ -79,6 +79,7 @@ extension TextSelection {
         var lastConfiguredSize: CGSize?
         var textOrigin: CGPoint
         var sourceText: String
+        var copyEnvironment: EnvironmentValues
 
         init(
             textSelections: Attribute<[Range<Int>]>,
@@ -95,6 +96,7 @@ extension TextSelection {
             self.lastConfiguredSize = nil
             self.textOrigin = .zero
             self.sourceText = ""
+            self.copyEnvironment = EnvironmentValues()
         }
 
         func setTextSelection(_ selection: Range<Int>) {
@@ -380,6 +382,7 @@ private struct SelectableTextChildQuery: StatefulRule, RemovableAttribute {
         configuration.layoutManager = layoutManager
         configuration.lastConfiguredSize = size.value
         configuration.sourceText = sourceText
+        configuration.copyEnvironment = environment.untrackedCopy()
 
         let layout = SelectableTextLayout.resolve(
             layoutManager: layoutManager,
@@ -663,14 +666,11 @@ private final class SelectableTextResponder: MultiViewResponder,
         switch command {
         case .copy:
             guard let clipboard = appContext?.clipboard,
-                  let selectedText = configuration.selectedText else {
+                  let representations = configuration.copyRepresentations else {
                 return
             }
             Update.enqueueAction {
-                try? clipboard.setData(
-                    Data(selectedText.utf8),
-                    forType: ClipboardContentType.utf8PlainText
-                )
+                try? clipboard.setData(representations)
             }
         default:
             break
