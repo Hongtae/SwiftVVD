@@ -15,7 +15,7 @@ extension GraphicsContext {
     }
 
     public func resolveSymbol<ID>(id: ID) -> ResolvedSymbol? where ID: Hashable {
-        symbols?.symbol(for: id, in: self)
+        symbols?.symbol(for: id)
     }
 
     public func draw(_ symbol: ResolvedSymbol, in rect: CGRect) {
@@ -40,7 +40,7 @@ extension GraphicsContext {
 }
 
 class GraphicsContextSymbols {
-    func symbol<ID: Hashable>(for id: ID, in context: GraphicsContext) -> GraphicsContext.ResolvedSymbol? {
+    func symbol<ID: Hashable>(for id: ID) -> GraphicsContext.ResolvedSymbol? {
         fatalError("GraphicsContextSymbols requires a concrete symbol renderer.")
     }
 }

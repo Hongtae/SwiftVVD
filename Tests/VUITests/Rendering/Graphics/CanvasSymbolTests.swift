@@ -18,18 +18,23 @@ final class CanvasSymbolTests: XCTestCase {
     }
 
     private func render<Content: View>(
-        _ host: SymbolHost<Content>, device: GraphicsDeviceContext
+        _ host: SymbolHost<Content>,
+        device: GraphicsDeviceContext,
+        viewport: CGSize = CGSize(width: 100, height: 80),
+        translation: CGSize = .zero
     ) throws -> Pixels {
-        let width = 100, height = 80
+        let width = Int(viewport.width)
+        let height = Int(viewport.height)
         let queue = try XCTUnwrap(device.renderQueue())
         let commands = try XCTUnwrap(queue.makeCommandBuffer())
-        let context = try XCTUnwrap(GraphicsContext(
+        var context = try XCTUnwrap(GraphicsContext(
             sceneResources: SceneResources(), environment: EnvironmentValues(),
             viewport: CGRect(x: 0, y: 0, width: width, height: height),
             contentOffset: .zero, contentScaleFactor: 1,
             resolution: CGSize(width: width, height: height), commandBuffer: commands
         ))
         context.clear(with: .clear)
+        context.translateBy(x: translation.width, y: translation.height)
         host.host.data.withCurrent {
             host.host.data.rootSubgraph.update()
             host.renderer.render(list: host.list.value, at: .zero, in: context)
@@ -66,6 +71,215 @@ final class CanvasSymbolTests: XCTestCase {
             }
         }
         return result
+    }
+
+    func testRendererRecordsDuringDisplayListEvaluation() {
+        let log = SymbolLayoutLog()
+        var calls = 0
+        let host = SymbolHost(Canvas { context, _ in
+            calls += 1
+            guard let symbol = context.resolveSymbol(id: "layout") else {
+                return XCTFail("Expected a resolved symbol")
+            }
+            context.draw(symbol, at: .zero, anchor: .topLeading)
+        } symbols: {
+            SymbolLayout(log: log) { Color.red }.tag("layout")
+        })
+
+        let list = host.host.data.withCurrent {
+            host.host.data.rootSubgraph.update()
+            return host.list.value
+        }
+
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(log.proposals, [ProposedViewSize(width: 100, height: 80)])
+        guard list.items.count == 1,
+              case let .content(content) = list.items[0].value,
+              case .drawing = content.value else {
+            return XCTFail("Canvas evaluation must publish retained drawing contents")
+        }
+
+        host.host.data.withCurrent {
+            host.host.data.rootSubgraph.update()
+            _ = host.list.value
+        }
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(log.proposals.count, 1)
+    }
+
+    func testRendererOnlyInvalidationPreservesSymbolProviderCache() {
+        let model = SymbolModel()
+        let log = SymbolLayoutLog()
+        var calls = 0
+        var symbolLists: [ObjectIdentifier] = []
+        let host = SymbolHost(Canvas { context, _ in
+            calls += 1
+            _ = model.tick
+            guard let symbol = context.resolveSymbol(id: "layout") else {
+                return XCTFail("Expected a resolved symbol")
+            }
+            symbolLists.append(ObjectIdentifier(symbol.list))
+            context.draw(symbol, at: .zero, anchor: .topLeading)
+            XCTAssertNil(context.resolveSymbol(id: "missing"))
+        } symbols: {
+            SymbolLayout(log: log) { Color.red }.tag("layout")
+        })
+
+        func evaluate() {
+            host.host.data.withCurrent {
+                host.host.data.rootSubgraph.update()
+                _ = host.list.value
+            }
+        }
+
+        evaluate()
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(log.proposals.count, 1)
+
+        model.tick += 1
+        host.host.flushTransactions()
+        evaluate()
+
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(log.proposals.count, 1)
+        XCTAssertEqual(symbolLists.count, 2)
+        XCTAssertEqual(symbolLists[0], symbolLists[1])
+
+        evaluate()
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(log.proposals.count, 1)
+    }
+
+    func testScrollRecordingUsesOverscannedBoundsAndReusesEachTile() throws {
+        let inputs = CanvasScrollInputs()
+        var calls = 0
+        let host = SymbolHost(
+            Canvas { context, _ in
+                calls += 1
+                for y in [19, 147, 275, 531, 968] as [CGFloat] {
+                    context.fill(
+                        Path(CGRect(x: 17, y: y, width: 21, height: 13)),
+                        with: .color(.red)
+                    )
+                }
+            },
+            size: CGSize(width: 180, height: 1_000),
+            features: [inputs]
+        )
+
+        func evaluate(_ offset: CGFloat?) -> DisplayList {
+            host.host.data.withCurrent {
+                if let offset {
+                    inputs.setOffset(offset)
+                }
+                host.host.data.rootSubgraph.update()
+                return host.list.value
+            }
+        }
+
+        func drawing(
+            _ list: DisplayList,
+            frame: CGRect,
+            origin: CGPoint,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) -> (ObjectIdentifier, DisplayList.Version)? {
+            guard list.items.count == 1,
+                  case let .content(content) = list.items[0].value,
+                  case let .drawing(contents, actualOrigin, _) = content.value else {
+                XCTFail("Expected one retained Canvas drawing", file: file, line: line)
+                return nil
+            }
+            XCTAssertEqual(list.items[0].frame, frame, file: file, line: line)
+            XCTAssertEqual(actualOrigin, origin, file: file, line: line)
+            return (ObjectIdentifier(contents), list.items[0].version)
+        }
+
+        let initial = evaluate(nil)
+        XCTAssertEqual(calls, 1)
+        let initialDrawing = try XCTUnwrap(drawing(
+            initial,
+            frame: CGRect(x: 16, y: 16, width: 32, height: 144),
+            origin: CGPoint(x: 16, y: 16)
+        ))
+
+        for offset in [40, 80, 127] as [CGFloat] {
+            let reused = evaluate(offset)
+            XCTAssertEqual(calls, 1, "offset \(offset)")
+            let reusedDrawing = try XCTUnwrap(drawing(
+                reused,
+                frame: CGRect(x: 16, y: 16, width: 32, height: 144),
+                origin: CGPoint(x: 16, y: 16)
+            ))
+            XCTAssertEqual(reusedDrawing.0, initialDrawing.0, "offset \(offset)")
+            XCTAssertEqual(reusedDrawing.1, initialDrawing.1, "offset \(offset)")
+        }
+
+        let secondTile = evaluate(128)
+        XCTAssertEqual(calls, 2)
+        let secondDrawing = try XCTUnwrap(drawing(
+            secondTile,
+            frame: CGRect(x: 16, y: 144, width: 32, height: 144),
+            origin: CGPoint(x: 16, y: 16)
+        ))
+        XCTAssertNotEqual(secondDrawing.0, initialDrawing.0)
+        XCTAssertNotEqual(secondDrawing.1, initialDrawing.1)
+
+        let reusedSecondTile = evaluate(200)
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(
+            try XCTUnwrap(drawing(
+                reusedSecondTile,
+                frame: CGRect(x: 16, y: 144, width: 32, height: 144),
+                origin: CGPoint(x: 16, y: 16)
+            )).0,
+            secondDrawing.0
+        )
+
+        XCTAssertNotEqual(
+            try XCTUnwrap(drawing(
+                evaluate(256),
+                frame: CGRect(x: 16, y: 272, width: 32, height: 16),
+                origin: CGPoint(x: 16, y: 16)
+            )).0,
+            secondDrawing.0
+        )
+        XCTAssertEqual(calls, 3)
+        _ = drawing(
+            evaluate(600),
+            frame: CGRect(x: 16, y: 528, width: 32, height: 16),
+            origin: CGPoint(x: 16, y: 16)
+        )
+        XCTAssertEqual(calls, 4)
+    }
+
+    func testScrollRecordingReplaysAtCanvasCoordinates() throws {
+        let device = try device()
+        let inputs = CanvasScrollInputs()
+        let host = SymbolHost(
+            Canvas { context, _ in
+                for y in [19, 147, 275, 531, 968] as [CGFloat] {
+                    context.fill(
+                        Path(CGRect(x: 17, y: y, width: 21, height: 13)),
+                        with: .color(.red)
+                    )
+                }
+            },
+            size: CGSize(width: 180, height: 1_000),
+            features: [inputs]
+        )
+        host.host.data.withCurrent {
+            inputs.setOffset(128)
+        }
+
+        let pixels = try render(
+            host,
+            device: device,
+            viewport: CGSize(width: 180, height: 140),
+            translation: CGSize(width: 0, height: -128)
+        )
+        XCTAssertEqual(pixels.bounds, CGRect(x: 17, y: 19, width: 21, height: 13))
+        XCTAssertEqual(pixels.alpha, 21 * 13 * 255)
     }
 
     func testTypedLookupDuplicateOptionalAndListTags() throws {
@@ -317,10 +531,50 @@ private final class SymbolHost<Content: View> {
     let renderer = DisplayList.GraphicsRenderer()
     var list: Attribute<DisplayList> { host.rootDisplayList! }
 
-    init(_ content: Content) {
-        host = ViewGraph(rootViewType: Content.self, content: content, rendererHost: rendererHost)
-        host.setSize(CGSize(width: 100, height: 80))
+    init(
+        _ content: Content,
+        size: CGSize = CGSize(width: 100, height: 80),
+        features: [any ViewGraphFeature] = []
+    ) {
+        host = ViewGraph(
+            rootViewType: Content.self,
+            content: content,
+            rendererHost: rendererHost,
+            features: features
+        )
+        host.setSize(size)
         host.instantiateIfNeeded()
+    }
+}
+
+private final class CanvasScrollInputs: ViewGraphFeature {
+    private var transform: Attribute<VUI.ViewTransform>?
+
+    func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+        let transform = graph.data.graph.makeInput(value: value(offset: 0))
+        self.transform = transform
+        inputs.transform = transform
+        inputs[UsingGraphicsRenderer.self] = false
+    }
+
+    func setOffset(_ offset: CGFloat) {
+        guard let transform else {
+            fatalError("Canvas scroll inputs have not been installed.")
+        }
+        transform.setValue(value(offset: offset))
+    }
+
+    private func value(offset: CGFloat) -> VUI.ViewTransform {
+        var transform = VUI.ViewTransform()
+        transform.appendScrollGeometry(
+            ScrollGeometry(
+                contentOffset: CGPoint(x: 0, y: offset),
+                contentSize: CGSize(width: 180, height: 1_000),
+                containerSize: CGSize(width: 180, height: 140)
+            ),
+            isClipped: true
+        )
+        return transform
     }
 }
 
@@ -340,6 +594,7 @@ private struct SymbolLayout: Layout {
 }
 
 @Observable private final class SymbolModel {
+    var tick = 0
     var width: CGFloat = 20
     var rows = [1, 2]
     var tag = "first"
