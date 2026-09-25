@@ -115,7 +115,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         let black = Color.black.opacity(0.5).resolve(in: .init())
         let large = try XCTUnwrap(rectangle.shadow(radius: 12, color: black,
             itemTransform: .identity, styleTransform: .identity, offset: .zero))
-        XCTAssertEqual(large.primitive.cornerRadius, 12)
+        XCTAssertEqual(large.primitive.cornerRadii.x, 12)
         XCTAssertEqual(large.primitive.color.w, 0.25732421875)
         let shear = bases[3].1
         for (item, style, radius) in [(shear, CGAffineTransform.identity, Float(2.6299822330474854)),
@@ -139,17 +139,17 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
             CGRect(x: 56, y: 52, width: 144, height: 80), cornerRadius: 30,
             style: .continuous), color: black))
         XCTAssertEqual(primitive.kind, 4)
-        XCTAssertEqual(primitive.cornerRadius.bitPattern, 0x42190000)
+        XCTAssertEqual(primitive.cornerRadii.x.bitPattern, 0x42190000)
         let shadow = try XCTUnwrap(primitive.shadow(radius: 8, color: black,
             itemTransform: .identity, styleTransform: .identity, offset: CGPoint(x: 3, y: 2)))
         XCTAssertEqual(shadow.primitive.kind, 4)
-        XCTAssertEqual(shadow.primitive.cornerRadius.bitPattern, 0x4229b67a)
+        XCTAssertEqual(shadow.primitive.cornerRadii.x.bitPattern, 0x4229b67a)
         let lowering = try XCTUnwrap(shadow.primitive.lowering(pixelTransform: .identity))
         XCTAssertEqual(lowering.kind, 10)
         XCTAssertEqual([lowering.cornerRadii.x.bitPattern, lowering.cornerRadii.y.bitPattern,
                         lowering.cornerRadii.z.bitPattern, lowering.cornerRadii.w.bitPattern],
                        [0x3eab51a4, 0x3e865e26, 0x3f1e2b3e, 0])
-        XCTAssertEqual(lowering.innerInset.bitPattern, 0x3eef2655)
+        XCTAssertEqual(lowering.innerInsets.x.bitPattern, 0x3eef2655)
         XCTAssertEqual(lowering.mainIndices, [4, 0, 5, 1, 6, 2, 7, 3, 4, 0])
         XCTAssertEqual(lowering.extraIndices, [5, 4, 6, 7])
 
@@ -163,7 +163,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         XCTAssertEqual([small.cornerRadii.x.bitPattern, small.cornerRadii.y.bitPattern,
                         small.cornerRadii.z.bitPattern, small.cornerRadii.w.bitPattern],
                        [0x3e281a5e, 0x3e03d872, 0x3f800000, 0])
-        XCTAssertEqual(small.innerInset, 0)
+        XCTAssertEqual(small.innerInsets.x, 0)
         XCTAssertEqual(small.mainIndices, [1, 0, 2, 3])
         XCTAssertTrue(small.extraIndices.isEmpty)
 
@@ -177,7 +177,7 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         XCTAssertEqual([square.cornerRadii.x.bitPattern, square.cornerRadii.y.bitPattern,
                         square.cornerRadii.z.bitPattern, square.cornerRadii.w.bitPattern],
                        [0x3eada817, 0x3e883385, 0x3f177483, 0x3f177483])
-        XCTAssertEqual(square.innerInset.bitPattern, 0x3ee7a660)
+        XCTAssertEqual(square.innerInsets.x.bitPattern, 0x3ee7a660)
         XCTAssertEqual(square.mainIndices, [4, 0, 5, 1, 6, 2, 7, 3, 4, 0])
         XCTAssertEqual(square.extraIndices, [5, 4, 6, 7])
 
@@ -191,9 +191,113 @@ final class GraphicsContextPrimitiveTests: XCTestCase {
         XCTAssertEqual([capped.cornerRadii.x.bitPattern, capped.cornerRadii.y.bitPattern,
                         capped.cornerRadii.z.bitPattern, capped.cornerRadii.w.bitPattern],
                        [0x3e4238b2, 0x3e1854a0, 0x3f800000, 0])
-        XCTAssertEqual(capped.innerInset, 0)
+        XCTAssertEqual(capped.innerInsets.x, 0)
         XCTAssertEqual(capped.mainIndices, [1, 0, 2, 3])
         XCTAssertTrue(capped.extraIndices.isEmpty)
+    }
+
+    // ASSERTIONS recordedPrimitiveUnevenCorner27Observed
+    // ASSERTIONS recordedPrimitiveUnevenCornerSurface27Observed
+    func testUnevenCornerAdmissionPreservesPerCornerRadiusLanes() throws {
+        let black = Color.black.opacity(0.5).resolve(in: .init())
+        let controls: [(CGRect, RectangleCornerRadii, RoundedCornerStyle, Float, UInt32,
+                        [UInt32], [UInt32], [UInt32], Bool)] = [
+            (CGRect(x: 32, y: 24, width: 48, height: 24),
+             .init(topLeading: 1, bottomLeading: 3, bottomTrailing: 5, topTrailing: 7),
+             .circular, 2, 6,
+             [0x406f1fac, 0x40fbe310, 0x40c5284b, 0x4095f4f0],
+             [0x3dcdb2a4, 0x3e58ad4c, 0x3e299906, 0x3e00febd],
+             [0, 0, 0, 0], false),
+            (CGRect(x: 32, y: 56, width: 48, height: 24),
+             .init(topLeading: 1, bottomLeading: 3, bottomTrailing: 5, topTrailing: 7),
+             .continuous, 2, 7,
+             [0x409870fd, 0x412093f5, 0x40fb602d, 0x40bf31e6],
+             [0x3e0321e1, 0x3e8a21ae, 0x3e583cb5, 0x3e2477ff],
+             [0, 0, 0, 0], false),
+            (CGRect(x: 56, y: 36, width: 144, height: 80),
+             .init(topLeading: 2, bottomLeading: 4, bottomTrailing: 6, topTrailing: 8),
+             .circular, 8, 6,
+             [0x41689c92, 0x4183c8b8, 0x41799999, 0x416f1fac],
+             [0x3dead01e, 0x3e0507fe, 0x3dfbf64e, 0x3df162ff],
+             [0x3ece2a56, 0x3ed0741d, 0x3ecf6bcd, 0x3ecea590], true),
+            (CGRect(x: 56, y: 52, width: 144, height: 80),
+             .init(topLeading: 2, bottomLeading: 4, bottomTrailing: 6, topTrailing: 8),
+             .continuous, 8, 7,
+             [0x41944a36, 0x41a80652, 0x419f1eb8, 0x419870fd],
+             [0x3e15b179, 0x3e299d65, 0x3e20a038, 0x3e19e24f],
+             [0x3ed2e4c7, 0x3ed5cfa5, 0x3ed47ea6, 0x3ed381e4], true),
+        ]
+        for (rect, radii, style, shadowRadius, kind, expectedRaw, expectedRadii,
+             expectedInsets, inner) in controls {
+            let path = UnevenRoundedRectangle(cornerRadii: radii, style: style).path(in: rect)
+            let primitive = try XCTUnwrap(FilledPrimitive(path: path, color: black))
+            let shadow = try XCTUnwrap(primitive.shadow(radius: shadowRadius, color: black,
+                itemTransform: .identity, styleTransform: .identity, offset: CGPoint(x: 3, y: 2)))
+            XCTAssertEqual([
+                shadow.primitive.cornerRadii.x.bitPattern, shadow.primitive.cornerRadii.y.bitPattern,
+                shadow.primitive.cornerRadii.z.bitPattern, shadow.primitive.cornerRadii.w.bitPattern,
+            ], expectedRaw)
+            let lowering = try XCTUnwrap(shadow.primitive.lowering(pixelTransform: .identity))
+            XCTAssertEqual(lowering.kind, kind)
+            XCTAssertEqual([lowering.cornerRadii.x.bitPattern, lowering.cornerRadii.y.bitPattern,
+                            lowering.cornerRadii.z.bitPattern, lowering.cornerRadii.w.bitPattern],
+                           expectedRadii)
+            XCTAssertEqual([
+                lowering.innerInsets.x.bitPattern, lowering.innerInsets.y.bitPattern,
+                lowering.innerInsets.z.bitPattern, lowering.innerInsets.w.bitPattern,
+            ], expectedInsets)
+            XCTAssertEqual(lowering.mainIndices,
+                           inner ? [4, 0, 5, 1, 6, 2, 7, 3, 4, 0] : [1, 0, 2, 3])
+            XCTAssertEqual(lowering.extraIndices, inner ? [5, 4, 6, 7] : [])
+        }
+    }
+
+    // ASSERTIONS recordedPrimitiveUnevenCorner27Observed
+    func testUnevenCornerMetalReadbacksPreservePublicControls() throws {
+        let device = try device()
+        let output = ProcessInfo.processInfo.environment["VUI_PRIMITIVE_UNEVEN"].map {
+            URL(fileURLWithPath: $0)
+        }
+        if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
+        let small = RectangleCornerRadii(
+            topLeading: 1, bottomLeading: 3,
+            bottomTrailing: 5, topTrailing: 7)
+        let large = RectangleCornerRadii(
+            topLeading: 2, bottomLeading: 4,
+            bottomTrailing: 6, topTrailing: 8)
+        let controls: [(String, CGRect, RectangleCornerRadii, RoundedCornerStyle, CGFloat)] = [
+            ("small-circular", CGRect(x: 32, y: 24, width: 48, height: 24),
+             small, .circular, 2),
+            ("small-continuous", CGRect(x: 32, y: 56, width: 48, height: 24),
+             small, .continuous, 2),
+            ("large-circular", CGRect(x: 56, y: 36, width: 144, height: 80),
+             large, .circular, 8),
+            ("large-continuous", CGRect(x: 56, y: 52, width: 144, height: 80),
+             large, .continuous, 8),
+        ]
+        for (name, rect, radii, style, shadowRadius) in controls {
+            let draw = { (context: inout GraphicsContext) in
+                context.addFilter(.shadow(color: .black.opacity(0.5), radius: shadowRadius,
+                                          x: 3, y: 2, options: .shadowOnly))
+                context.fill(UnevenRoundedRectangle(cornerRadii: radii, style: style).path(in: rect),
+                             with: .color(.red.opacity(0.6)))
+            }
+            var recording = recording()
+            draw(&recording)
+            let contents = try XCTUnwrap(recording.recording).moveContents()
+            for density: CGFloat in [1, 2] {
+                let live = try render(device, scale: density, draw: draw)
+                let replay = try render(device, scale: density) { contents.draw(in: $0) }
+                XCTAssertEqual(live, replay, "\(name)-\(density)")
+                XCTAssertTrue(stride(from: 3, to: live.count, by: 4).contains { live[$0] > 0 })
+                XCTAssertTrue(stride(from: 0, to: live.count, by: 4).allSatisfy {
+                    live[$0] == 0 && live[$0 + 1] == 0 && live[$0 + 2] == 0
+                })
+                if let output {
+                    try Data(live).write(to: output.appendingPathComponent("\(name)-\(Int(density)).rgba"))
+                }
+            }
+        }
     }
 
     // ASSERTIONS recordedPrimitiveContinuousCorner27Observed

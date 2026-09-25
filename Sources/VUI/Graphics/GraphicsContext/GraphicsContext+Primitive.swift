@@ -9,11 +9,12 @@ import Foundation
 import VVD
 
 // A filled, solid-color primitive consumed by the plane and shadow encoders.
-// Complex paths and unequal corner axes use path drawing.
+// Complex paths and unequal corner axes use path drawing; circular radii may
+// vary independently at each corner.
 struct FilledPrimitive {
     var rect: CGRect
     var kind: UInt32
-    var cornerRadius: Float
+    var cornerRadii: SIMD4<Float>
     var blurRadius: Float = 0
     var color: SIMD4<Float>
 
@@ -22,23 +23,36 @@ struct FilledPrimitive {
         case let .rect(rect):
             self.rect = rect.standardized
             kind = 2
-            cornerRadius = 0
+            cornerRadii = .zero
         case let .ellipse(rect) where rect.width == rect.height:
             self.rect = rect.standardized
             kind = 5
-            cornerRadius = Float(self.rect.height) * 0.5
-        case let .roundedRect(rounded) where rounded.style == .circular &&
-            rounded.cornerSize.width == rounded.cornerSize.height:
+            cornerRadii = SIMD4(repeating: Float(self.rect.height) * 0.5)
+        case let .roundedRect(rounded):
             self.rect = rounded.rect.standardized
-            kind = 3
-            cornerRadius = min(max(0, Float(rounded.cornerSize.width)),
-                min(Float(self.rect.width), Float(self.rect.height)) * 0.5)
-        case let .roundedRect(rounded) where rounded.style == .continuous &&
-            rounded.cornerSize.width == rounded.cornerSize.height:
-            self.rect = rounded.rect.standardized
-            kind = 4
-            cornerRadius = min(max(0, Float(rounded.cornerSize.width)),
-                min(Float(self.rect.width), Float(self.rect.height)) * 0.5) * 1.275
+            let maximum = min(Float(self.rect.width), Float(self.rect.height)) * 0.5
+            let multiplier: Float
+            switch rounded.style {
+            case .circular:
+                kind = 3
+                multiplier = 1
+            case .continuous:
+                kind = 4
+                multiplier = 1.275
+            }
+            switch rounded.radii {
+            case let .elliptic(width, height) where width == height:
+                let radius = min(max(0, Float(width)), maximum) * multiplier
+                cornerRadii = SIMD4(repeating: radius)
+            case let .uneven(topLeft, topRight, bottomRight, bottomLeft):
+                cornerRadii = SIMD4(
+                    min(max(0, Float(topLeft)), maximum) * multiplier,
+                    min(max(0, Float(topRight)), maximum) * multiplier,
+                    min(max(0, Float(bottomRight)), maximum) * multiplier,
+                    min(max(0, Float(bottomLeft)), maximum) * multiplier)
+            default:
+                return nil
+            }
         default: return nil
         }
         guard !rect.isEmpty, !rect.isInfinite,
@@ -104,7 +118,7 @@ struct FilledPrimitive {
         let distanceScale: Float
         let kind: UInt32
         let mode: UInt32
-        let innerInset: Float
+        let innerInsets: SIMD4<Float>
         let mainIndices: [UInt16]
         let extraIndices: [UInt16]
     }
@@ -128,12 +142,20 @@ struct FilledPrimitive {
         let frame = CGRect(x: CGFloat(Float(rect.minX) - outset),
                            y: CGFloat(Float(rect.minY) - outset),
                            width: CGFloat(expandedWidth), height: CGFloat(expandedHeight))
-        let corner = cornerRadius
-        var loweredKind = plane ? UInt32(1) : corner < 0.01 && radius == 0 ? UInt32(2) : kind
+        let corners = cornerRadii
+        let equalCorners = corners.x == corners.y && corners.x == corners.z && corners.x == corners.w
+        let hasCorner = corners.x >= 0.01 || corners.y >= 0.01 ||
+            corners.z >= 0.01 || corners.w >= 0.01
+        var loweredKind = plane ? UInt32(1) : !hasCorner && radius == 0 ? UInt32(2) : kind
+        if !equalCorners {
+            if loweredKind == 3 { loweredKind = 6 }
+            if loweredKind == 4 { loweredKind = 7 }
+        }
         var secondRadius: Float = 0
         var weights = SIMD2<Float>(repeating: 0)
 
         if loweredKind == 4 {
+            let corner = corners.x
             secondRadius = corner * 0.7843137383460999
             let denominator = corner * 0.4146391749382019
             let ratios = SIMD2((width * 0.5 - secondRadius) / denominator,
@@ -146,29 +168,52 @@ struct FilledPrimitive {
             }
         }
 
-        let edgeInset: Float = loweredKind == 3 || loweredKind == 4 ? corner : 0
+        let edgeInset: Float = loweredKind == 3 || loweredKind == 4 ? corners.x : 0
         let edges = SIMD2((width * 0.5 - edgeInset) * reciprocalHeight,
                           (height * 0.5 - edgeInset) * reciprocalHeight)
-        let cornerRadii = loweredKind == 10
-            ? SIMD4(corner * reciprocalHeight, secondRadius * reciprocalHeight, weights.x, weights.y)
-            : SIMD4(corner * reciprocalHeight, 0, 0, 0)
+        let normalizedCornerRadii: SIMD4<Float>
+        if loweredKind == 10 {
+            normalizedCornerRadii = SIMD4(
+                corners.x * reciprocalHeight,
+                secondRadius * reciprocalHeight,
+                weights.x, weights.y)
+        } else if loweredKind == 6 || loweredKind == 7 {
+            normalizedCornerRadii = corners * SIMD4(repeating: reciprocalHeight)
+        } else {
+            normalizedCornerRadii = SIMD4(corners.x * reciprocalHeight, 0, 0, 0)
+        }
         let distanceScale = radius > 0
             ? Float(Float16(Float(Float16(0.1695573329925537 / radius)) * expandedHeight)) : 0
 
-        let cornerInset = max(corner * 0.2928932309150696, 0)
-        let usesInnerMesh = loweredKind == 10 && scale * width * height > 4096 &&
-            min(width, height) * 0.5 > cornerInset + outset
+        let cornerInsets = SIMD4(
+            max(corners.x * 0.2928932309150696, 0),
+            max(corners.y * 0.2928932309150696, 0),
+            max(corners.z * 0.2928932309150696, 0),
+            max(corners.w * 0.2928932309150696, 0))
+        let cornerLimit = min(width, height) * 0.5
+        let supportsInnerMesh = loweredKind == 6 || loweredKind == 7 || loweredKind == 10
+        let usesInnerMesh = supportsInnerMesh && scale * width * height > 4096 &&
+            cornerLimit > cornerInsets.x + outset &&
+            cornerLimit > cornerInsets.y + outset &&
+            cornerLimit > cornerInsets.z + outset &&
+            cornerLimit > cornerInsets.w + outset
         // Inner vertices use a separately divided reciprocal and two rounded
         // outset additions; the normalized corner fields use reciprocalHeight.
-        let innerInset = usesInnerMesh
-            ? ((cornerInset + outset) + outset) * (1 / expandedHeight) : 0
+        let innerReciprocal = 1 / expandedHeight
+        let innerInsets = usesInnerMesh
+            ? SIMD4(
+                ((cornerInsets.x + outset) + outset) * innerReciprocal,
+                ((cornerInsets.y + outset) + outset) * innerReciprocal,
+                ((cornerInsets.z + outset) + outset) * innerReciprocal,
+                ((cornerInsets.w + outset) + outset) * innerReciprocal)
+            : .zero
         let mainIndices: [UInt16] = usesInnerMesh
             ? [4, 0, 5, 1, 6, 2, 7, 3, 4, 0] : [1, 0, 2, 3]
         let extraIndices: [UInt16] = usesInnerMesh ? [5, 4, 6, 7] : []
         return Lowering(frame: frame, expandedWidth: expandedWidth, expandedHeight: expandedHeight,
-            reciprocalHeight: reciprocalHeight, edges: edges, cornerRadii: cornerRadii,
+            reciprocalHeight: reciprocalHeight, edges: edges, cornerRadii: normalizedCornerRadii,
             distanceScale: distanceScale, kind: loweredKind, mode: radius > 0 ? 2 : 0,
-            innerInset: innerInset, mainIndices: mainIndices, extraIndices: extraIndices)
+            innerInsets: innerInsets, mainIndices: mainIndices, extraIndices: extraIndices)
     }
 
     func bounds(transform: CGAffineTransform) -> CGRect {
@@ -202,15 +247,28 @@ struct FilledPrimitive {
         var result = self
         result.blurRadius = sigma
         let minimum = min(Float(rect.width), Float(rect.height))
+        let amount = Float(1.8) * sigma
+        let amountSquared = amount * amount
+        let expandedCorner = { (corner: Float, reciprocal: Float, multiplier: Float) in
+            let radius = corner * reciprocal
+            let combined = radius > 0
+                ? amountSquared.addingProduct(radius, radius).squareRoot()
+                : amount
+            return min(combined, minimum * 0.5) * multiplier
+        }
         if kind == 4 {
-            let continuousRadius = cornerRadius * 0.7843137383460999
-            let amount = Float(1.8) * sigma
-            result.cornerRadius = min((continuousRadius * continuousRadius + amount * amount).squareRoot(),
-                                      minimum * 0.5) * 1.275
+            // The coverage owner uses the vector reciprocal estimate followed
+            // by two Newton refinements. Its result is one ULP above 1/1.275.
+            let reciprocal = Float(bitPattern: 0x3f48c8ca)
+            result.cornerRadii = SIMD4(
+                expandedCorner(cornerRadii.x, reciprocal, 1.275),
+                expandedCorner(cornerRadii.y, reciprocal, 1.275),
+                expandedCorner(cornerRadii.z, reciprocal, 1.275),
+                expandedCorner(cornerRadii.w, reciprocal, 1.275))
         } else if kind != 5 {
-            let amount = Float(1.8) * sigma
-            result.cornerRadius = min((cornerRadius * cornerRadius + amount * amount).squareRoot(),
-                                      minimum * 0.5)
+            result.cornerRadii = SIMD4(
+                expandedCorner(cornerRadii.x, 1, 1), expandedCorner(cornerRadii.y, 1, 1),
+                expandedCorner(cornerRadii.z, 1, 1), expandedCorner(cornerRadii.w, 1, 1))
             result.kind = 3
         }
         var alpha = self.color.w
@@ -434,14 +492,20 @@ extension GraphicsContext {
         let bl = makeVertex(0, 1, -halfWidth, 0.5)
         let br = makeVertex(1, 1, halfWidth, 0.5)
         var vertices = [tl, tr, br, bl]
-        if lowering.innerInset > 0 {
-            let x = lowering.innerInset / unitWidth
-            let y = lowering.innerInset
+        if lowering.innerInsets != .zero {
+            let topLeft = lowering.innerInsets.x
+            let topRight = lowering.innerInsets.y
+            let bottomRight = lowering.innerInsets.z
+            let bottomLeft = lowering.innerInsets.w
             vertices += [
-                makeVertex(x, y, -halfWidth + lowering.innerInset, -0.5 + y),
-                makeVertex(1 - x, y, halfWidth - lowering.innerInset, -0.5 + y),
-                makeVertex(1 - x, 1 - y, halfWidth - lowering.innerInset, 0.5 - y),
-                makeVertex(x, 1 - y, -halfWidth + lowering.innerInset, 0.5 - y),
+                makeVertex(topLeft / unitWidth, topLeft,
+                           -halfWidth + topLeft, -0.5 + topLeft),
+                makeVertex(1 - topRight / unitWidth, topRight,
+                           halfWidth - topRight, -0.5 + topRight),
+                makeVertex(1 - bottomRight / unitWidth, 1 - bottomRight,
+                           halfWidth - bottomRight, 0.5 - bottomRight),
+                makeVertex(bottomLeft / unitWidth, 1 - bottomLeft,
+                           -halfWidth + bottomLeft, 0.5 - bottomLeft),
             ]
         }
         // Typed half output and source-over form one precision path. Keep the

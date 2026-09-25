@@ -24,8 +24,23 @@ public struct FillStyle: Equatable, Sendable {
 }
 
 struct FixedRoundedRect: Equatable {
+    enum Radii: Equatable {
+        case elliptic(width: CGFloat, height: CGFloat)
+        case uneven(topLeft: CGFloat, topRight: CGFloat,
+                    bottomRight: CGFloat, bottomLeft: CGFloat)
+
+        var isZero: Bool {
+            switch self {
+            case let .elliptic(width, height):
+                width == 0 && height == 0
+            case let .uneven(topLeft, topRight, bottomRight, bottomLeft):
+                topLeft == 0 && topRight == 0 && bottomRight == 0 && bottomLeft == 0
+            }
+        }
+    }
+
     var rect: CGRect
-    var cornerSize: CGSize
+    var radii: Radii
     var style: RoundedCornerStyle
 }
 
@@ -1030,12 +1045,16 @@ public struct Path: Equatable {
             let rect = rect.standardized
             return CGPoint(x: rect.maxX, y: rect.midY)
         case .roundedRect(let roundedRect):
-            guard roundedRect.cornerSize.width > 0,
-                  roundedRect.cornerSize.height > 0 else {
-                return roundedRect.rect.origin
-            }
             let rect = roundedRect.rect.standardized
-            return CGPoint(x: rect.maxX, y: rect.midY)
+            switch roundedRect.radii {
+            case let .elliptic(width, height):
+                guard width > 0, height > 0 else { return roundedRect.rect.origin }
+                return CGPoint(x: rect.maxX, y: rect.midY)
+            case let .uneven(_, topRight, bottomRight, _):
+                guard !roundedRect.radii.isZero else { return roundedRect.rect.origin }
+                return CGPoint(x: rect.maxX,
+                               y: (rect.minY + topRight + rect.maxY - bottomRight) * 0.5)
+            }
         case .path(let box):
             return box.data.currentPoint
         }
@@ -1069,11 +1088,22 @@ public struct Path: Equatable {
             return data
         case .roundedRect(let roundedRect):
             var path = Path(storage: .path(PathBox()))
-            path.addRoundedRect(
-                in: roundedRect.rect,
-                cornerSize: roundedRect.cornerSize,
-                style: roundedRect.style
-            )
+            switch roundedRect.radii {
+            case let .elliptic(width, height):
+                path.addRoundedRect(
+                    in: roundedRect.rect,
+                    cornerSize: CGSize(width: width, height: height),
+                    style: roundedRect.style
+                )
+            case let .uneven(topLeft, topRight, bottomRight, bottomLeft):
+                path.addRoundedRect(
+                    in: roundedRect.rect,
+                    cornerRadii: RectangleCornerRadii(
+                        topLeft: topLeft, topRight: topRight,
+                        bottomRight: bottomRight, bottomLeft: bottomLeft),
+                    style: roundedRect.style
+                )
+            }
             guard case .path(let box) = path.storage else {
                 preconditionFailure("rounded-rect materialization must use path storage")
             }
@@ -1910,7 +1940,7 @@ extension Path {
         } else {
             storage = .roundedRect(FixedRoundedRect(
                 rect: rect,
-                cornerSize: cornerSize,
+                radii: .elliptic(width: cornerSize.width, height: cornerSize.height),
                 style: style
             ))
         }
@@ -1924,6 +1954,26 @@ extension Path {
             cornerSize: CGSize(width: cornerRadius, height: cornerRadius),
             style: style
         )
+    }
+
+    public init(roundedRect rect: CGRect,
+                cornerRadii: RectangleCornerRadii,
+                style: RoundedCornerStyle = .continuous) {
+        if rect.isNull {
+            storage = .empty
+        } else if cornerRadii == RectangleCornerRadii() {
+            storage = .rect(rect)
+        } else {
+            storage = .roundedRect(FixedRoundedRect(
+                rect: rect,
+                radii: .uneven(
+                    topLeft: cornerRadii.topLeft,
+                    topRight: cornerRadii.topRight,
+                    bottomRight: cornerRadii.bottomRight,
+                    bottomLeft: cornerRadii.bottomLeft),
+                style: style
+            ))
+        }
     }
 
     public init(ellipseIn rect: CGRect) {
@@ -2003,7 +2053,9 @@ extension Path {
             } else {
                 storage = .roundedRect(FixedRoundedRect(
                     rect: transformedRect,
-                    cornerSize: transformedCornerSize,
+                    radii: .elliptic(
+                        width: transformedCornerSize.width,
+                        height: transformedCornerSize.height),
                     style: style
                 ))
             }
@@ -2106,6 +2158,147 @@ extension Path {
                 data.addLine(to: CGPoint(x: minX, y: maxY).applying(transform))
             }
             data.closeSubpath()
+        }
+    }
+
+    public mutating func addRoundedRect(
+        in rect: CGRect,
+        cornerRadii: RectangleCornerRadii,
+        style: RoundedCornerStyle = .continuous,
+        transform: CGAffineTransform = .identity
+    ) {
+        if rect.isNull { return }
+        let sourceRect = rect
+        let rect = sourceRect.standardized
+        let minX = rect.minX
+        let maxX = rect.maxX
+        let minY = rect.minY
+        let maxY = rect.maxY
+        let maximumRadius = min(rect.width, rect.height) * 0.5
+        let topLeft = clamp(cornerRadii.topLeft, min: 0, max: maximumRadius)
+        let topRight = clamp(cornerRadii.topRight, min: 0, max: maximumRadius)
+        let bottomRight = clamp(cornerRadii.bottomRight, min: 0, max: maximumRadius)
+        let bottomLeft = clamp(cornerRadii.bottomLeft, min: 0, max: maximumRadius)
+        let allZero = topLeft == 0 && topRight == 0 && bottomRight == 0 && bottomLeft == 0
+
+        if case .empty = storage, transform.isIdentity {
+            if allZero {
+                storage = .rect(rect)
+            } else {
+                storage = .roundedRect(FixedRoundedRect(
+                    rect: rect,
+                    radii: .uneven(
+                        topLeft: cornerRadii.topLeft,
+                        topRight: cornerRadii.topRight,
+                        bottomRight: cornerRadii.bottomRight,
+                        bottomLeft: cornerRadii.bottomLeft),
+                    style: style
+                ))
+            }
+            return
+        }
+
+        withMutableBuffer { data in
+            data.reserveCapacity(data.elements.count + 18)
+            guard !allZero else {
+                data.addRect(rect, transform: transform)
+                return
+            }
+
+            let usesKnownBounds = style == .circular
+                && Self.preservesAxisAlignment(transform)
+            let bottomRightTransform = CGAffineTransform(
+                scaleX: bottomRight, y: bottomRight)
+                .concatenating(CGAffineTransform(
+                    translationX: maxX - bottomRight,
+                    y: maxY - bottomRight))
+                .concatenating(transform)
+            let bottomLeftTransform = CGAffineTransform(scaleX: -1, y: 1)
+                .concatenating(CGAffineTransform(translationX: 1, y: 0))
+                .concatenating(CGAffineTransform(
+                    scaleX: bottomLeft, y: bottomLeft))
+                .concatenating(CGAffineTransform(
+                    translationX: minX, y: maxY - bottomLeft))
+                .concatenating(transform)
+            let topLeftTransform = CGAffineTransform(rotationAngle: .pi)
+                .concatenating(CGAffineTransform(translationX: 1, y: 1))
+                .concatenating(CGAffineTransform(
+                    scaleX: topLeft, y: topLeft))
+                .concatenating(CGAffineTransform(
+                    translationX: minX, y: minY))
+                .concatenating(transform)
+            let topRightTransform = CGAffineTransform(scaleX: 1, y: -1)
+                .concatenating(CGAffineTransform(translationX: 0, y: 1))
+                .concatenating(CGAffineTransform(
+                    scaleX: topRight, y: topRight))
+                .concatenating(CGAffineTransform(
+                    translationX: maxX - topRight, y: minY))
+                .concatenating(transform)
+
+            let startPoint = CGPoint(
+                x: maxX,
+                y: (minY + topRight + maxY - bottomRight) * 0.5
+            ).applying(transform)
+            if usesKnownBounds {
+                data.elements.append(.move(to: startPoint))
+            } else {
+                data.move(to: startPoint)
+            }
+
+            if style == .circular {
+                data.appendCircularCorner(
+                    transform: bottomRightTransform,
+                    reversed: false,
+                    tracksBounds: !usesKnownBounds)
+                data.appendCircularCorner(
+                    transform: bottomLeftTransform,
+                    reversed: true,
+                    tracksBounds: !usesKnownBounds)
+                data.appendCircularCorner(
+                    transform: topLeftTransform,
+                    reversed: false,
+                    tracksBounds: !usesKnownBounds)
+                data.appendCircularCorner(
+                    transform: topRightTransform,
+                    reversed: true,
+                    tracksBounds: !usesKnownBounds)
+            } else {
+                let factor = { (length: CGFloat, first: CGFloat, second: CGFloat) -> CGFloat in
+                    let total = first + second
+                    return total > 0 ? min((length - total) / (total * 0.54), 1) : 1
+                }
+                let topFactor = factor(rect.width, topLeft, topRight)
+                let bottomFactor = factor(rect.width, bottomLeft, bottomRight)
+                let leadingFactor = factor(rect.height, topLeft, bottomLeft)
+                let trailingFactor = factor(rect.height, topRight, bottomRight)
+                data.appendContinuousCorner(
+                    transform: bottomRightTransform,
+                    radiusFactors: CGPoint(x: bottomFactor, y: trailingFactor),
+                    reversed: false)
+                data.appendContinuousCorner(
+                    transform: bottomLeftTransform,
+                    radiusFactors: CGPoint(x: bottomFactor, y: leadingFactor),
+                    reversed: true)
+                data.appendContinuousCorner(
+                    transform: topLeftTransform,
+                    radiusFactors: CGPoint(x: topFactor, y: leadingFactor),
+                    reversed: false)
+                data.appendContinuousCorner(
+                    transform: topRightTransform,
+                    radiusFactors: CGPoint(x: topFactor, y: trailingFactor),
+                    reversed: true)
+            }
+
+            if usesKnownBounds {
+                data.elements.append(.closeSubpath)
+                let bounds = rect.applying(transform).standardized
+                data.boundingBox = data.boundingBox.union(bounds)
+                data.boundingBoxOfPath = data.boundingBoxOfPath.union(bounds)
+                data.initialPoint = startPoint
+                data.currentPoint = startPoint
+            } else {
+                data.closeSubpath()
+            }
         }
     }
 
@@ -2276,12 +2469,24 @@ extension Path {
                 addEllipse(in: rect, transform: transform)
                 return
             case .roundedRect(let roundedRect):
-                addRoundedRect(
-                    in: roundedRect.rect,
-                    cornerSize: roundedRect.cornerSize,
-                    style: roundedRect.style,
-                    transform: transform
-                )
+                switch roundedRect.radii {
+                case let .elliptic(width, height):
+                    addRoundedRect(
+                        in: roundedRect.rect,
+                        cornerSize: CGSize(width: width, height: height),
+                        style: roundedRect.style,
+                        transform: transform
+                    )
+                case let .uneven(topLeft, topRight, bottomRight, bottomLeft):
+                    addRoundedRect(
+                        in: roundedRect.rect,
+                        cornerRadii: RectangleCornerRadii(
+                            topLeft: topLeft, topRight: topRight,
+                            bottomRight: bottomRight, bottomLeft: bottomLeft),
+                        style: roundedRect.style,
+                        transform: transform
+                    )
+                }
                 return
             case .path:
                 break

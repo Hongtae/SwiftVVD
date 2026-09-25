@@ -2,7 +2,7 @@
 //  File: Edge.swift
 //  Author: Hongtae Kim (tiff2766@gmail.com)
 //
-//  Copyright (c) 2022-2025 Hongtae Kim. All rights reserved.
+//  Copyright (c) 2022-2026 Hongtae Kim. All rights reserved.
 //
 
 import Foundation
@@ -60,6 +60,42 @@ extension Edge {
             case .leading:  self = .leading
             case .bottom:   self = .bottom
             case .trailing: self = .trailing
+            }
+        }
+    }
+}
+
+extension Edge {
+    public enum Corner: Int8, CaseIterable, Hashable, Sendable {
+        case topLeading
+        case topTrailing
+        case bottomLeading
+        case bottomTrailing
+
+        public struct Set: OptionSet, Hashable, Sendable {
+            public let rawValue: Int8
+
+            public init(rawValue: Int8) {
+                self.rawValue = rawValue
+            }
+
+            public static let none: Set = []
+            public static let topLeading = Set(rawValue: 1)
+            public static let topTrailing = Set(rawValue: 2)
+            public static let bottomLeading = Set(rawValue: 4)
+            public static let bottomTrailing = Set(rawValue: 8)
+            public static let all: Set = [.topLeading, .topTrailing, .bottomLeading, .bottomTrailing]
+            public static let leading: Set = [.topLeading, .bottomLeading]
+            public static let trailing: Set = [.topTrailing, .bottomTrailing]
+            public static let bottom: Set = [.bottomLeading, .bottomTrailing]
+            public static let top: Set = [.topLeading, .topTrailing]
+
+            public init(_ corner: Corner) {
+                self.init(rawValue: 1 << corner.rawValue)
+            }
+
+            public func contains(_ corner: Corner) -> Bool {
+                contains(Set(corner))
             }
         }
     }

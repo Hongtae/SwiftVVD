@@ -54,6 +54,21 @@ PRIMITIVE_OUTPUT_TYPE primitive_color(FragmentInput input) : SV_Target0
         d = continuousLength(max(q, 0.0), constants.cornerRadius0) + min(d, 0.0) - constants.cornerRadius0;
     else if (constants.kind == 5)
         d = length(input.position) - constants.cornerRadius0;
+    else if (constants.kind == 6 || constants.kind == 7)
+    {
+        float4 cornerRadii = float4(constants.cornerRadius0, constants.cornerRadius1,
+                                    constants.mixWeight0, constants.mixWeight1);
+        uint corner = input.position.y < 0.0
+            ? (input.position.x < 0.0 ? 0 : 1)
+            : (input.position.x < 0.0 ? 3 : 2);
+        float radius = cornerRadii[corner];
+        q = abs(input.position) + radius - constants.edges;
+        d = max(q.x, q.y);
+        if (constants.kind == 6)
+            d = length(max(q, 0.0)) + min(d, 0.0) - radius;
+        else
+            d = continuousLength(max(q, 0.0), radius) + min(d, 0.0) - radius;
+    }
     else if (constants.kind == 10)
     {
         float2 continuousVector = max(q + constants.cornerRadius0, 0.0);

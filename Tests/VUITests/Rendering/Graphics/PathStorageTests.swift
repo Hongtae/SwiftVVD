@@ -63,6 +63,82 @@ final class PathStorageTests: XCTestCase {
         XCTAssertEqual(zeroWidthCorner.currentPoint, rect.origin)
     }
 
+    // ASSERTIONS recordedPrimitiveUnevenCornerSurface27Observed
+    func testUnevenRoundedRectangleUsesObservedStorageAndLaneOrder() {
+        XCTAssertEqual(MemoryLayout<RectangleCornerRadii>.size, 32)
+        XCTAssertEqual(MemoryLayout<RectangleCornerRadii>.alignment, 8)
+        XCTAssertEqual(MemoryLayout<RectangleCornerRadii>.stride, 32)
+        XCTAssertEqual(MemoryLayout<UnevenRoundedRectangle>.size, 33)
+        XCTAssertEqual(MemoryLayout<UnevenRoundedRectangle>.alignment, 8)
+        XCTAssertEqual(MemoryLayout<UnevenRoundedRectangle>.stride, 40)
+
+        var radii = RectangleCornerRadii(
+            topLeading: 2, bottomLeading: 4,
+            bottomTrailing: 6, topTrailing: 8)
+        XCTAssertEqual([radii.topLeading, radii.topTrailing,
+                        radii.bottomTrailing, radii.bottomLeading], [2, 8, 6, 4])
+        XCTAssertEqual(Edge.Corner.allCases.map(\.rawValue), [0, 1, 2, 3])
+        XCTAssertEqual(Edge.Corner.allCases.map { radii[$0] }, [2, 8, 4, 6])
+        XCTAssertEqual([
+            Edge.Corner.Set.none.rawValue, Edge.Corner.Set.topLeading.rawValue,
+            Edge.Corner.Set.topTrailing.rawValue, Edge.Corner.Set.bottomLeading.rawValue,
+            Edge.Corner.Set.bottomTrailing.rawValue, Edge.Corner.Set.all.rawValue,
+            Edge.Corner.Set.leading.rawValue, Edge.Corner.Set.trailing.rawValue,
+            Edge.Corner.Set.bottom.rawValue, Edge.Corner.Set.top.rawValue,
+        ], [0, 1, 2, 4, 8, 15, 5, 10, 12, 3])
+
+        radii.animatableData = .init(.init(11, 12), .init(13, 14))
+        XCTAssertEqual([radii.topLeading, radii.topTrailing,
+                        radii.bottomTrailing, radii.bottomLeading], [11, 12, 13, 14])
+
+        let rect = CGRect(x: 10, y: 20, width: 144, height: 80)
+        let source = RectangleCornerRadii(
+            topLeading: 2, bottomLeading: 4,
+            bottomTrailing: 6, topTrailing: 8)
+        let circularShape = UnevenRoundedRectangle(cornerRadii: source, style: .circular)
+        let circular = circularShape.path(in: rect)
+        guard case let .roundedRect(payload) = circular.storage,
+              case let .uneven(topLeft, topRight, bottomRight, bottomLeft) = payload.radii else {
+            return XCTFail("Expected specialized uneven roundedRect storage")
+        }
+        XCTAssertEqual(payload.rect, rect)
+        XCTAssertEqual([topLeft, topRight, bottomRight, bottomLeft], [2, 8, 6, 4])
+        XCTAssertEqual(payload.style, .circular)
+        XCTAssertEqual(circular.currentPoint, CGPoint(x: 154, y: 61))
+        XCTAssertEqual(circular,
+            Path(roundedRect: rect, cornerRadii: source, style: .circular))
+        XCTAssertEqual(Path(roundedRect: rect, cornerRadii: .init(), style: .circular), Path(rect))
+
+        var circularElements: [Path.Element] = []
+        circular.forEach { circularElements.append($0) }
+        XCTAssertEqual(circularElements.count, 10)
+        XCTAssertEqual(circularElements[0], .move(to: CGPoint(x: 154, y: 61)))
+        XCTAssertEqual(circularElements[1], .line(to: CGPoint(x: 154, y: 94)))
+        XCTAssertEqual(circularElements[3], .line(to: CGPoint(x: 14, y: 100)))
+        XCTAssertEqual(circularElements.last, .closeSubpath)
+
+        let continuous = UnevenRoundedRectangle(
+            cornerRadii: source, style: .continuous).path(in: rect)
+        var continuousElements: [Path.Element] = []
+        continuous.forEach { continuousElements.append($0) }
+        XCTAssertEqual(continuousElements.count, 18)
+        XCTAssertEqual(continuousElements[0], .move(to: CGPoint(x: 154, y: 61)))
+        guard case let .line(point) = continuousElements[1] else {
+            return XCTFail("Expected the bottom-right continuous-corner entry")
+        }
+        assertPoint(point, equals: CGPoint(x: 154, y: 90.82801032066345),
+                    accuracy: 0.000001, file: #filePath, line: #line)
+        XCTAssertEqual(continuousElements.last, .closeSubpath)
+
+        let inset = circularShape.inset(by: 3)
+        XCTAssertEqual(inset.path(in: rect), Path(
+            roundedRect: rect.insetBy(dx: 3, dy: 3),
+            cornerRadii: .init(
+                topLeading: 0, bottomLeading: 1,
+                bottomTrailing: 3, topTrailing: 5),
+            style: .circular))
+    }
+
     func testAddOperationsStandardizeRectButRetainCornerPayload() {
         let negativeRect = CGRect(x: 10, y: 20, width: -3, height: -4)
         let standardizedRect = CGRect(x: 7, y: 16, width: 3, height: 4)
@@ -653,7 +729,15 @@ final class PathStorageTests: XCTestCase {
             )
         }
         XCTAssertEqual(value.rect, rect, file: file, line: line)
-        XCTAssertEqual(value.cornerSize, cornerSize, file: file, line: line)
+        guard case let .elliptic(width, height) = value.radii else {
+            return XCTFail(
+                "Expected elliptic roundedRect radii, got \(value.radii)",
+                file: file,
+                line: line
+            )
+        }
+        XCTAssertEqual(CGSize(width: width, height: height), cornerSize,
+                       file: file, line: line)
         XCTAssertEqual(value.style, style, file: file, line: line)
     }
 
