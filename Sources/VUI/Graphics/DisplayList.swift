@@ -1374,6 +1374,10 @@ struct DisplayList: Equatable, CustomStringConvertible {
         // Backend-local snapshot used when replaying flattened view content.
         // Nil means that synthetic content inherits the enclosing context.
         var environment: EnvironmentValues?
+        // Retargeted typed contents can expose a wider replay region than their
+        // logical operation record. Keep both geometries without a draw closure.
+        var clipBounds: CGRect? = nil
+        var recordBoundsOverride: CGRect? = nil
 
         init(
             command: ItemCommand,
@@ -1509,38 +1513,46 @@ struct DisplayList: Equatable, CustomStringConvertible {
         }
 
         var command: ItemCommand {
+            let command: ItemCommand
             switch value {
-            case let .backend(command, _):
-                return command
+            case let .backend(backendCommand, _):
+                command = backendCommand
             case .color:
-                return .closure(bounds: nil)
+                command = .closure(bounds: nil)
             case let .shape(shape):
-                return shape.command
+                command = shape.command
             case let .shadow(path, _):
-                return .closure(bounds: path.boundingRect)
+                command = .closure(bounds: path.boundingRect)
             case let .image(image):
-                return image.command
+                command = image.command
             case let .style(style):
-                return style.command
+                command = style.command
             case let .crossFade(crossFade):
-                return crossFade.command
+                command = crossFade.command
             case let .text(text):
-                return text.command
+                command = text.command
             case let .flattened(list, origin, _):
-                return .closure(bounds: list.interpolationBounds.map {
+                command = .closure(bounds: list.interpolationBounds.map {
                     $0.offsetBy(dx: origin.x, dy: origin.y)
                 })
             case let .drawing(contents, origin, _):
                 let bounds = contents.boundingRect
-                return .closure(bounds: bounds.isNull ? nil : bounds.offsetBy(dx: origin.x, dy: origin.y))
+                command = .closure(bounds: bounds.isNull ? nil : bounds.offsetBy(dx: origin.x, dy: origin.y))
             }
+            return recordBoundsOverride.map {
+                command.replacingBounds(with: $0)
+            } ?? command
         }
 
         func renderContext(from context: GraphicsContext) -> GraphicsContext {
-            guard let environment else { return context }
             var context = context
-            context.copyOnWrite()
-            context.environment = environment
+            if let environment {
+                context.copyOnWrite()
+                context.environment = environment
+            }
+            if let clipBounds {
+                context.clip(to: Path(clipBounds))
+            }
             return context
         }
 
@@ -1605,9 +1617,23 @@ struct DisplayList: Equatable, CustomStringConvertible {
 
         func transformed(by affineTransform: CGAffineTransform) -> Content {
             let transformedCommand = command.transformed(by: affineTransform)
+            let transformedClipBounds = clipBounds?
+                .applying(affineTransform)
+                .standardized
+            let transformedRecordBounds = recordBoundsOverride?
+                .applying(affineTransform)
+                .standardized
+
+            func preservingReplayBounds(_ content: Content) -> Content {
+                var content = content
+                content.clipBounds = transformedClipBounds
+                content.recordBoundsOverride = transformedRecordBounds
+                return content
+            }
+
             switch value {
             case .backend, .shadow:
-                return Content(
+                return preservingReplayBounds(Content(
                     command: transformedCommand,
                     seed: seed,
                     environment: environment
@@ -1615,54 +1641,54 @@ struct DisplayList: Equatable, CustomStringConvertible {
                     var context = context
                     context.concatenate(affineTransform)
                     self.draw(in: context)
-                }
+                })
             case .color:
-                return self
+                return preservingReplayBounds(self)
             case let .shape(shape):
                 var copy = self
                 copy.value = .shape(shape.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
-                return copy
+                return preservingReplayBounds(copy)
             case let .image(image):
                 var copy = self
                 copy.value = .image(image.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
-                return copy
+                return preservingReplayBounds(copy)
             case let .style(style):
                 var copy = self
                 copy.value = .style(style.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
-                return copy
+                return preservingReplayBounds(copy)
             case let .crossFade(crossFade):
                 var copy = self
                 copy.value = .crossFade(crossFade.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
-                return copy
+                return preservingReplayBounds(copy)
             case let .text(text):
                 var copy = self
                 copy.value = .text(text.transformed(
                     command: transformedCommand,
                     by: affineTransform
                 ))
-                return copy
+                return preservingReplayBounds(copy)
             case let .flattened(list, origin, options):
                 var copy = self
                 let transformedOrigin = origin.applying(affineTransform)
                 copy.value = .flattened(list, transformedOrigin, options)
-                return copy
+                return preservingReplayBounds(copy)
             case let .drawing(contents, origin, options):
                 var copy = self
                 let transformedOrigin = origin.applying(affineTransform)
                 copy.value = .drawing(contents, transformedOrigin, options)
-                return copy
+                return preservingReplayBounds(copy)
             }
         }
 
@@ -3839,7 +3865,9 @@ struct DisplayList: Equatable, CustomStringConvertible {
             }
             switch (lhs.value, rhs.value) {
             case let (.content(lhs), .content(rhs)):
-                guard lhs.seed == rhs.seed else { return false }
+                guard lhs.seed == rhs.seed,
+                      lhs.clipBounds == rhs.clipBounds,
+                      lhs.recordBoundsOverride == rhs.recordBoundsOverride else { return false }
                 switch (lhs.value, rhs.value) {
                 case let (.shadow(lhsPath, lhsShadow), .shadow(rhsPath, rhsShadow)):
                     return lhsPath == rhsPath && lhsShadow == rhsShadow
@@ -4153,30 +4181,38 @@ extension DisplayList.Effect {
 }
 
 private extension DisplayList.ItemCommand {
-    func transformed(by transform: CGAffineTransform) -> Self {
-        let transformedBounds = bounds?.applying(transform).standardized
+    func replacingBounds(with bounds: CGRect?) -> Self {
         switch self {
         case .closure:
-            return .closure(bounds: transformedBounds)
+            return .closure(bounds: bounds)
         case let .shape(role, style, fillStyle, strokeStyle, _):
             return .shape(
                 role: role,
                 style: style,
                 fillStyle: fillStyle,
                 strokeStyle: strokeStyle,
-                bounds: transformedBounds
+                bounds: bounds
             )
         case let .image(image, _):
-            return .image(image, bounds: transformedBounds)
+            return .image(image, bounds: bounds)
         case let .text(text, _):
-            return .text(text, bounds: transformedBounds)
+            return .text(text, bounds: bounds)
         case let .custom(custom, _):
-            return .custom(custom, bounds: transformedBounds)
+            return .custom(custom, bounds: bounds)
         case let .effect(effect, _):
-            return .effect(effect.transformed(by: transform), bounds: transformedBounds)
+            return .effect(effect, bounds: bounds)
         case .debug:
-            return .debug(bounds: transformedBounds)
+            return .debug(bounds: bounds)
         }
+    }
+
+    func transformed(by transform: CGAffineTransform) -> Self {
+        let transformedBounds = bounds?.applying(transform).standardized
+        let command = replacingBounds(with: transformedBounds)
+        guard case let .effect(effect, _) = command else {
+            return command
+        }
+        return .effect(effect.transformed(by: transform), bounds: transformedBounds)
     }
 }
 

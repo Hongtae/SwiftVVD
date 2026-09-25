@@ -30,6 +30,13 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
         var item: DisplayList.Item
         var command: DisplayList.ItemCommand
         var bounds: CGRect
+        // A retargeted atom reuses its materialized presentation items directly.
+        // This keeps prior drawing ownership typed instead of nesting callbacks.
+        var presentationItems: [DisplayList.Item]? = nil
+
+        var renderedItems: [DisplayList.Item] {
+            presentationItems ?? [item]
+        }
     }
 
     private struct TextAtomInterpolationInput {
@@ -358,10 +365,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     transition: transition
                 ) else { return }
                 contents.appendCrossFadeItem(
-                    sourceItems: [source.item],
+                    sourceItems: source.renderedItems,
                     sourceBounds: source.bounds,
                     sourceOutputBounds: outputBounds,
-                    targetItems: [target.item],
+                    targetItems: target.renderedItems,
                     targetBounds: target.bounds,
                     targetOutputBounds: outputBounds,
                     bounds: outputBounds,
@@ -390,7 +397,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                     return
                 }
                 guard !transition.isEmpty(for: 1) else {
-                    contents.items.append(target.item)
+                    contents.items.append(contentsOf: target.renderedItems)
                     return
                 }
                 guard let results = transition.effectResults(
@@ -508,7 +515,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             into contents: inout DisplayList
         ) {
             contents.appendCrossFadeItem(
-                sourceItems: [source.item],
+                sourceItems: source.renderedItems,
                 sourceBounds: source.bounds,
                 sourceOutputBounds: source.bounds,
                 targetItems: [],
@@ -529,7 +536,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 sourceItems: [],
                 sourceBounds: nil,
                 sourceOutputBounds: nil,
-                targetItems: [target.item],
+                targetItems: target.renderedItems,
                 targetBounds: target.bounds,
                 targetOutputBounds: target.bounds,
                 bounds: target.bounds,
@@ -544,7 +551,7 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
             into contents: inout DisplayList
         ) {
             appendTransitionedItems(
-                [input.item],
+                input.renderedItems,
                 bounds: input.bounds,
                 results: results,
                 into: &contents
@@ -658,10 +665,10 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
                 crossFadeBounds = sourceOutputBounds.union(targetOutputBounds)
             }
             contents.appendCrossFadeItem(
-                sourceItems: [source.item],
+                sourceItems: source.renderedItems,
                 sourceBounds: source.bounds,
                 sourceOutputBounds: sourceOutputBounds,
-                targetItems: [target.item],
+                targetItems: target.renderedItems,
                 targetBounds: target.bounds,
                 targetOutputBounds: targetOutputBounds,
                 bounds: crossFadeBounds,
@@ -3462,38 +3469,60 @@ final class RBDisplayListInterpolator: NSObject, NSCopying {
 
         return atoms.enumerated().map { index, atom in
             let command = DisplayList.ItemCommand.text(record, bounds: atom.bounds)
-            let presentationPartition = presentationPartitions?[index]
-            let presentationClipBounds = presentation.map { _ in
-                textPresentationClipBounds(
+            let presentationItems = presentationPartitions.map { partitions in
+                let partition = partitions[index]
+                let clipBounds = textPresentationClipBounds(
                     at: index,
                     atomBounds: atomBounds,
                     presentationBounds: presentationBounds
                 )
-            }
-            var atomItem = DisplayList.Item(
-                command: command,
-                identity: item.identity,
-                version: item.version
-            ) { context in
-                var context = context
-                if let presentationPartition, let presentationClipBounds {
-                    context.clip(to: Path(presentationClipBounds))
-                    presentationPartition.draw(in: context)
-                } else {
-                    context.clip(to: Path(atom.bounds))
-                    item(context)
+                return (partition.items + partition.debugItems).map { item in
+                    clippedPresentationItem(
+                        item,
+                        recordBounds: atom.bounds,
+                        clipBounds: clipBounds
+                    )
                 }
             }
-            atomItem.styleChain = item.styleChain
+            var atomText = text
+            atomText.command = command
+            var atomContent = content
+            atomContent.clipBounds = atomContent.clipBounds.map {
+                $0.intersection(atom.bounds)
+            } ?? atom.bounds
+            atomContent.recordBoundsOverride = atom.bounds
+            atomContent.value = .text(atomText)
+            var atomItem = item
+            atomItem.frame = atom.bounds
+            atomItem.value = .content(atomContent)
             return TextAtomInterpolationInput(
                 scalar: atom.scalar,
                 input: ItemInterpolationInput(
                     item: atomItem,
                     command: command,
-                    bounds: atom.bounds
+                    bounds: atom.bounds,
+                    presentationItems: presentationItems
                 )
             )
         }
+    }
+
+    private static func clippedPresentationItem(
+        _ item: DisplayList.Item,
+        recordBounds: CGRect,
+        clipBounds: CGRect
+    ) -> DisplayList.Item {
+        guard case var .content(content) = item.value else {
+            return item
+        }
+        content.clipBounds = content.clipBounds.map {
+            $0.intersection(clipBounds)
+        } ?? clipBounds
+        content.recordBoundsOverride = recordBounds
+        var item = item
+        item.frame = recordBounds
+        item.value = .content(content)
+        return item
     }
 
     private static func textPresentationClipBounds(

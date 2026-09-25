@@ -58,6 +58,90 @@ private final class NumericTransitionTestTypeface: Typeface {
     func purgeResources(reason: ResourcePurgeReason) {}
 }
 
+private final class NumericTransitionStackDepthProbe: @unchecked Sendable {
+    private(set) var maximumDepth = 0
+
+    func reset() {
+        maximumDepth = 0
+    }
+
+    func record() {
+        maximumDepth = max(
+            maximumDepth,
+            Thread.callStackReturnAddresses.count
+        )
+    }
+}
+
+private final class NumericTransitionStackDepthText: ResolvedStyledText,
+    @unchecked Sendable {
+    var stackDepthProbe: NumericTransitionStackDepthProbe?
+
+    required init(
+        storage: NSAttributedString? = nil,
+        layoutProperties: TextLayoutProperties = TextLayoutProperties(),
+        layoutMargins: EdgeInsets? = nil,
+        scaleFactorOverride: CGFloat? = nil,
+        stylePadding: EdgeInsets = EdgeInsets(),
+        archiveOptions: ArchivedViewInput.Value = ArchivedViewInput.Value(),
+        isCollapsible: Bool = false,
+        features: Text.ResolvedProperties.Features = [],
+        suffix: ResolvedTextSuffix = .none,
+        attachments: Text.ResolvedProperties.CustomAttachments = .init(),
+        styles: [_ShapeStyle_Pack.Style] = [],
+        transitions: [Text.ResolvedProperties.Transition] = [],
+        links: Text.ResolvedProperties.Links = Text.ResolvedProperties.Links(),
+        fonts: Text.ResolvedProperties.Fonts? = nil,
+        lineHeightMetrics: Text.ResolvedProperties.LineHeightMetrics = .init(),
+        resolvedText: ResolvedTextSource? = nil,
+        version: Int = 0,
+        transitionText: String? = nil,
+        needsDrawingGroup: Bool = false
+    ) {
+        super.init(
+            storage: storage,
+            layoutProperties: layoutProperties,
+            layoutMargins: layoutMargins,
+            scaleFactorOverride: scaleFactorOverride,
+            stylePadding: stylePadding,
+            archiveOptions: archiveOptions,
+            isCollapsible: isCollapsible,
+            features: features,
+            suffix: suffix,
+            attachments: attachments,
+            styles: styles,
+            transitions: transitions,
+            links: links,
+            fonts: fonts,
+            lineHeightMetrics: lineHeightMetrics,
+            resolvedText: resolvedText,
+            version: version,
+            transitionText: transitionText,
+            needsDrawingGroup: needsDrawingGroup
+        )
+    }
+
+    override func prepareDrawing(
+        in rect: CGRect,
+        with size: CGSize,
+        applyingMarginOffsets: Bool,
+        containsResolvable: Bool = false
+    ) -> (
+        source: ResolvedTextSource,
+        lines: [ResolvedTextSource.LineGlyphs],
+        bounds: CGRect,
+        layout: Text.Layout?
+    )? {
+        stackDepthProbe?.record()
+        return super.prepareDrawing(
+            in: rect,
+            with: size,
+            applyingMarginOffsets: applyingMarginOffsets,
+            containsResolvable: containsResolvable
+        )
+    }
+}
+
 private enum InterpolatableContentProbeLog {
     nonisolated(unsafe) static var modifyTransitionCalls = 0
     nonisolated(unsafe) static var defaultAnimationCalls = 0
@@ -7106,6 +7190,98 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         )
     }
 
+    // ASSERTIONS contentTransitionRapidNumericRetargetSurvives27Observed
+    func testRetainedNumericPresentationReplayKeepsBoundedStackDepth() throws {
+        let stackDepthProbe = NumericTransitionStackDepthProbe()
+        let viewport = CGRect(x: 0, y: 0, width: 200, height: 20)
+        func recordingContext() -> GraphicsContext {
+            GraphicsContext(
+                recording: RBDisplayList(viewport: viewport),
+                environment: EnvironmentValues(),
+                inputs: .init(
+                    sceneResources: SceneResources(),
+                    viewport: viewport,
+                    contentScaleFactor: 1,
+                    resourceCommandQueue: nil
+                )
+            )
+        }
+
+        var current = try makeStackDepthNumericTextDisplayList(
+            "0",
+            numericValue: 0,
+            stackDepthProbe: stackDepthProbe
+        )
+        stackDepthProbe.reset()
+        current.draw(in: recordingContext())
+        let baselineDepth = stackDepthProbe.maximumDepth
+        XCTAssertGreaterThan(baselineDepth, 0)
+
+        let unary = DisplayList.UnaryInterpolatorGroup()
+        var state = ContentTransition.State(transition: .numericText())
+        state.animation = .linear(duration: 20)
+        var currentTime = 0.0
+        var retainedLimitDepth = 0
+
+        for step in 1...24 {
+            let target = try makeStackDepthNumericTextDisplayList(
+                "\(step)",
+                numericValue: Float(step),
+                stackDepthProbe: stackDepthProbe
+            )
+            _ = interpolationContext.transition(
+                unary,
+                seed: DisplayList.Seed(decodedValue: UInt16(step)),
+                from: current,
+                to: target,
+                state: state,
+                at: Time(seconds: currentTime)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.01)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.02)
+            )
+            interpolationContext.advance(
+                unary,
+                to: Time(seconds: currentTime + 0.05)
+            )
+            currentTime += 0.05
+            current = target
+
+            if step == 8 {
+                XCTAssertEqual(unary.layer.removedCount, 8)
+                let retainedPresentation = try XCTUnwrap(
+                    unary.layer.removed.last?.interpolator?.from
+                )
+                stackDepthProbe.reset()
+                retainedPresentation.draw(in: recordingContext())
+                retainedLimitDepth = stackDepthProbe.maximumDepth
+            }
+        }
+
+        let retainedPresentation = try XCTUnwrap(
+            unary.layer.removed.last?.interpolator?.from
+        )
+        stackDepthProbe.reset()
+        retainedPresentation.draw(in: recordingContext())
+        let retainedDepth = stackDepthProbe.maximumDepth
+
+        XCTAssertLessThanOrEqual(
+            retainedLimitDepth,
+            baselineDepth + 8 * 10,
+            "each retained layer must add no more than ten draw frames: baseline \(baselineDepth), limit \(retainedLimitDepth) frames"
+        )
+        XCTAssertLessThanOrEqual(
+            retainedDepth,
+            retainedLimitDepth + 12,
+            "retained numeric replay kept growing past the eight-layer limit: baseline \(baselineDepth), limit \(retainedLimitDepth), final \(retainedDepth) frames"
+        )
+    }
+
     func testUnaryInterpolatorGroupUpdateThenRewriteSynchronizesLayerState() {
         let unary = DisplayList.UnaryInterpolatorGroup()
         let target = makeDisplayList(debugItemCount: 2, itemCount: 2)
@@ -8574,6 +8750,35 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             scaleFactor: 1
         )
         let styledText = ResolvedStyledText.StringDrawing(resolvedText: resolved, version: 1)
+        let view = StyledTextContentView(text: styledText, renderer: nil)
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 20)
+        var list = DisplayList()
+        list.appendTextItem(
+            view,
+            size: bounds.size,
+            foreground: .color(.white),
+            bounds: bounds,
+            seed: DisplayList.Seed(DisplayList.Version(forUpdate: ()))
+        )
+        list.numericValue = numericValue
+        return list
+    }
+
+    private func makeStackDepthNumericTextDisplayList(
+        _ text: String,
+        numericValue: Float,
+        stackDepthProbe: NumericTransitionStackDepthProbe
+    ) throws -> DisplayList {
+        let face = NumericTransitionTestTypeface()
+        let resolved = ResolvedTextSource(
+            runs: [.text([face], text)],
+            scaleFactor: 1
+        )
+        let styledText = NumericTransitionStackDepthText(
+            resolvedText: resolved,
+            version: 1
+        )
+        styledText.stackDepthProbe = stackDepthProbe
         let view = StyledTextContentView(text: styledText, renderer: nil)
         let bounds = CGRect(x: 0, y: 0, width: 200, height: 20)
         var list = DisplayList()
