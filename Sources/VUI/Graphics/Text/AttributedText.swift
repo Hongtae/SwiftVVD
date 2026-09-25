@@ -137,6 +137,15 @@ extension NSAttributedString.Key {
     static let coreBaselineOffset = Self(
         AttributeScopes.CoreAttributes.BaselineOffsetAttribute.name
     )
+    static let accessibilitySpeechPunctuation = Self("AXPunctuation")
+    static let accessibilitySpeechSpellOut = Self("AXSpellOut")
+    static let accessibilitySpeechPitch = Self("AXPitch")
+    static let accessibilitySpeechAnnouncementPriority = Self(
+        "AXAnnouncementPriority"
+    )
+    static let accessibilityHeadingLevel = Self("AXHeadingLevel")
+    static let accessibilityTextualContext = Self("AXTextualContext")
+    static let accessibilityLabel = Self("SwiftUI.accessibilityLabel")
 }
 
 /// Run values and shared resources produced by text-style and attributed conversion.
@@ -160,6 +169,13 @@ struct _ResolvedTextRunAttributes: Equatable {
     var shadow: _ShadowEffect?
     var transitionIndex: Int?
     var customAttachment: AnyCustomTextAttachment?
+    var speechAlwaysIncludesPunctuation: Bool?
+    var speechSpellsOutCharacters: Bool?
+    var speechAdjustedPitch: Double?
+    var speechAnnouncementsPriority: AccessibilityAnnouncementPriority?
+    var accessibilityContentType: AccessibilityTextContentType.RawValue?
+    var accessibilityHeadingLevel: AccessibilityHeadingLevel?
+    var accessibilityLabel: String?
 
     init(
         font: Font? = nil,
@@ -184,7 +200,11 @@ struct _ResolvedTextRunAttributes: Equatable {
     var isEmpty: Bool {
         font == nil && foregroundColor == nil && backgroundColor == nil &&
             strikethroughStyle == nil && underlineStyle == nil && kern == nil &&
-            tracking == nil && baselineOffset == nil && customAttachment == nil
+            tracking == nil && baselineOffset == nil && customAttachment == nil &&
+            speechAlwaysIncludesPunctuation == nil &&
+            speechSpellsOutCharacters == nil && speechAdjustedPitch == nil &&
+            speechAnnouncementsPriority == nil && accessibilityContentType == nil &&
+            accessibilityHeadingLevel == nil && accessibilityLabel == nil
     }
 
     var nsAttributes: [NSAttributedString.Key: Any] {
@@ -219,6 +239,33 @@ struct _ResolvedTextRunAttributes: Equatable {
         if let shadow { result[NSAttributedString.Key("VUI.TextShadow")] = shadow }
         if let transitionIndex { result[NSAttributedString.Key("VUI.TextTransition")] = transitionIndex }
         if let customAttachment { result[.customTextAttachment] = customAttachment }
+        if let speechAlwaysIncludesPunctuation {
+            result[.accessibilitySpeechPunctuation] =
+                speechAlwaysIncludesPunctuation
+        }
+        if let speechSpellsOutCharacters {
+            result[.accessibilitySpeechSpellOut] = speechSpellsOutCharacters
+        }
+        if let speechAdjustedPitch {
+            result[.accessibilitySpeechPitch] = speechAdjustedPitch
+        }
+        if let speechAnnouncementsPriority {
+            result[.accessibilitySpeechAnnouncementPriority] =
+                speechAnnouncementsPriority.resolvedAttributeValue
+        }
+        if let accessibilityContentType,
+           let value = AccessibilityTextContentType(
+               rawValue: accessibilityContentType
+           ).resolvedAttributeValue {
+            result[.accessibilityTextualContext] = value
+        }
+        if let accessibilityHeadingLevel {
+            result[.accessibilityHeadingLevel] =
+                accessibilityHeadingLevel.rawValue
+        }
+        if let accessibilityLabel {
+            result[.accessibilityLabel] = accessibilityLabel
+        }
         return result
     }
 
@@ -233,6 +280,29 @@ struct _ResolvedTextRunAttributes: Equatable {
         tracking = nsAttributes[.coreTracking] as? CGFloat
         baselineOffset = nsAttributes[.coreBaselineOffset] as? CGFloat
         customAttachment = nsAttributes[.customTextAttachment] as? AnyCustomTextAttachment
+        speechAlwaysIncludesPunctuation =
+            nsAttributes[.accessibilitySpeechPunctuation] as? Bool
+        speechSpellsOutCharacters =
+            nsAttributes[.accessibilitySpeechSpellOut] as? Bool
+        speechAdjustedPitch = nsAttributes[.accessibilitySpeechPitch] as? Double
+        speechAnnouncementsPriority = (
+            nsAttributes[.accessibilitySpeechAnnouncementPriority] as? String
+        ).flatMap(AccessibilityAnnouncementPriority.init(resolvedAttributeValue:))
+        accessibilityContentType = (
+            nsAttributes[.accessibilityTextualContext] as? String
+        ).flatMap(AccessibilityTextContentType.init(resolvedAttributeValue:))?
+            .rawValue
+        if let value = nsAttributes[.accessibilityHeadingLevel] as? UInt {
+            accessibilityHeadingLevel = AccessibilityHeadingLevel(
+                rawValue: value
+            )
+        } else if let value = nsAttributes[.accessibilityHeadingLevel]
+                    as? NSNumber {
+            accessibilityHeadingLevel = AccessibilityHeadingLevel(
+                rawValue: value.uintValue
+            )
+        }
+        accessibilityLabel = nsAttributes[.accessibilityLabel] as? String
     }
 }
 

@@ -459,6 +459,9 @@ struct ResolvedTextHelper: SizeFittingTextResolver {
         )
         var options: Text.ResolveOptions = .includeTransitions
         if allowsKeyColors { options.insert(.allowsKeyColors) }
+        if allowsAccessibilityAttributes {
+            options.insert(.includeAccessibility)
+        }
         if features.contains(.useTextSuffix) { options.insert(.allowsTextSuffix) }
         var preparedText = text
         if includeDefaultAttributes {

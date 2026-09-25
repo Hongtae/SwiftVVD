@@ -70,13 +70,78 @@ struct TypesettingLanguageAwareLineHeightRatio: Hashable {
 }
 
 enum AccessibilityAnnouncementPriority: Hashable { case low, `default`, high }
-enum AccessibilityHeadingLevel: Hashable { case unspecified, h1, h2, h3, h4, h5, h6 }
+extension AccessibilityAnnouncementPriority {
+    var resolvedAttributeValue: String {
+        switch self {
+        case .low: "low"
+        case .default: "default"
+        case .high: "high"
+        }
+    }
+
+    init?(resolvedAttributeValue: String) {
+        switch resolvedAttributeValue {
+        case "low": self = .low
+        case "default": self = .default
+        case "high": self = .high
+        default: return nil
+        }
+    }
+}
+public enum AccessibilityHeadingLevel: UInt, Sendable {
+    case unspecified
+    case h1
+    case h2
+    case h3
+    case h4
+    case h5
+    case h6
+}
 /// Describes the semantic category of text for accessibility services.
-struct AccessibilityTextContentType: Hashable {
-    enum RawValue: Hashable {
+public struct AccessibilityTextContentType: Sendable {
+    enum RawValue: Hashable, Sendable {
         case plain, console, fileSystem, messaging, narrative, sourceCode, spreadsheet, wordProcessing
     }
     var rawValue: RawValue
+
+    init(rawValue: RawValue) {
+        self.rawValue = rawValue
+    }
+
+    public static let plain = Self(rawValue: .plain)
+    public static let console = Self(rawValue: .console)
+    public static let fileSystem = Self(rawValue: .fileSystem)
+    public static let messaging = Self(rawValue: .messaging)
+    public static let narrative = Self(rawValue: .narrative)
+    public static let sourceCode = Self(rawValue: .sourceCode)
+    public static let spreadsheet = Self(rawValue: .spreadsheet)
+    public static let wordProcessing = Self(rawValue: .wordProcessing)
+
+    var resolvedAttributeValue: String? {
+        switch rawValue {
+        case .plain: nil
+        case .console: "AXTextualContextConsole"
+        case .fileSystem: "AXTextualContextFileSystem"
+        case .messaging: "AXTextualContextMessaging"
+        case .narrative: "AXTextualContextNarrative"
+        case .sourceCode: "AXTextualContextSourceCode"
+        case .spreadsheet: "AXTextualContextSpreadsheet"
+        case .wordProcessing: "AXTextualContextWordProcessing"
+        }
+    }
+
+    init?(resolvedAttributeValue: String) {
+        switch resolvedAttributeValue {
+        case "AXTextualContextConsole": self = .console
+        case "AXTextualContextFileSystem": self = .fileSystem
+        case "AXTextualContextMessaging": self = .messaging
+        case "AXTextualContextNarrative": self = .narrative
+        case "AXTextualContextSourceCode": self = .sourceCode
+        case "AXTextualContextSpreadsheet": self = .spreadsheet
+        case "AXTextualContextWordProcessing": self = .wordProcessing
+        default: return nil
+        }
+    }
 }
 /// Optional speech settings merged into the current text style.
 struct AccessibilitySpeechAttributes: Equatable {
@@ -102,10 +167,17 @@ struct AccessibilityTextAttributes: Equatable {
     var label: Text?
 
     mutating func merge(_ value: Self) {
-        if let v = value.contentType { contentType = v }
-        if let v = value.headingLevel { headingLevel = v }
-        if let v = value.durationTimeMMSS { durationTimeMMSS = v }
-        if let v = value.label { label = v }
+        if contentType == nil { contentType = value.contentType }
+        if headingLevel == nil { headingLevel = value.headingLevel }
+        if durationTimeMMSS == nil { durationTimeMMSS = value.durationTimeMMSS }
+        if label == nil { label = value.label }
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.contentType?.rawValue == rhs.contentType?.rawValue &&
+            lhs.headingLevel == rhs.headingLevel &&
+            lhs.durationTimeMMSS == rhs.durationTimeMMSS &&
+            lhs.label == rhs.label
     }
 }
 
@@ -281,6 +353,9 @@ final class SpeechModifier: AnyTextModifier {
         style.speech = speech
     }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.value == value }
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        options.contains(.includeAccessibility)
+    }
 }
 /// Merges specified accessibility metadata into the inherited style.
 final class AccessibilityTextModifier: AnyTextModifier {
@@ -292,6 +367,81 @@ final class AccessibilityTextModifier: AnyTextModifier {
         style.accessibility = accessibility
     }
     override func isEqual(to other: AnyTextModifier) -> Bool { (other as? Self)?.value == value }
+    override func isStyled(options: Text.ResolveOptions) -> Bool {
+        options.contains(.includeAccessibility)
+    }
+}
+
+extension Text {
+    public func speechAlwaysIncludesPunctuation(_ value: Bool = true) -> Text {
+        modified(with: .anyTextModifier(SpeechModifier(
+            .init(alwaysIncludesPunctuation: value)
+        )))
+    }
+
+    public func speechSpellsOutCharacters(_ value: Bool = true) -> Text {
+        modified(with: .anyTextModifier(SpeechModifier(
+            .init(spellsOutCharacters: value)
+        )))
+    }
+
+    public func speechAdjustedPitch(_ value: Double) -> Text {
+        modified(with: .anyTextModifier(SpeechModifier(
+            .init(adjustedPitch: value)
+        )))
+    }
+
+    public func speechAnnouncementsQueued(_ value: Bool = true) -> Text {
+        modified(with: .anyTextModifier(SpeechModifier(
+            .init(announcementsPriority: value ? .low : .default)
+        )))
+    }
+
+    nonisolated public func accessibilityTextContentType(
+        _ value: AccessibilityTextContentType
+    ) -> Text {
+        modified(with: .anyTextModifier(AccessibilityTextModifier(
+            .init(contentType: value)
+        )))
+    }
+
+    nonisolated public func accessibilityHeading(
+        _ level: AccessibilityHeadingLevel
+    ) -> Text {
+        modified(with: .anyTextModifier(AccessibilityTextModifier(
+            .init(headingLevel: level)
+        )))
+    }
+
+    nonisolated public func accessibilityLabel(_ label: Text) -> Text {
+        label.assertUnstyled(
+            "an accessibility label",
+            options: .includeAccessibility
+        )
+        return modified(with: .anyTextModifier(AccessibilityTextModifier(
+            .init(label: label)
+        )))
+    }
+
+    nonisolated public func accessibilityLabel(
+        _ labelKey: LocalizedStringKey
+    ) -> Text {
+        accessibilityLabel(Text(labelKey))
+    }
+
+    @_disfavoredOverload
+    @export(implementation)
+    nonisolated public func accessibilityLabel(
+        _ label: LocalizedStringResource
+    ) -> Text {
+        accessibilityLabel(Text(label))
+    }
+
+    @_disfavoredOverload
+    nonisolated public func accessibilityLabel<S>(_ label: S) -> Text
+    where S: StringProtocol {
+        accessibilityLabel(Text(verbatim: String(label)))
+    }
 }
 /// Retains a shadow effect for run attributes and layout inset calculation.
 final class TextShadowModifier: AnyTextModifier {

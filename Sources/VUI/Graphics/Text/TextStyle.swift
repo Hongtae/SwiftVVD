@@ -262,6 +262,26 @@ extension Text {
                 attributes.transitionIndex = properties.transitions.count
                 properties.transitions.append(transition.resolved)
             }
+            if options.contains(.includeAccessibility) {
+                if let speech {
+                    attributes.speechAlwaysIncludesPunctuation =
+                        speech.alwaysIncludesPunctuation
+                    attributes.speechSpellsOutCharacters =
+                        speech.spellsOutCharacters
+                    attributes.speechAdjustedPitch =
+                        speech.adjustedPitch.map { $0 + 1 }
+                    attributes.speechAnnouncementsPriority =
+                        speech.announcementsPriority
+                }
+                if let accessibility {
+                    attributes.accessibilityContentType =
+                        accessibility.contentType?.rawValue
+                    attributes.accessibilityHeadingLevel =
+                        accessibility.headingLevel
+                    attributes.accessibilityLabel =
+                        accessibility.label?._resolveText(in: environment)
+                }
+            }
             return attributes
         }
 
