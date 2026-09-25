@@ -92,4 +92,65 @@ extension Section where Parent == Text, Content: View, Footer == EmptyView {
     public init<S>(_ title: S, @ViewBuilder content: () -> Content) where S: StringProtocol {
         self.init(content: content(), header: Text(title), footer: EmptyView())
     }
+
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(
+            content: content(),
+            header: Text(titleResource),
+            footer: EmptyView()
+        )
+    }
+}
+
+extension Section where Parent: View, Content: View, Footer == EmptyView {
+    public init(
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder header: () -> Parent
+    ) {
+        self.init(
+            isExpanded: isExpanded,
+            content: content(),
+            header: header(),
+            footer: EmptyView()
+        )
+    }
+}
+
+extension Section where Parent == Text, Content: View, Footer == EmptyView {
+    public init(
+        _ titleKey: LocalizedStringKey,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(isExpanded: isExpanded, content: content) {
+            Text(titleKey)
+        }
+    }
+
+    @_disfavoredOverload
+    public init(
+        _ titleResource: LocalizedStringResource,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(isExpanded: isExpanded, content: content) {
+            Text(titleResource)
+        }
+    }
+
+    @_disfavoredOverload
+    public init<S>(
+        _ title: S,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) where S: StringProtocol {
+        self.init(isExpanded: isExpanded, content: content) {
+            Text(title)
+        }
+    }
 }

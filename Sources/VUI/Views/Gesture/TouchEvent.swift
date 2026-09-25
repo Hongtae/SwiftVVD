@@ -42,6 +42,7 @@ enum TouchType: Sendable, Hashable {
 
 struct TouchEvent: EventType,
                    SpatialEventType,
+                   TappableEventType,
                    TouchTypeProviding,
                    ModifiersEventType,
                    HitTestableEventType,

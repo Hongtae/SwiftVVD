@@ -40,6 +40,32 @@ public enum HorizontalEdge: Int8, CaseIterable, Codable, Equatable, Hashable, Ra
     }
 }
 
+public enum VerticalEdge: Int8, CaseIterable, Codable, Equatable, Hashable, RawRepresentable {
+    case top
+    case bottom
+
+    public struct Set: OptionSet, Sendable {
+        public let rawValue: Int8
+
+        public init(rawValue: Int8) {
+            self.rawValue = rawValue
+        }
+
+        public static let top = Set(rawValue: 1)
+        public static let bottom = Set(rawValue: 2)
+        public static let all: Set = [.top, .bottom]
+
+        public init(_ edge: VerticalEdge) {
+            switch edge {
+            case .top:
+                self = .top
+            case .bottom:
+                self = .bottom
+            }
+        }
+    }
+}
+
 extension Edge {
     public struct Set: OptionSet, Sendable {
         public let rawValue: Int8

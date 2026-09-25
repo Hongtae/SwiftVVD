@@ -57,6 +57,51 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
     public typealias Body = Never
 }
 
+struct TraitTransformerModifier<Trait>: ViewModifier
+where Trait: _ViewTraitKey {
+    var transform: (inout Trait.Value) -> Void
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        body(_Graph(), inputs)
+    }
+
+    static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "TraitTransformerModifier._makeViewList called outside " +
+                "an active graph."
+            )
+        }
+        var modifiedInputs = inputs
+        let traits: Attribute<ViewTraitCollection> = graph.makeRule {
+            var collection = inputs._traits.value ?? ViewTraitCollection()
+            var value = collection[Trait.self]
+            modifier._attribute.value.transform(&value)
+            collection[Trait.self] = value
+            return collection
+        }
+        modifiedInputs._traits = OptionalAttribute(traits)
+        modifiedInputs.traitKeys?.insert(Trait.self)
+        let outputs = body(_Graph(), modifiedInputs)
+        guard case .staticList = outputs.views else { return outputs }
+        return _ViewListOutputs(
+            views: .dynamicList(outputs.makeAttribute(inputs: modifiedInputs), nil),
+            nextImplicitID: outputs.nextImplicitID,
+            staticCount: outputs.staticCount
+        )
+    }
+
+    typealias Body = Never
+}
+
 extension View {
     public func _trait<K>(_ key: K.Type, _ value: K.Value) -> some View where K: _ViewTraitKey {
         return modifier(_TraitWritingModifier<K>(value: value))
