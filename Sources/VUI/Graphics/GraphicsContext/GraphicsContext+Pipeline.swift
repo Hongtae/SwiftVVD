@@ -177,7 +177,7 @@ class GraphicsPipelineStates {
                     .init(stepRate: .vertex, stride: MemoryLayout<_Vertex>.stride)
                 ]
             }
-            pipelineDescriptor.primitiveTopology = .triangle
+            pipelineDescriptor.primitiveTopology = rs.shader == .primitiveColor ? .triangleStrip : .triangle
             pipelineDescriptor.triangleFillMode = .fill
             pipelineDescriptor.rasterSampleCount = rs.sampleCount
 

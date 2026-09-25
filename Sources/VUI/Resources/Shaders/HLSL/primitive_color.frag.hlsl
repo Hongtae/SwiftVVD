@@ -18,7 +18,10 @@ struct FragmentInput
 struct Constants
 {
     float2 edges;
-    float cornerRadius;
+    float cornerRadius0;
+    float cornerRadius1;
+    float mixWeight0;
+    float mixWeight1;
     float distanceScale;
     uint kind;
     uint mode;
@@ -29,15 +32,38 @@ struct Constants
 float roundHalf(float x) { return f16tof32(f32tof16(x)); }
 float cubic(float t) { return roundHalf(roundHalf(t * t) * roundHalf(mad(t, -2.0, 3.0))); }
 
+float continuousLength(float2 value, float radius)
+{
+    float lengthValue = length(value);
+    float a = min(abs(value.x), abs(value.y));
+    float b = mad(max(radius - lengthValue, 0.0), 0.25, max(abs(value.x), abs(value.y)));
+    float denominator = dot(float2(a, b), float2(0.361, 0.639));
+    float t = denominator != 0.0 ? a / denominator : 0.0;
+    float polynomial = t * t * t * mad(t, mad(t, -0.538410, 1.346025), -0.897350);
+    return mad(polynomial, radius, lengthValue);
+}
+
 PRIMITIVE_OUTPUT_TYPE primitive_color(FragmentInput input) : SV_Target0
 {
     if (constants.kind == 1) return PRIMITIVE_OUTPUT_TYPE(input.color);
     float2 q = abs(input.position) - constants.edges;
     float d = max(q.x, q.y);
     if (constants.kind == 3)
-        d = length(max(q, 0.0)) + min(d, 0.0) - constants.cornerRadius;
+        d = length(max(q, 0.0)) + min(d, 0.0) - constants.cornerRadius0;
+    else if (constants.kind == 4)
+        d = continuousLength(max(q, 0.0), constants.cornerRadius0) + min(d, 0.0) - constants.cornerRadius0;
     else if (constants.kind == 5)
-        d = length(input.position) - constants.cornerRadius;
+        d = length(input.position) - constants.cornerRadius0;
+    else if (constants.kind == 10)
+    {
+        float2 continuousVector = max(q + constants.cornerRadius0, 0.0);
+        float continuous = continuousLength(continuousVector, constants.cornerRadius0) - constants.cornerRadius0;
+        float2 circularVector = q + constants.cornerRadius1;
+        float circular = length(max(circularVector, 0.0)) - constants.cornerRadius1;
+        float2 direction = circularVector * rsqrt(dot(circularVector, circularVector));
+        float weight = saturate(dot(direction, float2(constants.mixWeight0, constants.mixWeight1)));
+        d = lerp(continuous, circular, weight * weight);
+    }
 
     float coverage;
     if (constants.mode == 2)

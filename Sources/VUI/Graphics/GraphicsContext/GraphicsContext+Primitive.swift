@@ -9,7 +9,7 @@ import Foundation
 import VVD
 
 // A filled, solid-color primitive consumed by the plane and shadow encoders.
-// Complex paths, unequal corner axes and continuous corners use path drawing.
+// Complex paths and unequal corner axes use path drawing.
 struct FilledPrimitive {
     var rect: CGRect
     var kind: UInt32
@@ -33,6 +33,12 @@ struct FilledPrimitive {
             kind = 3
             cornerRadius = min(max(0, Float(rounded.cornerSize.width)),
                 min(Float(self.rect.width), Float(self.rect.height)) * 0.5)
+        case let .roundedRect(rounded) where rounded.style == .continuous &&
+            rounded.cornerSize.width == rounded.cornerSize.height:
+            self.rect = rounded.rect.standardized
+            kind = 4
+            cornerRadius = min(max(0, Float(rounded.cornerSize.width)),
+                min(Float(self.rect.width), Float(self.rect.height)) * 0.5) * 1.275
         default: return nil
         }
         guard !rect.isEmpty, !rect.isInfinite,
@@ -88,6 +94,83 @@ struct FilledPrimitive {
         }
     }
 
+    struct Lowering {
+        let frame: CGRect
+        let expandedWidth: Float
+        let expandedHeight: Float
+        let reciprocalHeight: Float
+        let edges: SIMD2<Float>
+        let cornerRadii: SIMD4<Float>
+        let distanceScale: Float
+        let kind: UInt32
+        let mode: UInt32
+        let innerInset: Float
+        let mainIndices: [UInt16]
+        let extraIndices: [UInt16]
+    }
+
+    func lowering(pixelTransform: CGAffineTransform) -> Lowering? {
+        let radius = blurRadius
+        let scale = Float(max(max(abs(pixelTransform.a), abs(pixelTransform.b)),
+                              max(abs(pixelTransform.c), abs(pixelTransform.d))))
+        let aligned = (pixelTransform.b == 0 && pixelTransform.c == 0) ||
+                      (pixelTransform.a == 0 && pixelTransform.d == 0)
+        let pixelRect = bounds(transform: pixelTransform)
+        let plane = kind == 2 && aligned && Self.hasIntegralBounds(pixelRect)
+        let outset: Float = plane ? 0 : radius > 0 ? Float(1).addingProduct(2.8, radius) : 1 / scale
+        guard outset.isFinite else { return nil }
+
+        let width = Float(rect.width)
+        let height = Float(rect.height)
+        let expandedWidth = width + 2 * outset
+        let expandedHeight = height + 2 * outset
+        let reciprocalHeight = Self.reciprocalHeight(expandedHeight)
+        let frame = CGRect(x: CGFloat(Float(rect.minX) - outset),
+                           y: CGFloat(Float(rect.minY) - outset),
+                           width: CGFloat(expandedWidth), height: CGFloat(expandedHeight))
+        let corner = cornerRadius
+        var loweredKind = plane ? UInt32(1) : corner < 0.01 && radius == 0 ? UInt32(2) : kind
+        var secondRadius: Float = 0
+        var weights = SIMD2<Float>(repeating: 0)
+
+        if loweredKind == 4 {
+            secondRadius = corner * 0.7843137383460999
+            let denominator = corner * 0.4146391749382019
+            let ratios = SIMD2((width * 0.5 - secondRadius) / denominator,
+                               (height * 0.5 - secondRadius) / denominator)
+            if (ratios.x > -0.0001 && ratios.x < 1) ||
+               (ratios.y > -0.0001 && ratios.y < 1) {
+                loweredKind = 10
+                weights = SIMD2(1 - min(max(ratios.y, 0), 1),
+                                1 - min(max(ratios.x, 0), 1))
+            }
+        }
+
+        let edgeInset: Float = loweredKind == 3 || loweredKind == 4 ? corner : 0
+        let edges = SIMD2((width * 0.5 - edgeInset) * reciprocalHeight,
+                          (height * 0.5 - edgeInset) * reciprocalHeight)
+        let cornerRadii = loweredKind == 10
+            ? SIMD4(corner * reciprocalHeight, secondRadius * reciprocalHeight, weights.x, weights.y)
+            : SIMD4(corner * reciprocalHeight, 0, 0, 0)
+        let distanceScale = radius > 0
+            ? Float(Float16(Float(Float16(0.1695573329925537 / radius)) * expandedHeight)) : 0
+
+        let cornerInset = max(corner * 0.2928932309150696, 0)
+        let usesInnerMesh = loweredKind == 10 && scale * width * height > 4096 &&
+            min(width, height) * 0.5 > cornerInset + outset
+        // Inner vertices use a separately divided reciprocal and two rounded
+        // outset additions; the normalized corner fields use reciprocalHeight.
+        let innerInset = usesInnerMesh
+            ? ((cornerInset + outset) + outset) * (1 / expandedHeight) : 0
+        let mainIndices: [UInt16] = usesInnerMesh
+            ? [4, 0, 5, 1, 6, 2, 7, 3, 4, 0] : [1, 0, 2, 3]
+        let extraIndices: [UInt16] = usesInnerMesh ? [5, 4, 6, 7] : []
+        return Lowering(frame: frame, expandedWidth: expandedWidth, expandedHeight: expandedHeight,
+            reciprocalHeight: reciprocalHeight, edges: edges, cornerRadii: cornerRadii,
+            distanceScale: distanceScale, kind: loweredKind, mode: radius > 0 ? 2 : 0,
+            innerInset: innerInset, mainIndices: mainIndices, extraIndices: extraIndices)
+    }
+
     func bounds(transform: CGAffineTransform) -> CGRect {
         let amount = max(0, blurRadius * 2.8)
         let x = Float(rect.minX) - amount, y = Float(rect.minY) - amount
@@ -119,7 +202,12 @@ struct FilledPrimitive {
         var result = self
         result.blurRadius = sigma
         let minimum = min(Float(rect.width), Float(rect.height))
-        if kind != 5 {
+        if kind == 4 {
+            let continuousRadius = cornerRadius * 0.7843137383460999
+            let amount = Float(1.8) * sigma
+            result.cornerRadius = min((continuousRadius * continuousRadius + amount * amount).squareRoot(),
+                                      minimum * 0.5) * 1.275
+        } else if kind != 5 {
             let amount = Float(1.8) * sigma
             result.cornerRadius = min((cornerRadius * cornerRadius + amount * amount).squareRoot(),
                                       minimum * 0.5)
@@ -319,53 +407,43 @@ extension GraphicsContext {
 
     func encodePrimitive(renderPass: RenderPass, primitive: FilledPrimitive,
                          transform: CGAffineTransform, blendState: BlendState? = nil) -> Bool {
-        let radius = primitive.blurRadius
         let pixelTransform = transform.concatenating(CGAffineTransform(
             scaleX: contentScaleFactor, y: contentScaleFactor))
-        // The dominant component bounds the antialiasing mesh in item space.
-        let scale = Float(max(max(abs(pixelTransform.a), abs(pixelTransform.b)),
-                              max(abs(pixelTransform.c), abs(pixelTransform.d))))
-        let aligned = (pixelTransform.b == 0 && pixelTransform.c == 0) ||
-                      (pixelTransform.a == 0 && pixelTransform.d == 0)
-        let pixelRect = primitive.bounds(transform: pixelTransform)
-        let plane = primitive.kind == 2 && aligned && FilledPrimitive.hasIntegralBounds(pixelRect)
-        let outset: Float = plane ? 0 : radius > 0 ? Float(1).addingProduct(2.8, radius) : 1 / scale
-        guard outset.isFinite else { return false }
-        let width = Float(primitive.rect.width)
-        let height = Float(primitive.rect.height)
-        let expandedWidth = width + 2 * outset
-        let expandedHeight = height + 2 * outset
-        let reciprocalHeight = FilledPrimitive.reciprocalHeight(expandedHeight)
-        let frame = CGRect(x: CGFloat(Float(primitive.rect.minX) - outset),
-                           y: CGFloat(Float(primitive.rect.minY) - outset),
-                           width: CGFloat(expandedWidth), height: CGFloat(expandedHeight))
-        let corner = primitive.cornerRadius
-        let kind = plane ? UInt32(1) : corner < 0.01 && radius == 0 ? UInt32(2) : primitive.kind
-        let inset: Float = kind == 3 ? corner : 0
-        let coefficient = radius > 0
-            ? Float(Float16(Float(Float16(0.1695573329925537 / radius)) * expandedHeight)) : 0
+        guard let lowering = primitive.lowering(pixelTransform: pixelTransform) else { return false }
         // Float words keep the uniform layout portable without requiring
         // native 16-bit storage support from the graphics device.
-        let constants: (Float, Float, Float, Float, UInt32, UInt32) = (
-            (width * 0.5 - inset) * reciprocalHeight,
-            (height * 0.5 - inset) * reciprocalHeight,
-            corner * reciprocalHeight, coefficient, kind, radius > 0 ? 2 : 0)
+        let constants: (Float, Float, Float, Float, Float, Float, Float, UInt32, UInt32) = (
+            lowering.edges.x, lowering.edges.y,
+            lowering.cornerRadii.x, lowering.cornerRadii.y,
+            lowering.cornerRadii.z, lowering.cornerRadii.w,
+            lowering.distanceScale, lowering.kind, lowering.mode)
         let matrix = transform.concatenating(viewTransform)
         let color = primitive.color
-        let origin = Vector2(frame.minX, frame.minY).applying(matrix).float2
-        let axisX = (Float(frame.width * matrix.a), Float(frame.width * matrix.b))
-        let axisY = (Float(frame.height * matrix.c), Float(frame.height * matrix.d))
+        let origin = Vector2(lowering.frame.minX, lowering.frame.minY).applying(matrix).float2
+        let axisX = (Float(lowering.frame.width * matrix.a), Float(lowering.frame.width * matrix.b))
+        let axisY = (Float(lowering.frame.height * matrix.c), Float(lowering.frame.height * matrix.d))
         let makeVertex = { (x: Float, y: Float, u: Float, v: Float) in
             _Vertex(position: (origin.0.addingProduct(y, axisY.0).addingProduct(x, axisX.0),
                                origin.1.addingProduct(y, axisY.1).addingProduct(x, axisX.1)),
                 texcoord: (u, v), color: (color.x, color.y, color.z, color.w))
         }
-        let halfWidth = expandedWidth * reciprocalHeight * 0.5
+        let unitWidth = lowering.expandedWidth * lowering.reciprocalHeight
+        let halfWidth = unitWidth * 0.5
         let tl = makeVertex(0, 0, -halfWidth, -0.5)
         let tr = makeVertex(1, 0, halfWidth, -0.5)
         let bl = makeVertex(0, 1, -halfWidth, 0.5)
         let br = makeVertex(1, 1, halfWidth, 0.5)
-        let vertices = [bl, tl, br, br, tl, tr]
+        var vertices = [tl, tr, br, bl]
+        if lowering.innerInset > 0 {
+            let x = lowering.innerInset / unitWidth
+            let y = lowering.innerInset
+            vertices += [
+                makeVertex(x, y, -halfWidth + lowering.innerInset, -0.5 + y),
+                makeVertex(1 - x, y, halfWidth - lowering.innerInset, -0.5 + y),
+                makeVertex(1 - x, 1 - y, halfWidth - lowering.innerInset, 0.5 - y),
+                makeVertex(x, 1 - y, -halfWidth + lowering.innerInset, 0.5 - y),
+            ]
+        }
         // Typed half output and source-over form one precision path. Keep the
         // float output path's existing replacement blend on other devices.
         let blendState = blendState ?? (pipeline.primitiveOutputUsesFloat16
@@ -374,14 +452,23 @@ extension GraphicsContext {
                   colorFormat: renderPass.colorFormat, depthFormat: renderPass.depthFormat,
                   blendState: blendState, sampleCount: renderPass.sampleCount),
               let depth = pipeline.depthStencilState(.ignore),
-              let buffer = makeBuffer(vertices) else { return false }
+              let vertexBuffer = makeBuffer(vertices),
+              let indexBuffer = makeBuffer(lowering.mainIndices + lowering.extraIndices) else { return false }
         let encoder = renderPass.encoder
         encoder.setRenderPipelineState(pipelineState)
         encoder.setDepthStencilState(depth)
         withUnsafeBytes(of: constants) { encoder.pushConstant(stages: .fragment, offset: 0, data: $0) }
         encoder.setCullMode(.none)
-        encoder.setVertexBuffer(buffer.buffer, offset: buffer.offset, index: 0)
-        encoder.draw(vertexStart: 0, vertexCount: vertices.count, instanceCount: 1, baseInstance: 0)
+        encoder.setVertexBuffer(vertexBuffer.buffer, offset: vertexBuffer.offset, index: 0)
+        encoder.drawIndexed(indexCount: lowering.mainIndices.count, indexType: .uint16,
+            indexBuffer: indexBuffer.buffer, indexBufferOffset: indexBuffer.offset,
+            instanceCount: 1, baseVertex: 0, baseInstance: 0)
+        if !lowering.extraIndices.isEmpty {
+            encoder.drawIndexed(indexCount: lowering.extraIndices.count, indexType: .uint16,
+                indexBuffer: indexBuffer.buffer,
+                indexBufferOffset: indexBuffer.offset + lowering.mainIndices.count * MemoryLayout<UInt16>.stride,
+                instanceCount: 1, baseVertex: 0, baseInstance: 0)
+        }
         return true
     }
 }
