@@ -23,6 +23,10 @@ extension Font {
     public struct Width: Hashable, Sendable {
         public var value: CGFloat
 
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.value == rhs.value
+        }
+
         public static let compressed = Width(-0.3)
         public static let condensed = Width(-0.2)
         public static let standard = Width(0)

@@ -13,6 +13,15 @@ extension Text {
         case tail
         case middle
 
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.head, .head), (.tail, .tail), (.middle, .middle):
+                true
+            default:
+                false
+            }
+        }
+
         fileprivate var protobufValue: UInt {
             switch self {
             case .head: 1

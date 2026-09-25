@@ -42,6 +42,15 @@ public enum TextAlignment: Hashable, CaseIterable {
     case leading
     case center
     case trailing
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.leading, .leading), (.center, .center), (.trailing, .trailing):
+            true
+        default:
+            false
+        }
+    }
 }
 
 private struct MultilineTextAlignmentKey: EnvironmentKey {
@@ -1327,6 +1336,15 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
     public enum Case: Hashable, Sendable {
         case uppercase
         case lowercase
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.uppercase, .uppercase), (.lowercase, .lowercase):
+                true
+            default:
+                false
+            }
+        }
     }
 
     public struct LineStyle: Hashable, Sendable {
@@ -1352,6 +1370,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         }
 
         public static let single = LineStyle()
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.nsUnderlineStyleValue == rhs.nsUnderlineStyleValue &&
+                lhs.color == rhs.color
+        }
     }
 
     public struct DateStyle: Equatable, Codable, Sendable {
@@ -1391,6 +1414,11 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
         public static let relative = DateStyle(.relative)
         public static let offset = DateStyle(.offset)
         public static let timer = DateStyle(.timer)
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.storage == rhs.storage &&
+                lhs.unitConfiguration == rhs.unitConfiguration
+        }
 
         private enum CodingKeys: String, CodingKey {
             case storage
@@ -1485,6 +1513,10 @@ public struct Text: Equatable, _AGTypeDescriptorEquatable {
     }
 
     var modifiers: [Modifier]
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.storage == rhs.storage && lhs.modifiers == rhs.modifiers
+    }
 
     func isStyled(options: ResolveOptions = []) -> Bool {
         storage.isStyled(options: options) || modifiers.contains {

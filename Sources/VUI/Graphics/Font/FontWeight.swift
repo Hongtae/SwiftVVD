@@ -11,6 +11,10 @@ extension Font {
     public struct Weight: Hashable, Sendable {
         public var value: CGFloat
 
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.value == rhs.value
+        }
+
         public static let ultraLight = Weight(value: -0.8)
         public static let thin = Weight(value: -0.6)
         public static let light = Weight(value: -0.4)

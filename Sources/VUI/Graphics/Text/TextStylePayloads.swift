@@ -39,6 +39,9 @@ public struct TypesettingLanguage: Equatable, Sendable {
     public static func explicit(_ language: Locale.Language) -> Self {
         Self(storage: .explicit(language, Flags(rawValue: 1)))
     }
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.storage == rhs.storage
+    }
     func resolve() -> Resolved {
         switch storage {
         case let .explicit(language, flags): .explicit(language.maximalIdentifier, flags)
@@ -188,6 +191,9 @@ extension Text {
         var storage: Storage
         public static let `default` = Self(storage: .default)
         public static let secondary = Self(storage: .secondary)
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.storage == rhs.storage
+        }
     }
     /// Marks a superscript request carried by resolved run attributes.
     struct Superscript: Hashable {}

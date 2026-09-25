@@ -119,6 +119,10 @@ public enum DynamicTypeSize: Hashable, Comparable, CaseIterable, Sendable {
         self >= .accessibility1
     }
 
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.order == rhs.order
+    }
+
     public static func < (lhs: Self, rhs: Self) -> Bool {
         lhs.order < rhs.order
     }
@@ -144,6 +148,15 @@ public enum DynamicTypeSize: Hashable, Comparable, CaseIterable, Sendable {
 public enum LegibilityWeight: Hashable, Sendable {
     case regular
     case bold
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.regular, .regular), (.bold, .bold):
+            true
+        default:
+            false
+        }
+    }
 }
 
 private struct DynamicTypeSizeCollection: Collection {

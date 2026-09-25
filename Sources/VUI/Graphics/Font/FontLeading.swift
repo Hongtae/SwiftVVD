@@ -11,6 +11,15 @@ extension Font {
         case standard
         case tight
         case loose
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.standard, .standard), (.tight, .tight), (.loose, .loose):
+                true
+            default:
+                false
+            }
+        }
     }
 
     public func leading(_ leading: Leading) -> Font {

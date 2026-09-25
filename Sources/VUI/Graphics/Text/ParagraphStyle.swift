@@ -27,6 +27,9 @@ extension Text {
         public static let `default` = Self(storage: nil)
         public static let layoutBased = Self(storage: .layoutBased)
         public static let writingDirectionBased = Self(storage: .writingDirectionBased)
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.storage == rhs.storage
+        }
         enum EnvironmentKey: VUI.EnvironmentKey {
             static var defaultValue: AlignmentStrategy { .default }
         }
@@ -39,6 +42,9 @@ extension Text {
         public static let `default` = Self(storage: nil)
         public static let layoutBased = Self(storage: .layoutBased)
         public static let contentBased = Self(storage: .contentBased)
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.storage == rhs.storage
+        }
     }
 }
 private enum ParagraphTypesettingKey: EnvironmentKey { static var defaultValue: ParagraphTypesetting { .automatic } }

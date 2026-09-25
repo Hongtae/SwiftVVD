@@ -374,6 +374,14 @@ extension Text {
                     height: ascent + descent
                 )
             }
+
+            public static func == (lhs: Self, rhs: Self) -> Bool {
+                lhs.origin == rhs.origin &&
+                    lhs.width == rhs.width &&
+                    lhs.ascent == rhs.ascent &&
+                    lhs.descent == rhs.descent &&
+                    lhs.leading == rhs.leading
+            }
         }
 
         public struct Line: RandomAccessCollection, Equatable {
@@ -616,6 +624,10 @@ extension Text {
 
             public var characterIndices: [CharacterIndex] {
                 Array(run.characterIndices[indices])
+            }
+
+            public static func == (lhs: Self, rhs: Self) -> Bool {
+                lhs.run == rhs.run && lhs.indices == rhs.indices
             }
         }
 

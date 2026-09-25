@@ -12,6 +12,10 @@ extension Text {
         public struct AnchoredLayout: Equatable {
             public var origin: Anchor<CGPoint>
             public var layout: Layout
+
+            public static func == (lhs: Self, rhs: Self) -> Bool {
+                lhs.origin == rhs.origin && lhs.layout == rhs.layout
+            }
         }
 
         public typealias Value = [AnchoredLayout]

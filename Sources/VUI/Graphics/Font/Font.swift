@@ -525,6 +525,16 @@ extension Font {
         case serif
         case rounded
         case monospaced
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.default, .default), (.serif, .serif),
+                 (.rounded, .rounded), (.monospaced, .monospaced):
+                true
+            default:
+                false
+            }
+        }
     }
 
     public enum TextStyle: CaseIterable, Hashable, Sendable, Codable {
@@ -539,6 +549,20 @@ extension Font {
         case footnote
         case caption
         case caption2
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            switch (lhs, rhs) {
+            case (.largeTitle, .largeTitle), (.title, .title),
+                 (.title2, .title2), (.title3, .title3),
+                 (.headline, .headline), (.subheadline, .subheadline),
+                 (.body, .body), (.callout, .callout),
+                 (.footnote, .footnote), (.caption, .caption),
+                 (.caption2, .caption2):
+                true
+            default:
+                false
+            }
+        }
     }
 }
 
