@@ -260,6 +260,14 @@ final class AnimatorState<Value: VectorArithmetic> {
         forks.removeAll()
     }
 
+    func discardListeners() {
+        // The enclosing host owns completion in this route. Dropping these
+        // stale forks must not publish their superseded callbacks.
+        listeners.removeAll()
+        logicalListeners.removeAll()
+        forks.removeAll()
+    }
+
     private func updateListeners(
         isLogicallyComplete: Bool,
         time: Time,
@@ -351,15 +359,18 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
     private var previousModelData: AnimatedValue.AnimatableData?
     private var animatorState: AnimatorState<AnimatedValue.AnimatableData>?
     private var resetSeed: UInt32 = 0
+    private var discardsListenersDuringRemoval: Bool
 
     init(
         _phase: Attribute<_GraphInputs.Phase>,
         _time: Attribute<Time>,
-        _transaction: Attribute<Transaction>
+        _transaction: Attribute<Transaction>,
+        discardsListenersDuringRemoval: Bool = false
     ) {
         self._phase = _phase
         self._time = _time
         self._transaction = _transaction
+        self.discardsListenersDuringRemoval = discardsListenersDuringRemoval
     }
 
     var isAnimating: Bool {
@@ -383,6 +394,14 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
             Time
         ) -> Void
     ) {
+        if discardsListenersDuringRemoval,
+           _phase.value.isBeingRemoved {
+            animatorState?.discardListeners()
+            animatorState = nil
+            previousModelData = value.value.animatableData
+            return
+        }
+
         if checkReset() {
             value.changed = true
         }
@@ -463,6 +482,14 @@ struct AnimatableAttributeHelper<AnimatedValue: Animatable> {
 
     mutating func removeListeners() {
         animatorState?.removeListeners()
+    }
+
+    mutating func removeListenersForDestruction() {
+        if discardsListenersDuringRemoval {
+            animatorState?.discardListeners()
+        } else {
+            animatorState?.removeListeners()
+        }
     }
 
     mutating func finishAndClearAnimatorState() {

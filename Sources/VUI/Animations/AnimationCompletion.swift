@@ -28,6 +28,24 @@ class AnimationListener: @unchecked Sendable {
 
     func finalizeTransaction() {
     }
+
+    // Host-owned operations use a separate count so they can wait until every
+    // graph-owned animation has drained before releasing their own token.
+    func hostedAnimationWasAdded() {
+        animationWasAdded()
+    }
+
+    func hostedAnimationWasRemoved() {
+        animationWasRemoved()
+    }
+
+    var hasOnlyHostedAnimations: Bool {
+        true
+    }
+
+    func observeHostedAnimationReadiness(_ observer: @escaping () -> Void) {
+        observer()
+    }
 }
 
 final class ListenerPair: AnimationListener, @unchecked Sendable {
@@ -48,6 +66,27 @@ final class ListenerPair: AnimationListener, @unchecked Sendable {
         first.animationWasRemoved()
         second.animationWasRemoved()
     }
+
+    override func hostedAnimationWasAdded() {
+        first.hostedAnimationWasAdded()
+        second.hostedAnimationWasAdded()
+    }
+
+    override func hostedAnimationWasRemoved() {
+        first.hostedAnimationWasRemoved()
+        second.hostedAnimationWasRemoved()
+    }
+
+    override var hasOnlyHostedAnimations: Bool {
+        first.hasOnlyHostedAnimations && second.hasOnlyHostedAnimations
+    }
+
+    override func observeHostedAnimationReadiness(
+        _ observer: @escaping () -> Void
+    ) {
+        first.observeHostedAnimationReadiness(observer)
+        second.observeHostedAnimationReadiness(observer)
+    }
 }
 
 extension Transaction {
@@ -60,7 +99,9 @@ final class AllFinishedListener: AnimationListener, @unchecked Sendable {
     private let callback: (Transaction.AnimationCompletionInfo) -> Void
     private var activeCount = 0
     private var totalCount = 0
+    private var hostedCount = 0
     private var finalized = false
+    private var hostedReadinessObservers: [() -> Void] = []
 
     init(callback: @escaping (Transaction.AnimationCompletionInfo) -> Void) {
         self.callback = callback
@@ -77,7 +118,34 @@ final class AllFinishedListener: AnimationListener, @unchecked Sendable {
 
     override func animationWasRemoved() {
         activeCount -= 1
+        notifyHostedReadinessIfNeeded()
         finishIfPossible()
+    }
+
+    override func hostedAnimationWasAdded() {
+        activeCount += 1
+        totalCount += 1
+        hostedCount += 1
+    }
+
+    override func hostedAnimationWasRemoved() {
+        activeCount -= 1
+        hostedCount -= 1
+        notifyHostedReadinessIfNeeded()
+        finishIfPossible()
+    }
+
+    override var hasOnlyHostedAnimations: Bool {
+        activeCount == hostedCount
+    }
+
+    override func observeHostedAnimationReadiness(
+        _ observer: @escaping () -> Void
+    ) {
+        hostedReadinessObservers.append(observer)
+        if hasOnlyHostedAnimations {
+            observer()
+        }
     }
 
     override func finalizeTransaction() {
@@ -91,6 +159,13 @@ final class AllFinishedListener: AnimationListener, @unchecked Sendable {
         finalized = true
         callback(Transaction.AnimationCompletionInfo(completedCount: totalCount))
     }
+
+    private func notifyHostedReadinessIfNeeded() {
+        guard hasOnlyHostedAnimations else { return }
+        for observer in hostedReadinessObservers {
+            observer()
+        }
+    }
 }
 
 /// A host-adapter token for platform operations that begin and finish outside
@@ -98,14 +173,23 @@ final class AllFinishedListener: AnimationListener, @unchecked Sendable {
 /// graph-owned animations.
 final class AnimationCompletionToken: @unchecked Sendable {
     private let listener: AnimationListener
+    private let usesHostedLifecycle: Bool
     private var finished = false
 
-    init(listener: AnimationListener) {
+    init(
+        listener: AnimationListener,
+        usesHostedLifecycle: Bool = false
+    ) {
         self.listener = listener
+        self.usesHostedLifecycle = usesHostedLifecycle
     }
 
     func start() {
-        listener.animationWasAdded()
+        if usesHostedLifecycle {
+            listener.hostedAnimationWasAdded()
+        } else {
+            listener.animationWasAdded()
+        }
     }
 
     func finish() {
@@ -113,7 +197,21 @@ final class AnimationCompletionToken: @unchecked Sendable {
             return
         }
         finished = true
-        listener.animationWasRemoved()
+        if usesHostedLifecycle {
+            listener.hostedAnimationWasRemoved()
+        } else {
+            listener.animationWasRemoved()
+        }
+    }
+
+    var hasOnlyHostedAnimations: Bool {
+        listener.hasOnlyHostedAnimations
+    }
+
+    func observeHostedAnimationReadiness(
+        _ observer: @escaping () -> Void
+    ) {
+        listener.observeHostedAnimationReadiness(observer)
     }
 }
 

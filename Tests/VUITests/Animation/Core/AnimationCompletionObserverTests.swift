@@ -57,6 +57,37 @@ final class AnimationCompletionListenerTests: XCTestCase {
         XCTAssertEqual(counts, [0])
     }
 
+    func testHostedTokenWaitsForOrdinaryAnimationsBeforeReportingReadiness() {
+        var counts: [Int] = []
+        var readinessCount = 0
+        let listener = AllFinishedListener { info in
+            counts.append(info.completedCount)
+        }
+        let token = AnimationCompletionToken(
+            listener: listener,
+            usesHostedLifecycle: true
+        )
+
+        listener.animationWasAdded()
+        token.start()
+        token.observeHostedAnimationReadiness {
+            readinessCount += 1
+        }
+        listener.finalizeTransaction()
+
+        XCTAssertFalse(token.hasOnlyHostedAnimations)
+        XCTAssertEqual(readinessCount, 0)
+        XCTAssertEqual(counts, [])
+
+        listener.animationWasRemoved()
+        XCTAssertTrue(token.hasOnlyHostedAnimations)
+        XCTAssertEqual(readinessCount, 1)
+        XCTAssertEqual(counts, [])
+
+        token.finish()
+        XCTAssertEqual(counts, [2])
+    }
+
     func testEachCompletionRegistrationOwnsIndependentListener() throws {
         var events: [String] = []
         var transaction = Transaction()

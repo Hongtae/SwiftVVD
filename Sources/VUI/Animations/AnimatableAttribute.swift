@@ -18,7 +18,9 @@ extension Animatable {
                 phase: inputs.phase,
                 time: inputs.time,
                 transaction: inputs.transaction,
-                environment: inputs.cachedEnvironment.value.environment
+                environment: inputs.cachedEnvironment.value.environment,
+                discardsListenersDuringRemoval:
+                    inputs[ListRowHostRemovalInput.self]
             )
         )
         attr.flags = .transactional
@@ -55,14 +57,17 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>:
         phase: Attribute<_GraphInputs.Phase>,
         time: Attribute<Time>,
         transaction: Attribute<Transaction>,
-        environment: Attribute<EnvironmentValues>
+        environment: Attribute<EnvironmentValues>,
+        discardsListenersDuringRemoval: Bool
     ) {
         self._source = source
         self._environment = environment
         self.helper = AnimatableAttributeHelper(
             _phase: phase,
             _time: time,
-            _transaction: transaction
+            _transaction: transaction,
+            discardsListenersDuringRemoval:
+                discardsListenersDuringRemoval
         )
     }
 
@@ -84,6 +89,6 @@ private struct AnimatableAttribute<AnimatedValue: Animatable>:
     }
 
     mutating func destroy() {
-        helper.removeListeners()
+        helper.removeListenersForDestruction()
     }
 }

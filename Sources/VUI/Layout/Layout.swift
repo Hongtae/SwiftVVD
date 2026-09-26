@@ -184,6 +184,7 @@ private struct StaticLayoutComputer<L: Layout>: StatefulRule, AsyncAttribute, Cu
 protocol DynamicContainerItem {
     var count: Int { get }
     var needsTransitions: Bool { get }
+    var usesHostedRemovalCompletions: Bool { get }
     var zIndex: Double { get }
     func matchesIdentity(of other: Self) -> Bool
     static var supportsReuse: Bool { get }
@@ -194,6 +195,7 @@ protocol DynamicContainerItem {
 
 extension DynamicContainerItem {
     var needsTransitions: Bool { false }
+    var usesHostedRemovalCompletions: Bool { false }
     var zIndex: Double { 0 }
     static var supportsReuse: Bool { false }
     func canBeReused(by other: Self) -> Bool { false }
@@ -507,6 +509,98 @@ final class DynamicAnimationListener: AnimationListener, @unchecked Sendable {
     }
 }
 
+/// Holds transaction completions until both the row transition and every
+/// graph-owned animation in the same transaction have finished.
+final class HostedRemovalCompletionOwner: @unchecked Sendable {
+    private weak var viewGraph: ViewGraph?
+    private var asyncSignal: AGWeakAttribute
+    private var logicalToken: AnimationCompletionToken?
+    private var removalToken: AnimationCompletionToken?
+    private(set) var isFinished = false
+    private var isFinishScheduled = false
+    private var rowRemovalIsComplete = false
+
+    init(transaction: Transaction) {
+        guard let graph = _AGGraph.current,
+              let currentAttribute = _AGGraph.currentRuleContextAttribute,
+              let asyncSignal = graph.weakAttributeIfValid(
+                  for: currentAttribute
+              ) else {
+            fatalError(
+                "HostedRemovalCompletionOwner requires a live dynamic-container rule."
+            )
+        }
+        self.viewGraph = GraphHost.currentHost as? ViewGraph
+        self.asyncSignal = asyncSignal
+        logicalToken = transaction.animationLogicalListener.map {
+            AnimationCompletionToken(
+                listener: $0,
+                usesHostedLifecycle: true
+            )
+        }
+        removalToken = transaction.animationListener.map {
+            AnimationCompletionToken(
+                listener: $0,
+                usesHostedLifecycle: true
+            )
+        }
+        logicalToken?.start()
+        removalToken?.start()
+    }
+
+    func start() {
+        let readinessChanged: () -> Void = { [weak self] in
+            _ = self?.scheduleFinishIfReady()
+        }
+        logicalToken?.observeHostedAnimationReadiness(readinessChanged)
+        removalToken?.observeHostedAnimationReadiness(readinessChanged)
+        scheduleFinishIfReady()
+    }
+
+    func rowRemovalDidComplete() {
+        rowRemovalIsComplete = true
+        scheduleFinishIfReady()
+    }
+
+    private func scheduleFinishIfReady() {
+        guard rowRemovalIsComplete,
+              logicalToken?.hasOnlyHostedAnimations ?? true,
+              removalToken?.hasOnlyHostedAnimations ?? true,
+              !isFinishScheduled,
+              !isFinished else {
+            return
+        }
+        isFinishScheduled = true
+        Update.enqueueAction { [weak self] in
+            guard let self else { return }
+            self.isFinishScheduled = false
+            guard self.rowRemovalIsComplete,
+                  self.logicalToken?.hasOnlyHostedAnimations ?? true,
+                  self.removalToken?.hasOnlyHostedAnimations ?? true else {
+                return
+            }
+            self.finish()
+            self.viewGraph?.continueTransaction(
+                invalidating: self.asyncSignal
+            )
+        }
+    }
+
+    private func finish() {
+        guard !isFinished else { return }
+        // Logical completion is observable before final removal completion.
+        logicalToken?.finish()
+        removalToken?.finish()
+        logicalToken = nil
+        removalToken = nil
+        isFinished = true
+    }
+
+    deinit {
+        finish()
+    }
+}
+
 /// Dynamic container storage used by DynamicContainerInfo.
 enum DynamicContainer {
     /// Retained item state shared by every dynamic-container adaptor. A nil
@@ -523,6 +617,7 @@ enum DynamicContainer {
         var precedingViewCount: Int32
         var resetSeed: UInt32
         var phase: TransitionPhase?
+        var hostedRemovalCompletionOwner: HostedRemovalCompletionOwner?
 
         init(
             subgraph: AGSubgraph,
@@ -535,7 +630,8 @@ enum DynamicContainer {
             removalOrder: UInt32 = 0,
             precedingViewCount: Int32 = 0,
             resetSeed: UInt32 = 0,
-            phase: TransitionPhase? = .identity
+            phase: TransitionPhase? = .identity,
+            hostedRemovalCompletionOwner: HostedRemovalCompletionOwner? = nil
         ) {
             self.subgraph = subgraph
             self.uniqueId = uniqueId
@@ -548,6 +644,7 @@ enum DynamicContainer {
             self.precedingViewCount = precedingViewCount
             self.resetSeed = resetSeed
             self.phase = phase
+            self.hostedRemovalCompletionOwner = hostedRemovalCompletionOwner
         }
 
         func `for`<A: DynamicContainerAdaptor>(_ type: A.Type) -> _ItemInfo<A> {
@@ -952,6 +1049,10 @@ struct DynamicViewListItem: DynamicContainerItem {
             return false
         }
         return !traits[TransitionTraitKey.self].isIdentity
+    }
+
+    var usesHostedRemovalCompletions: Bool {
+        traits[ListRowHostRemovalTraitKey.self]
     }
 
     var zIndex: Double {
@@ -1723,6 +1824,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         let oldPhase = item.phase
         item.listener?.detachFromViewGraph()
         item.listener = nil
+        item.hostedRemovalCompletionOwner = nil
         item.removalOrder = 0
 
         if oldPhase == nil {
@@ -1754,8 +1856,10 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         var removed: [DynamicContainer.ItemInfo] = []
         var unused: [DynamicContainer.ItemInfo] = []
         let maxUnusedItems = max(A.maxUnusedItems, 0)
-
         for item in candidates {
+            let typedItem = item.for(A.self).item
+            let usesHostedRemovalCompletions =
+                typedItem.usesHostedRemovalCompletions
             if item.phase == .didDisappear {
                 guard let listener = item.listener else {
                     eraseItem(item)
@@ -1765,6 +1869,14 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
                 guard listener.isComplete else {
                     removed.append(item)
                     continue
+                }
+                if let owner = item.hostedRemovalCompletionOwner {
+                    guard owner.isFinished else {
+                        owner.rowRemovalDidComplete()
+                        removed.append(item)
+                        continue
+                    }
+                    item.hostedRemovalCompletionOwner = nil
                 }
                 eraseItem(item)
                 changed = true
@@ -1782,7 +1894,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
             }
 
             guard allowNewRemovals,
-                  item.needsTransitions,
+                  item.needsTransitions || usesHostedRemovalCompletions,
                   !disableTransitions else {
                 cacheOrErase(
                     item,
@@ -1795,6 +1907,13 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
 
             let listener = DynamicAnimationListener()
             item.listener = listener
+            if usesHostedRemovalCompletions {
+                let owner = HostedRemovalCompletionOwner(
+                    transaction: inputs.base.transaction.value
+                )
+                item.hostedRemovalCompletionOwner = owner
+                owner.start()
+            }
             item.removalOrder = nextRemovalOrder()
             item.phase = .didDisappear
             listener.beginTrackingAnimations()
@@ -1815,6 +1934,7 @@ struct DynamicContainerInfo<A: DynamicContainerAdaptor>:
         }
         item.listener?.detachFromViewGraph()
         item.listener = nil
+        item.hostedRemovalCompletionOwner = nil
         item.subgraph.willRemove()
         item.phase = nil
         item.removalOrder = 0

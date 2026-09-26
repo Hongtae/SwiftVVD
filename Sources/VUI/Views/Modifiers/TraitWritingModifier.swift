@@ -43,13 +43,15 @@ public struct _TraitWritingModifier<Trait>: ViewModifier where Trait: _ViewTrait
         // Wrap it in a list attribute whose identity is retained by each
         // LayoutProxyAttributes value. LayoutProxy then reads that list
         // relative to the layout rule that owns the proxy.
-        if case .staticList(let elements) = bodyOut.views {
-            let viewListAttr: Attribute<any ViewList> = graph.makeRule {
-                let traits = newTraitAttr.value
-                return BaseViewList(elements: elements, traits: traits)
-            }
-            return _ViewListOutputs(views: .dynamicList(viewListAttr, nil),
-                                    nextImplicitID: 0, staticCount: nil)
+        if case .staticList = bodyOut.views {
+            return _ViewListOutputs(
+                views: .dynamicList(
+                    bodyOut.makeAttribute(inputs: modifiedInputs),
+                    nil
+                ),
+                nextImplicitID: bodyOut.nextImplicitID,
+                staticCount: bodyOut.staticCount
+            )
         }
         return bodyOut
     }

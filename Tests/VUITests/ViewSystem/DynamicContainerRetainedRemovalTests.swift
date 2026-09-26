@@ -786,6 +786,34 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS: listSectionForkRemovalIOS27Observed
+    // ASSERTIONS: listSectionForkRemovalRepublish27Observed
+    func testPublicListSectionRemovalFinalizesSingleLogicalRowLifecycle() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear(
+            disappearBeforeRetainedCompletions: true,
+            listLogicalRemoval: true
+        ) { rows, target, recorder, capture in
+            List {
+                Section {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerListForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(
+                                opacity: row == "row" ? target : 0
+                            ),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                } header: {
+                    Text("Header")
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
     // ASSERTIONS disclosureGroupForkRetainedRemovalObserved
     func testPublicDisclosureGroupForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
@@ -2152,6 +2180,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
 
     private func assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear<Root: View>(
         disappearBeforeRetainedCompletions: Bool = false,
+        listLogicalRemoval: Bool = false,
         @ViewBuilder makeRoot: @escaping (
             [String],
             Double,
@@ -2177,6 +2206,15 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         var scrollablesOutput: Attribute<ScrollablePreferenceKey.Value>!
         var animatedValue: Attribute<_OpacityEffect>!
         var hasVisibleLazyItem = false
+        let activeRows = listLogicalRemoval
+            ? ["row", "sentinel"]
+            : ["row"]
+        let remainingRows = listLogicalRemoval
+            ? ["sentinel"]
+            : []
+        let initialEvents = listLogicalRemoval
+            ? ["row appear", "sentinel appear"]
+            : ["row appear"]
 
         func sampleLayout() {
             let layout = layoutAttr.value
@@ -2219,7 +2257,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 // zero-sized fixture can materialize it without committing a
                 // placement, so no initial phase mutation would exist to flush.
                 viewInputs.size.setValue(ViewSize(width: 100, height: 100))
-                source = graph.makeInput(value: makeRoot(["row"], 0, recorder, capture))
+                source = graph.makeInput(value: makeRoot(activeRows, 0, recorder, capture))
                 let outputs = Root._makeView(
                     view: _GraphValue(_attribute: source),
                     inputs: viewInputs
@@ -2252,10 +2290,38 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         if disappearBeforeRetainedCompletions {
             XCTAssertTrue(hasVisibleLazyItem)
         }
-        XCTAssertEqual(recorder.events, ["row appear"])
+        if listLogicalRemoval {
+            XCTAssertTrue(capture.sawListHostRemovalInput)
+            XCTAssertEqual(recorder.events.count, initialEvents.count)
+            XCTAssertEqual(Set(recorder.events), Set(initialEvents))
+            recorder.removeAll()
+        } else {
+            XCTAssertEqual(recorder.events, initialEvents)
+        }
+
+        func configuredTransaction(
+            animation: Animation?,
+            label: String
+        ) -> Transaction {
+            guard listLogicalRemoval else {
+                return completionTransaction(
+                    animation: animation,
+                    label: label,
+                    recorder: recorder
+                )
+            }
+            var transaction = Transaction(animation: animation)
+            transaction.addAnimationCompletion(criteria: .logicallyComplete) {
+                recorder.record("\(label) logical")
+            }
+            transaction.addAnimationCompletion(criteria: .removed) {
+                recorder.record("\(label) removed")
+            }
+            return transaction
+        }
 
         func transaction(label: String) -> Transaction {
-            completionTransaction(
+            configuredTransaction(
                 animation: Animation(
                     RetargetBoundaryRecordingAnimation(
                         label: label,
@@ -2264,8 +2330,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                         recorder: sampleRecorder
                     )
                 ),
-                label: label,
-                recorder: recorder
+                label: label
             )
         }
 
@@ -2274,10 +2339,17 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             let update = {
                 graphInputs.transaction.setValue(transaction)
                 source.setValue(
-                    makeRoot(["row"], target, recorder, capture),
+                    makeRoot(activeRows, target, recorder, capture),
                     transaction: transaction
                 )
                 sampleLayout()
+                if listLogicalRemoval {
+                    guard let refreshed = capture.animated else {
+                        XCTFail("List target should publish its animated attribute")
+                        return
+                    }
+                    animatedValue = refreshed
+                }
                 _ = animatedValue.value
                 if !disappearBeforeRetainedCompletions {
                     Transaction.dispatchPendingListeners()
@@ -2301,23 +2373,32 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         retarget("old", target: 1, firstSample: 0.5, secondSample: 0.6)
         retarget("middle", target: 2, firstSample: 0.8, secondSample: 0.9)
         retarget("active", target: 3, firstSample: 1.2, secondSample: 1.3)
-        XCTAssertEqual(recorder.events, ["row appear"])
+        XCTAssertEqual(
+            recorder.events,
+            listLogicalRemoval ? [] : initialEvents
+        )
 
-        var removal = completionTransaction(
+        var removal = configuredTransaction(
             animation: .linear(duration: 0.02),
-            label: "removal",
-            recorder: recorder
+            label: "removal"
         )
         removal.animationFrameInterval = 1.0 / 120.0
         let remove = {
             graphInputs.transaction.setValue(removal)
-            source.setValue(makeRoot([], 3, recorder, capture), transaction: removal)
+            source.setValue(
+                makeRoot(remainingRows, 3, recorder, capture),
+                transaction: removal
+            )
             sampleLayout()
-            _ = animatedValue.value
+            if !listLogicalRemoval {
+                _ = animatedValue.value
+            }
             if !disappearBeforeRetainedCompletions {
                 Transaction.dispatchPendingListeners()
             }
-            XCTAssertEqual(recorder.events, ["row appear"])
+            if !listLogicalRemoval {
+                XCTAssertEqual(recorder.events, initialEvents)
+            }
         }
         if disappearBeforeRetainedCompletions {
             viewGraph.runTransaction(removal, do: remove, id: nil)
@@ -2342,7 +2423,9 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                         )
                         viewGraph.data.rootSubgraph.update(flags: 1)
                         sampleLayout()
-                        _ = animatedValue.value
+                        if !listLogicalRemoval {
+                            _ = animatedValue.value
+                        }
                     }
                 }
             }
@@ -2350,14 +2433,16 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         }
         Self.flushGraphActions(graph)
-        XCTAssertEqual(
-            recorder.events,
-            [
-                "row appear",
-                "removal removed",
-                "removal logical",
-            ]
-        )
+        if !listLogicalRemoval {
+            XCTAssertEqual(
+                recorder.events,
+                [
+                    "row appear",
+                    "removal removed",
+                    "removal logical",
+                ]
+            )
+        }
         if !disappearBeforeRetainedCompletions {
             viewGraph.flushTransactions()
         }
@@ -2374,6 +2459,17 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
             }
         }
         if disappearBeforeRetainedCompletions {
+            if listLogicalRemoval {
+                XCTAssertEqual(
+                    recorder.events,
+                    [
+                        "removal logical",
+                        "removal removed",
+                        "row disappear",
+                    ]
+                )
+                return
+            }
             XCTAssertEqual(
                 recorder.events,
                 [
@@ -3844,6 +3940,7 @@ private struct DynamicContainerPhaseRecordingModifier: ViewModifier {
 
 private final class DynamicContainerForkRetargetCapture {
     var animated: Attribute<_OpacityEffect>?
+    var sawListHostRemovalInput = false
 }
 
 private struct DynamicContainerForkRetargetRow: View {
@@ -3865,6 +3962,72 @@ private struct DynamicContainerForkRetargetRow: View {
         )
     }
 }
+
+private struct DynamicContainerListForkRetargetRow: View {
+    var row: String
+    var effect: _OpacityEffect
+    var recorder: AnimationCompletionRecorder
+    var capture: DynamicContainerForkRetargetCapture
+
+    var body: some View {
+        DynamicContainerListForkRetargetContent(
+            row: row,
+            effect: effect,
+            capture: capture
+        )
+        .modifier(
+            _AppearanceActionModifier(
+                appear: { recorder.record("\(row) appear") },
+                disappear: { recorder.record("\(row) disappear") }
+            )
+        )
+    }
+}
+
+private struct DynamicContainerListForkRetargetContent: View {
+    var row: String
+    var effect: _OpacityEffect
+    var capture: DynamicContainerForkRetargetCapture
+
+    static func _makeView(
+        view: _GraphValue<Self>,
+        inputs: _ViewInputs
+    ) -> _ViewOutputs {
+        guard let graph = _AGGraph.current else {
+            fatalError("DynamicContainerListForkRetargetContent._makeView called outside AG context.")
+        }
+
+        var graphValue = view[\.effect]
+        captureFrom(view: view).sawListHostRemovalInput =
+            inputs.base[ListRowHostRemovalInput.self]
+        _OpacityEffect._makeAnimatable(value: &graphValue, inputs: inputs.base)
+        let animatedAttr = graphValue._attribute
+        let rowAttr = view[\.row]._attribute
+        let captureAttr = view[\.capture]._attribute
+        graph.makeSideEffectRule {
+            if rowAttr.value == "row" {
+                captureAttr.value.animated = animatedAttr
+            }
+            return ()
+        }
+
+        let layout = graph.makeRule {
+            _ = animatedAttr.value
+            return LayoutComputer.fixed(CGSize(width: 10, height: 10))
+        }
+        return _ViewOutputs(layoutComputer: OptionalAttribute(layout))
+    }
+
+    typealias Body = Never
+
+    private static func captureFrom(
+        view: _GraphValue<Self>
+    ) -> DynamicContainerForkRetargetCapture {
+        view[\.capture]._attribute.value
+    }
+}
+
+extension DynamicContainerListForkRetargetContent: TestPrimitiveView {}
 
 private struct DynamicContainerForkRetargetContent: View {
     var effect: _OpacityEffect

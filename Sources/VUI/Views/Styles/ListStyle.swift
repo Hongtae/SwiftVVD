@@ -355,6 +355,15 @@ private struct IsSelectionEnabledTraitKey: _ViewTraitKey {
     static var defaultValue: Bool { true }
 }
 
+// The input marks row source and placeholder subgraphs whose teardown is
+// finalized by the List row host rather than by the source collection.
+struct ListRowHostRemovalInput: ViewInputBoolFlag {}
+
+// The trait reaches the dynamic-layout item that owns row retention.
+struct ListRowHostRemovalTraitKey: _ViewTraitKey {
+    static var defaultValue: Bool { false }
+}
+
 private struct SectionActionsTraitKey: _ViewTraitKey {
     static var defaultValue: AnyView? { nil }
 }
@@ -474,7 +483,13 @@ where SelectionValue: Hashable {
     private var scrollBody: some View {
         let appearance = resolvedAppearance
         ScrollView(.vertical) {
-            Group(sections: configuration.content) { sections in
+            Group(
+                sections: configuration.content.modifier(
+                    ViewInputFlagModifier(
+                        flag: ListRowHostRemovalInput()
+                    )
+                )
+            ) { sections in
                 LazyVStack(
                     alignment: .leading,
                     spacing: appearance.sectionSpacing,
@@ -587,7 +602,13 @@ where SelectionValue: Hashable {
                         selection: selection,
                         appearance: appearance
                     )
+                    ._trait(ListRowHostRemovalTraitKey.self, true)
                 }
+                .modifier(
+                    ViewInputFlagModifier(
+                        flag: ListRowHostRemovalInput()
+                    )
+                )
             } header: {
                 header.frame(
                     minHeight: defaultMinListHeaderHeight,

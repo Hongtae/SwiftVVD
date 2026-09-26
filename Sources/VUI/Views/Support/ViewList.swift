@@ -2708,6 +2708,11 @@ private struct PlaceholderInfo: StatefulRule, ObservedAttribute, AsyncAttribute 
     private mutating func eraseItem() {
         guard let subgraph = childSubgraph else { return }
         placeholders.detachIndirectOutputs()
+        // A hosted List row remains inserted until its completion owner has
+        // finished, so its final placeholder teardown is a lifecycle removal.
+        if inputs.base[ListRowHostRemovalInput.self], subgraph.isInserted {
+            subgraph.willRemove()
+        }
         subgraph.invalidate()
         subgraph.removeFromParent()
         childSubgraph = nil
