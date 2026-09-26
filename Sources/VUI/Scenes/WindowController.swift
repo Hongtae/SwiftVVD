@@ -448,7 +448,7 @@ class WindowController: WindowDelegate,
     private weak var textSelectionFocusedResponder: ResponderNode?
     private var platformTextInputEnabled = false
     private var platformTextInputGeneration: UInt64 = 0
-    private let textInputCursorRequestGeneration = Mutex<UInt64>(0)
+    private let cursorRequestGeneration = Mutex<UInt64>(0)
 
     var resolvedFocusedValues: FocusedValues {
         focusedValuesState.withLock { $0.resolved }
@@ -3184,14 +3184,22 @@ class WindowController: WindowDelegate,
     }
 
     func requestTextInputCursor(_ cursor: Cursor?) {
+        requestCursor(cursor)
+    }
+
+    func requestSplitViewCursor(_ cursor: Cursor?) {
+        requestCursor(cursor)
+    }
+
+    private func requestCursor(_ cursor: Cursor?) {
         let owner = textInputFocusOwner
-        let generation = owner.textInputCursorRequestGeneration.withLock {
+        let generation = owner.cursorRequestGeneration.withLock {
             $0 &+= 1
             return $0
         }
         Task { @MainActor [weak owner] in
             guard let owner,
-                  owner.textInputCursorRequestGeneration.withLock({
+                  owner.cursorRequestGeneration.withLock({
                       $0 == generation
                   }) else {
                 return
