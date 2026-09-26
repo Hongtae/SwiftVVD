@@ -64,18 +64,40 @@ struct SourceFormula<T: View>: AnySourceFormula {
     static func makeView<A: ViewAlias>(
         view: _GraphValue<A>, source: AnySource, inputs: _ViewInputs
     ) -> _ViewOutputs {
-        T._makeView(view: _GraphValue(_attribute: Attribute<T>(source.value.toStrong())), inputs: inputs)
+        if source.valueIsNil?.value == true {
+            return _ViewOutputs()
+        }
+        return T._makeView(
+            view: _GraphValue(
+                _attribute: Attribute<T>(source.value.toStrong())
+            ),
+            inputs: inputs
+        )
     }
     static func makeViewList<A: ViewAlias>(
         view: _GraphValue<A>, source: AnySource, inputs: _ViewListInputs
     ) -> _ViewListOutputs {
-        T._makeViewList(view: _GraphValue(_attribute: Attribute<T>(source.value.toStrong())), inputs: inputs)
+        if source.valueIsNil?.value == true {
+            return _ViewListOutputs(
+                views: .staticList(.merged([])),
+                nextImplicitID: inputs.implicitID,
+                staticCount: 0
+            )
+        }
+        return T._makeViewList(
+            view: _GraphValue(
+                _attribute: Attribute<T>(source.value.toStrong())
+            ),
+            inputs: inputs
+        )
     }
     static func viewListCount(source: AnySource, inputs: _ViewListCountInputs) -> Int? {
         nil  // Dynamic/unknown count.
     }
     static func snapshot(source: AnySource) -> AnyView? {
-        guard let graph = _AGGraph.current, source.value.isValid(in: graph) else {
+        guard source.valueIsNil?.value != true,
+              let graph = _AGGraph.current,
+              source.value.isValid(in: graph) else {
             return nil
         }
         return AnyView(Attribute<T>(source.value.toStrong()).value)
@@ -132,7 +154,8 @@ struct AnySource {
         Self._dispatchSnapshot(formula, source: self)
     }
     func snapshotValue<T: View>(as type: T.Type) -> T? {
-        guard isSource(type),
+        guard valueIsNil?.value != true,
+              isSource(type),
               let graph = _AGGraph.current,
               value.isValid(in: graph) else {
             return nil
@@ -192,6 +215,11 @@ struct StaticSourceWriter<Source, Type> {
     let source: Type
 }
 
+struct OptionalSourceWriter<Source, Type> {
+    public typealias Body = Never
+    let source: Type?
+}
+
 extension StaticSourceWriter: ViewModifier where Source: View, Type: View {
 }
 
@@ -202,6 +230,39 @@ extension StaticSourceWriter: _GraphInputsModifier where Source: View, Type: Vie
             return
         }
         let anySource = AnySource(value: modifier[\.source])
+        var stack = inputs.customInputs.value(forKey: SourceInput<Source>.self)
+        stack = .node(anySource, stack)
+        inputs.customInputs.setValue(stack, forKey: SourceInput<Source>.self)
+    }
+}
+
+extension OptionalSourceWriter: ViewModifier where Source: View, Type: View {
+}
+
+extension OptionalSourceWriter: _GraphInputsModifier where Source: View, Type: View {
+    static func _makeInputs(
+        modifier: _GraphValue<Self>,
+        inputs: inout _GraphInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "OptionalSourceWriter._makeInputs called outside an active graph."
+            )
+        }
+        let optionalSource = modifier[\.source]._attribute
+        let valueIsNil: Attribute<Bool> = graph.makeRule {
+            optionalSource.value == nil
+        }
+        let source: Attribute<Type> = graph.makeRule {
+            guard let source = optionalSource.value else {
+                fatalError("An absent optional source cannot be rendered.")
+            }
+            return source
+        }
+        let anySource = AnySource(
+            value: _GraphValue(_attribute: source),
+            valueIsNil: valueIsNil
+        )
         var stack = inputs.customInputs.value(forKey: SourceInput<Source>.self)
         stack = .node(anySource, stack)
         inputs.customInputs.setValue(stack, forKey: SourceInput<Source>.self)
