@@ -12,6 +12,14 @@
 //   MenuStyleConfiguration.Label/Content, etc.
 protocol ViewAlias: View {}
 
+struct OptionalViewAlias<Alias> {
+    var isPresent: Bool
+
+    init(_ isPresent: Bool = false) {
+        self.isPresent = isPresent
+    }
+}
+
 extension ViewAlias {
     public static func _makeView(
         view: _GraphValue<Self>,

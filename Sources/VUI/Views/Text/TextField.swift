@@ -60,10 +60,6 @@ public struct TextSelection: Equatable, Hashable {
     }
 }
 
-struct OptionalViewAlias<Alias> {
-    init() {}
-}
-
 extension EnvironmentValues {
     struct TextInputSuggestions {}
 }

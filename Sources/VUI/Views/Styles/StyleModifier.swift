@@ -230,6 +230,22 @@ struct DividerStyleModifier<S: DividerStyle>: StyleModifier {
     }
 }
 
+struct ProgressViewStyleModifier<S: ProgressViewStyle>: StyleModifier {
+    typealias Body = Never
+    typealias StyleConfiguration = ProgressViewStyleConfiguration
+    typealias StyleBody = S.Body
+
+    var style: S
+
+    init(style: S) { self.style = style }
+
+    func styleBody(
+        configuration: ProgressViewStyleConfiguration
+    ) -> S.Body {
+        style.makeBody(configuration: configuration)
+    }
+}
+
 // LabelStyleModifier<S>: StyleModifier conformance is declared in LabelStyle.swift.
 
 // MARK: - Wrapped Style Access
