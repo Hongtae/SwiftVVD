@@ -64,7 +64,7 @@ public struct PreviewColorSchemeTraitKey: _ViewTraitKey {
     public static var defaultValue: ColorScheme? { nil }
 }
 
-public struct PreferredColorSchemeKey: PreferenceKey {
+public struct PreferredColorSchemeKey: HostPreferenceKey {
     public typealias Value = ColorScheme?
     // Keep-first reduction: only writes nextValue() when value is currently nil.
     public static func reduce(value: inout ColorScheme?, nextValue: () -> ColorScheme?) {

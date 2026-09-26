@@ -2955,6 +2955,15 @@ class WindowController: WindowDelegate,
         )
     }
 
+    func updatePreferredColorScheme(_ colorScheme: ColorScheme?) {
+        guard environment.explicitPreferredColorScheme != colorScheme else {
+            return
+        }
+        environment.explicitPreferredColorScheme = colorScheme
+        viewGraph.valuesNeedingUpdate.insert(.environment)
+        viewChangedWhileDrawing = true
+    }
+
     // Presentation roots own a distinct ViewGraph, but begin with the
     // environment at the source presentation site. Platform presentation
     // graphs run on their own render thread, so route later updates through

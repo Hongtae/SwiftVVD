@@ -973,6 +973,7 @@ class ViewGraph: ViewGraphHost {
                 prefKeys.add(SheetPreference.Key.self)
                 prefKeys.add(AlertStorage.PreferenceKey.self)
                 prefKeys.add(ConfirmationDialog.PreferenceKey.self)
+                prefKeys.add(PreferredColorSchemeKey.self)
 
                 let hostKeysAttr = g.makeInput(value: prefKeys)
                 let prefsInputs  = PreferencesInputs(keys: prefKeys, hostKeys: hostKeysAttr)
@@ -1117,6 +1118,30 @@ class ViewGraph: ViewGraphHost {
                             }
                             return combined
                         }
+                    }
+
+                    let colorSchemeNodes = outputs.preferences.values(
+                        for: PreferredColorSchemeKey.self
+                    )
+                    let preferredColorScheme = g.makeRule {
+                        var combined = PreferredColorSchemeKey.defaultValue
+                        for nodeID in colorSchemeNodes {
+                            let value = Attribute<PreferredColorSchemeKey.Value>(
+                                nodeID
+                            ).value
+                            PreferredColorSchemeKey.reduce(
+                                value: &combined
+                            ) { value }
+                        }
+                        return combined
+                    }
+                    g.makeSideEffectRule { [weak self] in
+                        guard let host = self?.rendererHost as? WindowController else {
+                            return
+                        }
+                        host.updatePreferredColorScheme(
+                            preferredColorScheme.value
+                        )
                     }
 
                     let sheetNodes = outputs.preferences.values(for: SheetPreference.Key.self)
