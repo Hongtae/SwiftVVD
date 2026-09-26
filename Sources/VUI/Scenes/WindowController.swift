@@ -1113,11 +1113,22 @@ class WindowController: WindowDelegate,
 
         configureForwardedEventDispatchers()
 
+        let staticRootContent = AnyView(content)
+        let rootToolbarBridge = RootToolbarBridge()
+        self.staticRootContent = staticRootContent
+        self.rootToolbarBridge = rootToolbarBridge
+        let toolbarRoot = RootToolbarHost.hostRootView(
+            sceneContent: staticRootContent,
+            bridge: rootToolbarBridge
+        )
         self._viewGraph = ViewGraph(
-            replaceableContent: content,
+            replaceableContent: WindowCommandMenuPresenter.hostRootView(
+                sceneContent: toolbarRoot,
+                presenter: nil
+            ),
             rendererHost: self,
             initialEnvironment: self.environment,
-            features: [HostViewGraph()]
+            features: [HostViewGraph(), RootToolbarViewGraph()]
         )
         self.crossGraphSourceGraph = nil
         self.viewGraph.renderDelegate = self

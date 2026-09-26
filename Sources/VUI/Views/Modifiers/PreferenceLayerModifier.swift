@@ -147,8 +147,9 @@ func makeSecondaryPreferenceView<Key: PreferenceKey, Overlay: View>(
     secondaryInputs.base.pushStableIndex(1)
     let child = graph.makeRule(SecondaryChild(
         _modifier: modifier,
-        _preferenceValue: primaryOutputs.preferences.value(for: Key.self)
-            .map { OptionalAttribute(Attribute<Key.Value>($0)) } ?? OptionalAttribute()
+        _preferenceValue: primaryOutputs.preferences
+            .reducedValue(for: Key.self, in: graph)
+            .map(OptionalAttribute.init) ?? OptionalAttribute()
     ))
     let secondaryOutputs = Overlay._makeView(
         view: _GraphValue(_attribute: child), inputs: secondaryInputs

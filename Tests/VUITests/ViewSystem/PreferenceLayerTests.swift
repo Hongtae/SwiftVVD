@@ -174,6 +174,57 @@ final class PreferenceLayerTests: XCTestCase {
         }
     }
 
+    func testSecondaryLayerReducesEveryPrimaryValueForTheRequestedKey() throws {
+        let host = GraphHost()
+        try host.data.withCurrent {
+            let graph = host.data.graph
+            let capture = PreferenceChildCapture()
+            let modifier = graph.makeInput(
+                value: _OverlayPreferenceModifier<
+                    LayerSequenceKey,
+                    PreferenceChildProbe
+                >(
+                    alignment: .center,
+                    transform: { value in
+                        capture.values.append(value)
+                        return PreferenceChildProbe(
+                            capture: capture,
+                            values: value
+                        )
+                    }
+                )
+            )
+            let first = graph.makeInput(value: [1])
+            let second = graph.makeInput(value: [2])
+            let outputs = makeSecondaryPreferenceView(
+                modifier: modifier,
+                inputs: makeInputs(graph),
+                body: { _, _ in
+                    var preferences = PreferencesOutputs()
+                    preferences.append(
+                        LayerSequenceKey.self,
+                        node: first.identifier
+                    )
+                    preferences.append(
+                        LayerSequenceKey.self,
+                        node: second.identifier
+                    )
+                    return _ViewOutputs(preferences: preferences)
+                },
+                flipOrder: false
+            )
+
+            let child = try XCTUnwrap(capture.attribute)
+            XCTAssertEqual(child.value.values, [1, 2])
+
+            first.value = [3]
+            XCTAssertEqual(child.value.values, [3, 2])
+            second.value = [4]
+            XCTAssertEqual(child.value.values, [3, 4])
+            XCTAssertTrue(outputs.preferences.preferences.isEmpty)
+        }
+    }
+
     func testPublicTextLayoutConsumersResolveAnchorsInReceivingGeometry() throws {
         // ASSERTIONS secondaryPreferenceLayer27Observed
         // ASSERTIONS textLayoutAnchorTransform27Observed

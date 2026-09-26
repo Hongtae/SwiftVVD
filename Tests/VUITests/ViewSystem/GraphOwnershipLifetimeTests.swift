@@ -3,6 +3,46 @@ import XCTest
 @testable import VUI
 
 final class GraphOwnershipLifetimeTests: XCTestCase {
+    func testMountedBindingTracksLocationChangesWithoutReplacingItsLocation() {
+        let graph = _AGGraph()
+        _AGGraph.withCurrent(graph) {
+            let location = ImmediateTrackingLocation(1)
+            let container = graph.makeInput(
+                value: Binding<Int>(location: location)
+            )
+            var inputs = _GraphInputs(
+                time: graph.makeInput(value: Time.zero),
+                phase: graph.makeInput(value: _GraphInputs.Phase()),
+                environment: graph.makeInput(value: EnvironmentValues()),
+                transaction: graph.makeInput(value: Transaction())
+            )
+            let buffer = _DynamicPropertyBuffer(
+                fields: .init(entries: [
+                    .init(offset: 0, type: Binding<Int>.self)
+                ]),
+                container: _GraphValue(_attribute: container),
+                inputs: &inputs
+            )
+            var evaluations = 0
+            let resolved: Attribute<Int> = graph.makeRule {
+                var binding = container.value
+                buffer.applyContexts(to: &binding)
+                evaluations += 1
+                return binding.wrappedValue
+            }
+
+            XCTAssertEqual(resolved.value, 1)
+            XCTAssertEqual(evaluations, 1)
+
+            location.setValue(2, transaction: Transaction())
+            graph.inbox.drain()
+
+            XCTAssertEqual(resolved.value, 2)
+            XCTAssertEqual(evaluations, 2)
+            XCTAssertTrue(container.value.location === location)
+        }
+    }
+
     func testMountedStateOrBindingBufferDoesNotKeepItsHostOrGraphAlive() {
         weak var hostReference: TestViewRendererHost?
         weak var viewGraphReference: ViewGraph?
@@ -149,6 +189,31 @@ final class GraphOwnershipLifetimeTests: XCTestCase {
             try reduce()
             XCTAssertNil(graphReference, "reduction mode \(mode)")
         }
+    }
+}
+
+private final class ImmediateTrackingLocation<Value>:
+    AnyLocation<Value>,
+    @unchecked Sendable
+{
+    private var storedValue: Value
+
+    init(_ value: Value) {
+        storedValue = value
+        super.init()
+    }
+
+    override func getValue() -> Value {
+        storedValue
+    }
+
+    override func update() -> (Value, Bool) {
+        (storedValue, true)
+    }
+
+    override func setValue(_ value: Value, transaction: Transaction) {
+        storedValue = value
+        notifyChange()
     }
 }
 

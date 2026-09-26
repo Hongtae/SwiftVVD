@@ -28,6 +28,51 @@ private struct UnaryOverrideInput: GraphInput {
     static var defaultValue: Int { 0 }
 }
 
+private struct ModifiedInputProbe: PrimitiveViewModifier {
+    typealias Body = Never
+
+    var observe: (_ViewInputs) -> Void
+
+    static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        modifier._attribute.value.observe(inputs)
+        return body(_Graph(), inputs)
+    }
+}
+
+private struct ModifiedInputPassthroughElements: _ViewList_Elements {
+    var count: Int { 1 }
+
+    func makeElements(
+        from: inout Int,
+        inputs: _ViewInputs,
+        indirectMap: IndirectAttributeMap?,
+        body: (
+            _ViewInputs,
+            @escaping (_ViewInputs) -> _ViewOutputs
+        ) -> (_ViewOutputs?, Bool)
+    ) -> (_ViewOutputs?, Bool) {
+        guard from == 0 else {
+            from -= 1
+            return (nil, true)
+        }
+        return body(inputs) { _ in _ViewOutputs() }
+    }
+
+    func tryToReuseElement(
+        at index: Int,
+        by other: any _ViewList_Elements,
+        at otherIndex: Int,
+        indirectMap: IndirectAttributeMap,
+        testOnly: Bool
+    ) -> Bool {
+        false
+    }
+}
+
 private func makeViewListCountInputs(graph: _AGGraph) -> _ViewListCountInputs {
     _ViewListCountInputs(
         base: _GraphInputs(
@@ -267,6 +312,65 @@ final class PrimitiveViewTests: XCTestCase {
             XCTAssertNil(skipped.0)
             XCTAssertTrue(skipped.1)
             XCTAssertEqual(from, 1)
+        }
+    }
+
+    // ASSERTIONS modifiedElementsInputMerge27Observed
+    func testModifiedElementsKeepsIncomingInputsAsMergeReceiver() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        ref.withCurrent {
+            var storedInputs = makeViewInputs(graph: graph)
+            storedInputs.base[UnaryStoredInput.self] = 11
+            storedInputs.base[UnaryOverrideInput.self] = 31
+            let storedCache = ObjectIdentifier(
+                storedInputs.base.cachedEnvironment
+            )
+
+            var observedStored = 0
+            var observedIncoming = 0
+            var observedOverride = 0
+            var observedCache: ObjectIdentifier?
+            let modifier = graph.makeInput(
+                value: ModifiedInputProbe { inputs in
+                    observedStored = inputs.base[UnaryStoredInput.self]
+                    observedIncoming = inputs.base[UnaryIncomingInput.self]
+                    observedOverride = inputs.base[UnaryOverrideInput.self]
+                    observedCache = ObjectIdentifier(
+                        inputs.base.cachedEnvironment
+                    )
+                }
+            )
+            let elements = ModifiedElements.make(
+                base: ModifiedInputPassthroughElements(),
+                modifier: _GraphValue(_attribute: modifier),
+                inputs: storedInputs.base
+            )
+
+            var incomingInputs = storedInputs
+            incomingInputs.copyCaches()
+            incomingInputs.base[UnaryIncomingInput.self] = 22
+            incomingInputs.base[UnaryOverrideInput.self] = 32
+            let incomingCache = ObjectIdentifier(
+                incomingInputs.base.cachedEnvironment
+            )
+            XCTAssertNotEqual(incomingCache, storedCache)
+
+            var from = 0
+            let result = elements.makeElements(
+                from: &from,
+                inputs: incomingInputs,
+                indirectMap: nil
+            ) { inputs, makeView in
+                (makeView(inputs), true)
+            }
+            XCTAssertNotNil(result.0)
+            XCTAssertTrue(result.1)
+            XCTAssertEqual(observedStored, 11)
+            XCTAssertEqual(observedIncoming, 22)
+            XCTAssertEqual(observedOverride, 32)
+            XCTAssertEqual(observedCache, incomingCache)
+            XCTAssertNotEqual(observedCache, storedCache)
         }
     }
 }

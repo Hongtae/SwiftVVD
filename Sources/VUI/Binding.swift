@@ -7,6 +7,46 @@
 
 import Foundation
 
+private final class BindingLocationTracker<Value> {
+    private final class Identity {
+    }
+
+    private let identity: Identity
+    private let location: AnyLocation<Value>
+    private let key: AnyLocationBase.TrackerKey
+
+    init(
+        location: AnyLocation<Value>,
+        graph: _AGGraph,
+        signal: Attribute<Void>
+    ) {
+        self.location = location
+        let identity = Identity()
+        self.identity = identity
+        key = AnyLocationBase.TrackerKey(
+            id: ObjectIdentifier(identity),
+            offset: 0
+        )
+        let inbox = graph.inbox
+        let graphReference = UnsafeSendableBox(_AGGraphWeakRef(graph))
+        let weakSignal = signal.asWeak().base
+        location.addTracker(key: key) { [weak inbox] in
+            inbox?.enqueue {
+                guard let graph = graphReference.value.graph,
+                      _AGGraph.current === graph,
+                      weakSignal.isValid(in: graph) else {
+                    return
+                }
+                graph.invalidateAttribute(weakSignal.toStrong())
+            }
+        }
+    }
+
+    deinit {
+        location.removeTracker(key: key)
+    }
+}
+
 @propertyWrapper @dynamicMemberLookup public struct Binding<Value> {
     public var transaction: Transaction
     var location: AnyLocation<Value>
@@ -164,8 +204,43 @@ extension Binding {
 }
 
 extension Binding: DynamicProperty {
-    public static func _makeProperty<V>(in buffer: inout _DynamicPropertyBuffer, container: _GraphValue<V>, fieldOffset: Int, inputs: inout _GraphInputs) {
-        assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
+    public static func _makeProperty<V>(
+        in buffer: inout _DynamicPropertyBuffer,
+        container: _GraphValue<V>,
+        fieldOffset: Int,
+        inputs: inout _GraphInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError(
+                "Binding._makeProperty called outside an active _AGGraph "
+                    + "context."
+            )
+        }
+
+        let wiringSubgraph = AGSubgraph.current
+        let signal: Attribute<Void> = AGSubgraph.withCurrent(wiringSubgraph) {
+            graph.makeInput(value: ())
+        }
+        let tracker = MutableBox<BindingLocationTracker<Value>?>(nil)
+
+        assert(!buffer.properties.contains { $0.offset == fieldOffset })
         buffer.properties.append(.init(type: self, offset: fieldOffset))
+        buffer.contexts[fieldOffset] = {
+            (pointer: UnsafeMutableRawPointer) in
+            var binding = pointer
+                .assumingMemoryBound(to: Binding<Value>.self)
+                .pointee
+            if tracker.value == nil {
+                tracker.value = BindingLocationTracker(
+                    location: binding.location,
+                    graph: graph,
+                    signal: signal
+                )
+            }
+            _ = signal.value
+            binding._value = binding.location.update().0
+            pointer.assumingMemoryBound(to: Binding<Value>.self).pointee =
+                binding
+        }
     }
 }

@@ -254,8 +254,11 @@ extension EnvironmentValues {
 // MARK: - NavigationState.SelectionSeed
 
 // NavigationState.SelectionSeed: written to navigationSelectionSeed env key in SheetContent.body.
-// Selection seed fields are added by the navigation subsystem.
-enum NavigationState {
+// The stack owner retains this state through NavigationStateHost.
+struct NavigationState {
+    var pathDepth: Int = 0
+    var presentations: [NavigationPresentationState] = []
+
     struct SelectionSeed: Equatable {
     }
 }

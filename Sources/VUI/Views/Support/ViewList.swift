@@ -1834,7 +1834,8 @@ struct ModifiedElements: _ViewList_Elements {
     /// Flow:
     ///   1. Delegate to base.makeElements with a wrappedBody.
     ///   2. wrappedBody (called per-element by base):
-    ///      a. Merge baseInputs (modifier's, higher priority) + elementInputs.base (element's)
+    ///      a. Merge baseInputs into elementInputs, preserving the element as
+    ///         the higher-priority receiver.
     ///      b. Resolve modifier weak attr and return nil if expired.
     ///      c. Call project(modAttr, mergedInputs, makeView).
     @discardableResult
@@ -1854,11 +1855,14 @@ struct ModifiedElements: _ViewList_Elements {
                 fatalError("ModifiedElements.makeElements wrappedBody called outside AG context.")
             }
 
-            // Merge modifier baseInputs at higher priority than elementInputs.base.
-            var mergedBase = capturedBaseInputs
-            mergedBase.merge(elementInputs.base, ignoringPhase: false)
+            // The per-element callback owns the receiver and its cache boxes;
+            // the modifier's captured inputs supply inherited fallback values.
+            var storedBase = capturedBaseInputs
+            if let indirectMap {
+                storedBase.makeReusable(indirectMap: indirectMap)
+            }
             var mergedInputs = elementInputs
-            mergedInputs.base = mergedBase
+            mergedInputs.base.merge(storedBase, ignoringPhase: false)
 
             // Resolve modifier weak attr.
             guard capturedModifier.isValid(in: graph) else { return (nil, false) }

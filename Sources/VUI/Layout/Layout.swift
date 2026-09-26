@@ -779,6 +779,13 @@ private struct DynamicViewPhase: Rule, AsyncAttribute {
 
     var value: _GraphInputs.Phase {
         var value = phase.value
+        let infoState = containerInfo.valueState
+        if infoState.contains(.evaluating) && !infoState.contains(.hasValue) {
+            // Publish the already-written parent phase before the first
+            // container read closes this dependency cycle. The value-returning
+            // rule bridge otherwise publishes only after the getter returns.
+            return value
+        }
         guard let item = containerInfo.value.item(for: uniqueId) else {
             return value
         }

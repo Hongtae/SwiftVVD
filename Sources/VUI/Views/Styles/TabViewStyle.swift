@@ -314,7 +314,11 @@ private struct TabSelectedContent: View {
             )
         }
 
-        let outputs = inputs.makeIndirectOutputs()
+        var outputs = inputs.makeIndirectOutputs()
+        outputs.preferences.setValue(
+            nil,
+            for: NavigationDestinationsKey.self
+        )
         let state = TabSelectionState(
             view: view._attribute,
             inputs: inputs,

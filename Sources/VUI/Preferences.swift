@@ -83,14 +83,14 @@ where Key: PreferenceKey, Content: View {
             inputs: childInputs
         )
 
-        let source = outputs.preferences.value(for: Key.self).flatMap {
-            graph.weakAttributeIfValid(for: $0)
-        }
+        let source = outputs.preferences
+            .reducedValue(for: Key.self, in: graph)?
+            .asWeak()
         graph.mutateRule(
             preferenceValue.identifier,
             as: PreferenceValueAttribute<Key>.self
         ) { rule in
-            rule.source = source.map(WeakAttribute<Key.Value>.init)
+            rule.source = source
         }
         graph.invalidateAttribute(preferenceValue.identifier)
         return outputs
@@ -1400,6 +1400,9 @@ extension PreferencesOutputs {
               let representative = preferences.first(where: {
                   ObjectIdentifier($0.key) == ObjectIdentifier(key)
               }) else { return nil }
+        if nodes.count == 1 {
+            return Attribute(nodes[0])
+        }
         return Attribute(representative._makeReduceRule(nodes, _AGGraphRef(graph)))
     }
 }
