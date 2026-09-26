@@ -762,6 +762,30 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS formSectionForkRetainedRemoval27Observed
+    func testPublicFormSectionForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            Form {
+                Section {
+                    ForEach(rows, id: \.self) { row in
+                        DynamicContainerForkRetargetRow(
+                            row: row,
+                            effect: _OpacityEffect(
+                                opacity: row == "row" ? target : 0
+                            ),
+                            recorder: recorder,
+                            capture: capture
+                        )
+                        .transition(.opacity)
+                    }
+                } header: {
+                    Text("Header")
+                }
+            }
+        }
+    }
+
     // ASSERTIONS disclosureGroupForkRetainedRemovalObserved
     func testPublicDisclosureGroupForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {

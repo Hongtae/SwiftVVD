@@ -41,7 +41,14 @@ extension StyleContext {
 // Marker types: empty structs with no stored properties.
 struct NoStyleContext: StyleContext {}
 struct PlainListStyleContext: StyleContext {}
+struct AnyListStyleContext: StyleContext {}
 struct GroupedFormStyleContext: StyleContext {}
+struct InspectorStyleContext: StyleContext {}
+struct ColumnsFormStyleContext: StyleContext {}
+struct FormBoxStyleContext: StyleContext {}
+struct GroupedFormValueStyleContext: StyleContext {}
+struct GroupedFormTextFieldStyleContext: StyleContext {}
+struct RadioGroupStyleContext: StyleContext {}
 struct TableStyleContext: StyleContext {}
 struct SidebarListStyleContext: StyleContext {}
 struct InsetListStyleContext: StyleContext {}
@@ -79,7 +86,16 @@ struct AnyStyleContextType: Equatable {
     }
 
     func acceptsTop(_ type: any StyleContext.Type) -> Bool {
-        contextIDs.contains(ObjectIdentifier(type))
+        if ObjectIdentifier(type) == ObjectIdentifier(AnyListStyleContext.self) {
+            return acceptsAny([
+                PlainListStyleContext.self,
+                SidebarListStyleContext.self,
+                InsetListStyleContext.self,
+                BorderedListStyleContext.self,
+                SystemPreferencesSidebarListStyleContext.self,
+            ])
+        }
+        return contextIDs.contains(ObjectIdentifier(type))
     }
 
     func pushing<T: StyleContext>(_ type: T.Type) -> AnyStyleContextType {
