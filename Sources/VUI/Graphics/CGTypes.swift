@@ -9,7 +9,6 @@ import Foundation
 import VVD
 
 #if canImport(CoreGraphics)
-//import CoreGraphics
 @_exported import CoreGraphics
 
 public typealias CGFloat = CoreGraphics.CGFloat
@@ -22,6 +21,7 @@ public typealias CGContext = CoreGraphics.CGContext
 public typealias CGImage = CoreGraphics.CGImage
 public typealias CGLineCap = CoreGraphics.CGLineCap
 public typealias CGLineJoin = CoreGraphics.CGLineJoin
+public typealias CGVector = CoreGraphics.CGVector
 
 extension CGAffineTransform {
     @inlinable
