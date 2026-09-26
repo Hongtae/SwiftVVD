@@ -762,6 +762,28 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS disclosureGroupForkRetainedRemovalObserved
+    func testPublicDisclosureGroupForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
+        try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
+            rows, target, recorder, capture in
+            DisclosureGroup(isExpanded: .constant(true)) {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerForkRetargetRow(
+                        row: row,
+                        effect: _OpacityEffect(
+                            opacity: row == "row" ? target : 0
+                        ),
+                        recorder: recorder,
+                        capture: capture
+                    )
+                    .transition(.opacity)
+                }
+            } label: {
+                Text("Details")
+            }
+        }
+    }
+
     func testPublicCustomLayoutForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
             rows, target, recorder, capture in
@@ -1820,6 +1842,24 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
                 }
             } header: {
                 Text("Header")
+            }
+        }
+    }
+
+    // ASSERTIONS disclosureGroupRetainedListenerOrderObserved
+    func testPublicDisclosureGroupForEachRetainsTransitionRemovalUntilListenerInvalidatesRule() throws {
+        try assertPublicLayoutRootRetainsTransitionRemovalUntilListenerInvalidatesRule {
+            rows, recorder in
+            DisclosureGroup(isExpanded: .constant(true)) {
+                ForEach(rows, id: \.self) { row in
+                    DynamicContainerLifecycleRow(
+                        row: row,
+                        recorder: recorder
+                    )
+                    .transition(.opacity)
+                }
+            } label: {
+                Text("Details")
             }
         }
     }
