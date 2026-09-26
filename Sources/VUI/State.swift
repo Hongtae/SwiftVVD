@@ -8,6 +8,57 @@
 import Foundation
 import Observation
 
+@attached(accessor, names: named(init), named(get), named(set))
+@attached(peer, names: prefixed(_), prefixed(__), prefixed(`$`))
+public macro State() = #externalMacro(
+    module: "VUIMacros",
+    type: "StateMacro"
+)
+
+@attached(accessor, names: named(init), named(get), named(set))
+@attached(peer, names: prefixed(_), prefixed(__), prefixed(`$`))
+public macro State<Value>(initialValue: Value) = #externalMacro(
+    module: "VUIMacros",
+    type: "StateMacro"
+)
+
+@attached(accessor, names: named(init), named(get), named(set))
+@attached(peer, names: prefixed(_), prefixed(__), prefixed(`$`))
+public macro State<Value>(wrappedValue: Value) = #externalMacro(
+    module: "VUIMacros",
+    type: "StateMacro"
+)
+
+@attached(accessor, names: named(init), named(get), named(set))
+public macro _StatePropertyWrapperStorage(initialValue: String) = #externalMacro(
+    module: "VUIMacros",
+    type: "StatePropertyWrapperStorageMacro"
+)
+
+@attached(accessor, names: named(init), named(get), named(set))
+public macro _StatePropertyWrapperStorage() = #externalMacro(
+    module: "VUIMacros",
+    type: "StatePropertyWrapperStorageMacro"
+)
+
+@attached(accessor, names: named(get))
+public macro _StateInitialStoredValue(_ initialValue: String) = #externalMacro(
+    module: "VUIMacros",
+    type: "StateInitialStoredValueMacro"
+)
+
+@attached(accessor, names: named(get))
+public macro _StateProjectedValue() = #externalMacro(
+    module: "VUIMacros",
+    type: "StateProjectedValueMacro"
+)
+
+@attached(accessor, names: named(get))
+public macro _PropertyWrapperProjectedValue() = #externalMacro(
+    module: "VUIMacros",
+    type: "ProjectedValueMacro"
+)
+
 @usableFromInline
 func _stateValuesAreKnownEqual<Value>(_ lhs: Value, _ rhs: Value) -> Bool {
     guard let lhs = lhs as? AnyHashable,
@@ -78,6 +129,156 @@ extension State where Value: ExpressibleByNilLiteral {
 }
 
 extension State: Sendable where Value: Sendable {
+}
+
+@export(implementation)
+@_transparent
+public func _stateNil<T>(of _: () -> T) -> T? {
+    nil
+}
+
+extension State {
+    @export(implementation)
+    public static func _makeStorage(
+        _ makeInitialValue: @escaping () -> Value
+    ) -> LazyState<Value> {
+        LazyState(initialValue: makeInitialValue)
+    }
+
+    @export(implementation)
+    public static func _makeStorage(initialValue: Value) -> LazyState<Value> {
+        LazyState(_initialValue: initialValue)
+    }
+
+    @export(implementation)
+    public static func _makeStorageFrozen(
+        _ makeInitialValue: @escaping () -> Value
+    ) -> LazyState<Value> {
+        LazyState(initialValue: makeInitialValue)
+    }
+
+    @export(implementation)
+    public static func _makeStorageFrozen(initialValue: Value) -> LazyState<Value> {
+        LazyState(_initialValue: initialValue)
+    }
+
+    public static var _propertyStorageSize: Int? {
+        16
+    }
+}
+
+@_documentation(visibility: internal)
+public struct LazyState<Value>: DynamicProperty {
+    public enum Storage: @unchecked Sendable {
+        case thunk(() -> Value)
+        case value(Value)
+    }
+
+    @usableFromInline
+    var _storage: Storage
+
+    @usableFromInline
+    var _location: AnyLocation<Value>?
+
+    public init(initialValue thunk: @escaping () -> Value) {
+        _storage = .thunk(thunk)
+    }
+
+    @export(implementation)
+    public init(_initialValue: Value) {
+        _storage = .value(_initialValue)
+    }
+
+    public var wrappedValue: Value {
+        get {
+            if let _location {
+                if GraphHost.isUpdating {
+                    switch _storage {
+                    case .thunk(let thunk):
+                        return thunk()
+                    case .value(let value):
+                        return value
+                    }
+                }
+                return _location.getValue()
+            }
+
+            switch _storage {
+            case .thunk(let thunk):
+                return thunk()
+            case .value(let value):
+                return value
+            }
+        }
+        nonmutating set {
+            _location?.setValue(newValue, transaction: Transaction.current)
+        }
+    }
+
+    public var projectedValue: Binding<Value> {
+        if let _location {
+            return Binding(location: _location)
+        }
+        print("Accessing State's value outside of being installed on a View. This will result in a constant Binding of the initial value and will not update.")
+        return .constant(wrappedValue)
+    }
+
+    public static var _propertyStorageSize: Int? {
+        16
+    }
+
+    public static func _makeProperty<V>(
+        in buffer: inout _DynamicPropertyBuffer,
+        container: _GraphValue<V>,
+        fieldOffset: Int,
+        inputs: inout _GraphInputs
+    ) {
+        guard let graph = _AGGraph.current else {
+            fatalError("\(self)._makeProperty called outside an active _AGGraph context.")
+        }
+
+        let wiringSubgraph = AGSubgraph.current
+        let signal: Attribute<Void> = AGSubgraph.withCurrent(wiringSubgraph) {
+            graph.makeInput(value: ())
+        }
+        let mountedLocation = MutableBox<AnyLocation<Value>?>(nil)
+
+        assert(buffer.properties.contains { $0.offset == fieldOffset } == false)
+        buffer.properties.append(.init(type: Self.self, offset: fieldOffset))
+        buffer.contexts[fieldOffset] = { (ptr: UnsafeMutableRawPointer) in
+            guard _AGGraph.current != nil else {
+                fatalError("\(Self.self)._makeProperty context closure called outside an active _AGGraph context.")
+            }
+            let currentState = ptr.assumingMemoryBound(to: LazyState<Value>.self).pointee
+            _ = signal.value
+
+            if let location = mountedLocation.value {
+                var state = currentState
+                state._storage = .value(location.update().0)
+                state._location = location
+                ptr.assumingMemoryBound(to: LazyState<Value>.self).pointee = state
+                return
+            }
+
+            let initialValue: Value
+            switch currentState._storage {
+            case .thunk(let thunk):
+                initialValue = thunk()
+            case .value(let value):
+                initialValue = value
+            }
+            let location = StoredLocation<Value>(
+                initialValue: initialValue,
+                host: GraphHost.currentHost,
+                signal: signal.asWeak().base
+            )
+            mountedLocation.value = location
+            var state = currentState
+            state._storage = .value(location.update().0)
+            state._location = location
+            ptr.assumingMemoryBound(to: LazyState<Value>.self).pointee = state
+        }
+    }
 }
 
 extension State {

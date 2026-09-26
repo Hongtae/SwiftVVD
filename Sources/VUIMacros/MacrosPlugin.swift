@@ -20,5 +20,10 @@ struct MacrosPlugin: CompilerPlugin {
         AnimatablePairDataMacro.self,
         AnimatablePropertyMacro.self,
         InvalidAnimatablePropertyMacro.self,
+        StateMacro.self,
+        StatePropertyWrapperStorageMacro.self,
+        StateInitialStoredValueMacro.self,
+        StateProjectedValueMacro.self,
+        ProjectedValueMacro.self,
     ]
 }

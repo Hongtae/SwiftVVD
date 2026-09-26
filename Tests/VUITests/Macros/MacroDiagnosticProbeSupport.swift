@@ -2,6 +2,8 @@ import Foundation
 import XCTest
 
 #if os(macOS)
+private final class MacroDiagnosticProbeBundleToken {}
+
 func runMacroDiagnosticProbe(named name: String, source: String) throws -> String {
     // The SwiftPM build plan belongs to the package root, not the test bundle.
     let packageRoot = URL(fileURLWithPath: #filePath)
@@ -9,9 +11,20 @@ func runMacroDiagnosticProbe(named name: String, source: String) throws -> Strin
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
-    let buildRoot = packageRoot.appendingPathComponent(".build/debug")
+    let buildRoot = try macroDiagnosticBuildRoot(packageRoot: packageRoot)
     let descriptionURL = buildRoot.appendingPathComponent("description.json")
-    let arguments = try swiftcArguments(from: descriptionURL, buildRoot: buildRoot)
+    let arguments: [String]
+    if FileManager.default.fileExists(atPath: descriptionURL.path) {
+        arguments = try swiftcArguments(
+            from: descriptionURL,
+            buildRoot: buildRoot
+        )
+    } else {
+        arguments = try nativeBuildSwiftcArguments(
+            packageRoot: packageRoot,
+            buildRoot: buildRoot
+        )
+    }
 
     let sourceURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("vui_macro_\(name)_\(UUID().uuidString)")
@@ -33,6 +46,54 @@ func runMacroDiagnosticProbe(named name: String, source: String) throws -> Strin
     let output = String(data: data, encoding: .utf8) ?? ""
     XCTAssertNotEqual(process.terminationStatus, 0, output)
     return output
+}
+
+private func macroDiagnosticBuildRoot(packageRoot: URL) throws -> URL {
+    let bundleProductRoot = Bundle(for: MacroDiagnosticProbeBundleToken.self)
+        .bundleURL
+        .deletingLastPathComponent()
+    let candidates = [
+        bundleProductRoot,
+        packageRoot.appendingPathComponent(".build/debug"),
+        packageRoot.appendingPathComponent(".build/release"),
+    ]
+    return try XCTUnwrap(candidates.first { candidate in
+        FileManager.default.fileExists(
+            atPath: candidate.appendingPathComponent("VUIMacros").path
+        ) && FileManager.default.fileExists(
+            atPath: candidate.appendingPathComponent("VUI.swiftmodule").path
+        )
+    }, "Missing built VUIMacros and VUI products")
+}
+
+private func nativeBuildSwiftcArguments(
+    packageRoot: URL,
+    buildRoot: URL
+) throws -> [String] {
+    let plugin = buildRoot.appendingPathComponent("VUIMacros")
+    let module = buildRoot.appendingPathComponent("VUI.swiftmodule")
+    _ = try XCTUnwrap(
+        FileManager.default.fileExists(atPath: plugin.path) ? plugin : nil,
+        "Missing built VUIMacros plugin at \(plugin.path)"
+    )
+    _ = try XCTUnwrap(
+        FileManager.default.fileExists(atPath: module.path) ? module : nil,
+        "Missing built VUI module at \(module.path)"
+    )
+
+    var arguments = [
+        "-dump-macro-expansions",
+        "-I", buildRoot.path,
+        "-load-plugin-executable", "\(plugin.path)#VUIMacros",
+    ]
+    let helperModuleMap = packageRoot
+        .appendingPathComponent(".build/out/Intermediates.noindex/GeneratedModuleMaps/VVDHelper.modulemap")
+    if FileManager.default.fileExists(atPath: helperModuleMap.path) {
+        arguments.append(contentsOf: [
+            "-Xcc", "-fmodule-map-file=\(helperModuleMap.path)",
+        ])
+    }
+    return arguments
 }
 
 private func swiftcArguments(from descriptionURL: URL, buildRoot: URL) throws -> [String] {
