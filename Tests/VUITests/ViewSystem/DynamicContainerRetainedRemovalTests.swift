@@ -762,7 +762,7 @@ final class DynamicContainerRetainedRemovalTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS formSectionForkRetainedRemoval27Observed
+    // ASSERTIONS: formSectionForkRetainedRemoval27Observed
     func testPublicFormSectionForEachRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear() throws {
         try assertPublicLayoutRootRetainedRemovalDrainsForkedAnimatableCompletionsBeforeDisappear {
             rows, target, recorder, capture in

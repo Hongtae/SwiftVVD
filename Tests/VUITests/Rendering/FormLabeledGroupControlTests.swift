@@ -4,9 +4,9 @@ import XCTest
 @testable import VVD
 
 final class FormLabeledGroupControlTests: XCTestCase {
-    // ASSERTIONS formPublicStructure27Observed
-    // ASSERTIONS formOwnerLowering27Observed
-    // ASSERTIONS formLabeledGroupFieldMetadata27Observed
+    // ASSERTIONS: formPublicStructure27Observed
+    // ASSERTIONS: formOwnerLowering27Observed
+    // ASSERTIONS: formLabeledGroupFieldMetadata27Observed
     func testFormRetainsContentAndResolvedStyleBoundary() {
         let textType: Any.Type = Text.self
         let aliasType: Any.Type = FormStyleConfiguration.Content.self
@@ -35,8 +35,8 @@ final class FormLabeledGroupControlTests: XCTestCase {
         _ = form.formStyle(.grouped)
     }
 
-    // ASSERTIONS formStyleRouting27Observed
-    // ASSERTIONS formCustomStyleReachability27Observed
+    // ASSERTIONS: formStyleRouting27Observed
+    // ASSERTIONS: formCustomStyleReachability27Observed
     func testFormStyleConfigurationRetainsContentAndFooterAliases() {
         let configuration = FormStyleConfiguration()
         XCTAssertEqual(
@@ -68,9 +68,9 @@ final class FormLabeledGroupControlTests: XCTestCase {
         XCTAssertTrue(grouped.contains("FormStyleConfiguration.Footer"), grouped)
     }
 
-    // ASSERTIONS labeledContentPublicStructure27Observed
-    // ASSERTIONS labeledContentOwnerLowering27Observed
-    // ASSERTIONS labeledContentStyleRouting27Observed
+    // ASSERTIONS: labeledContentPublicStructure27Observed
+    // ASSERTIONS: labeledContentOwnerLowering27Observed
+    // ASSERTIONS: labeledContentStyleRouting27Observed
     func testLabeledContentRetainsSourcesAndAutomaticStyleContexts() {
         let labeled = LabeledContent {
             Text("Value")
@@ -114,9 +114,9 @@ final class FormLabeledGroupControlTests: XCTestCase {
         _ = labeled.labeledContentStyle(.automatic)
     }
 
-    // ASSERTIONS groupBoxPublicStructure27Observed
-    // ASSERTIONS groupBoxOwnerLowering27Observed
-    // ASSERTIONS groupBoxStyleRouting27Observed
+    // ASSERTIONS: groupBoxPublicStructure27Observed
+    // ASSERTIONS: groupBoxOwnerLowering27Observed
+    // ASSERTIONS: groupBoxStyleRouting27Observed
     func testGroupBoxRetainsOptionalLabelAndDefaultStyleChain() {
         let group = GroupBox {
             Text("Content")
@@ -154,9 +154,9 @@ final class FormLabeledGroupControlTests: XCTestCase {
         _ = group.groupBoxStyle(.automatic)
     }
 
-    // ASSERTIONS formCustomStyleReachability27Observed
-    // ASSERTIONS labeledContentStyleRouting27Observed
-    // ASSERTIONS groupBoxStyleRouting27Observed
+    // ASSERTIONS: formCustomStyleReachability27Observed
+    // ASSERTIONS: labeledContentStyleRouting27Observed
+    // ASSERTIONS: groupBoxStyleRouting27Observed
     func testCustomStylesReceiveRuntimeDispatch() {
         let recorder = FormLabeledGroupStyleRecorder()
         mount(
@@ -223,9 +223,9 @@ final class FormLabeledGroupControlTests: XCTestCase {
         }
     }
 
-    // ASSERTIONS formColumnsSectionLayout27Observed
-    // ASSERTIONS labeledContentPublicLayout27Observed
-    // ASSERTIONS groupBoxPublicLayout27Observed
+    // ASSERTIONS: formColumnsSectionLayout27Observed
+    // ASSERTIONS: labeledContentPublicLayout27Observed
+    // ASSERTIONS: groupBoxPublicLayout27Observed
     func testDefaultLayoutOwnersRetainObservedAxisRelationships() {
         let labeled = ResolvedLabeledContent._Body(
             configuration: LabeledContentStyleConfiguration()
@@ -250,9 +250,9 @@ final class FormLabeledGroupControlTests: XCTestCase {
         )
     }
 
-    // ASSERTIONS formColumnsSectionLayout27Observed
-    // ASSERTIONS labeledContentPublicLayout27Observed
-    // ASSERTIONS groupBoxPublicLayout27Observed
+    // ASSERTIONS: formColumnsSectionLayout27Observed
+    // ASSERTIONS: labeledContentPublicLayout27Observed
+    // ASSERTIONS: groupBoxPublicLayout27Observed
     @MainActor
     func testMountedDefaultControlsProduceLayoutAndDisplay() throws {
         let root = VStack(spacing: 12) {
