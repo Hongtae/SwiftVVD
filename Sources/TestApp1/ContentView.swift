@@ -17,6 +17,7 @@ private enum LabCategory: Int, Identifiable {
     case textInput
     case scrollView
     case scrollViewReader
+    case splitView
 
     var id: Int { rawValue }
 }
@@ -110,6 +111,7 @@ struct ContentView: View {
                     categoryButton("Scroll View", category: .scrollView, width: 145)
                     categoryButton("ScrollView Reader", category: .scrollViewReader, width: 145)
                     categoryButton("Text Input", category: .textInput, width: 145)
+                    categoryButton("Split View", category: .splitView, width: 145)
                 }
             }
 
@@ -337,6 +339,10 @@ struct ContentView: View {
             }
         case .scrollViewReader:
             ScrollViewReaderLabSheet {
+                selectedCategory = nil
+            }
+        case .splitView:
+            SplitViewLabSheet {
                 selectedCategory = nil
             }
         }
