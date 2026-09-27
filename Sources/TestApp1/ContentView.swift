@@ -38,6 +38,7 @@ private struct SampleLocalizedError: LocalizedError {
 struct ContentView: View {
     @State private var contentScaleFactorOverride: CGFloat?
     @State private var usesVectorFontRendering = false
+    @State private var usesDarkMode = false
     @Environment(\.displayScale) private var displayScale
     @Environment(\._contentScaleFactorOverride)
     private var setContentScaleFactorOverride
@@ -224,6 +225,7 @@ struct ContentView: View {
             \.defaultFontRenderingMode,
             usesVectorFontRendering ? .vector() : .bitmap()
         )
+        .preferredColorScheme(usesDarkMode ? .dark : .light)
     }
 
     private func settingsContent() -> some View {
@@ -239,6 +241,13 @@ struct ContentView: View {
                 contentScaleButton("2x", value: 2)
                 contentScaleButton("3x", value: 3)
             }
+
+            Divider()
+
+            Toggle(
+                "Dark Mode",
+                isOn: $usesDarkMode
+            )
 
             Divider()
 
@@ -263,7 +272,7 @@ struct ContentView: View {
             }
         }
         .padding(24)
-        .frame(width: 440, height: 330)
+        .frame(width: 440, height: 380)
     }
 
     private func contentScaleButton(
