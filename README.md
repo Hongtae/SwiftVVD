@@ -83,6 +83,16 @@ swift test -c release
 their release commands are documented in
 [SharedLibraries/README.md](SharedLibraries/README.md).
 
+`VEditor` currently provides the initial workspace shell: Project Explorer on
+the left, Main Content and Inspector across the upper work area, and a
+full-width Log pane below them. Its File, Edit, View, Tools, Window, and Help
+menus are structural placeholders; project loading, editing, build execution,
+scene/asset tools, and a 3D viewport are later editor-domain work.
+`Sources/VEditor/Core` owns all UI-independent editor code, including editor
+models, operations, services, persistence, and engine integration;
+`Sources/VEditor/UI` owns the VUI-only application shell and calls Core or the
+engine's public API. Core code must not import or depend on VUI.
+
 Platform success is established per host and SDK; a successful macOS or Apple
 cross-build does not imply a Windows or Linux runtime pass. Use the native
 toolchain and prerequisites listed above for each platform.
