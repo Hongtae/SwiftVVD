@@ -193,6 +193,75 @@ final class SplitViewSurfaceTests: XCTestCase {
     }
 
     @MainActor
+    func testPointerReleaseOutsideDividerRestoresPlatformCursor() async throws {
+        // ASSERTIONS splitViewCursorTransition27Observed
+        let size = CGSize(width: 600, height: 240)
+        let controller = SplitViewHostController(
+            content: HSplitView {
+                Color.red
+                Color.blue
+            }
+        )
+        try mount(controller, size: size)
+        let hover = try XCTUnwrap(firstHover(in: controller))
+        let initial = try XCTUnwrap(horizontalHitRange(
+            of: hover,
+            y: size.height / 2,
+            width: Int(size.width)
+        ))
+        let start = CGPoint(x: initial.mid, y: size.height / 2)
+        let outside = CGPoint(x: size.width - 4, y: size.height / 2)
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0
+        ))
+        Update.dispatchActions()
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [.horizontal])
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0.01
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.02
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.03
+        ))
+        Update.dispatchActions()
+        await Task.yield()
+
+        XCTAssertEqual(
+            controller.testWindow.cursorChanges,
+            [.horizontal, .platformDefault]
+        )
+    }
+
+    @MainActor
     func testPointerDragMovesAndRetainsTheDivider() throws {
         // ASSERTIONS splitViewDividerDrag27Observed
         // ASSERTIONS splitViewPositionRetention27Observed

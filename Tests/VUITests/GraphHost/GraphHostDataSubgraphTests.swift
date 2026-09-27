@@ -124,4 +124,53 @@ final class GraphHostDataSubgraphTests: XCTestCase {
 
         XCTAssertNil(graphReference)
     }
+
+    func testTerminalInvalidationAllowsDestroyHookToInvalidateOwnedSubgraph() {
+        let graph = _AGGraph()
+        let ref = _AGGraphContext(graph: graph)
+        let recorder = TerminalSubgraphDestroyRecorder()
+
+        ref.withCurrent {
+            let child = AGSubgraph()
+            AGSubgraph.withCurrent(child) {
+                _ = graph.makeInput(value: 42)
+            }
+            _ = graph.makeStatefulRule(
+                TerminalSubgraphInvalidatingRule(
+                    subgraph: child,
+                    recorder: recorder
+                )
+            )
+
+            graph.invalidateAllNodes()
+        }
+
+        XCTAssertEqual(recorder.destroyCount, 1)
+        XCTAssertFalse(recorder.subgraphWasValidAfterInvalidation)
+        XCTAssertTrue(graph.slots.isEmpty)
+    }
+}
+
+private final class TerminalSubgraphDestroyRecorder {
+    var destroyCount = 0
+    var subgraphWasValidAfterInvalidation = true
+}
+
+private struct TerminalSubgraphInvalidatingRule:
+    StatefulRule, ObservedAttribute
+{
+    typealias Value = Int
+
+    var subgraph: AGSubgraphRef
+    var recorder: TerminalSubgraphDestroyRecorder
+
+    mutating func updateValue() {
+        value = 1
+    }
+
+    mutating func destroy() {
+        recorder.destroyCount += 1
+        subgraph.invalidate()
+        recorder.subgraphWasValidAfterInvalidation = subgraph.isValid
+    }
 }

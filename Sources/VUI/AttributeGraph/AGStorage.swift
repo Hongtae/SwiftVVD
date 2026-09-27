@@ -1177,6 +1177,27 @@ extension _AGGraph {
             "A graph cannot be invalidated during an active update."
         )
 
+        // Destroy hooks can invalidate an owned child subgraph. Mark every
+        // surviving ownership group terminal before preparing nodes so those
+        // callbacks cannot start a second removal pass over the same slots.
+        // The ownership metadata is finalized after all node bodies have run.
+        var terminalSubgraphs = pendingSubgraphInvalidations
+        var terminalSubgraphIDs = Set(
+            terminalSubgraphs.map(ObjectIdentifier.init)
+        )
+        for slot in slots {
+            guard let subgraph = slot.node?.pointee.subgraph,
+                  terminalSubgraphIDs.insert(
+                    ObjectIdentifier(subgraph)
+                  ).inserted else {
+                continue
+            }
+            terminalSubgraphs.append(subgraph)
+        }
+        for subgraph in terminalSubgraphs {
+            _ = subgraph._beginInvalidation()
+        }
+
         // GraphHost teardown is terminal. Clear work that could retain graph
         // values before disconnecting every node, including nodes that were
         // intentionally created outside an ownership subgraph.
@@ -1198,6 +1219,9 @@ extension _AGGraph {
         }
         for removal in removals {
             finishNodeRemoval(removal)
+        }
+        for subgraph in terminalSubgraphs {
+            subgraph._finishInvalidation(removingNodes: false)
         }
 
         // Destroy hooks may enqueue cleanup work. None of it may escape a

@@ -165,7 +165,7 @@ final class AGSubgraphRef: @unchecked Sendable {
         return true
     }
 
-    func _finishInvalidation() {
+    func _finishInvalidation(removingNodes: Bool = true) {
         guard invalidationPending else { return }
 
         var work: [AGSubgraphRef] = [self]
@@ -182,7 +182,7 @@ final class AGSubgraphRef: @unchecked Sendable {
             }
         }
 
-        if let graph {
+        if removingNodes, let graph {
             var removals: [_AGGraph.PreparedNodeRemoval] = []
             for subgraph in ordered {
                 for node in subgraph.nodes.reversed() {

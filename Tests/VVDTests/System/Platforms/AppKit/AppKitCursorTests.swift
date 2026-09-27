@@ -58,6 +58,8 @@ final class AppKitCursorTests: XCTestCase {
 
     @MainActor
     func testWindowStoresCursorOverridePerPrimaryPointer() throws {
+        let previousNativeCursor = NSCursor.current
+        defer { previousNativeCursor.set() }
         let window = try XCTUnwrap(
             makeWindow(
                 name: "AppKitCursorTests",
@@ -67,19 +69,21 @@ final class AppKitCursorTests: XCTestCase {
         )
         defer { window.close() }
 
-        window.setCursor(.pointingHand, forDeviceID: 0)
-        guard case .pointingHand? = window.cursor(forDeviceID: 0) else {
+        window.setCursor(.resizeLeftRight, forDeviceID: 0)
+        guard case .resizeLeftRight? = window.cursor(forDeviceID: 0) else {
             return XCTFail("Expected the primary pointer cursor override")
         }
 
         window.setCursor(.crosshair, forDeviceID: 1)
         XCTAssertNil(window.cursor(forDeviceID: 1))
-        guard case .pointingHand? = window.cursor(forDeviceID: 0) else {
+        guard case .resizeLeftRight? = window.cursor(forDeviceID: 0) else {
             return XCTFail("An unsupported device must not change the override")
         }
 
+        NSCursor.columnResize.set()
         window.setCursor(nil, forDeviceID: 0)
         XCTAssertNil(window.cursor(forDeviceID: 0))
+        XCTAssertTrue(NSCursor.current === NSCursor.arrow)
     }
 }
 #endif

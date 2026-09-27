@@ -353,8 +353,14 @@ final class AppKitWindow: Window {
             return
         }
 
+        let previousNativeCursor = view?.cursorOverride
         cursorOverride = cursor
         view?.cursorOverride = nativeCursor
+        if cursor == nil,
+           let previousNativeCursor,
+           NSCursor.current === previousNativeCursor {
+            NSCursor.arrow.set()
+        }
     }
 
     func cursor(forDeviceID deviceID: Int) -> Cursor? {
