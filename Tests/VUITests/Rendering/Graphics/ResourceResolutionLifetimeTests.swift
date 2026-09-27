@@ -297,6 +297,118 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
         XCTAssertNil(witness.deviceContext)
     }
 
+    @MainActor
+    func testAppTerminationInvalidatesWindowGraphsAndReleasesTextResources() throws {
+        let previousContext = appContext
+        defer { appContext = previousContext }
+
+        weak var controllerReference: WindowController?
+        weak var viewGraphReference: ViewGraph?
+        weak var attributeGraphReference: _AGGraph?
+        weak var orphanViewGraphReference: ViewGraph?
+        weak var orphanAttributeGraphReference: _AGGraph?
+        weak var deviceContextReference: GraphicsDeviceContext?
+        weak var deviceReference: LifetimeTestDevice?
+        var registry: AppWindowsController? = AppWindowsController()
+
+        func populate() throws {
+            let device = LifetimeTestDevice()
+            let context = GraphicsDeviceContext(device: device)
+            deviceReference = device
+            deviceContextReference = context
+            appContext = LifetimeTestAppContext(
+                context,
+                appWindowsController: registry
+            )
+
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<5 { root.deleteLastPathComponent() }
+            var environment = EnvironmentValues()
+            environment.font = .file(
+                root.appendingPathComponent(
+                    "Sources/VUI/Resources/Fonts/Roboto/Roboto-VariableFont_wdth,wght.ttf"
+                ),
+                size: 13
+            )
+            environment.defaultFontRenderingMode = .bitmap()
+
+            let scene = WindowKey(
+                namespace: .app,
+                sceneID: SceneID(ResourceResolutionLifetimeTests.self)
+            )
+            let controller = WindowController(
+                content: ShutdownLifetimeRoot(),
+                environment: environment,
+                scene: scene
+            )
+            controllerReference = controller
+            viewGraphReference = controller.viewGraph
+            attributeGraphReference = controller.viewGraph.data.graph
+            registry?.mainWindowControllers[scene] = [controller]
+
+            var redraw = false
+            controller.updateView(
+                tick: 0,
+                delta: 0,
+                date: controller.date,
+                contentSize: CGSize(width: 320, height: 180),
+                redraw: &redraw
+            ) { _, _ in }
+            controller.viewGraph.data.withCurrent {
+                let graph = controller.viewGraph.data.graph
+                // Model a graph-owned closure that keeps the raw graph alive
+                // unless terminal invalidation destroys every remaining node.
+                let retainedGraphRule: Attribute<Int> = graph.makeRule(
+                    rule: { () -> Int in graph.slots.count }
+                )
+                XCTAssertGreaterThan(retainedGraphRule.value, 0)
+            }
+
+            // Model a dismissed presentation whose controller and ViewGraph
+            // have left the parent's strong registries while the raw graph is
+            // still retained by a graph-owned closure.
+            let orphan = WindowController(
+                content: ShutdownLifetimeRoot(),
+                environment: environment,
+                scene: scene
+            )
+            orphanViewGraphReference = orphan.viewGraph
+            orphanAttributeGraphReference = orphan.viewGraph.data.graph
+            orphan.viewGraph.data.withCurrent {
+                let graph = orphan.viewGraph.data.graph
+                let retainedGraphRule: Attribute<Int> = graph.makeRule(
+                    rule: { () -> Int in graph.slots.count }
+                )
+                XCTAssertGreaterThan(retainedGraphRule.value, 0)
+            }
+        }
+
+#if canImport(ObjectiveC)
+        try autoreleasepool(invoking: populate)
+#else
+        try populate()
+#endif
+        appContext = previousContext
+        XCTAssertNotNil(controllerReference)
+        XCTAssertNotNil(viewGraphReference)
+        XCTAssertNotNil(attributeGraphReference)
+        XCTAssertNil(orphanViewGraphReference)
+        XCTAssertNotNil(orphanAttributeGraphReference)
+        XCTAssertNotNil(deviceContextReference)
+        XCTAssertNotNil(deviceReference)
+
+        registry?.invalidateForAppTermination()
+        registry = nil
+
+        XCTAssertNil(controllerReference)
+        XCTAssertNil(viewGraphReference)
+        XCTAssertNil(attributeGraphReference)
+        XCTAssertNil(orphanViewGraphReference)
+        XCTAssertNil(orphanAttributeGraphReference)
+        XCTAssertNil(deviceContextReference)
+        XCTAssertNil(deviceReference)
+    }
+
     func testManagerBackendCachePurgeReleasesItsLastTextureFontAndDevice() throws {
         try checkManagerBackendPurge(retainsScaledSource: false)
     }
@@ -596,11 +708,31 @@ final class ResourceResolutionLifetimeTests: XCTestCase {
     }
 }
 
+private struct ShutdownLifetimeRoot: View {
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                Text(verbatim: "Shutdown")
+                ForEach(0..<2, id: \.self) { index in
+                    Button("Item \(index)") {}
+                }
+            }
+            .padding(12)
+        }
+    }
+}
+
 private final class LifetimeTestAppContext: AppContext {
     let graphicsDeviceContext: GraphicsDeviceContext?
     let audioDeviceContext: AudioDeviceContext? = nil
-    var appWindowsController: AppWindowsController? { nil }
-    init(_ context: GraphicsDeviceContext) { graphicsDeviceContext = context }
+    let appWindowsController: AppWindowsController?
+    init(
+        _ context: GraphicsDeviceContext,
+        appWindowsController: AppWindowsController? = nil
+    ) {
+        graphicsDeviceContext = context
+        self.appWindowsController = appWindowsController
+    }
     func resourceData(forURL: URL) -> (any DataProtocol)? { nil }
     func setResource(data: (any DataProtocol)?, forURL: URL) {}
 }

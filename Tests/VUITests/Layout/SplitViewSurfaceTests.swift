@@ -280,6 +280,93 @@ final class SplitViewSurfaceTests: XCTestCase {
     }
 
     @MainActor
+    func testPointerDragTracksRepeatedLayoutUpdatesInBothAxes() throws {
+        let horizontalSize = CGSize(width: 600, height: 240)
+        let horizontal = SplitViewHostController(
+            content: HSplitView {
+                Color.red
+                Color.blue
+            }
+        )
+        try mount(horizontal, size: horizontalSize)
+        let horizontalHover = try XCTUnwrap(firstHover(in: horizontal))
+        let horizontalInitial = try XCTUnwrap(horizontalHitRange(
+            of: horizontalHover,
+            y: horizontalSize.height / 2,
+            width: Int(horizontalSize.width)
+        ))
+        let horizontalStart = CGPoint(
+            x: horizontalInitial.mid,
+            y: horizontalSize.height / 2
+        )
+        try drag(
+            horizontal,
+            from: horizontalStart,
+            first: CGPoint(
+                x: horizontalStart.x + 24,
+                y: horizontalStart.y
+            ),
+            final: CGPoint(
+                x: horizontalStart.x + 48,
+                y: horizontalStart.y
+            ),
+            size: horizontalSize
+        )
+        let horizontalFinal = try XCTUnwrap(horizontalHitRange(
+            of: try XCTUnwrap(firstHover(in: horizontal)),
+            y: horizontalSize.height / 2,
+            width: Int(horizontalSize.width)
+        ))
+        XCTAssertEqual(
+            horizontalFinal.mid,
+            horizontalInitial.mid + 48,
+            accuracy: 1
+        )
+
+        let verticalSize = CGSize(width: 320, height: 420)
+        let vertical = SplitViewHostController(
+            content: VSplitView {
+                Color.red
+                Color.blue
+            }
+        )
+        try mount(vertical, size: verticalSize)
+        let verticalHover = try XCTUnwrap(firstHover(in: vertical))
+        let verticalInitial = try XCTUnwrap(verticalHitRange(
+            of: verticalHover,
+            x: verticalSize.width / 2,
+            height: Int(verticalSize.height)
+        ))
+        let verticalStart = CGPoint(
+            x: verticalSize.width / 2,
+            y: verticalInitial.mid
+        )
+        try drag(
+            vertical,
+            from: verticalStart,
+            first: CGPoint(
+                x: verticalStart.x,
+                y: verticalStart.y + 24
+            ),
+            final: CGPoint(
+                x: verticalStart.x,
+                y: verticalStart.y + 48
+            ),
+            size: verticalSize
+        )
+        let verticalFinal = try XCTUnwrap(verticalHitRange(
+            of: try XCTUnwrap(firstHover(in: vertical)),
+            x: verticalSize.width / 2,
+            height: Int(verticalSize.height)
+        ))
+        XCTAssertEqual(
+            verticalFinal.mid,
+            verticalInitial.mid + 48,
+            accuracy: 1
+        )
+    }
+
+    @MainActor
     private func mount(
         _ controller: WindowController,
         size: CGSize
@@ -330,6 +417,98 @@ final class SplitViewSurfaceTests: XCTestCase {
             return nil
         }
         return (minimum, maximum, (minimum + maximum) / 2)
+    }
+
+    private func verticalHitRange(
+        of responder: HoverResponder,
+        x: CGFloat,
+        height: Int
+    ) -> (min: CGFloat, max: CGFloat, mid: CGFloat)? {
+        var hits: [CGFloat] = []
+        for y in 0..<height {
+            let result = responder.containsGlobalPoints(
+                [CGPoint(x: x, y: CGFloat(y))],
+                cacheKey: nil,
+                options: [.includeHoverResponders, .uncached]
+            )
+            if result.mask[0] {
+                hits.append(CGFloat(y))
+            }
+        }
+        guard let minimum = hits.first, let maximum = hits.last else {
+            return nil
+        }
+        return (minimum, maximum, (minimum + maximum) / 2)
+    }
+
+    @MainActor
+    private func drag(
+        _ controller: SplitViewHostController,
+        from start: CGPoint,
+        first: CGPoint,
+        final: CGPoint,
+        size: CGSize
+    ) throws {
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0
+        )))
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: first,
+            timestamp: 0.01
+        )))
+        var redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: final,
+            timestamp: 0.02
+        )))
+        controller.updateView(
+            tick: 2,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+
+        XCTAssertTrue(controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: final,
+            timestamp: 0.03
+        )))
+        controller.updateView(
+            tick: 3,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
     }
 
     private func firstGesturePoint(

@@ -105,4 +105,23 @@ final class GraphHostDataSubgraphTests: XCTestCase {
             XCTAssertEqual(unflaggedEvaluations, 2)
         }
     }
+
+    func testInvalidationReleasesNodesCreatedOutsideOwnershipSubgraphs() {
+        weak var graphReference: _AGGraph?
+        var host: GraphHost? = GraphHost()
+        graphReference = host?.data.graph
+
+        host?.data.withCurrent {
+            let graph = host!.data.graph
+            let retainedGraphRule: Attribute<Int> = graph.makeRule(
+                rule: { () -> Int in graph.slots.count }
+            )
+            XCTAssertGreaterThan(retainedGraphRule.value, 0)
+        }
+
+        host?.invalidate()
+        host = nil
+
+        XCTAssertNil(graphReference)
+    }
 }

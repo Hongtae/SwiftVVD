@@ -330,9 +330,10 @@ class GraphHost: CustomReflectable {
         }
 
         mutating func invalidate() {
-            guard graphRef != nil else { return }
+            guard let graph = graphRef else { return }
             withCurrent {
                 globalSubgraph.invalidate()
+                graph.invalidateAllNodes()
             }
             graphRef = nil
         }

@@ -145,6 +145,7 @@ class AppMain<A>: ApplicationDelegate, AppContext where A: App {
     }
 
     func finalize(application: Application) {
+        windowsController?.invalidateForAppTermination()
         AppLifetimeResource.purgeAllResources(reason: .appTermination)
         self.appGraph = nil
         self.windowsController = nil

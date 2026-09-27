@@ -1143,6 +1143,7 @@ class WindowController: WindowDelegate,
         self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
         installContentScaleFactorOverrideAction()
+        appContext?.appWindowsController?.registerForAppTermination(self)
     }
 
     deinit {
@@ -1184,6 +1185,7 @@ class WindowController: WindowDelegate,
         self.viewGraph.graphDelegate = self
         self.viewGraph.updateDelegate = self
         installContentScaleFactorOverrideAction()
+        appContext?.appWindowsController?.registerForAppTermination(self)
     }
 
     private func installContentScaleFactorOverrideAction() {
@@ -1842,6 +1844,31 @@ class WindowController: WindowDelegate,
                 window?.close()
             }
         }
+    }
+
+    func invalidateForAppTermination() {
+        guard viewGraph.isValid else { return }
+
+        let presentationControllers = presentationChildren.withLock {
+            $0.map(\.controller)
+        }
+        let modalControllers = modalChildren.withLock {
+            $0.map(\.controller)
+        }
+
+        endPresentationSession()
+        for controller in presentationControllers {
+            controller.invalidateForAppTermination()
+        }
+        for controller in modalControllers {
+            controller.invalidateForAppTermination()
+        }
+
+        rootCommandsSource?.unregister(self)
+        rootCommandsSource = nil
+        resolvedRootCommands = nil
+        viewGraph.invalidate()
+        sceneResources.purgeResources(reason: .appTermination)
     }
 
     func forEachPresentationChild(_ body: (PresentationChildWindowController) -> Void) {

@@ -519,6 +519,23 @@ final class WindowGestureEnvironment {
             cancelledGestureResponders.removeValue(forKey: serial)
         }
 
+        if !events.isEmpty,
+           events.values.allSatisfy({ $0.phase.isTerminal }),
+           let cohortID,
+           let cohort = recognitionCohorts[cohortID] {
+            // A responder can combine recognizers for disjoint event types,
+            // such as mouse and touch taps. Recognizers that did not accept
+            // this completed event stream remain possible, but there can be
+            // no later sample that resolves them. Retire those members with
+            // the completed stream so a later interaction can form a fresh
+            // recognition cohort for the same responder.
+            for member in cohort.members.values
+            where !member.disposition.isTerminal {
+                reject(member)
+            }
+            finalizeTerminalMembers(in: cohortID)
+        }
+
         let phase: GesturePhase<Void>
         if phases.contains(where: { $0.isActive }) {
             phase = .active(())

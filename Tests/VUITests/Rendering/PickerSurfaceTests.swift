@@ -1,3 +1,4 @@
+import Observation
 import XCTest
 @testable import VUI
 @testable import VVD
@@ -316,6 +317,114 @@ final class PickerSurfaceTests: XCTestCase {
         XCTAssertEqual(store.selection, 2)
     }
 
+    @MainActor
+    func testSegmentedPointerCanReselectAnOptionAfterContentUpdates() {
+        let store = PickerPointerSelectionStore(selection: 1)
+        let controller = WindowController(
+            content: PickerPointerSelectionRoot(store: store),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(PickerPointerSelectionStore.self)
+            )
+        )
+        let size = CGSize(width: 240, height: 120)
+        update(controller, size: size, tick: 0)
+
+        var hitPoints = segmentedGestureHitPoints(
+            in: controller,
+            size: size
+        )
+        XCTAssertFalse(hitPoints.isEmpty)
+        guard let right = hitPoints.first else { return }
+        XCTAssertTrue(click(controller, at: right, timestamp: 0))
+        update(controller, size: size, tick: 1)
+        XCTAssertEqual(store.selection, 2)
+
+        hitPoints = segmentedGestureHitPoints(in: controller, size: size)
+        guard let left = hitPoints.last else { return }
+        XCTAssertTrue(click(controller, at: left, timestamp: 1))
+        update(controller, size: size, tick: 2)
+        XCTAssertEqual(store.selection, 1)
+
+        hitPoints = segmentedGestureHitPoints(in: controller, size: size)
+        guard let reselectedRight = hitPoints.first else { return }
+        XCTAssertTrue(click(controller, at: reselectedRight, timestamp: 2))
+        update(controller, size: size, tick: 3)
+        XCTAssertEqual(store.selection, 2)
+    }
+
+    @MainActor
+    private func update(
+        _ controller: WindowController,
+        size: CGSize,
+        tick: UInt64
+    ) {
+        var redraw = false
+        controller.updateView(
+            tick: tick,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+    }
+
+    @MainActor
+    private func segmentedGestureHitPoints(
+        in controller: WindowController,
+        size: CGSize
+    ) -> [CGPoint] {
+        controller.viewGraph.data.withCurrent {
+            guard let responder = controller.viewGraph.responderNode
+                    as? MultiViewResponder else {
+                return []
+            }
+            var points: [CGPoint] = []
+            for y in stride(from: 0.0, through: size.height, by: 4.0) {
+                for x in stride(from: 0.0, through: size.width, by: 4.0) {
+                    let point = CGPoint(x: x, y: y)
+                    let hits = responder.respondersContaining(point: point)
+                    if hits.contains(where: {
+                        $0 is any AnyGestureResponder
+                    }) {
+                        points.append(point)
+                    }
+                }
+            }
+            return points.sorted {
+                $0.x == $1.x ? $0.y < $1.y : $0.x > $1.x
+            }
+        }
+    }
+
+    @MainActor
+    private func click(
+        _ controller: WindowController,
+        at point: CGPoint,
+        timestamp: TimeInterval
+    ) -> Bool {
+        let down = controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            clickCount: 1,
+            location: point,
+            timestamp: timestamp
+        ))
+        let up = controller.handleMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            clickCount: 1,
+            location: point,
+            timestamp: timestamp + 0.01
+        ))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.002))
+        return down && up
+    }
+
     private func render<Content: View>(_ root: Content) {
         let renderer = TestViewRendererHost()
         let graph = ViewGraph(
@@ -334,6 +443,7 @@ private struct PickerSelectionSource<Value> {
     var selection: Binding<Value>
 }
 
+@Observable
 private final class PickerPointerSelectionStore: @unchecked Sendable {
     var selection: Int
 

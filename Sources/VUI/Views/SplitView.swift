@@ -247,7 +247,7 @@ private struct SplitViewDivider: View {
             )
         }
         .gesture(
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
                     positions.update(
                         divider: id,

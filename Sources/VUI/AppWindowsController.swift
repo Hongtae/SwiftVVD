@@ -13,12 +13,20 @@ import Synchronization
 // directly by their parent WindowController, not by this static-scene registry.
 class AppWindowsController: @unchecked Sendable {
 
+    private struct WindowLifetimeEntry: @unchecked Sendable {
+        var controller: WeakBox<WindowController>
+        var viewGraph: WeakBox<ViewGraph>
+        var graph: WeakBox<_AGGraph>
+        var sceneResources: WeakBox<SceneResources>
+    }
+
     private struct RootCommandFocusState: @unchecked Sendable {
         var activeRoot: ObjectIdentifier?
         var values: [ObjectIdentifier: FocusedValues] = [:]
     }
 
     private let rootCommandFocusState = Mutex(RootCommandFocusState())
+    private let windowLifetimeEntries = Mutex<[WindowLifetimeEntry]>([])
 
     // WindowGroup: array because openWindow() can open multiple instances per key.
     var mainWindowControllers: [WindowKey: [WindowController]] = [:]
@@ -52,6 +60,72 @@ class AppWindowsController: @unchecked Sendable {
         auxiliaryWindowControllers.values.forEach { result.append($0) }
         if let s = settingsWindowController { result.append(s) }
         return result
+    }
+
+    func registerForAppTermination(_ controller: WindowController) {
+        let viewGraph = controller.viewGraph
+        let graph = viewGraph.data.graph
+        windowLifetimeEntries.withLock { entries in
+            entries.removeAll {
+                $0.graph.base == nil || $0.graph.base === graph
+            }
+            entries.append(WindowLifetimeEntry(
+                controller: WeakBox(controller),
+                viewGraph: WeakBox(viewGraph),
+                graph: WeakBox(graph),
+                sceneResources: WeakBox(controller.sceneResources)
+            ))
+        }
+    }
+
+    func invalidateForAppTermination() {
+        // Dynamic presentation controllers leave their parent's active child
+        // list when dismissed. Keep only weak app-lifetime records so terminal
+        // cleanup can still reach a graph retained by one of its own nodes.
+        let lifetimeEntries = windowLifetimeEntries.withLock { entries in
+            defer { entries.removeAll() }
+            return entries
+        }
+        var seen: Set<ObjectIdentifier> = []
+        let registeredControllers = lifetimeEntries.compactMap {
+            $0.controller.base
+        }
+        let controllers = (
+            allWindowControllers +
+            dismissedWindowControllers +
+            registeredControllers
+        )
+            .filter { seen.insert(ObjectIdentifier($0)).inserted }
+
+        for controller in controllers {
+            controller.invalidateForAppTermination()
+        }
+
+        // A controller or ViewGraph may already have been released while its
+        // raw graph remains in a graph-owned closure cycle. Tear down each
+        // surviving layer independently; all operations are terminal and
+        // idempotent for application shutdown.
+        for entry in lifetimeEntries {
+            entry.viewGraph.base?.invalidate()
+            if let graph = entry.graph.base {
+                _AGGraph.withCurrent(graph) {
+                    graph.invalidateAllNodes()
+                }
+            }
+            entry.sceneResources.base?.purgeResources(reason: .appTermination)
+        }
+
+        mainWindowControllers.removeAll()
+        singleWindowControllers.removeAll()
+        auxiliaryWindowControllers.removeAll()
+        settingsWindowController = nil
+        dismissedWindowControllers.removeAll()
+        windowCounts.removeAll()
+        cascadeNumbers.removeAll()
+        auxiliaryCascadeNumber = 0
+        rootCommandFocusState.withLock {
+            $0 = RootCommandFocusState()
+        }
     }
 
     // One source can feed multiple roots, so schedule each shared source once.

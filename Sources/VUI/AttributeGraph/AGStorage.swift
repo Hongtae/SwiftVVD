@@ -1058,7 +1058,10 @@ extension _AGGraph {
 
     /// Disconnects a node while retaining its body and value for the later
     /// destruction pass.
-    func prepareNodeRemoval(_ id: AGAttribute) -> PreparedNodeRemoval {
+    func prepareNodeRemoval(
+        _ id: AGAttribute,
+        replacementSeed suppliedReplacementSeed: UInt32? = nil
+    ) -> PreparedNodeRemoval {
         assert(_AGGraph.current === self)
         let index = Int(id.rawValue)
         guard let removingNode = slots[index].node else {
@@ -1068,7 +1071,7 @@ extension _AGGraph {
             fatalError("removeNode called on @\(id.rawValue) while removal is already in progress.")
         }
         removingNode.pointee.isBeingRemoved = true
-        let replacementSeed = makeWeakSeed()
+        let replacementSeed = suppliedReplacementSeed ?? makeWeakSeed()
 #if DEBUG
         recordRemovedNodeTombstone(
             id: id,
@@ -1165,6 +1168,61 @@ extension _AGGraph {
     /// lifecycle.
     func removeNode(_ id: AGAttribute) {
         finishNodeRemoval(prepareNodeRemoval(id))
+    }
+
+    func invalidateAllNodes() {
+        assert(_AGGraph.current === self)
+        precondition(
+            !isUpdatingOnCurrentThread,
+            "A graph cannot be invalidated during an active update."
+        )
+
+        // GraphHost teardown is terminal. Clear work that could retain graph
+        // values before disconnecting every node, including nodes that were
+        // intentionally created outside an ownership subgraph.
+        inbox.removeAll()
+        actionOutbox.removeAll()
+        pendingActions.removeAll()
+        pendingSideEffectEvaluations.removeAll()
+        pendingSideEffectEvaluationSet.removeAll()
+        pendingSubgraphInvalidations.removeAll()
+
+        let replacementSeed = makeWeakSeed()
+        var removals: [PreparedNodeRemoval] = []
+        removals.reserveCapacity(slots.count - freeList.count)
+        for index in slots.indices.reversed() where slots[index].node != nil {
+            removals.append(prepareNodeRemoval(
+                AGAttribute(rawValue: UInt32(index)),
+                replacementSeed: replacementSeed
+            ))
+        }
+        for removal in removals {
+            finishNodeRemoval(removal)
+        }
+
+        // Destroy hooks may enqueue cleanup work. None of it may escape a
+        // terminal graph invalidation with stale attribute handles.
+        inbox.removeAll()
+        actionOutbox.removeAll()
+        pendingActions.removeAll()
+        pendingSideEffectEvaluations.removeAll()
+        pendingSideEffectEvaluationSet.removeAll()
+        pendingSubgraphInvalidations.removeAll()
+
+        slots.removeAll()
+        freeList.removeAll()
+        attributeInfos.removeAll()
+        cachedRuleEntries.removeAll()
+        cachedRuleKeysByAttribute.removeAll()
+        offsetPathIDs.removeAll()
+        rawOffsetPathIDs.removeAll()
+        indirectDependencies.removeAll()
+        crossGraphObservers.removeAll()
+#if DEBUG
+        removedNodeTombstones.removeAll()
+        removedNodeTombstoneOrder.removeAll()
+#endif
+        context = nil
     }
 
     // MARK: Value Access

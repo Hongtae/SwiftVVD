@@ -99,4 +99,8 @@ final class AGInbox: @unchecked Sendable {
         item.work()
         return transaction?.isEmpty == false ? transaction : nil
     }
+
+    func removeAll() {
+        pendingWork.withLock { $0.removeAll() }
+    }
 }
