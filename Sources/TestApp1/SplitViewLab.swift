@@ -22,13 +22,13 @@ struct SplitViewLabSheet: View {
             HSplitView {
                 pane(
                     title: "Navigator",
-                    detail: "120…260 pt",
+                    detail: "120…420 pt",
                     color: .blue
                 )
                 .frame(
                     minWidth: 120,
                     idealWidth: 180,
-                    maxWidth: 260,
+                    maxWidth: 420,
                     maxHeight: .infinity
                 )
 
@@ -53,24 +53,24 @@ struct SplitViewLabSheet: View {
             VSplitView {
                 pane(
                     title: "Viewport",
-                    detail: "70…150 pt",
+                    detail: "60…160 pt",
                     color: .green
                 )
                 .frame(
                     maxWidth: .infinity,
-                    minHeight: 70,
-                    idealHeight: 105,
-                    maxHeight: 150
+                    minHeight: 60,
+                    idealHeight: 110,
+                    maxHeight: 160
                 )
 
                 pane(
                     title: "Console",
-                    detail: "minimum 90 pt",
+                    detail: "minimum 60 pt",
                     color: .purple
                 )
                 .frame(
                     maxWidth: .infinity,
-                    minHeight: 90,
+                    minHeight: 60,
                     idealHeight: 220,
                     maxHeight: .infinity
                 )
