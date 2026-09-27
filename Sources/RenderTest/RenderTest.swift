@@ -135,7 +135,9 @@ class RenderTestApp: ApplicationDelegate, WindowDelegate, @unchecked Sendable {
         let lightColor = Vector3(1, 1, 1)
         let ambientColor = Vector3(0.3, 0.3, 0.3)
 
-        let structuredBufferBinding = false
+        let structuredBufferBinding = CommandLine.arguments.contains(
+            "--structured-buffer-binding"
+        )
         if structuredBufferBinding {
             let pcData = (lightDir: lightDir.float3, _: Float(0),
                           lightColor: lightColor.float3, _: Float(0),

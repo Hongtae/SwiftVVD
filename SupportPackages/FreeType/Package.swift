@@ -77,6 +77,7 @@ let package = Package(
                 .headerSearchPath("include"),
                 .unsafeFlags([
                     "-Wno-format",
+                    "-Wno-macro-redefined",
                     "-Wno-shorten-64-to-32",
                 ]),
             ]),

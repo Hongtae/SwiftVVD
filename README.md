@@ -52,8 +52,40 @@ Cross-Platform Game Engine for swift programming language.
 - [minimp3](https://github.com/lieff/minimp3)
 - [SPIRV-Cross](https://github.com/khronosgroup/spirv-cross)
 - [TinyGLTF](https://github.com/syoyo/tinygltf)
+- [Vulkan Headers](https://github.com/KhronosGroup/Vulkan-Headers)
+- [Wayland protocols](https://gitlab.freedesktop.org/wayland/wayland-protocols)
 - [zlib](https://github.com/madler/zlib)
 - [Zstd](https://github.com/facebook/zstd)
+
+The VUI product also bundles portable fonts and Material Design-derived SVG
+symbols. SwiftSyntax is fetched as a build-time dependency, and Linux builds
+use the system ICU and Wayland libraries. See
+[Third-party notices](THIRD_PARTY_NOTICES.md) for the in-tree license and
+provenance locations.
+
+---
+## Build and test
+
+Clone with Git LFS enabled and materialize all LFS objects before building:
+
+```sh
+git lfs pull
+swift build -c release --product VVD
+swift build -c release --product VUI
+swift build -c release --product VGame
+swift build -c release --product VEditor
+swift test
+swift test -c release
+```
+
+`VVD`, `VUI`, and `VGame` are library products. `VEditor`, `TestApp1`, and
+`RenderTest` are executable targets. Separate dynamic-library manifests and
+their release commands are documented in
+[SharedLibraries/README.md](SharedLibraries/README.md).
+
+Platform success is established per host and SDK; a successful macOS or Apple
+cross-build does not imply a Windows or Linux runtime pass. Use the native
+toolchain and prerequisites listed above for each platform.
 
 ---
 ## Samples
