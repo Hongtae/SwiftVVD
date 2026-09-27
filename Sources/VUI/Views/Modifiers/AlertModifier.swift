@@ -341,6 +341,7 @@ private struct DialogOverlayActionButtonBody: View {
             .padding(.vertical, 4)
             .foregroundStyle(foreground)
             .background {
+                RoundedRectangle(cornerRadius: 5).fill(BackgroundStyle())
                 RoundedRectangle(cornerRadius: 5).fill(background)
                 RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1)
             }
@@ -351,28 +352,24 @@ private struct DialogOverlayActionButtonBody: View {
         if isDefaultAction {
             return .white
         }
-        return role == .destructive ? Color(red: 1.0, green: 0.12, blue: 0.16) : .black
+        return role == .destructive ? .red : .primary
     }
 
     private var background: Color {
         if isDefaultAction {
-            return isPressed
-                ? Color(red: 0.0, green: 0.36, blue: 0.78)
-                : Color(red: 0.0, green: 0.48, blue: 1.0)
+            return isPressed ? Color.blue.opacity(0.8) : .blue
         }
         if role == .destructive {
-            return isPressed
-                ? Color(red: 1.0, green: 0.62, blue: 0.64)
-                : Color(red: 1.0, green: 0.76, blue: 0.78)
+            return Color.red.opacity(isPressed ? 0.35 : 0.22)
         }
-        return Color(white: isPressed ? 0.82 : 0.92)
+        return isPressed ? .primaryFill : .quaternaryFill
     }
 
     private var border: Color {
         if isDefaultAction {
             return .clear
         }
-        return role == .destructive ? .clear : Color(white: 0.35)
+        return role == .destructive ? .clear : .secondaryFill
     }
 }
 
@@ -406,6 +403,7 @@ struct DialogOverlayPanel: View {
                 .padding(.bottom, 20)
         }
         .frame(width: 280)
+        .background(BackgroundStyle(), in: RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder

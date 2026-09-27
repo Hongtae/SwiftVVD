@@ -92,6 +92,43 @@ final class WindowConfigurationTests: XCTestCase {
         XCTAssertEqual(DebugInfoLayout.edgeInset, 5)
     }
 
+    func testBackgroundRolesTrackSchemeUntilAnExplicitOverrideWins() {
+        // ASSERTIONS colorBackgroundPalette27Observed
+        var dark = EnvironmentValues()
+        dark.colorScheme = .dark
+        var light = EnvironmentValues()
+        light.colorScheme = .light
+
+        var window = WindowConfiguration()
+        window.updateBackground(in: dark)
+        XCTAssertEqual(window.backgroundRole, .window)
+        XCTAssertEqual(
+            window.backgroundColor,
+            BackendColor(rgba8: .init(r: 30, g: 30, b: 30, a: 255))
+        )
+        window.updateBackground(in: light)
+        XCTAssertEqual(window.backgroundColor, BackendColor(white: 1))
+
+        var content = WindowConfiguration()
+        content.setBackgroundRole(.content, environment: dark)
+        XCTAssertEqual(content.backgroundRole, .content)
+        XCTAssertEqual(
+            content.backgroundColor,
+            BackendColor(rgba8: .init(r: 46, g: 46, b: 46, a: 255))
+        )
+
+        let fixed = content.applying(.init(
+            backgroundColor: BackendColor(0.25, 0.5, 0.75, 0.8)
+        ))
+        XCTAssertEqual(fixed.backgroundRole, .fixed)
+        var updatedFixed = fixed
+        updatedFixed.updateBackground(in: light)
+        XCTAssertEqual(
+            updatedFixed.backgroundColor,
+            BackendColor(0.25, 0.5, 0.75, 0.8)
+        )
+    }
+
     func testDebugInfoModifierAcceptsAlignmentAndOffset() {
         _ = _EmptyScene().drawDebugInfo(
             .frameInfo,
@@ -305,7 +342,7 @@ final class WindowConfigurationTests: XCTestCase {
             )
             XCTAssertEqual(
                 controller.configuration.backgroundColor,
-                BackendColor(white: 0.96)
+                BackendColor(white: 1)
             )
             XCTAssertEqual(controller.configurationOverride.contentScaleFactor, 2)
         }

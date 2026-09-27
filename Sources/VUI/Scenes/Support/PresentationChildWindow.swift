@@ -510,6 +510,10 @@ class PresentationChildWindowController: WindowController, @unchecked Sendable {
     }
 
     override func drawFrame(offset: CGPoint, _ context: GraphicsContext) {
+        var context = context
+        // Overlay children draw through their parent's backend context, but
+        // direct chrome drawing must resolve styles in the child's environment.
+        context.environment = environment.untrackedCopy()
         if window == nil {
             let contentOffset = offset + frameInParent.origin
             if frameInParent.width > .zero && frameInParent.height > .zero {
@@ -654,7 +658,7 @@ class PopupWindowController: PresentationChildWindowController, @unchecked Senda
         let path = RoundedRectangle(cornerRadius: 6).path(in: frame)
         var shadowContext = context
         shadowContext.addFilter(overlayShadowFilter)
-        shadowContext.fill(path, with: .color(.white))
+        shadowContext.fill(path, with: .style(BackgroundStyle()))
     }
 }
 

@@ -138,7 +138,7 @@ private struct LinearProgressViewBody: View {
             ProgressTrackLayout(
                 fraction: configuration.fractionCompleted ?? 0.3
             ) {
-                Capsule().fill(Color(white: 0.78))
+                Capsule().fill(Color.primaryFill)
                 Capsule().fill(tint ?? Color.blue)
             }
             .frame(
@@ -161,7 +161,7 @@ private struct CircularProgressViewBody: View {
         HStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .strokeBorder(Color(white: 0.78), lineWidth: 2)
+                    .strokeBorder(Color.primaryFill, lineWidth: 2)
                 Circle()
                     .strokeBorder(tint ?? Color.blue, lineWidth: 3)
                     .scaleEffect(

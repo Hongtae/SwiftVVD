@@ -135,10 +135,13 @@ private struct _DefaultButtonStyleBody: View {
             .padding(4)
             .background {
                 RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
-                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white)
-                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+                    .fill(BackgroundStyle())
+                RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
+                    .fill(isPressed ? Color.primaryFill : .clear)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.secondary)
             }
-            .foregroundStyle(Color.black)
+            .foregroundStyle(Color.primary)
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
 }
@@ -158,7 +161,7 @@ private struct _BorderlessButtonStyleBody: View {
     var body: some View {
         configuration.label
             .padding(4)
-            .foregroundStyle(isPressed ? Color.black : Color.gray)
+            .foregroundStyle(isPressed ? Color.secondary : Color.primary)
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
 }
@@ -179,7 +182,8 @@ private struct _LinkButtonStyleBody: View {
         configuration.label
             .padding(4)
             .background {
-                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.secondary)
             }
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
@@ -224,10 +228,13 @@ private struct _BorderedButtonStyleBody: View {
             .padding(4)
             .background {
                 RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
-                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .white)
-                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+                    .fill(BackgroundStyle())
+                RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
+                    .fill(isPressed ? Color.primaryFill : .clear)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.secondary)
             }
-            .foregroundStyle(Color.black)
+            .foregroundStyle(Color.primary)
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
     }
 }
@@ -249,8 +256,9 @@ private struct _BorderedProminentButtonStyleBody: View {
             .padding(4)
             .background {
                 RoundedRectangle(cornerRadius: 4).inset(by: 0.1)
-                    .fill(isPressed ? Color(hue: 1, saturation: 0, brightness: 0.9) : .blue)
-                RoundedRectangle(cornerRadius: 4).strokeBorder(.black)
+                    .fill(isPressed ? Color.blue.opacity(0.8) : .blue)
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(Color.blue)
             }
             .foregroundStyle(Color.white)
             ._onButtonGesture(pressing: { isPressed = $0 }, perform: { configuration.trigger() })
@@ -276,7 +284,7 @@ private struct _MenuItemButtonBody: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
         }
-        .foregroundStyle(isHovered ? Color.white : Color.black)
+        .foregroundStyle(isHovered ? Color.white : Color.primary)
         ._onButtonGesture(pressing: { _ in }, perform: { configuration.trigger() })
         .onHover { isHovered = $0 }
     }

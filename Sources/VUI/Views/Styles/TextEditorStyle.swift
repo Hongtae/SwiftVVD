@@ -109,7 +109,7 @@ private struct TextEditorControl: View {
     @ViewBuilder
     private var styledEditor: some View {
         if drawsBackground && contentBackground.visibility != .hidden {
-            editor.background(Color.white)
+            editor.background(BackgroundStyle())
         } else {
             editor
         }

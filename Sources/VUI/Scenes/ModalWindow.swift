@@ -106,7 +106,6 @@ final class ModalPresentationContext: @unchecked Sendable {
     private var needsInputPlacement = true
     private var transition: TransitionAnimation? = nil
     private var pendingDismissal: PendingDismissal?
-    private let shadowFilter = GraphicsContext.Filter.shadow(radius: 8.0, x: 0, y: 0)
 
     // Overlay modals use the transition for drawing. Platform modals use the
     // same timing path to preserve transaction completion boundaries.
@@ -141,6 +140,18 @@ final class ModalPresentationContext: @unchecked Sendable {
     }
 
     var isAnimating: Bool { transition != nil }
+
+    static func shadowFilter(
+        in environment: EnvironmentValues
+    ) -> GraphicsContext.Filter {
+        let opacity = environment.colorScheme == .dark ? 0.18 : 0.33
+        return .shadow(
+            color: Color(.sRGBLinear, white: 0, opacity: opacity),
+            radius: 8,
+            x: 0,
+            y: 0
+        )
+    }
 
     init(parentController: WindowController) {
         self.parentController = parentController
@@ -409,10 +420,20 @@ final class ModalPresentationContext: @unchecked Sendable {
         // Overlay modal controllers draw into the full parent area so they can
         // paint modal chrome, such as the shadow, before the child content.
         let path = RoundedRectangle(cornerRadius: 5).path(in: frame)
+        let panelEnvironment = controller.environment
+        let panelBackground = Color(
+            .sRGB,
+            white: panelEnvironment.colorScheme.contentBackgroundWhite(
+                contrast: panelEnvironment.colorSchemeContrast
+            )
+        )
+        let panelBorder = Color(
+            Color.secondaryFill.resolve(in: panelEnvironment)
+        )
         var shadowContext = context
-        shadowContext.addFilter(shadowFilter)
-        shadowContext.fill(path, with: .color(.white))
-        context.stroke(path, with: .color(.black.opacity(0.7)),
+        shadowContext.addFilter(Self.shadowFilter(in: panelEnvironment))
+        shadowContext.fill(path, with: .color(panelBackground))
+        context.stroke(path, with: .color(panelBorder),
                        style: StrokeStyle(lineWidth: 1))
 
         if alpha < 1.0 {

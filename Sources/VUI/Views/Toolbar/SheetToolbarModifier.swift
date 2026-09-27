@@ -137,6 +137,7 @@ private struct SheetToolbarButtonBody: View {
         .padding(.vertical, 4)
         .foregroundStyle(foreground)
         .background {
+            RoundedRectangle(cornerRadius: 6).fill(BackgroundStyle())
             RoundedRectangle(cornerRadius: 6).fill(background)
             RoundedRectangle(cornerRadius: 6).strokeBorder(border, lineWidth: borderWidth)
         }
@@ -145,29 +146,25 @@ private struct SheetToolbarButtonBody: View {
 
     private var foreground: Color {
         if placement.isConfirmationAction { return .white }
-        if placement.isDestructiveAction { return Color(red: 1.0, green: 0.12, blue: 0.16) }
-        return .black
+        if placement.isDestructiveAction { return .red }
+        return .primary
     }
 
     private var background: Color {
         if placement.isConfirmationAction {
-            return isPressed
-                ? Color(red: 0.0, green: 0.36, blue: 0.86)
-                : Color(red: 0.0, green: 0.47, blue: 1.0)
+            return isPressed ? Color.blue.opacity(0.8) : .blue
         }
         if placement.isDestructiveAction {
-            return isPressed
-                ? Color(red: 1.0, green: 0.62, blue: 0.64)
-                : Color(red: 1.0, green: 0.76, blue: 0.78)
+            return Color.red.opacity(isPressed ? 0.35 : 0.22)
         }
-        return Color(white: isPressed ? 0.86 : 0.96)
+        return isPressed ? .primaryFill : .quaternaryFill
     }
 
     private var border: Color {
         if placement.isConfirmationAction { return .clear }
-        if placement.isCancellationAction { return Color(red: 0.42, green: 0.62, blue: 0.95) }
+        if placement.isCancellationAction { return Color.blue.opacity(0.55) }
         if placement.isDestructiveAction { return .clear }
-        return Color(white: 0.64)
+        return .secondaryFill
     }
 
     private var borderWidth: CGFloat {

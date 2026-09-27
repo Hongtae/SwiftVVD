@@ -1179,7 +1179,7 @@ class ViewGraph: ViewGraphHost {
                         }
                         g.makeSideEffectRule { [weak self] in
                             guard let host = self?.rendererHost as? WindowController else { return }
-                            let alerts = Array(alertAttr.value.values.map { $0.preference })
+                            let alerts = Array(alertAttr.value.values)
                             let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
                             host.updateAlertPresentation(
                                 alerts,
@@ -1200,7 +1200,7 @@ class ViewGraph: ViewGraphHost {
                         }
                         g.makeSideEffectRule { [weak self] in
                             guard let host = self?.rendererHost as? WindowController else { return }
-                            let dialogs = Array(dialogAttr.value.values.map { $0.preference })
+                            let dialogs = Array(dialogAttr.value.values)
                             let viewPhase = ViewGraphHost.Phase(base: phaseAttr.value)
                             host.updateConfirmationDialogPresentation(
                                 dialogs,

@@ -278,7 +278,7 @@ private struct TextFieldControl: View {
                 .padding(.horizontal, horizontalInset)
                 .padding(.vertical, 4)
                 .background(
-                    Color.white,
+                    BackgroundStyle(),
                     in: RoundedRectangle(cornerRadius: 5)
                 )
                 .overlay {
@@ -286,7 +286,7 @@ private struct TextFieldControl: View {
                         .strokeBorder(
                             inputState.isFocused
                                 ? Color.blue
-                                : Color(white: 0.72),
+                                : Color.secondaryFill,
                             lineWidth: inputState.isFocused ? 2 : 1
                         )
                 }

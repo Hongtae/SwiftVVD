@@ -155,11 +155,11 @@ private struct ColorPickerSwatch: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 5)
-                .fill(Color(white: 0.82))
+                .fill(Color.primaryFill)
             RoundedRectangle(cornerRadius: 5)
                 .fill(color.wrappedValue)
             RoundedRectangle(cornerRadius: 5)
-                .strokeBorder(Color(white: 0.35), lineWidth: 1)
+                .strokeBorder(Color.secondary, lineWidth: 1)
         }
         .frame(width: 44, height: 24)
         .contentShape(Rectangle())
@@ -273,7 +273,7 @@ struct ColorPickerEditor: EnvironmentalView {
                 .frame(height: 56)
                 .background {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(white: 0.82))
+                        .fill(Color.primaryFill)
                 }
             ColorPickerComponentRow(
                 title: "Red",
@@ -293,7 +293,7 @@ struct ColorPickerEditor: EnvironmentalView {
             if supportsOpacity {
                 ColorPickerComponentRow(
                     title: "Opacity",
-                    accent: Color(white: 0.45),
+                    accent: .secondary,
                     value: projection.binding(for: .opacity)
                 )
             }

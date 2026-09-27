@@ -118,7 +118,7 @@ struct MacIdiomGroupBoxStyle: GroupBoxStyle {
         }
         .padding(disablePadding ? 0 : 12)
         .background(
-            disableBackground ? Color.clear : Color(white: 0.95),
+            disableBackground ? Color.clear : Color.quaternaryFill,
             in: RoundedRectangle(cornerRadius: 8)
         )
     }

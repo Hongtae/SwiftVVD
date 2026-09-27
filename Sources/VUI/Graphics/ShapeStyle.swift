@@ -394,7 +394,12 @@ public struct BackgroundStyle: ShapeStyle {
         _ShapeView<S, BackgroundStyle>._makeView(view: view, inputs: inputs)
     }
     public func _apply(to shape: inout _ShapeStyle_Shape) {
-        shape.resolvedShading = .color(.sRGB, white: 1)
+        Color(
+            .sRGB,
+            white: shape.environment.colorScheme.contentBackgroundWhite(
+                contrast: shape.environment.colorSchemeContrast
+            )
+        )._apply(to: &shape)
     }
     public static func _apply(to type: inout _ShapeStyle_ShapeType) {
         type.result = .bool(true)

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import VVD
 
 private var defaultWindowTitle: Text { Text("VUI.WindowGroup") }
 
@@ -87,11 +86,6 @@ struct WindowGroupScene<Content>: _PrimitiveScene where Content: View {
                 scene: windowKey,
                 environment: environment
             )
-            var configuration = wc.baseConfiguration
-            configuration.backgroundColor = BackendColor(
-                rgba8: .init(r: 255, g: 255, b: 241, a: 255)
-            )
-            wc.baseConfiguration = configuration
             return wc
         }
         let itemsAttr: Attribute<[SceneList.Item]> = graph.makeRule {

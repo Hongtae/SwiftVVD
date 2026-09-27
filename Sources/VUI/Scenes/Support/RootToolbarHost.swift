@@ -374,7 +374,8 @@ private struct RootToolbarBar: View {
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: RootToolbarHost.toolbarHeight)
-        .background(Color(white: 0.94))
+        .background(Color.quaternaryFill)
+        .background(BackgroundStyle())
     }
 }
 
@@ -417,7 +418,8 @@ private struct RootToolbarCustomizationPalette: View {
         }
         .padding(12)
         .frame(width: 360)
-        .background(Color(white: 0.97))
-        .border(Color(white: 0.62, opacity: 0.55))
+        .background(Color.quaternaryFill)
+        .background(BackgroundStyle())
+        .border(Color.secondaryFill)
     }
 }

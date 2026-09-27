@@ -978,11 +978,11 @@ private struct SliderTrack: View {
             fraction: configuration._value.wrappedValue,
             metrics: metrics
         ) {
-            Capsule().fill(Color(white: 0.72))
+            Capsule().fill(Color.primaryFill)
             Capsule().fill(Color.blue)
             ZStack {
-                Circle().fill(Color.white)
-                Circle().strokeBorder(Color(white: 0.72), lineWidth: 1)
+                Circle().fill(BackgroundStyle())
+                Circle().strokeBorder(Color.secondaryFill, lineWidth: 1)
             }
         }
         .frame(

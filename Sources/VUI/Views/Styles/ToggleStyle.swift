@@ -97,13 +97,13 @@ private struct SwitchToggleStyleBody: View {
                 configuration.label
                 ZStack(alignment: configuration.isOn ? .trailing : .leading) {
                     Capsule()
-                        .fill(configuration.isOn ? Color.blue : Color(white: 0.75))
+                        .fill(configuration.isOn ? Color.blue : Color.primaryFill)
                         .frame(width: 38, height: 22)
                     ZStack {
                         Circle()
-                            .fill(Color.white)
+                            .fill(BackgroundStyle())
                         Circle()
-                            .strokeBorder(Color(white: 0.84), lineWidth: 1)
+                            .strokeBorder(Color.secondaryFill, lineWidth: 1)
                     }
                     .frame(width: 18, height: 18)
                     .padding(2)

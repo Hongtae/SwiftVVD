@@ -9,17 +9,50 @@ import Foundation
 
 // Runtime rendering configuration for a window.
 struct WindowConfiguration {
+    enum BackgroundRole: Equatable, Sendable {
+        case window
+        case content
+        case fixed
+    }
+
     var activeFrameInterval = 1.0 / 60.0
     var inactiveFrameInterval = 1.0 / 30.0
     // Windows synchronize presentation to the display unless a scene opts out.
     var displaySyncEnabled = true
     var drawEveryFrames: Bool = true
-    var backgroundColor = BackendColor(
-        rgba8: .init(r: 255, g: 255, b: 241, a: 255)
-    )
+    private(set) var backgroundRole: BackgroundRole = .window
+    private(set) var backgroundColor = BackendColor(white: 1)
     var drawDebugInfo: _DrawDebug.Info = []
     var drawDebugInfoPlacement = DebugInfoPlacement()
     var contentScaleFactorOverride: CGFloat? = nil
+
+    mutating func setBackgroundRole(
+        _ role: BackgroundRole,
+        environment: EnvironmentValues
+    ) {
+        backgroundRole = role
+        updateBackground(in: environment)
+    }
+
+    mutating func setFixedBackgroundColor(_ color: BackendColor) {
+        backgroundRole = .fixed
+        backgroundColor = color
+    }
+
+    mutating func updateBackground(in environment: EnvironmentValues) {
+        let white: Double
+        switch backgroundRole {
+        case .window:
+            white = environment.colorScheme.windowBackgroundWhite
+        case .content:
+            white = environment.colorScheme.contentBackgroundWhite(
+                contrast: environment.colorSchemeContrast
+            )
+        case .fixed:
+            return
+        }
+        backgroundColor = BackendColor(white: white)
+    }
 
     // Partial values supplied by scene modifiers. nil means that the base
     // configuration remains in effect for that field.
@@ -49,7 +82,7 @@ struct WindowConfiguration {
             result.drawEveryFrames = value
         }
         if let value = override.backgroundColor {
-            result.backgroundColor = value
+            result.setFixedBackgroundColor(value)
         }
         if let value = override.drawDebugInfo {
             result.drawDebugInfo = value

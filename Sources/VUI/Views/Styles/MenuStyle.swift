@@ -77,7 +77,9 @@ private struct _DefaultMenuStyleBody: View {
             // Both segments share one control owner. The initial segment keeps
             // ownership through dragging and decides its result on release.
             HStack(spacing: 0) {
-                let labelBg: Color = isLabelPressing ? Color(white: 0.88) : isLabelHovered ? Color(white: 0.85) : .clear
+                let labelBg: Color = isLabelPressing
+                    ? .primaryFill
+                    : isLabelHovered ? .secondaryFill : .clear
                 let labelFg: Color = .primary
                 configuration.label
                     .foregroundStyle(labelFg)
@@ -88,7 +90,9 @@ private struct _DefaultMenuStyleBody: View {
                 
                 Divider()
                 
-                let arrowBg: Color = isArrowPressing ? Color(white: 0.88) : isArrowHovered ? Color(white: 0.85) : .clear
+                let arrowBg: Color = isArrowPressing
+                    ? .primaryFill
+                    : isArrowHovered ? .secondaryFill : .clear
                 let arrowFg: Color = .primary
                 MenuChevronDownShape()
                     .stroke(arrowFg,
@@ -100,10 +104,10 @@ private struct _DefaultMenuStyleBody: View {
                     .onHover { isArrowHovered = $0 }
             }
             .fixedSize()
-            .background(Color(white: 0.95), in: RoundedRectangle(cornerRadius: 5))
+            .background(BackgroundStyle(), in: RoundedRectangle(cornerRadius: 5))
             .overlay {
                 RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                    .stroke(Color.secondaryFill, lineWidth: 1)
             }
             .modifier(MenuControlModifier(
                 content: configuration.content,
@@ -114,16 +118,19 @@ private struct _DefaultMenuStyleBody: View {
                 onPresentationChanged: configuration._onPresentationChanged
             ))
         } else {
-            let bg: Color = isLabelPressing ? Color(white: 0.88) : isLabelHovered ? Color(white: 0.85) : Color(white: 0.95)
+            let bg: Color = isLabelPressing
+                ? .primaryFill
+                : isLabelHovered ? .secondaryFill : .clear
             let fg: Color = .primary
             configuration.label
                 .foregroundStyle(fg)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(bg, in: RoundedRectangle(cornerRadius: 5))
+                .background(BackgroundStyle(), in: RoundedRectangle(cornerRadius: 5))
                 .overlay {
                     RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.secondaryFill, lineWidth: 1)
                 }
                 .modifier(MenuControlModifier(
                     content: configuration.content,
@@ -160,8 +167,8 @@ private struct _ButtonMenuStyleBody: View {
             // Explicit button styling retains the same single split-control
             // event owner as the default style.
             HStack(spacing: 0) {
-                let labelBg: Color = isLabelPressing ? Color(white: 0.88)
-                                   : isLabelHovered ? Color(white: 0.93)
+                let labelBg: Color = isLabelPressing ? .primaryFill
+                                   : isLabelHovered ? .secondaryFill
                                    : .clear
                 configuration.label
                     .padding(.horizontal, 10)
@@ -171,8 +178,8 @@ private struct _ButtonMenuStyleBody: View {
 
                 Divider()
 
-                let menuBg: Color = isMenuPressing ? Color(white: 0.88)
-                                  : isMenuHovered ? Color(white: 0.93)
+                let menuBg: Color = isMenuPressing ? .primaryFill
+                                  : isMenuHovered ? .secondaryFill
                                   : .clear
                 MenuChevronDownShape()
                     .stroke(Color.primary,
@@ -184,10 +191,10 @@ private struct _ButtonMenuStyleBody: View {
                     .onHover { isMenuHovered = $0 }
             }
             .fixedSize()
-            .background(Color(white: 0.97), in: RoundedRectangle(cornerRadius: 7))
+            .background(BackgroundStyle(), in: RoundedRectangle(cornerRadius: 7))
             .overlay(alignment: .center) {
                 RoundedRectangle(cornerRadius: 7)
-                    .stroke(Color(white: 0.7), lineWidth: 1)
+                    .stroke(Color.secondaryFill, lineWidth: 1)
             }
             .modifier(MenuControlModifier(
                 content: configuration.content,
@@ -198,16 +205,17 @@ private struct _ButtonMenuStyleBody: View {
                 onPresentationChanged: configuration._onPresentationChanged
             ))
         } else {
-            let bg: Color = isPressing ? Color(white: 0.88)
-                          : isHovered  ? Color(white: 0.93)
-                          : Color(white: 0.97)
+            let bg: Color = isPressing ? .primaryFill
+                          : isHovered  ? .secondaryFill
+                          : .clear
             configuration.label
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(bg, in: RoundedRectangle(cornerRadius: 7))
+                .background(BackgroundStyle(), in: RoundedRectangle(cornerRadius: 7))
                 .overlay(alignment: .center) {
                     RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color(white: 0.7), lineWidth: 1)
+                        .stroke(Color.secondaryFill, lineWidth: 1)
                 }
                 .modifier(MenuControlModifier(
                     content: configuration.content,

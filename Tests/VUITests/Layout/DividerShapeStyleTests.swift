@@ -478,6 +478,40 @@ final class DividerShapeStyleTests: XCTestCase {
         }
     }
 
+    // ASSERTIONS foregroundHierarchyModifier27Observed
+    func testInstalledSecondaryHierarchyDoesNotApplyItsLevelTwice() throws {
+        let modifiedEnvironment = applyingForegroundStyle(
+            HierarchicalShapeStyle.secondary,
+            to: environment(scheme: .dark)
+        )
+
+        let installed = try XCTUnwrap(
+            modifiedEnvironment.foregroundStyleLevels?.primary
+        )
+        assertEqual(
+            resolvedColor(installed, environment: modifiedEnvironment),
+            Color.secondary.resolve(in: modifiedEnvironment)
+        )
+
+        var redParent = environment(scheme: .dark)
+        redParent.foregroundStyleLevels = _ForegroundStyleLevels(
+            primary: AnyShapeStyle(Color.red)
+        )
+        let inherited = applyingForegroundStyle(
+            HierarchicalShapeStyle.secondary,
+            to: redParent
+        )
+        let inheritedStyle = try XCTUnwrap(
+            inherited.foregroundStyleLevels?.primary
+        )
+        var expectedRed = Color.red.resolve(in: inherited)
+        expectedRed.opacity *= 0.5
+        assertEqual(
+            resolvedColor(inheritedStyle, environment: inherited),
+            expectedRed
+        )
+    }
+
     func testExplicitForegroundHierarchyUsesObservedFallbackAndClamping() {
         var primaryOnly = environment(scheme: .light)
         primaryOnly.foregroundStyleLevels = _ForegroundStyleLevels(
@@ -780,6 +814,42 @@ final class DividerShapeStyleTests: XCTestCase {
         environment.colorScheme = scheme
         environment._colorSchemeContrast = contrast
         return environment
+    }
+
+    private func applyingForegroundStyle<S: ShapeStyle>(
+        _ style: S,
+        to environment: EnvironmentValues
+    ) -> EnvironmentValues {
+        let graph = _AGGraph()
+        return _AGGraph.withCurrent(graph) {
+            let modifier = _ForegroundStyleModifier(style: style)
+            let attribute = graph.makeInput(value: modifier)
+            var inputs = _ViewInputs(
+                base: _GraphInputs(
+                    time: graph.makeInput(value: Time(seconds: 0)),
+                    phase: graph.makeInput(value: _GraphInputs.Phase()),
+                    environment: graph.makeInput(value: environment),
+                    transaction: graph.makeInput(value: Transaction())
+                ),
+                customInputs: PropertyList(),
+                preferences: PreferencesInputs(
+                    keys: PreferenceKeys(),
+                    hostKeys: graph.makeInput(value: PreferenceKeys())
+                ),
+                transform: graph.makeInput(value: ViewTransform()),
+                position: graph.makeInput(value: CGPoint.zero),
+                containerPosition: graph.makeInput(value: CGPoint.zero),
+                size: graph.makeInput(value: ViewSize(width: 0, height: 0)),
+                safeAreaInsets: OptionalAttribute(),
+                containerSize: OptionalAttribute(),
+                stackOrientation: nil
+            )
+            type(of: modifier)._makeViewInputs(
+                modifier: _GraphValue(_attribute: attribute),
+                inputs: &inputs
+            )
+            return inputs.base.cachedEnvironment.value.environment.value
+        }
     }
 
     private func withGraph(_ body: (_AGGraph) -> Void) {

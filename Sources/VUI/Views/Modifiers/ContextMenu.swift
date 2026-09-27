@@ -587,7 +587,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         let shape = RoundedRectangle(cornerRadius: 6)
         context.fill(
             shape.path(in: frame),
-            with: .color(menuPopupAppearance.palette.chromeFill)
+            with: .style(BackgroundStyle())
         )
         context.stroke(
             shape.inset(by: 0.5).path(in: frame),
@@ -650,7 +650,7 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         // surface color. Window shape, border, and shadow remain the platform's
         // responsibility; overlay presentations draw those separately.
         var configuration = baseConfiguration
-        configuration.backgroundColor = menuPopupAppearance.palette.windowBackground
+        configuration.setBackgroundRole(.content, environment: environment)
         baseConfiguration = configuration
     }
 
@@ -1350,23 +1350,13 @@ private struct MenuPopupAppearance {
     }
 
     struct Palette {
-        let actionForeground = Color(.sRGB, white: 60.0 / 255.0)
-        let disabledForeground = Color(.sRGB, white: 135.0 / 255.0)
-        let highlightedForeground = Color(.sRGB, white: 252.0 / 255.0)
-        let highlightBackground = Color(.sRGB,
-                                        red: 63.0 / 255.0,
-                                        green: 146.0 / 255.0,
-                                        blue: 252.0 / 255.0)
-        let inactiveSubmenuBackground = Color(
-            .sRGB,
-            red: 215.0 / 255.0,
-            green: 220.0 / 255.0,
-            blue: 225.0 / 255.0
-        )
-        let separator = Color(.sRGB, white: 156.0 / 255.0)
-        let chromeFill = Color(.sRGB, white: 0.96)
-        let chromeStroke = Color(.sRGB, white: 0.62, opacity: 0.45)
-        let windowBackground = BackendColor(white: 0.96)
+        let actionForeground = Color.primary
+        let disabledForeground = Color.secondary
+        let highlightedForeground = Color.white
+        let highlightBackground = Color.blue
+        let inactiveSubmenuBackground = Color.primaryFill
+        let separator = Color.secondaryFill
+        let chromeStroke = Color.secondaryFill
     }
 
     let metrics = Metrics()

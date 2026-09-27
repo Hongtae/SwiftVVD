@@ -613,6 +613,11 @@ extension Color {
     )))
     public static let primary = Color(systemColor: .primary)
     public static let secondary = Color(systemColor: .secondary)
+
+    static let primaryFill = Color(systemColor: .primaryFill)
+    static let secondaryFill = Color(systemColor: .secondaryFill)
+    static let tertiaryFill = Color(systemColor: .tertiaryFill)
+    static let quaternaryFill = Color(systemColor: .quaternaryFill)
 }
 
 struct SystemColorsStyle: PrimitiveShapeStyle {

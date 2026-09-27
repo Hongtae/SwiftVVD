@@ -169,6 +169,11 @@ class WindowController: WindowDelegate,
         get { environmentWrapper.environment }
         set { environmentWrapper.environment = newValue }
     }
+    // A host keeps the preferred scheme received from its owning scene or
+    // presentation parent as a baseline. Its own preference overlays that
+    // baseline; a nil local preference restores the inherited value.
+    private var inheritedPreferredColorScheme: ColorScheme? = nil
+    private var localPreferredColorScheme: ColorScheme? = nil
     let sceneResources: SceneResources
 
     let eventBindingManager = EventBindingManager()
@@ -744,6 +749,8 @@ class WindowController: WindowDelegate,
         let environmentWrapper = ViewGraphHostEnvironmentWrapper()
         environmentWrapper.environment = environment.trackingCopy()
         self.environmentWrapper = environmentWrapper
+        self.inheritedPreferredColorScheme =
+            environment.explicitPreferredColorScheme
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
@@ -758,6 +765,7 @@ class WindowController: WindowDelegate,
             self._titleString = titleText._resolveText(in: EnvironmentValues())
         }
         self.date = .now
+        self._baseConfiguration.updateBackground(in: self.environment)
 
         configureForwardedEventDispatchers()
 
@@ -1096,9 +1104,14 @@ class WindowController: WindowDelegate,
             parentWindow == nil,
             "Only static scene roots can receive a scene environment."
         )
+        inheritedPreferredColorScheme =
+            sceneEnvironment.explicitPreferredColorScheme
         environment = sceneEnvironment.trackingCopy()
+        environment.explicitPreferredColorScheme =
+            localPreferredColorScheme ?? inheritedPreferredColorScheme
         environment.defaultPresentationHostMode =
             sceneConfiguration.defaultPresentationHostMode
+        updateAutomaticBackground()
         installContentScaleFactorOverrideAction()
         viewChangedWhileDrawing = true
     }
@@ -1113,10 +1126,13 @@ class WindowController: WindowDelegate,
         environmentWrapper.environment = environment.trackingCopy()
         environmentWrapper.phase = viewPhase
         self.environmentWrapper = environmentWrapper
+        self.inheritedPreferredColorScheme =
+            environment.explicitPreferredColorScheme
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
         self.date = .now
+        self._baseConfiguration.updateBackground(in: self.environment)
 
         configureForwardedEventDispatchers()
 
@@ -1165,10 +1181,13 @@ class WindowController: WindowDelegate,
         environmentWrapper.environment = environment.trackingCopy()
         environmentWrapper.phase = viewPhase
         self.environmentWrapper = environmentWrapper
+        self.inheritedPreferredColorScheme =
+            environment.explicitPreferredColorScheme
         self.sceneResources = SceneResources()
         self.windowContext = nil
         self.scene = scene
         self.date = .now
+        self._baseConfiguration.updateBackground(in: self.environment)
 
         configureForwardedEventDispatchers()
 
@@ -2983,6 +3002,7 @@ class WindowController: WindowDelegate,
         let contentScaleFactor = self.contentScaleFactor
         environment.displayScale = contentScaleFactor
         environment._contentScaleFactor = contentScaleFactor
+        updateAutomaticBackground()
         viewGraph.setEnvironment(
             environment,
             wrapper: environmentWrapper
@@ -2990,12 +3010,23 @@ class WindowController: WindowDelegate,
     }
 
     func updatePreferredColorScheme(_ colorScheme: ColorScheme?) {
-        guard environment.explicitPreferredColorScheme != colorScheme else {
+        let resolvedColorScheme =
+            colorScheme ?? inheritedPreferredColorScheme
+        guard localPreferredColorScheme != colorScheme ||
+                environment.explicitPreferredColorScheme != resolvedColorScheme else {
             return
         }
-        environment.explicitPreferredColorScheme = colorScheme
+        localPreferredColorScheme = colorScheme
+        environment.explicitPreferredColorScheme = resolvedColorScheme
+        updateAutomaticBackground()
         viewGraph.valuesNeedingUpdate.insert(.environment)
         viewChangedWhileDrawing = true
+    }
+
+    private func updateAutomaticBackground() {
+        var configuration = baseConfiguration
+        configuration.updateBackground(in: environment)
+        baseConfiguration = configuration
     }
 
     // Presentation roots own a distinct ViewGraph, but begin with the
@@ -3017,7 +3048,13 @@ class WindowController: WindowDelegate,
             let contentScaleFactor = self.contentScaleFactor
             environment.displayScale = contentScaleFactor
             environment._contentScaleFactor = contentScaleFactor
+            self.inheritedPreferredColorScheme =
+                environment.explicitPreferredColorScheme
+            environment.explicitPreferredColorScheme =
+                self.localPreferredColorScheme
+                ?? self.inheritedPreferredColorScheme
             self.environment = environment
+            self.updateAutomaticBackground()
             self.environmentWrapper.phase = snapshot.value.phase
             self.viewGraph.setEnvironment(
                 environment,
@@ -3804,7 +3841,7 @@ class WindowController: WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when ConfirmationDialogStorage.PreferenceKey changes.
     func updateConfirmationDialogPresentation(
-        _ dialogs: [ConfirmationDialogPreference],
+        _ dialogs: [ConfirmationDialog],
         viewPhase: ViewGraphHost.Phase
     ) {
         guard let graph = _AGGraph.current else {
@@ -3821,17 +3858,40 @@ class WindowController: WindowDelegate,
         }
         let existingIDs = Set(existing.map { $0.0 })
         for (id, ctrl) in existing {
-            if !dialogs.contains(where: { sid($0) == id }) {
+            if !dialogs.contains(where: { sid($0.preference) == id }) {
                 dismissModal(child: ctrl, reason: .dismissed)
             }
         }
-        for pref in dialogs {
-            guard !existingIDs.contains(sid(pref)) else { continue }
+        for storage in dialogs {
+            let pref = storage.preference
+            let presentationEnvironment = dialogPresentationEnvironment(
+                colorScheme: storage.colorScheme
+            )
+            if existingIDs.contains(sid(pref)) {
+                let controller = modalChildren.withLock { entries -> ModalWindowController? in
+                    guard let index = entries.firstIndex(where: {
+                        guard case .confirmationDialog(let existing) = $0.session else {
+                            return false
+                        }
+                        return sid(existing) == sid(pref)
+                    }) else {
+                        return nil
+                    }
+                    entries[index].session = .confirmationDialog(pref)
+                    return entries[index].controller
+                }
+                controller?.setPresentationEnvironment(
+                    presentationEnvironment,
+                    viewPhase: viewPhase
+                )
+                continue
+            }
             let content = ConfirmationDialogOverlayView(preference: pref)
             let attr: Attribute<AnyView> = graph.makeInput(value: AnyView(content))
             let key = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             let ctrl = ModalWindowController(crossGraphContent: attr,
                                              sourceGraph: graph,
+                                             environment: presentationEnvironment,
                                              viewPhase: viewPhase,
                                              scene: key,
                                              parentController: self,
@@ -3844,7 +3904,7 @@ class WindowController: WindowDelegate,
 
     /// Called from ViewGraph side-effect rule when AlertStorage.PreferenceKey changes.
     func updateAlertPresentation(
-        _ alerts: [AlertPreference],
+        _ alerts: [AlertStorage],
         viewPhase: ViewGraphHost.Phase
     ) {
         guard let graph = _AGGraph.current else {
@@ -3864,20 +3924,43 @@ class WindowController: WindowDelegate,
 
         // Dismiss removed alerts.
         for (id, ctrl) in existing {
-            if !alerts.contains(where: { sid($0) == id }) {
+            if !alerts.contains(where: { sid($0.preference) == id }) {
                 dismissModal(child: ctrl, reason: .dismissed)
             }
         }
 
         // Enqueue new alerts as overlay controllers.
-        for pref in alerts {
-            guard !existingIDs.contains(sid(pref)) else { continue }
+        for storage in alerts {
+            let pref = storage.preference
+            let presentationEnvironment = dialogPresentationEnvironment(
+                colorScheme: storage.colorScheme
+            )
+            if existingIDs.contains(sid(pref)) {
+                let controller = modalChildren.withLock { entries -> ModalWindowController? in
+                    guard let index = entries.firstIndex(where: {
+                        guard case .alert(let existing) = $0.session else {
+                            return false
+                        }
+                        return sid(existing) == sid(pref)
+                    }) else {
+                        return nil
+                    }
+                    entries[index].session = .alert(pref)
+                    return entries[index].controller
+                }
+                controller?.setPresentationEnvironment(
+                    presentationEnvironment,
+                    viewPhase: viewPhase
+                )
+                continue
+            }
 
             let alertContent = AlertOverlayView(preference: pref)
             let alertAttr: Attribute<AnyView> = graph.makeInput(value: AnyView(alertContent))
             let alertKey = WindowKey(namespace: scene.namespace, sceneID: scene.sceneID)
             let ctrl = ModalWindowController(crossGraphContent: alertAttr,
                                              sourceGraph: graph,
+                                             environment: presentationEnvironment,
                                              viewPhase: viewPhase,
                                              scene: alertKey,
                                              parentController: self,
@@ -3886,6 +3969,16 @@ class WindowController: WindowDelegate,
                 ctrl?.resolveModalWindowAttachment(attach)
             }
         }
+    }
+
+    private func dialogPresentationEnvironment(
+        colorScheme: ColorScheme?
+    ) -> EnvironmentValues {
+        var environment = self.environment.untrackedCopy()
+        if let colorScheme {
+            environment.explicitPreferredColorScheme = colorScheme
+        }
+        return environment
     }
 }
 

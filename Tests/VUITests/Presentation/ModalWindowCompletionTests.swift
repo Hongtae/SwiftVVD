@@ -2,6 +2,41 @@ import XCTest
 @testable import VUI
 
 final class ModalWindowCompletionTests: XCTestCase {
+    func testOverlayShadowUsesAQuieterDarkAppearance() {
+        for (scheme, expectedOpacity) in [
+            (ColorScheme.light, Float(0.33)),
+            (.dark, Float(0.18)),
+        ] {
+            var environment = EnvironmentValues()
+            environment.colorScheme = scheme
+            let filter = ModalPresentationContext.shadowFilter(
+                in: environment
+            )
+            guard case let .shadow(
+                color,
+                radius,
+                offset,
+                blendMode,
+                options
+            ) = filter.style else {
+                return XCTFail("expected an overlay shadow filter")
+            }
+            let resolved = color.resolve(in: environment)
+            XCTAssertEqual(resolved.red, 0, accuracy: 0.000_001)
+            XCTAssertEqual(resolved.green, 0, accuracy: 0.000_001)
+            XCTAssertEqual(resolved.blue, 0, accuracy: 0.000_001)
+            XCTAssertEqual(
+                resolved.opacity,
+                expectedOpacity,
+                accuracy: 0.000_001
+            )
+            XCTAssertEqual(radius, 8)
+            XCTAssertEqual(offset, .zero)
+            XCTAssertEqual(blendMode, .normal)
+            XCTAssertEqual(options.rawValue, 0)
+        }
+    }
+
     func testPositivePresentAnimationStartsCompletionTokensAndFinishesAtBoundary() {
         let parent = makeParentController()
         let context = ModalPresentationContext(parentController: parent)

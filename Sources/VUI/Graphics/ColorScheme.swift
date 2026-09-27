@@ -16,6 +16,25 @@ public enum ColorSchemeContrast: CaseIterable, Hashable, Equatable, Sendable {
     case increased
 }
 
+extension ColorScheme {
+    var windowBackgroundWhite: Double {
+        switch self {
+        case .light: 1
+        case .dark: 30.0 / 255.0
+        }
+    }
+
+    func contentBackgroundWhite(
+        contrast: ColorSchemeContrast
+    ) -> Double {
+        switch (self, contrast) {
+        case (.light, _): 1
+        case (.dark, .standard): 46.0 / 255.0
+        case (.dark, .increased): 30.0 / 255.0
+        }
+    }
+}
+
 // colorSchemeContrast uses a top-level environment key.
 struct ColorSchemeContrastKey: EnvironmentKey {
     static let defaultValue: ColorSchemeContrast = .standard

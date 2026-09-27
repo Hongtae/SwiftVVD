@@ -321,7 +321,7 @@ private struct NavigationStackOverlay: View {
             ForEach(layers) { layer in
                 layer.content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white)
+                    .background(BackgroundStyle())
                     .opacity(layer.id == layers.last?.id ? 1 : 0)
                     .disabled(layer.id != layers.last?.id)
             }

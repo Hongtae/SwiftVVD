@@ -599,7 +599,8 @@ private struct WindowCommandMenuBar: View {
                 environment: menuEnvironment
             )
         )
-        .background(Color(white: 0.94))
+        .background(Color.quaternaryFill)
+        .background(BackgroundStyle())
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -620,10 +621,10 @@ private struct WindowCommandMenuItem: View {
 
     private var background: Color {
         if isPressing || isOpen || isKeyboardSelected {
-            return Color(white: 0.78)
+            return .primaryFill
         }
         if isHovered {
-            return Color(white: 0.86)
+            return .secondaryFill
         }
         return .clear
     }
