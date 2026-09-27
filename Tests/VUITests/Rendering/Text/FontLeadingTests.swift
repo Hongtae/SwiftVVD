@@ -50,7 +50,7 @@ final class FontLeadingTests: XCTestCase {
                       spacing: CGFloat = 0, language: String = "en", ratio: Double? = nil) -> ResolvedTextSource {
         var attributes = _ResolvedTextRunAttributes()
         attributes.fontResource = request(font, language: language, ratio: ratio)
-        var paragraph = TextParagraphStyle()
+        let paragraph = TextParagraphStyle()
         paragraph.lineSpacing = spacing
         attributes.paragraphStyle = paragraph
         return ResolvedTextSource(runs: [.styledText([face], string, .init(), attributes)],

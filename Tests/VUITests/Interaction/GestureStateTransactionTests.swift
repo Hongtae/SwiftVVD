@@ -152,7 +152,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 .init(value: 2, current: 1, tracksVelocity: true)
             ])
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.active(3))
             }
 
@@ -161,7 +161,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 .init(value: 3, current: 3, tracksVelocity: true)
             ])
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.ended(0))
             }
 
@@ -169,7 +169,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 .init(value: 6, tracksVelocity: true)
             ])
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.ended(9))
             }
 
@@ -177,7 +177,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 .init(value: 6, tracksVelocity: true)
             ])
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.active(4))
             }
 
@@ -227,7 +227,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 inputs: makeGestureInputs(graph: graph)
             )
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.active(7))
             }
 
@@ -236,7 +236,7 @@ final class GestureStateTransactionTests: XCTestCase {
                 .init(value: 17, tracksVelocity: true, bodyMarker: 7, resetMarker: 0)
             ])
 
-            Update.ensure {
+            _ = Update.ensure {
                 phase.setValue(.ended(7))
             }
 

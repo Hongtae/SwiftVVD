@@ -140,7 +140,7 @@ final class GraphicsImageTests: XCTestCase {
         environment.displayScale = scale
         let scene = SceneResources()
         scene.contentScaleFactor = scale
-        var context = try XCTUnwrap(GraphicsContext(sceneResources: scene,
+        let context = try XCTUnwrap(GraphicsContext(sceneResources: scene,
             environment: environment, viewport: CGRect(origin: .zero, size: size),
             contentOffset: .zero, contentScaleFactor: scale, resolution: size,
             commandBuffer: commands))

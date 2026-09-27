@@ -4647,7 +4647,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         XCTAssertEqual(
             Mirror(reflecting: ordinary).children.compactMap(\.label),
-            ["threshold", "action", "_isActive"]
+            ["threshold", "action", "__isActive"]
         )
         XCTAssertEqual(threshold(in: ordinary), 0.375)
         XCTAssertEqual(threshold(in: aboveOne), 1)
@@ -4655,17 +4655,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(threshold(in: nan), 0)
 
         guard let activityState = Mirror(reflecting: ordinary).children.first(where: {
-            $0.label == "_isActive"
+            $0.label == "__isActive"
         })?.value else {
             XCTFail("expected activity State storage")
             return
         }
-        XCTAssertEqual(
-            Mirror(reflecting: activityState).children.first(where: {
-                $0.label == "_value"
-            })?.value as? Bool,
-            false
-        )
+        XCTAssertEqual((activityState as? LazyState<Bool>)?.wrappedValue, false)
     }
 
     // ASSERTIONS scrollTargetVisibilityChangeFieldMetadataObserved
@@ -4924,7 +4919,7 @@ final class ScrollViewSurfaceTests: XCTestCase {
 
         XCTAssertEqual(
             Mirror(reflecting: ordinary).children.compactMap(\.label),
-            ["threshold", "action", "_isActive"]
+            ["threshold", "action", "__isActive"]
         )
         XCTAssertEqual(threshold(in: ordinary), 0.375)
         XCTAssertEqual(threshold(in: aboveOne), 1)
@@ -4932,17 +4927,12 @@ final class ScrollViewSurfaceTests: XCTestCase {
         XCTAssertEqual(threshold(in: nan), 0)
 
         guard let activityState = Mirror(reflecting: ordinary).children.first(where: {
-            $0.label == "_isActive"
+            $0.label == "__isActive"
         })?.value else {
             XCTFail("expected activity State storage")
             return
         }
-        XCTAssertEqual(
-            Mirror(reflecting: activityState).children.first(where: {
-                $0.label == "_value"
-            })?.value as? Bool,
-            false
-        )
+        XCTAssertEqual((activityState as? LazyState<Bool>)?.wrappedValue, false)
     }
 
     // ASSERTIONS scrollVisibilityChangeFieldMetadataObserved

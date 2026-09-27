@@ -2579,6 +2579,18 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
             shouldDrawFrame: false,
             withGC
         )
+
+        // Initial focused-value publication intentionally schedules its host
+        // recomputation on the next input turn. Drain that initialization
+        // before measuring a genuinely idle forced draw.
+        controller.updateFrame(
+            tick: 1,
+            delta: 0,
+            date: controller.date,
+            contentSize: CGSize(width: 120, height: 80),
+            shouldDrawFrame: false,
+            withGC
+        )
         XCTAssertFalse(controller.viewGraph.hasScheduledViewUpdate)
         let graphCounter = controller.viewGraph.data.graph.graphCounter(lane: 1)
         let graphTime = controller.viewGraph.currentTimestamp
@@ -2586,7 +2598,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         presentRequests = 0
 
         controller.updateFrame(
-            tick: 1,
+            tick: 2,
             delta: 1.0 / 300.0,
             date: controller.date.addingTimeInterval(1.0 / 300.0),
             contentSize: CGSize(width: 120, height: 80),
@@ -5572,10 +5584,10 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         @discardableResult
         func advance(to targetTime: Double) throws -> CGRect {
             let interval = 1.0 / 30.0
-            var sample = try update(time: currentTime)
+            _ = try update(time: currentTime)
             while currentTime + interval < targetTime {
                 currentTime += interval
-                sample = try update(time: currentTime)
+                _ = try update(time: currentTime)
             }
             currentTime = targetTime
             return try update(time: currentTime)
@@ -6719,7 +6731,7 @@ final class WindowControllerLayoutSchedulingTests: XCTestCase {
         }
         let startDate = controller.date
         var tick: UInt64 = 0
-        var time = 0.0
+        let time = 0.0
 
         func update() throws -> DisplayList {
             controller.updateFrame(

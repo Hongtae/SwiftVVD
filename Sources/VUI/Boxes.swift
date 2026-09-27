@@ -25,6 +25,8 @@ struct WeakBox<Base: AnyObject> {
     }
 }
 
+extension WeakBox: @unchecked Sendable where Base: Sendable {}
+
 typealias UnsafeSendableBox<T> = VVD.UnsafeSendableBox<T>
 typealias WeakObject<T: AnyObject> = VVD.WeakObject<T>
 typealias AnyWeakObject = VVD.AnyWeakObject

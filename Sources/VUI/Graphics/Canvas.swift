@@ -238,7 +238,7 @@ private struct CanvasDisplayList<Symbols: View>: StatefulRule, AsyncAttribute {
             fatalError("Canvas recording requires an active ViewGraph renderer host.")
         }
 
-        let scale = environment.displayScale
+        let scale = environment._contentScaleFactor
         precondition(scale.isFinite && scale > 0)
         let viewport = CGRect(
             origin: .zero,
@@ -476,7 +476,7 @@ private final class SymbolRenderer: GraphicsContextSymbols {
                   let rendererHost = viewGraph.rendererHost else {
                 fatalError("Canvas symbol recording requires an active ViewGraph renderer host.")
             }
-            let scale = environment.displayScale
+            let scale = environment._contentScaleFactor
             precondition(scale.isFinite && scale > 0)
             let viewport = CGRect(
                 origin: .zero,

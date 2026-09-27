@@ -320,7 +320,7 @@ final class ShapeStyleCompositionTests: XCTestCase {
         XCTAssertTrue(drawings.contains { !$0.isEmpty })
         let data = try pixels(list.items, resources: host.rendererHost.sceneResources, device: device)
         XCTAssertGreaterThan(data.enumerated().filter { $0.offset % 4 == 3 }.reduce(0) { $0 + Int($1.element) }, 20000)
-        XCTAssertEqual(data[(4 * 96 + 4) * 4 + 3], 0)
+        XCTAssertEqual(data[3], 0)
     }
 
     private func outline(_ item: DisplayList.Item) -> String {

@@ -224,7 +224,7 @@ extension Text {
 // These resource owners are internal attribute transport for the rendering backend.
 // They preserve identity independently of a Text.Style value's lifetime.
 /// Binds a glyph identifier and source text to a retained font resource.
-final class TextGlyphInfo: NSObject {
+final class TextGlyphInfo: NSObject, @unchecked Sendable {
     let font: FontResource
     let glyphIndex: UInt32
     let baseString: String

@@ -165,7 +165,7 @@ struct ParagraphStyleResolutionContext {
 
 /// Mutable paragraph attributes shared by all runs in a paragraph.
 /// Finalization updates this same instance before clearing the paragraph cache.
-final class TextParagraphStyle: Codable, Equatable {
+final class TextParagraphStyle: Codable, Hashable {
     /// Keeps logical leading/trailing separate from physical left/right alignment.
     enum HorizontalAlignment: Int, Codable {
         case leading, trailing, left, right, center
@@ -202,6 +202,10 @@ final class TextParagraphStyle: Codable, Equatable {
     var compositionLanguage: Int = 0
 
     static func == (lhs: TextParagraphStyle, rhs: TextParagraphStyle) -> Bool { lhs === rhs }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(ObjectIdentifier(self))
+    }
 }
 
 func makeParagraphStyle(

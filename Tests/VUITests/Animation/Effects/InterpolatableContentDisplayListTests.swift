@@ -2,6 +2,13 @@ import XCTest
 @testable import VVD
 @testable import VUI
 
+@inline(never)
+private func effectForInspection(
+    _ effect: DisplayList.Effect
+) -> DisplayList.Effect {
+    effect
+}
+
 private final class ProbeTexture: Texture {
     var width: Int { 1 }
     var height: Int { 1 }
@@ -2350,17 +2357,30 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertFalse(source.hasSameInterpolationSurface(as: changedAsync))
     }
 
-    func testCanvasMakeViewEmitsCustomDisplayListItem() throws {
-        let graph = _AGGraph()
+    func testCanvasMakeViewEmitsRetainedDrawingItem() throws {
+        let rendererHost = TestViewRendererHost()
+        let viewGraph = ViewGraph(
+            rootViewType: EmptyView.self,
+            content: EmptyView(),
+            rendererHost: rendererHost
+        )
+        rendererHost.storage = viewGraph
 
-        try _AGGraph.withCurrent(graph) {
+        try viewGraph.data.withCurrent {
+            let graph = viewGraph.data.graph
             var environment = EnvironmentValues.tracking()
             environment.canvasEnvironmentProbe = 41
+            var observedEnvironmentProbe: Int?
             let canvas = Canvas(
                 opaque: true,
                 colorMode: .extendedLinear,
                 rendersAsynchronously: true
-            ) { _, _ in
+            ) { context, size in
+                observedEnvironmentProbe = context.environment.canvasEnvironmentProbe
+                context.fill(
+                    Path(CGRect(origin: .zero, size: size)),
+                    with: .color(.red)
+                )
             }
             let canvasAttr = graph.makeInput(value: canvas)
             let outputs = Canvas<EmptyView>._makeView(
@@ -2371,18 +2391,22 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             let outputID = try XCTUnwrap(outputs.preferences.value(for: DisplayList.Key.self))
             let list = Attribute<DisplayList>(outputID).value
 
+            XCTAssertEqual(observedEnvironmentProbe, 41)
             XCTAssertEqual(list.items.count, 1)
-            XCTAssertEqual(list.itemRecords.first?.kind, .custom)
+            XCTAssertEqual(list.itemRecords.first?.kind, .closure)
             XCTAssertEqual(list.itemRecords.first?.bounds, CGRect(x: 0, y: 0, width: 10, height: 10))
-            XCTAssertEqual(list.itemRecords.first?.custom?.isOpaque, true)
-            XCTAssertEqual(list.itemRecords.first?.custom?.colorMode, .extendedLinear)
-            XCTAssertEqual(list.itemRecords.first?.custom?.rendersAsynchronously, true)
             XCTAssertEqual(list.interpolationBounds, CGRect(x: 0, y: 0, width: 10, height: 10))
             guard case let .content(content) = list.items[0].value else {
                 return XCTFail("Canvas should emit display-list content")
             }
-            XCTAssertEqual(content.environment?.canvasEnvironmentProbe, 41)
-            XCTAssertNil(content.environment?.tracker)
+            guard case let .drawing(_, origin, options) = content.value else {
+                return XCTFail("Canvas should emit retained drawing content")
+            }
+            XCTAssertEqual(origin, .zero)
+            XCTAssertTrue(options.isOpaque)
+            XCTAssertEqual(options.colorMode, .extendedLinear)
+            XCTAssertTrue(options.rendersAsynchronously)
+            XCTAssertNil(content.environment)
         }
     }
 
@@ -4786,7 +4810,13 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
         XCTAssertNotNil(animation.animation)
 
         let group = DisplayList.InterpolatorGroup()
-        switch DisplayList.Effect.interpolatorRoot(group, CGPoint(x: 1, y: 2), CGSize(width: 3, height: 4)) {
+        switch effectForInspection(
+            .interpolatorRoot(
+                group,
+                CGPoint(x: 1, y: 2),
+                CGSize(width: 3, height: 4)
+            )
+        ) {
         case let .interpolatorRoot(storedGroup, origin, offset):
             XCTAssertTrue(storedGroup === group)
             XCTAssertEqual(origin, CGPoint(x: 1, y: 2))
@@ -4795,7 +4825,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTFail("missing interpolator root carrier")
         }
 
-        switch DisplayList.Effect.interpolatorLayer(group, 7) {
+        switch effectForInspection(.interpolatorLayer(group, 7)) {
         case let .interpolatorLayer(storedGroup, serial):
             XCTAssertTrue(storedGroup === group)
             XCTAssertEqual(serial, 7)
@@ -4803,7 +4833,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
             XCTFail("missing interpolator layer carrier")
         }
 
-        switch DisplayList.Effect.interpolatorAnimation(animation) {
+        switch effectForInspection(.interpolatorAnimation(animation)) {
         case let .interpolatorAnimation(stored):
             XCTAssertEqual(stored.value, hash)
             XCTAssertNotNil(stored.animation)
@@ -4863,7 +4893,7 @@ final class InterpolatableContentDisplayListTests: XCTestCase {
     func testShapeStyleRenderedLayersReplaceRetireAndCleanUp() throws {
         let graph = _AGGraph()
 
-        try _AGGraph.withCurrent(graph) {
+        _AGGraph.withCurrent(graph) {
             let environment = EnvironmentValues()
             let environmentAttribute = graph.makeInput(value: environment)
             let group = _ShapeStyle_InterpolatorGroup()

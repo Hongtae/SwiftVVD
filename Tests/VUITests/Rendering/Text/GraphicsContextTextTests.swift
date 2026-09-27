@@ -299,7 +299,7 @@ final class GraphicsContextTextTests: XCTestCase {
             var original: GraphicsContext.ResolvedText? = context.resolve(Text(verbatim: "A"))
             var copy = original
             let independent = context.resolve(Text(verbatim: "A"))
-            weak var owner = original?.resolved as? ResolvedStyledText.StringDrawing
+            weak let owner = original?.resolved as? ResolvedStyledText.StringDrawing
             let request = CGSize(width: 300, height: 81)
             let natural = try XCTUnwrap(original?.measure(in: request))
             XCTAssertEqual(independent.measure(in: request), natural)

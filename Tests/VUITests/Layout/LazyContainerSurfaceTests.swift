@@ -7367,11 +7367,11 @@ final class LazyContainerSurfaceTests: XCTestCase {
         item.animationWasAdded()
         XCTAssertEqual(item.animationCount, 2)
 
-        _ = item.animationWasRemoved()
+        item.animationWasRemoved()
         XCTAssertEqual(item.animationCount, 1)
         XCTAssertFalse(host.hasPendingTransactions)
 
-        _ = item.animationWasRemoved()
+        item.animationWasRemoved()
         XCTAssertEqual(item.animationCount, 0)
         XCTAssertTrue(host.hasPendingTransactions)
 

@@ -596,7 +596,6 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         )
     }
 
-    private var contentAttr: Attribute<AnyView>?
     private let popupActions: ContextMenuPopupActions
     private let menuSession: ContextMenuPresentationSession
     private let submenuPlacement: ContextMenuSubmenuPlacement?
@@ -653,7 +652,6 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         var configuration = baseConfiguration
         configuration.backgroundColor = menuPopupAppearance.palette.windowBackground
         baseConfiguration = configuration
-        self.contentAttr = viewGraph.rootAnyViewContentInput
     }
 
     func setActivated(_ activated: Bool) {
@@ -1019,7 +1017,6 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
     private func replaceMenuContent(
         with items: [ContextMenuPresentationItem]
     ) {
-        guard let contentAttr else { return }
         let graph = viewGraph.graph
         let content = UnsafeSendableBox(AnyView(contextMenuPopupContent(
             items: items,
@@ -1029,8 +1026,8 @@ final class ContextMenuWindowController: PopupWindowController, @unchecked Senda
         )))
         // Replace child root content through the child graph inbox. The source
         // graph may be evaluating the item list when this refresh is requested.
-        graph.inbox.enqueue {
-            contentAttr.setValue(content.value)
+        graph.inbox.enqueue { [weak self] in
+            self?.replaceStaticRootContent(content.value)
         }
     }
 

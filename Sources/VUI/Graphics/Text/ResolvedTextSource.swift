@@ -2705,14 +2705,14 @@ struct ResolvedTextSource {
                   base.glyphIndex != 65535,
                   base.style.kern == nil,
                   base.style.tracking == nil,
-                  base.style.baselineOffset == nil,
+                  (base.style.baselineOffset ?? 0) == 0,
                   base.style.language == nil else { continue }
             let style = normalizedStyle(base)
             guard group.dropFirst().allSatisfy({ index in
                 let glyph = glyphs[index]
                 return glyph.style.kern == nil &&
                     glyph.style.tracking == nil &&
-                    glyph.style.baselineOffset == nil &&
+                    (glyph.style.baselineOffset ?? 0) == 0 &&
                     glyph.style.language == nil &&
                     glyph.attributes == base.attributes &&
                     normalizedStyle(glyph) == style
@@ -2872,15 +2872,17 @@ struct ResolvedTextSource {
             // Paint and spacing intervals can share character preparation and
             // substitution context. Other positioning and attachment inputs
             // retain their existing owners.
-            guard firstStyle.baselineOffset == nil, nextStyle.baselineOffset == nil,
-                  firstStyle.language == nil, nextStyle.language == nil,
+            guard (firstStyle.baselineOffset ?? 0) == 0,
+                  (nextStyle.baselineOffset ?? 0) == 0,
                   firstStyle.customAttachment == nil, nextStyle.customAttachment == nil else { return false }
             firstStyle.foregroundColor = nil
             firstStyle.kern = nil
             firstStyle.tracking = nil
+            firstStyle.baselineOffset = nil
             nextStyle.foregroundColor = nil
             nextStyle.kern = nil
             nextStyle.tracking = nil
+            nextStyle.baselineOffset = nil
             return firstStyle == nextStyle
         }
         var inputIndex = 0

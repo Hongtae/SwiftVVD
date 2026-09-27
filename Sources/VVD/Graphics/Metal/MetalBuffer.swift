@@ -24,12 +24,6 @@ final class MetalBuffer: GPUBuffer, @unchecked Sendable {
         return self.buffer.contents()
     }
 
-    func flush() {
-#if os(macOS) || targetEnvironment(macCatalyst)
-        if buffer.storageMode == .managed {
-            buffer.didModifyRange(0..<buffer.length)
-        }
-#endif
-    }
+    func flush() {}
 }
 #endif //if ENABLE_METAL

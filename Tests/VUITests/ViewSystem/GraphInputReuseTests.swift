@@ -56,16 +56,18 @@ final class GraphInputReuseTests: XCTestCase {
             token: Int
         ) -> (_Graph, _ViewInputs) -> _ViewOutputs {
             { _, _ in
-                _ = token
-                fatalError("Equality must not invoke modifier bodies.")
+                fatalError(
+                    "Equality must not invoke modifier body \(token)."
+                )
             }
         }
         func makeViewListClosure(
             token: Int
         ) -> (_Graph, _ViewListInputs) -> _ViewListOutputs {
             { _, _ in
-                _ = token
-                fatalError("Equality must not invoke modifier bodies.")
+                fatalError(
+                    "Equality must not invoke modifier list body \(token)."
+                )
             }
         }
 

@@ -197,7 +197,7 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         )
 
         let controller = WindowController(
-            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            content: EmptyView(),
             environment: environment,
             scene: WindowKey(
                 namespace: .app,
@@ -534,7 +534,7 @@ final class WindowCommandMenuPresenterTests: XCTestCase {
         )
 
         let controller = WindowController(
-            content: presenter.rootView(sceneContent: AnyView(EmptyView())),
+            content: EmptyView(),
             environment: environment,
             scene: WindowKey(
                 namespace: .app,

@@ -923,6 +923,13 @@ class WindowController: WindowDelegate,
         }
     }
 
+    func replaceStaticRootContent(_ content: AnyView) {
+        guard staticRootContent != nil else { return }
+        staticRootContent = content
+        viewGraph.valuesNeedingUpdate.insert(.rootView)
+        viewChangedWhileDrawing = true
+    }
+
     func focusedValueListDidChange(_ list: FocusedValueList) {
         let values = FocusedValues(resolving: list)
         let changed = focusedValuesState.withLock { state in

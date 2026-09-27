@@ -69,3 +69,26 @@ func portableResolvedTextStorageRestoresCoreAttributedRuns() {
     #expect(text == [firstText, secondText])
     #expect(styles == [firstStyle, secondStyle])
 }
+
+@Test
+func paragraphStyleUsesIdentityEqualityAndHashingInAttributedStorage() {
+    let first = TextParagraphStyle()
+    let second = TextParagraphStyle()
+
+    #expect(first == first)
+    #expect(first != second)
+    #expect(Set([first, first, second]).count == 2)
+
+    let storage = NSMutableAttributedString(string: "paragraph")
+    storage.setAttributes(
+        [NSAttributedString.Key("VUI.ParagraphStyle"): first],
+        range: NSRange(location: 0, length: storage.length)
+    )
+    #expect(
+        storage.attribute(
+            NSAttributedString.Key("VUI.ParagraphStyle"),
+            at: 0,
+            effectiveRange: nil
+        ) as? TextParagraphStyle === first
+    )
+}

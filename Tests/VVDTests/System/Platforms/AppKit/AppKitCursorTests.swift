@@ -6,6 +6,7 @@ import XCTest
 final class AppKitCursorTests: XCTestCase {
     @MainActor
     func testCursorMappingAndCustomHotSpotClamping() throws {
+        _ = NSApplication.shared
         XCTAssertTrue(makeAppKitCursor(.arrow) === NSCursor.arrow)
         XCTAssertTrue(makeAppKitCursor(.text) === NSCursor.iBeam)
         XCTAssertTrue(makeAppKitCursor(.wait) === NSCursor.arrow)

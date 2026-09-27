@@ -77,11 +77,14 @@ final class AlertActionInputTests: XCTestCase {
             return child
         }
 
+        // This focused route installs the modal directly. Advance the child
+        // without asking the parent preference owner to reconcile an alert
+        // that its root content did not publish.
         for tick in 1...12 {
-            parent.updateView(
+            child.updateView(
                 tick: UInt64(tick),
                 delta: 0.05,
-                date: parent.date,
+                date: child.date,
                 contentSize: CGSize(width: 420, height: 240),
                 redraw: &redraw
             ) { _, _ in }

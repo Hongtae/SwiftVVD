@@ -206,33 +206,34 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     @MainActor
     func testOverlayModalRecentersAfterParentResizeAndTopAlignsWhenTooTall() async throws {
         let initialHostSize = CGSize(width: 640, height: 420)
-        let host = PresentationPlacementHostController(contentSize: initialHostSize)
+        let content = AnyView(Color.clear.frame(width: 300, height: 200))
+        let preference = sheetPreference(
+            content: content,
+            namespaceID: 91_000
+        )
+        let host = PresentationPlacementHostController(
+            contentSize: initialHostSize,
+            content: AnyView(EmptyView().preference(
+                key: SheetPreference.Key.self,
+                value: .single(preference)
+            ))
+        )
         let withGC: WindowContext.WithGraphicsContext = { _, _ in
             XCTFail("Overlay modal placement should not request graphics resources.")
         }
 
-        var redraw = false
-        host.updateView(
-            tick: 0,
-            delta: 0,
-            date: host.date,
-            contentSize: initialHostSize,
-            redraw: &redraw,
-            withGC
-        )
-
-        let content = AnyView(Color.clear.frame(width: 300, height: 200))
-        let modal = makeOverlayModal(
+        let (modal, contentAttr) = makeOverlayModal(
             parent: host,
             content: content,
             sceneIndex: 0
         )
         host.addModal(
             child: modal,
-            session: sheetSession(content: content, namespaceID: 91_000)
+            session: .sheet(preference),
+            contentAttr: contentAttr
         )
 
-        redraw = false
+        var redraw = false
         host.updateView(
             tick: 1,
             delta: 1,
@@ -430,41 +431,6 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     @MainActor
     func testNestedOverlayModalReceivesMouseEventInItsLocalCoordinates() async throws {
         let hostSize = CGSize(width: 640, height: 420)
-        let host = PresentationPlacementHostController(contentSize: hostSize)
-        let withGC: WindowContext.WithGraphicsContext = { _, _ in
-            XCTFail("Nested overlay input should not request graphics resources.")
-        }
-
-        var redraw = false
-        host.updateView(
-            tick: 0,
-            delta: 0,
-            date: host.date,
-            contentSize: hostSize,
-            redraw: &redraw,
-            withGC
-        )
-
-        let outerContent = AnyView(Color.clear.frame(width: 300, height: 200))
-        let outer = makeOverlayModal(
-            parent: host,
-            content: outerContent,
-            sceneIndex: 1
-        )
-        host.addModal(
-            child: outer,
-            session: sheetSession(content: outerContent, namespaceID: 91_001)
-        )
-        redraw = false
-        host.updateView(
-            tick: 1,
-            delta: 1.0 - host.animationTimestamp.seconds,
-            date: host.date.addingTimeInterval(1.0),
-            contentSize: hostSize,
-            redraw: &redraw,
-            withGC
-        )
-
         let probe = NestedOverlayInputProbe()
         let innerContent = AnyView(
             Color.blue
@@ -473,16 +439,55 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
                     probe.actionCount += 1
                 }
         )
-        let inner = makeOverlayModal(
+        let innerPreference = sheetPreference(
+            content: innerContent,
+            namespaceID: 91_002
+        )
+        let outerContent = AnyView(
+            Color.clear
+                .frame(width: 300, height: 200)
+                .preference(
+                    key: SheetPreference.Key.self,
+                    value: .single(innerPreference)
+                )
+        )
+        let outerPreference = sheetPreference(
+            content: outerContent,
+            namespaceID: 91_001
+        )
+        let host = PresentationPlacementHostController(
+            contentSize: hostSize,
+            content: AnyView(EmptyView().preference(
+                key: SheetPreference.Key.self,
+                value: .single(outerPreference)
+            ))
+        )
+        let withGC: WindowContext.WithGraphicsContext = { _, _ in
+            XCTFail("Nested overlay input should not request graphics resources.")
+        }
+
+        let (outer, outerContentAttr) = makeOverlayModal(
+            parent: host,
+            content: outerContent,
+            sceneIndex: 1
+        )
+        host.addModal(
+            child: outer,
+            session: .sheet(outerPreference),
+            contentAttr: outerContentAttr
+        )
+        let (inner, innerContentAttr) = makeOverlayModal(
             parent: outer,
             content: innerContent,
             sceneIndex: 2
         )
         outer.addModal(
             child: inner,
-            session: sheetSession(content: innerContent, namespaceID: 91_002)
+            session: .sheet(innerPreference),
+            contentAttr: innerContentAttr
         )
-        redraw = false
+
+        var redraw = false
         host.updateView(
             tick: 2,
             delta: 2.0 - host.animationTimestamp.seconds,
@@ -545,13 +550,17 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     }
 
     @MainActor
-    private func makeOverlayModal(parent: WindowController,
-                                  content: AnyView,
-                                  sceneIndex: UInt8) -> ModalWindowController {
+    private func makeOverlayModal(
+        parent: WindowController,
+        content: AnyView,
+        sceneIndex: UInt8
+    ) -> (ModalWindowController, Attribute<AnyView>) {
         parent.viewGraph.data.withCurrent {
             let sourceGraph = parent.viewGraph.data.graph
-            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(value: content)
-            return ModalWindowController(
+            let contentAttr: Attribute<AnyView> = sourceGraph.makeInput(
+                value: AnyView(SheetContent(content: content))
+            )
+            let controller = ModalWindowController(
                 crossGraphContent: contentAttr,
                 sourceGraph: sourceGraph,
                 scene: WindowKey(
@@ -561,6 +570,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
                 parentController: parent,
                 usesPlatformWindow: false
             )
+            return (controller, contentAttr)
         }
     }
 
@@ -587,7 +597,19 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
     private func sheetSession(content: AnyView,
                               namespaceID: Int,
                               usesPlatformWindow: Bool = false) -> PresentationSession {
-        .sheet(SheetPreference(
+        .sheet(sheetPreference(
+            content: content,
+            namespaceID: namespaceID,
+            usesPlatformWindow: usesPlatformWindow
+        ))
+    }
+
+    private func sheetPreference(
+        content: AnyView,
+        namespaceID: Int,
+        usesPlatformWindow: Bool = false
+    ) -> SheetPreference {
+        SheetPreference(
             content: content,
             onDismiss: nil,
             namespaceID: Namespace.ID(id: namespaceID),
@@ -596,7 +618,7 @@ final class PresentationChildWindowPlacementTests: XCTestCase {
             placement: .automatic,
             activeInspector: nil,
             usesPlatformWindow: usesPlatformWindow
-        ))
+        )
     }
 
     private func assertOverlayOrigin(_ actual: CGPoint,
@@ -733,10 +755,10 @@ private final class PresentationPlacementHostController: WindowController, @unch
     override var window: (any VVD.Window)? { platformWindow }
     var presentedModalSizes: [CGSize] { platformWindow.presentedModalSizes }
 
-    init(contentSize: CGSize) {
+    init(contentSize: CGSize, content: AnyView = AnyView(EmptyView())) {
         self.platformWindow = PresentationPlacementWindow(contentSize: contentSize)
         super.init(
-            content: EmptyView(),
+            content: content,
             scene: WindowKey(
                 namespace: .app,
                 sceneID: SceneID(PresentationPlacementHostController.self)

@@ -93,7 +93,7 @@ final class GraphicsContextSolidColorTests: XCTestCase {
         let output = ProcessInfo.processInfo.environment["VUI_SOLID_PLANE_CAPTURE"].map { URL(fileURLWithPath: $0) }
         if let output { try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true) }
         for name in cases {
-            var recording = GraphicsContext(recording: RBDisplayList(viewport: CGRect(origin: .zero, size: size)),
+            let recording = GraphicsContext(recording: RBDisplayList(viewport: CGRect(origin: .zero, size: size)),
                 environment: EnvironmentValues(), inputs: .init(sceneResources: SceneResources(),
                     viewport: CGRect(origin: .zero, size: size), contentScaleFactor: 1, resourceCommandQueue: nil))
             let backdrop = { (context: GraphicsContext) in

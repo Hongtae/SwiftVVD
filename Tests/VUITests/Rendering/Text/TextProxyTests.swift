@@ -387,8 +387,12 @@ final class TextProxyTests: XCTestCase {
                 let outputs = Content._makeView(
                     view: _GraphValue(_attribute: graph.makeInput(value: content)),
                     inputs: makeInputs(graph: graph, environment: environment))
-                let computer = try XCTUnwrap(outputs._layoutComputer.attribute).value
-                let layout = try XCTUnwrap(computer.box as? LayoutEngineBox<StyledTextLayoutEngine>).engine
+                let attribute = try XCTUnwrap(outputs._layoutComputer.attribute)
+                let computer = attribute.value
+                let box = try XCTUnwrap(
+                    computer.box as? LayoutEngineBox<StyledTextLayoutEngine>
+                )
+                let layout = box.engine
                 XCTAssertTrue(layout.text is ResolvedStyledText.StringDrawing)
                 XCTAssertEqual(layout.text.metricsCacheEntryCount, 0)
                 layout.text.layoutMargins = margins

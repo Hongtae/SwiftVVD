@@ -156,7 +156,7 @@ final class ObjectCacheTests: XCTestCase {
     // ASSERTIONS objectCacheBucketReplacementObserved
     func testEvictionReleasesTheCachedValue() {
         let cache = Cache { CachedObject(key: $0.value, generation: 0) }
-        weak var first = cache[CollisionKey(value: 0)]
+        weak let first = cache[CollisionKey(value: 0)]
         XCTAssertNotNil(first)
         for key in 1...4 { _ = cache[CollisionKey(value: key)] }
         XCTAssertNil(first)

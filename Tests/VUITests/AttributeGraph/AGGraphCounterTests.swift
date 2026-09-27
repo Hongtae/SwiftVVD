@@ -1690,7 +1690,7 @@ final class AGGraphCounterTests: XCTestCase {
             XCTAssertEqual(outerGraph.graphCounter(lane: 1), 1)
             XCTAssertEqual(innerGraph.graphCounter(lane: 1), 1)
 
-            innerRef.withCurrent {
+            _ = innerRef.withCurrent {
                 innerSource.setValue(3)
             }
             XCTAssertEqual(outerGraph.graphCounter(lane: 1), 1)

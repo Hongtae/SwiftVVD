@@ -22,7 +22,7 @@ final class MetalGraphicsDeviceLifetimeTests: XCTestCase {
         for factory in factories {
             let existingTasks = Set(detachedServiceTasks.keys)
             var device: MetalGraphicsDevice? = try XCTUnwrap(factory())
-            weak var weakDevice = device
+            weak let weakDevice = device
             try await waitUntil {
                 Set(detachedServiceTasks.keys).subtracting(existingTasks).count == 1
             }
@@ -43,7 +43,7 @@ final class MetalGraphicsDeviceLifetimeTests: XCTestCase {
         }
         let existingTasks = Set(detachedServiceTasks.keys)
         var device: MetalGraphicsDevice? = MetalGraphicsDevice(device: nativeDevice)
-        weak var weakDevice = device
+        weak let weakDevice = device
         retainedMetalBuffer = try XCTUnwrap(device?.makeBuffer(
             length: 256, storageMode: .shared, cpuCacheMode: .defaultCache))
         defer { retainedMetalBuffer = nil }

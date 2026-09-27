@@ -495,7 +495,7 @@ final class TextMetricsTests: XCTestCase {
                 let original = owner.metrics(in: size, layoutMargins: nil)
                 let storage = owner.storage
                 for scale: CGFloat? in [0.5, 0.5, 0.333, 0.75, 1, nil] {
-                    weak var oldLayout = owner.preparedLayout
+                    weak let oldLayout = owner.preparedLayout
                     XCTAssertGreaterThan(owner.metricsCacheEntryCount, 0)
                     owner.scaleFactorOverride = scale
                     XCTAssertEqual(owner.metricsCacheEntryCount, 0)
@@ -1001,7 +1001,7 @@ final class TextMetricsTests: XCTestCase {
                         applyingMarginOffsets: true))
                     let drawn = attributes(prepared.source)
                     XCTAssertEqual(drawn.compactMap { $0.fontResource?.pointSize }, sizes)
-                    XCTAssertEqual(drawn[1].baselineOffset, offset ? 3 : nil)
+                    XCTAssertEqual(drawn[1].baselineOffset, offset ? 3 : 0)
                     XCTAssertEqual(drawn[1].kern, offset ? 1.5 : nil)
                     XCTAssertEqual(drawn[1].foregroundColor, attributes(original)[1].foregroundColor)
                     XCTAssertEqual(attributes(original).compactMap { $0.fontResource?.pointSize }, [23, 31])

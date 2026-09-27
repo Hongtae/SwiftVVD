@@ -59,7 +59,7 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
     let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
 
     // Body rule: reactive to environment changes and @Observable mutations.
-    let inbox  = graph.inbox
+    let inbox = WeakBox(graph.inbox)
     let handle = MutableBox<AGAttribute?>(nil)
 
     let bodyAttr: Attribute<V.Body> = graph.makeRule {
@@ -69,9 +69,9 @@ func _makeDefaultView<V: View>(view: _GraphValue<V>, inputs: _ViewInputs) -> _Vi
         var result: V.Body!
         withObservationTracking {
             result = viewCopy.body
-        } onChange: { [weak inbox, handle] in
+        } onChange: { [inbox, handle] in
             let transactionBox = UnsafeSendableBox(Transaction.current)
-            inbox?.enqueue {
+            inbox.base?.enqueue {
                 if let id = handle.value {
                     _AGGraph.current?.markNeedsEvaluation(
                         id,
@@ -103,7 +103,7 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
     let dpFields = DynamicPropertyCache.fields(of: V.self)
     let dpBuffer = _DynamicPropertyBuffer(fields: dpFields, container: view, inputs: &graphInputs)
 
-    let inbox  = graph.inbox
+    let inbox = WeakBox(graph.inbox)
     let handle = MutableBox<AGAttribute?>(nil)
 
     let bodyAttr: Attribute<V.Body> = graph.makeRule {
@@ -113,9 +113,9 @@ func _makeDefaultViewList<V: View>(view: _GraphValue<V>, inputs: _ViewListInputs
         var result: V.Body!
         withObservationTracking {
             result = viewCopy.body
-        } onChange: { [weak inbox, handle] in
+        } onChange: { [inbox, handle] in
             let transactionBox = UnsafeSendableBox(Transaction.current)
-            inbox?.enqueue {
+            inbox.base?.enqueue {
                 if let id = handle.value {
                     _AGGraph.current?.markNeedsEvaluation(
                         id,
