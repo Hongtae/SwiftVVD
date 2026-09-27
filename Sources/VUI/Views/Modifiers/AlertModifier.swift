@@ -597,14 +597,11 @@ struct AlertOverlayView: View {
     let preference: AlertPreference
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.3)
-            DialogOverlayPanel(title: preference.title,
-                               makeMessage: preference.makeMessage,
-                               buttonItems: preference.actionsItemList?.buttonItems,
-                               makeActions: preference.makeActions,
-                               isPresented: preference.isPresented)
-        }
+        DialogOverlayPanel(title: preference.title,
+                           makeMessage: preference.makeMessage,
+                           buttonItems: preference.actionsItemList?.buttonItems,
+                           makeActions: preference.makeActions,
+                           isPresented: preference.isPresented)
     }
 }
 

@@ -354,15 +354,11 @@ struct ConfirmationDialogOverlayView: View {
     let preference: ConfirmationDialogPreference
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.3)
-                .onTapGesture {}
-            DialogOverlayPanel(title: panelTitle,
-                               makeMessage: preference.makeMessage,
-                               buttonItems: panelButtonItems,
-                               makeActions: preference.makeActions,
-                               isPresented: preference.isPresented)
-        }
+        DialogOverlayPanel(title: panelTitle,
+                           makeMessage: preference.makeMessage,
+                           buttonItems: panelButtonItems,
+                           makeActions: preference.makeActions,
+                           isPresented: preference.isPresented)
     }
 
     private var panelTitle: Text? {

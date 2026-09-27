@@ -106,6 +106,153 @@ final class AlertActionInputTests: XCTestCase {
         XCTAssertFalse(state.isPresented)
     }
 
+    // ASSERTIONS alertNativePanelIsolationObserved
+    @MainActor
+    func testSettledOverlayAlertKeepsItsChromeClearOfALocalScrim() throws {
+        #if canImport(Metal)
+        let state = AlertActionInputState()
+        let preference = alertPreference(state: state)
+        try assertSettledOverlayChromeHasNoLocalScrim(
+            content: AnyView(AlertOverlayView(preference: preference)),
+            session: .alert(preference),
+            label: "alert"
+        )
+        #else
+        throw XCTSkip("Metal is required for this readback fixture")
+        #endif
+    }
+
+    // ASSERTIONS alertNativePanelIsolationObserved
+    @MainActor
+    func testSettledOverlayConfirmationDialogKeepsItsChromeClearOfALocalScrim() throws {
+        #if canImport(Metal)
+        let state = AlertActionInputState()
+        let preference = ConfirmationDialogPreference(
+            title: Text("Choose an Option"),
+            titleVisibility: .visible,
+            actionsItemList: nil,
+            makeActions: { AnyView(Text("Continue")) },
+            makeMessage: nil,
+            messageItemList: nil,
+            isPresented: Binding(
+                get: { state.isPresented },
+                set: { state.isPresented = $0 }
+            ),
+            onDismiss: nil,
+            usesPlatformWindow: false
+        )
+        try assertSettledOverlayChromeHasNoLocalScrim(
+            content: AnyView(
+                ConfirmationDialogOverlayView(preference: preference)
+            ),
+            session: .confirmationDialog(preference),
+            label: "confirmation dialog"
+        )
+        #else
+        throw XCTSkip("Metal is required for this readback fixture")
+        #endif
+    }
+
+    @MainActor
+    private func assertSettledOverlayChromeHasNoLocalScrim(
+        content: AnyView,
+        session: PresentationSession,
+        label: String
+    ) throws {
+        let parentSize = CGSize(width: 420, height: 240)
+        let parent = WindowController(
+            content: Color.white.frame(
+                width: parentSize.width,
+                height: parentSize.height
+            ),
+            scene: WindowKey(
+                namespace: .app,
+                sceneID: SceneID(AlertActionInputTests.self)
+            )
+        )
+        var redraw = false
+        parent.updateView(
+            tick: 0,
+            delta: 0,
+            date: parent.date,
+            contentSize: parentSize,
+            redraw: &redraw
+        ) { _, _ in }
+
+        let child: ModalWindowController = parent.viewGraph.data.withCurrent {
+            let graph = parent.viewGraph.data.graph
+            let contentAttr = graph.makeInput(value: content)
+            let child = ModalWindowController(
+                crossGraphContent: contentAttr,
+                sourceGraph: graph,
+                scene: WindowKey(
+                    namespace: .app,
+                    sceneID: SceneID(AlertOverlayView.self)
+                ),
+                parentController: parent,
+                usesPlatformWindow: false
+            )
+            parent.addModal(child: child, session: session)
+            return child
+        }
+
+        for tick in 1...12 {
+            child.updateView(
+                tick: UInt64(tick),
+                delta: 0.05,
+                date: child.date.addingTimeInterval(Double(tick) * 0.05),
+                contentSize: parentSize,
+                redraw: &redraw
+            ) { _, _ in }
+        }
+
+        let device = try XCTUnwrap(makeGraphicsDeviceContext(api: .metal))
+        let queue = try XCTUnwrap(device.renderQueue())
+        let commands = try XCTUnwrap(queue.makeCommandBuffer())
+        let context = try XCTUnwrap(GraphicsContext(
+            sceneResources: parent.sceneResources,
+            environment: parent.environment,
+            viewport: CGRect(origin: .zero, size: parentSize),
+            contentOffset: .zero,
+            contentScaleFactor: 1,
+            resolution: parentSize,
+            commandBuffer: commands
+        ))
+        context.clear(with: .white)
+        parent.drawFrame(offset: .zero, context)
+
+        let completed = expectation(description: "\(label) readback")
+        commands.addCompletedHandler { _ in completed.fulfill() }
+        XCTAssertTrue(commands.commit())
+        wait(for: [completed], timeout: 10)
+
+        let staging = try XCTUnwrap(
+            device.makeCPUAccessible(texture: context.backdrop)
+        )
+        let bytes = UnsafeRawBufferPointer(
+            start: try XCTUnwrap(staging.contents()),
+            count: Int(parentSize.width * parentSize.height) * 4
+        )
+        let origin = child.presentationPointInParent(forLocalPoint: .zero)
+        let sample = CGPoint(
+            x: origin.x + child.cachedContentSize.width * 0.5,
+            y: origin.y + 2
+        )
+        let x = Int(sample.x.rounded(.down))
+        let y = Int(sample.y.rounded(.down))
+        let offset = (y * Int(parentSize.width) + x) * 4
+        let pixel = Array(bytes[offset..<offset + 4])
+
+        XCTAssertGreaterThanOrEqual(
+            pixel[0],
+            235,
+            "A content-sized scrim must not darken \(label) chrome at \(sample): \(pixel)"
+        )
+        XCTAssertGreaterThanOrEqual(pixel[1], 235)
+        XCTAssertGreaterThanOrEqual(pixel[2], 235)
+        XCTAssertEqual(pixel[3], 255)
+    }
+
     private func alertPreference(state: AlertActionInputState) -> AlertPreference {
         var actions = PlatformItemList()
         var item = PlatformItemList.Item(systemItem: .button)
