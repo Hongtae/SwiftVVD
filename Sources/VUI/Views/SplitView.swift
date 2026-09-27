@@ -140,21 +140,47 @@ private final class SplitViewPositionState {
 
 private final class SplitViewCursorTarget {
     weak var host: WindowController?
-    private var activeDividers: Set<SplitViewDividerID> = []
+    // A moving divider can replace its hover responder. The captured drag
+    // keeps cursor ownership independently until its terminal event.
+    private var hoveredDividers: Set<SplitViewDividerID> = []
+    private var draggedDividers: Set<SplitViewDividerID> = []
+    private var publishedAxis: Axis?
 
-    func update(
+    func updateHover(
         divider: SplitViewDividerID,
         axis: Axis,
         isActive: Bool
     ) {
         if isActive {
-            activeDividers.insert(divider)
+            hoveredDividers.insert(divider)
         } else {
-            activeDividers.remove(divider)
+            hoveredDividers.remove(divider)
         }
-        let cursor: Cursor? = activeDividers.isEmpty
+        publish(axis: axis)
+    }
+
+    func updateDrag(
+        divider: SplitViewDividerID,
+        axis: Axis,
+        isActive: Bool
+    ) {
+        if isActive {
+            draggedDividers.insert(divider)
+        } else {
+            draggedDividers.remove(divider)
+        }
+        publish(axis: axis)
+    }
+
+    private func publish(axis: Axis) {
+        let nextAxis = hoveredDividers.isEmpty && draggedDividers.isEmpty
             ? nil
-            : axis == .horizontal ? .resizeLeftRight : .resizeUpDown
+            : axis
+        guard nextAxis != publishedAxis else { return }
+        publishedAxis = nextAxis
+        let cursor: Cursor? = nextAxis.map {
+            $0 == .horizontal ? .resizeLeftRight : .resizeUpDown
+        }
         host?.requestSplitViewCursor(cursor)
     }
 }
@@ -240,7 +266,7 @@ private struct SplitViewDivider: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onHover { hovering in
-            cursorTarget.update(
+            cursorTarget.updateHover(
                 divider: id,
                 axis: axis,
                 isActive: hovering
@@ -249,6 +275,11 @@ private struct SplitViewDivider: View {
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
+                    cursorTarget.updateDrag(
+                        divider: id,
+                        axis: axis,
+                        isActive: true
+                    )
                     positions.update(
                         divider: id,
                         translation: axis == .horizontal
@@ -264,6 +295,11 @@ private struct SplitViewDivider: View {
                             ? value.translation.width
                             : value.translation.height,
                         ended: true
+                    )
+                    cursorTarget.updateDrag(
+                        divider: id,
+                        axis: axis,
+                        isActive: false
                     )
                 }
         )

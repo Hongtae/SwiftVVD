@@ -262,6 +262,29 @@ final class SplitViewSurfaceTests: XCTestCase {
     }
 
     @MainActor
+    func testPointerDragRetainsAxisCursorUntilTerminalRelease() async throws {
+        // ASSERTIONS splitViewCursorTransition27Observed
+        try await assertDragCursorLifetime(
+            content: HSplitView {
+                Color.red
+                Color.blue
+            },
+            size: CGSize(width: 600, height: 240),
+            axis: .horizontal,
+            expected: .horizontal
+        )
+        try await assertDragCursorLifetime(
+            content: VSplitView {
+                Color.red
+                Color.blue
+            },
+            size: CGSize(width: 320, height: 420),
+            axis: .vertical,
+            expected: .vertical
+        )
+    }
+
+    @MainActor
     func testPointerDragMovesAndRetainsTheDivider() throws {
         // ASSERTIONS splitViewDividerDrag27Observed
         // ASSERTIONS splitViewPositionRetention27Observed
@@ -578,6 +601,130 @@ final class SplitViewSurfaceTests: XCTestCase {
             contentSize: size,
             redraw: &redraw
         ) { _, _ in }
+    }
+
+    @MainActor
+    private func assertDragCursorLifetime<Content: View>(
+        content: Content,
+        size: CGSize,
+        axis: Axis,
+        expected: SplitViewCursorChange
+    ) async throws {
+        let controller = SplitViewHostController(content: content)
+        try mount(controller, size: size)
+        let hover = try XCTUnwrap(firstHover(in: controller))
+        let start: CGPoint
+        let first: CGPoint
+        let outside: CGPoint
+        switch axis {
+        case .horizontal:
+            let range = try XCTUnwrap(horizontalHitRange(
+                of: hover,
+                y: size.height / 2,
+                width: Int(size.width)
+            ))
+            start = CGPoint(x: range.mid, y: size.height / 2)
+            first = CGPoint(x: start.x + 24, y: start.y)
+            outside = CGPoint(x: size.width + 80, y: start.y)
+        case .vertical:
+            let range = try XCTUnwrap(verticalHitRange(
+                of: hover,
+                x: size.width / 2,
+                height: Int(size.height)
+            ))
+            start = CGPoint(x: size.width / 2, y: range.mid)
+            first = CGPoint(x: start.x, y: start.y + 24)
+            outside = CGPoint(x: start.x, y: size.height + 80)
+        }
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0
+        ))
+        Update.dispatchActions()
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [expected])
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonDown,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: start,
+            timestamp: 0.01
+        ))
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: first,
+            timestamp: 0.02
+        ))
+        Update.dispatchActions()
+        var redraw = false
+        controller.updateView(
+            tick: 1,
+            delta: 0.02,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+        Update.dispatchActions()
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [expected])
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .move,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.03
+        ))
+        Update.dispatchActions()
+        controller.updateView(
+            tick: 2,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+        Update.dispatchActions()
+        await Task.yield()
+        XCTAssertEqual(controller.testWindow.cursorChanges, [expected])
+
+        controller.onMouseEvent(event: MouseEvent(
+            type: .buttonUp,
+            window: controller.testWindow,
+            device: .genericMouse,
+            deviceID: 0,
+            buttonID: 0,
+            location: outside,
+            timestamp: 0.04
+        ))
+        Update.dispatchActions()
+        controller.updateView(
+            tick: 3,
+            delta: 0.01,
+            date: controller.date,
+            contentSize: size,
+            redraw: &redraw
+        ) { _, _ in }
+        Update.dispatchActions()
+        await Task.yield()
+        XCTAssertEqual(
+            controller.testWindow.cursorChanges,
+            [expected, .platformDefault]
+        )
     }
 
     private func firstGesturePoint(
